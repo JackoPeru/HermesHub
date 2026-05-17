@@ -16,16 +16,18 @@ import okhttp3.Call
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.ConnectException
+import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 private const val STREAM_ACCUM_MAX_CHARS = 2_000_000
 
 private val streamHttpClient: OkHttpClient = OkHttpClient.Builder()
-    .connectTimeout(15, TimeUnit.SECONDS)
-    .readTimeout(60, TimeUnit.MINUTES)
-    .writeTimeout(60, TimeUnit.SECONDS)
-    .callTimeout(60, TimeUnit.MINUTES)
+    .connectTimeout(0, TimeUnit.SECONDS)
+    .readTimeout(0, TimeUnit.SECONDS)
+    .writeTimeout(0, TimeUnit.SECONDS)
+    .callTimeout(0, TimeUnit.SECONDS)
     .apply { debugHttpLoggingInterceptor()?.let { addInterceptor(it) } }
     .build()
 
@@ -91,6 +93,7 @@ data class StreamingState(
     val responseId: String? = null,
     val stats: ChatStreamStats? = null,
     val status: String = "Invio prompt a Hermes...",
+    val promptProgressPercent: Int? = null,
     val activityLog: List<String> = listOf("0.0s  Invio prompt a Hermes..."),
     val error: String? = null,
     val source: String = "Hermes",
@@ -147,10 +150,15 @@ data class StreamingState(
             visualBlocksVersion = event.version
         ).withActivity("Visual blocks ricevuti: ${event.blocks.size}.")
         is ChatStreamEvent.Status -> copy(status = event.message).withActivity(event.message)
+        is ChatStreamEvent.PromptProgress -> copy(
+            promptProgressPercent = event.percent.coerceIn(0, 100),
+            status = event.label.ifBlank { "Processing prompt..." }
+        ).withActivity("Processing prompt ${event.percent}%")
         is ChatStreamEvent.Done -> copy(
             stats = event.stats,
             isDone = true,
             status = "Risposta completata.",
+            promptProgressPercent = 100,
             thinkingFrozen = true,
             thinkingElapsedSec = if (thinkingElapsedSec > 0) thinkingElapsedSec
                 else (System.nanoTime() - startedAtNs) / 1_000_000_000.0
@@ -214,6 +222,7 @@ sealed class ChatStreamEvent {
     data class VisualBlocks(val blocks: List<VisualBlock>, val version: Int) : ChatStreamEvent()
     data class Status(val message: String) : ChatStreamEvent()
     data class Usage(val promptTokens: Int?, val completionTokens: Int?) : ChatStreamEvent()
+    data class PromptProgress(val percent: Int, val label: String = "Processing prompt...") : ChatStreamEvent()
     data class Done(val stats: ChatStreamStats) : ChatStreamEvent()
     data class Error(val message: String) : ChatStreamEvent()
 }
@@ -435,7 +444,12 @@ private suspend inline fun openSseStream(
     } catch (ex: CancellationException) {
         throw ex
     } catch (ex: Exception) {
-        onEvent(ChatStreamEvent.Error("$label: ${ex.message ?: ex.javaClass.simpleName}"))
+        val message = when (ex) {
+            is SocketTimeoutException -> "$label: timeout di rete verso Hermes Gateway."
+            is ConnectException -> "$label: connessione a Hermes Gateway fallita."
+            else -> "$label: ${ex.message ?: ex.javaClass.simpleName}"
+        }
+        onEvent(ChatStreamEvent.Error(message))
         true
     } finally {
         cancellationHook?.dispose()
@@ -456,6 +470,13 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
     val t = type.lowercase()
 
     when {
+        t.contains("prompt.progress") || t.contains("processing.progress") -> {
+            val percent = obj.optInt("percent", obj.optInt("progress", -1))
+            if (percent in 0..100) {
+                out += ChatStreamEvent.PromptProgress(percent, obj.optString("label", "Processing prompt..."))
+            }
+            return out
+        }
         t.contains("hermes.visual_blocks") || t.contains("visual_blocks") -> {
             val blocks = extractVisualBlocksFromJson(obj.toString())
             if (blocks.isNotEmpty()) out += ChatStreamEvent.VisualBlocks(blocks, VISUAL_BLOCKS_VERSION)

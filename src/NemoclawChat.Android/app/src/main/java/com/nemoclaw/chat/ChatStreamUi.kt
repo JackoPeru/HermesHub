@@ -86,9 +86,8 @@ internal fun StreamingBubbleView(state: StreamingState) {
                 if (state.isDone) {
                     val parts = mutableListOf<String>()
                     state.stats?.ttftMs?.takeIf { it > 0 }?.let { parts += "TTFT ${String.format(java.util.Locale.US, "%.0f", it)}ms" }
-                    state.stats?.tokensPerSecond?.takeIf { it > 0 }?.let { parts += "${String.format(java.util.Locale.US, "%.1f", it)} t/s" }
+                    state.stats?.tokensPerSecond?.takeIf { it > 0 }?.let { parts += "${String.format(java.util.Locale.US, "%.2f", it)} tok/sec" }
                     state.stats?.tokensOut?.takeIf { it > 0 }?.let { parts += "$it tok" }
-                    state.stats?.promptTokens?.takeIf { it > 0 }?.let { parts += "prompt $it" }
                     state.stats?.totalMs?.takeIf { it > 0 }?.let { parts += "${String.format(java.util.Locale.US, "%.1f", it / 1000.0)}s" }
                     if (parts.isNotEmpty()) {
                         Text(
@@ -114,7 +113,6 @@ internal fun StreamingBubbleView(state: StreamingState) {
 
 @Composable
 internal fun HermesActivityExpander(state: StreamingState) {
-    var expanded by remember(state.startedAtNs) { mutableStateOf(true) }
     var nowNs by remember(state.startedAtNs) { mutableStateOf(System.nanoTime()) }
     LaunchedEffect(state.startedAtNs, state.isDone) {
         while (!state.isDone) {
@@ -122,116 +120,63 @@ internal fun HermesActivityExpander(state: StreamingState) {
             nowNs = System.nanoTime()
         }
     }
-    val pendingTool = state.toolCalls.lastOrNull { inferToolOutcome(it) == ToolOutcome.Pending }
     val active = !state.isDone
     val elapsedSec = ((if (active) nowNs else System.nanoTime()) - state.startedAtNs) / 1_000_000_000.0
-    val progress = activityProgressPercent(state, elapsedSec)
-    val title = when {
-        pendingTool != null -> "Uso tool: ${pendingTool.name}"
-        active && state.hasThinking && state.text.isEmpty() -> "Sto pensando"
-        active && state.text.isNotEmpty() -> "Sto generando"
-        active -> "Sto processando"
-        state.hasThinking -> {
-            if (state.thinkingElapsedSec >= 1) "Pensato per ${String.format(java.util.Locale.US, "%.1f", state.thinkingElapsedSec)}s" else "Ragionamento"
-        }
-        state.toolCalls.isNotEmpty() -> "Tool usati"
-        else -> "Attivita Hermes"
-    }
-    val stage = activityStageLabel(state)
-    val indicator = activityIndicator(state)
-    val compactStatus = "${String.format(java.util.Locale.US, "%.1fs", elapsedSec)} · ${progress}% · ${state.status}"
+    val generationStarted = state.text.isNotBlank() || state.hasThinking || state.toolCalls.isNotEmpty()
+    val processingPercent = state.promptProgressPercent
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 54.dp)
-                .clickable { expanded = !expanded },
-            verticalArrangement = Arrangement.spacedBy(3.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (active) {
-                    ShimmerText(title)
-                } else {
-                    Text(text = title, color = AppColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                }
-                Icon(
-                    imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                    contentDescription = if (expanded) "Chiudi attivita" else "Mostra attivita",
-                    tint = AppColors.Muted,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                if (indicator.isNotEmpty()) {
-                    Text(
-                        text = indicator,
-                        color = AppColors.Muted,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-            Text(
-                text = compactStatus,
-                color = AppColors.Muted,
-                fontSize = 11.sp,
-                maxLines = 2
+        if (active && !generationStarted) {
+            FlagRow(
+                title = "Processing prompt",
+                value = processingPercent?.let { "$it%" } ?: String.format(java.util.Locale.US, "%.1fs", elapsedSec),
+                shimmer = true
             )
         }
-        if (expanded) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 2.dp, end = 4.dp, bottom = 2.dp),
-                verticalArrangement = Arrangement.spacedBy(9.dp)
-            ) {
-                ActivityLine("Fase", stage)
-                ActivityLine("Avanzamento", "${progress}% · ${String.format(java.util.Locale.US, "%.1fs", elapsedSec)}")
-                ActivityLine("Stato", state.status)
-                if (state.hasThinking || !state.isDone) {
-                    HorizontalDivider(color = AppColors.Border)
-                    ActivityLine(
-                        "Ragionamento",
-                        state.thinking.ifBlank { "Reasoning non ricevuto dal server." },
-                        monospaced = state.thinking.isNotBlank()
-                    )
-                }
-                if (state.toolCalls.isNotEmpty()) {
-                    HorizontalDivider(color = AppColors.Border)
-                    Text("Tool", color = AppColors.Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                    state.toolCalls.forEach { tool ->
-                        androidx.compose.runtime.key(tool.id) {
-                            ToolActivityRow(tool)
-                        }
-                    }
-                }
-                if (state.activityLog.isNotEmpty()) {
-                    HorizontalDivider(color = AppColors.Border)
-                    ActivityLine("Eventi", state.activityLog.joinToString("\n"), monospaced = true)
+
+        if (state.hasThinking || state.thinking.isNotBlank()) {
+            ThinkingExpander(
+                thinking = state.thinking,
+                active = active && state.text.isBlank(),
+                elapsedSec = if (state.thinkingElapsedSec > 0) state.thinkingElapsedSec else elapsedSec
+            )
+        }
+
+        if (state.toolCalls.isNotEmpty()) {
+            state.toolCalls.forEach { tool ->
+                androidx.compose.runtime.key(tool.id) {
+                    ToolActivityRow(tool)
                 }
             }
+        }
+
+        if (active && state.text.isNotBlank()) {
+            FlagRow(
+                title = "Generazione",
+                value = activityIndicator(state),
+                shimmer = true
+            )
         }
     }
 }
 
-internal fun activityProgressPercent(state: StreamingState, elapsedSec: Double): Int {
-    if (state.isDone) return 100
-    val base = when {
-        state.text.isNotBlank() -> 70
-        state.toolCalls.any { inferToolOutcome(it) == ToolOutcome.Pending } -> 55
-        state.toolCalls.isNotEmpty() -> 45
-        state.hasThinking -> 30
-        else -> 8
+@Composable
+private fun FlagRow(title: String, value: String, shimmer: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (shimmer) {
+            ShimmerText(title)
+        } else {
+            Text(text = title, color = AppColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        Text(text = value, color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
-    val drift = when {
-        state.text.isNotBlank() -> (elapsedSec * 1.5).toInt()
-        state.hasThinking || state.toolCalls.isNotEmpty() -> (elapsedSec * 2.0).toInt()
-        else -> (elapsedSec * 3.0).toInt()
-    }
-    return (base + drift).coerceIn(1, 95)
 }
 
 internal fun activityIndicator(state: StreamingState): String {
@@ -247,17 +192,6 @@ internal fun activityIndicator(state: StreamingState): String {
         return if (toks > 0) "reasoning $toks tok" else "reasoning…"
     }
     return "prompt…"
-}
-
-internal fun activityStageLabel(state: StreamingState): String {
-    val pendingTool = state.toolCalls.lastOrNull { inferToolOutcome(it) == ToolOutcome.Pending }
-    return when {
-        pendingTool != null -> "Tool: ${pendingTool.name}"
-        state.text.isNotBlank() && !state.isDone -> "Generazione"
-        state.hasThinking && !state.isDone -> "Ragionamento"
-        state.isDone -> "Completato"
-        else -> "Processing"
-    }
 }
 
 @Composable
