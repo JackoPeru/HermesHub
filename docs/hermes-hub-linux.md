@@ -14,6 +14,7 @@ Default:
 ```text
 Hermes Gateway API: http://0.0.0.0:8642/v1
 API key: hermes-hub
+Max iterations: unlimited (`HERMES_MAX_ITERATIONS=0`)
 Provider: lm_studio
 Inference: http://127.0.0.1:1234/v1
 Config: ~/.hermes/config.yaml

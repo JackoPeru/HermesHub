@@ -144,8 +144,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -201,6 +204,10 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     News("News", Icons.AutoMirrored.Rounded.Article),
     Settings("Imposta", Icons.Rounded.Tune),
     Profile("Profilo", Icons.Rounded.AccountCircle)
+}
+
+private object HermesStreamRuntime {
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 }
 
 @androidx.compose.runtime.Immutable
@@ -883,26 +890,64 @@ private fun ChatScreen(
                     state.draft = ""
                     state.streamingState = StreamingState()
 
-                    val job = scope.launch {
+                    val job = HermesStreamRuntime.scope.launch {
                         var localState = StreamingState()
                         val mode = state.mode
                         val convId = state.activeConversationId
                         val prevId = state.previousResponseId
                         var interrupted = false
+                        var lastCheckpointAt = 0L
+                        val initialConversation = withContext(NonCancellable + Dispatchers.IO) {
+                            saveConversationSnapshot(
+                                context = context,
+                                conversationId = convId,
+                                mode = mode,
+                                prompt = text,
+                                messages = state.messages.toList(),
+                                source = "Hermes in corso",
+                                responseId = prevId
+                            )
+                        }
+                        state.activeConversationId = initialConversation.id
                         try {
-                            streamChatRequest(settings, mode, text, state.messages.takeLast(CHAT_HISTORY_MAX_MESSAGES).toList(), convId, prevId, loadGatewaySecret(context))
+                            streamChatRequest(settings, mode, text, state.messages.takeLast(CHAT_HISTORY_MAX_MESSAGES).toList(), state.activeConversationId, prevId, loadGatewaySecret(context))
                                 .collect { event ->
                                     localState = localState.applyEvent(event)
                                     state.streamingState = localState
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastCheckpointAt >= 2000L && (localState.text.isNotBlank() || localState.visualBlocks.isNotEmpty())) {
+                                        lastCheckpointAt = now
+                                        withContext(Dispatchers.IO) {
+                                            saveConversationSnapshot(
+                                                context = context,
+                                                conversationId = state.activeConversationId,
+                                                mode = mode,
+                                                prompt = text,
+                                                messages = state.messages.toList() + ChatMessage(
+                                                    "Hermes",
+                                                    localState.text.ifBlank { "Hermes sta lavorando..." },
+                                                    fromUser = false,
+                                                    visualBlocksVersion = localState.visualBlocksVersion,
+                                                    visualBlocks = localState.visualBlocks
+                                                ),
+                                                source = "Hermes in corso",
+                                                responseId = localState.responseId ?: prevId
+                                            )
+                                        }
+                                    }
                                 }
                         } catch (_: CancellationException) {
                             interrupted = true
                         } finally {
                             val finalState = localState
                             val partialText = finalState.text.trimEnd()
+                            val transportDetached = finalState.error?.contains("connection abort", ignoreCase = true) == true ||
+                                finalState.error?.contains("software caused connection abort", ignoreCase = true) == true
                             val finalText = when {
                                 interrupted && partialText.isNotEmpty() -> "$partialText\n\n_Interrotto._"
                                 interrupted -> "Generazione interrotta."
+                                transportDetached && partialText.isNotEmpty() -> "$partialText\n\n_Stream scollegato: Hermes potrebbe continuare il lavoro sul gateway._"
+                                transportDetached -> ""
                                 else -> finalState.text.ifEmpty { finalState.error ?: "" }
                             }
                             if (finalText.isNotEmpty() || finalState.visualBlocks.isNotEmpty()) {
@@ -946,23 +991,19 @@ private fun ChatScreen(
                                     )
                                 )
                             }
-                            if (partialText.isNotEmpty() || (!interrupted && finalText.isNotEmpty())) {
-                                val saved = withContext(Dispatchers.IO) {
-                                    saveConversationExchange(
-                                        context,
-                                        state.activeConversationId,
-                                        mode,
-                                        text,
-                                        finalText,
-                                        if (interrupted) "Hermes interrotto" else if (finalState.error != null) "Errore Hermes" else "Hermes",
-                                        finalState.responseId,
-                                        finalState.visualBlocks,
-                                        finalState.visualBlocksVersion
-                                    )
-                                }
-                                state.activeConversationId = saved.id
-                                state.previousResponseId = saved.previousResponseId
+                            val saved = withContext(NonCancellable + Dispatchers.IO) {
+                                saveConversationSnapshot(
+                                    context = context,
+                                    conversationId = state.activeConversationId,
+                                    mode = mode,
+                                    prompt = text,
+                                    messages = state.messages.toList(),
+                                    source = if (interrupted) "Hermes interrotto" else if (finalState.error != null) "Errore Hermes" else "Hermes",
+                                    responseId = finalState.responseId ?: prevId
+                                )
                             }
+                            state.activeConversationId = saved.id
+                            state.previousResponseId = saved.previousResponseId
                             state.streamingState = null
                             state.sending = false
                             state.activeStreamJob = null
@@ -4953,6 +4994,50 @@ private fun saveConversationExchange(
     return conversation
 }
 
+private fun saveConversationSnapshot(
+    context: Context,
+    conversationId: String?,
+    mode: String,
+    prompt: String,
+    messages: List<ChatMessage>,
+    source: String,
+    responseId: String? = null
+): LocalConversation {
+    val conversations = loadConversations(context).toMutableList()
+    val index = conversations.indexOfFirst { it.id == conversationId }
+    val now = System.currentTimeMillis()
+    val conversation = if (index >= 0) {
+        val current = conversations[index]
+        current.copy(
+            kind = if (mode == "Agente") "Task" else current.kind,
+            description = if (mode == "Agente") "Conversazione agente via $source." else "Conversazione chat via $source.",
+            prompt = prompt,
+            updatedAt = now,
+            messages = messages,
+            previousResponseId = responseId ?: current.previousResponseId
+        )
+    } else {
+        LocalConversation(
+            id = "conv_$now",
+            title = makeTitle(prompt),
+            kind = if (mode == "Agente") "Task" else "Chat",
+            description = if (mode == "Agente") "Conversazione agente via $source." else "Conversazione chat via $source.",
+            prompt = prompt,
+            updatedAt = now,
+            messages = messages,
+            previousResponseId = responseId
+        )
+    }
+
+    if (index >= 0) {
+        conversations[index] = conversation
+    } else {
+        conversations.add(0, conversation)
+    }
+    saveConversations(context, conversations)
+    return conversation
+}
+
 private fun saveProjectConversation(
     context: Context,
     title: String,
@@ -5073,7 +5158,7 @@ private fun saveConversations(context: Context, conversations: List<LocalConvers
     context.getSharedPreferences(CURRENT_ARCHIVE_PREFS, Context.MODE_PRIVATE)
         .edit()
         .putString("items", array.toString())
-        .apply()
+        .commit()
 }
 
 private fun loadTasks(context: Context): List<AgentTask> {
@@ -5138,7 +5223,7 @@ private fun readMessages(array: JSONArray): List<ChatMessage> {
                     author = obj.optString("author"),
                     text = obj.optString("text"),
                     fromUser = obj.optBoolean("fromUser"),
-                    isAction = false,
+                    isAction = obj.optBoolean("isAction", false),
                     visualBlocksVersion = obj.optInt("visualBlocksVersion").takeIf { obj.has("visualBlocksVersion") },
                     visualBlocks = readVisualBlocks(obj.optJSONArray("visualBlocks") ?: JSONArray()),
                     id = storedId ?: java.util.UUID.randomUUID().toString()
@@ -5151,17 +5236,16 @@ private fun readMessages(array: JSONArray): List<ChatMessage> {
 private fun writeMessages(messages: List<ChatMessage>): JSONArray {
     val array = JSONArray()
     messages.forEach { message ->
-        if (!message.isAction) {
-            array.put(
-                JSONObject()
-                    .put("id", message.id)
-                    .put("author", message.author)
-                    .put("text", message.text)
-                    .put("fromUser", message.fromUser)
-                    .put("visualBlocksVersion", message.visualBlocksVersion ?: JSONObject.NULL)
-                    .put("visualBlocks", writeVisualBlocks(message.visualBlocks))
-            )
-        }
+        array.put(
+            JSONObject()
+                .put("id", message.id)
+                .put("author", message.author)
+                .put("text", message.text)
+                .put("fromUser", message.fromUser)
+                .put("isAction", message.isAction)
+                .put("visualBlocksVersion", message.visualBlocksVersion ?: JSONObject.NULL)
+                .put("visualBlocks", writeVisualBlocks(message.visualBlocks))
+        )
     }
     return array
 }

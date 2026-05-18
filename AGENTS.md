@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.37 Release Hermes Hub 0.6.37
+v0.6.38 Release Hermes Hub 0.6.38
 ```
 
 ## Regola Memoria
@@ -54,7 +54,7 @@ Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
 
-Hermes Hub 0.6.37 (Windows + Android):
+Hermes Hub 0.6.38 (Windows + Android):
 
 Decisione auth client:
 - Hermes Hub usa API key lato app. Default: `hermes-hub`.
@@ -83,11 +83,18 @@ Terminologia gateway:
 - Il comando `hermes-hub` avvia **Hermes Gateway**: servizio ponte/API server che espone Hermes Agent alle app Hermes Hub Windows/Android e inoltra inferenza a LM Studio nei test o vLLM nel setup finale.
 - La versione Linux/headless deve restare aggiornata e funzionante: `scripts/hermes-hub-linux.sh`, `scripts/hermes-hub-linux.service` e `docs/hermes-hub-linux.md` devono supportare Ubuntu headless + vLLM, con API stabile `http://SERVER:8642/v1` e API key default `hermes-hub`.
 
+Release 0.6.38:
+- Android/Windows chat archive: salvataggio a snapshot. Il prompt utente viene persistito subito all'invio; durante streaming viene scritto un checkpoint parziale circa ogni 2s; il salvataggio finale sostituisce lo snapshot invece di aggiungere di nuovo la coppia prompt/risposta. Android conserva anche messaggi di stato/action nell'archivio.
+- Android: stream chat spostato su scope applicativo non legato alla composizione; chiudere la UI non cancella subito il job finche' il processo resta vivo. Se il trasporto cade con `connection abort`, il parziale viene salvato come stream scollegato invece di sparire.
+- Gateway locale: disconnessione SSE del client non interrompe piu' l'agent task; il gateway lascia proseguire il lavoro invece di chiamare `agent.interrupt("SSE client disconnected")`.
+- Gateway locale: rimosso hard cap globale da 90 iterazioni per Hermes Hub. `HERMES_MAX_ITERATIONS=0` significa illimitato; i vecchi hard-stop tool-loop sono forzati off anche se la config prova a riattivarli. Il loop guardrail ora emette prompt di assestamento dopo 10 fallimenti consecutivi dello stesso tool.
+- Wrapper Windows imposta `HERMES_AUXILIARY_LOCAL_ONLY=true` e il client ausiliario salta fallback esterni OpenRouter/Nous per evitare warning/credit errors nei test LM Studio locali.
+- Linux helper/service/docs: impostano `HERMES_MAX_ITERATIONS=0` per mantenere lo stesso comportamento su Ubuntu/vLLM.
+
 Release 0.6.37:
 - Android: tool call della chat raccolti in una singola flag `Tool` espandibile con conteggio/stato, per evitare che molti tool allunghino la chat. Le righe tool esistenti restano dentro la flag e mantengono JSON argomenti/risultato.
 - Gateway media: parser locale aggiornato per convertire anche riferimenti tipo `File: nome.png` in `visual_blocks media_file` via proxy `/v1/media/...` se il file sta dentro `HERMES_MEDIA_ROOTS`. Wrapper Windows aggiunge il workspace corrente alle media roots; helper Linux documenta/configura `HERMES_MEDIA_ROOTS` per Ubuntu/vLLM.
 - Video Library: gateway locale ora espone `video_library_path` in `/health/detailed` e capability `video_library`; wrapper Windows imposta `HERMES_VIDEO_LIBRARY_PATH` a `%LOCALAPPDATA%\hermes\media\video` e la aggiunge alle media roots. I prompt Android/Windows dicono all'agente di salvare li ogni video creato/scaricato/modificato per la sezione Video.
-
 Release 0.6.36:
 - Android: timeout OkHttp rimossi per chat/API Hermes (`connect/read/write/callTimeout = 0`) come richiesto da Matteo; nessun limite client a 60s/120s.
 - Android: activity streaming semplificata. Mostra flag `Processing prompt` con percentuale reale se emessa dal gateway, flag `Ragionamento`, flag tool cliccabili e label finale `tok/sec`; rimossa percentuale stimata/fittizia.
@@ -457,7 +464,7 @@ Windows:
 
 - Progetto: `src/NemoclawChat.Windows`
 - Stack: WinUI 3, C#, .NET 8, Windows App SDK self-contained.
-- Versione app: `0.6.37`.
+- Versione app: `0.6.38`.
 - Brand/UI: `Hermes Hub`, logo Hermes da `logo hermeshub.png` applicato agli asset Windows e alla UI principale, dark stile ChatGPT, sidebar, composer largo, menu `+`, settings reali.
 - UI design system applicato: superfici elevation-aware `#0F1115/#14171D/#1A1E26/#232831`, accent Hermes amber `#F5A524`, hover `#FFC857`, testo muted `#A2ADBF`, bubble utente amber scuro `#7A3E00`, card/composer radius premium e bordi soft.
 - Azioni locali: file picker Windows, screen clip, camera URI, nota vocale prompt.
@@ -495,7 +502,7 @@ Android:
 
 - Progetto: `src/NemoclawChat.Android/app`
 - Stack: Kotlin, Jetpack Compose, Gradle.
-- Versione app: `0.6.37`, versionCode `50`.
+- Versione app: `0.6.38`, versionCode `51`.
 - Brand/UI: `Hermes Hub`, logo Hermes da `logo hermeshub.png` applicato a launcher + UI, bottom nav con icone vere, composer mobile compatto stile ChatGPT Android, menu `+` con Material icons, profilo locale.
 - UI design system applicato: superfici elevation-aware `#0F1115/#14171D/#1A1E26/#232831`, accent Hermes amber `#F5A524`, testo muted `#A2ADBF`, bubble utente amber scuro `#7A3E00`, empty state con wash amber e logo grande.
 - Azioni locali: file picker Android, camera intent e prompt helper nel menu `+`; dettatura/mic placeholder rimossi finche' non c'e' integrazione reale.

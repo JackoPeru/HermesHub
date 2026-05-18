@@ -160,6 +160,45 @@ public static class ChatArchiveStore
         return conversation;
     }
 
+    public static ConversationRecord SaveSnapshot(
+        string? conversationId,
+        string mode,
+        string prompt,
+        IReadOnlyList<ChatMessageRecord> messages,
+        string source,
+        string? previousResponseId = null)
+    {
+        var items = Load();
+        var conversation = string.IsNullOrWhiteSpace(conversationId)
+            ? null
+            : items.FirstOrDefault(item => item.Id == conversationId);
+
+        if (conversation is null)
+        {
+            conversation = new ConversationRecord
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Title = MakeTitle(prompt),
+                Kind = mode == "Agente" ? "Task" : "Chat"
+            };
+            items.Insert(0, conversation);
+        }
+
+        conversation.Kind = mode == "Agente" ? "Task" : conversation.Kind;
+        conversation.Description = mode == "Agente"
+            ? $"Conversazione agente via {source}."
+            : $"Conversazione chat via {source}.";
+        conversation.Prompt = prompt;
+        if (!string.IsNullOrWhiteSpace(previousResponseId))
+        {
+            conversation.PreviousResponseId = previousResponseId;
+        }
+        conversation.UpdatedAt = DateTimeOffset.Now;
+        conversation.Messages = messages.ToList();
+        SaveAll(items);
+        return conversation;
+    }
+
     public static ConversationRecord SaveProject(string title, string description, string prompt)
     {
         var items = Load();

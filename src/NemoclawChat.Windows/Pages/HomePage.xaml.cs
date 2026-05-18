@@ -304,6 +304,9 @@ public sealed partial class HomePage : Page
             AddBubble("Tu", prompt, "UserBubbleBrush", HorizontalAlignment.Right);
             _messageHistory.Add(new ChatMessageRecord("Tu", prompt, DateTimeOffset.Now));
             PromptBox.Text = string.Empty;
+            var initialSave = ChatArchiveStore.SaveSnapshot(_conversationId, _mode, prompt, _messageHistory, "Hermes in corso", _previousResponseId);
+            _conversationId = initialSave.Id;
+            _previousResponseId = initialSave.PreviousResponseId;
 
             var settings = AppSettingsStore.Load();
             bubble = CreateStreamingAssistantBubble();
@@ -318,6 +321,7 @@ public sealed partial class HomePage : Page
             string source = "Hermes";
             bool usedFallback = false;
             string? streamError = null;
+            var lastCheckpointAt = DateTimeOffset.MinValue;
 
             await foreach (var ev in ChatStreamClient.StreamChatAsync(settings, _mode, prompt, _messageHistory, _conversationId, _previousResponseId))
             {
@@ -369,6 +373,26 @@ public sealed partial class HomePage : Page
                         streamError = se.Message;
                         break;
                 }
+
+                if ((DateTimeOffset.Now - lastCheckpointAt).TotalSeconds >= 2 &&
+                    (!string.IsNullOrWhiteSpace(finalText) || finalBlocks is { Count: > 0 }))
+                {
+                    lastCheckpointAt = DateTimeOffset.Now;
+                    var partialMessages = _messageHistory
+                        .Concat(new[]
+                        {
+                            new ChatMessageRecord(
+                                "Hermes",
+                                string.IsNullOrWhiteSpace(finalText) ? "Hermes sta lavorando..." : finalText,
+                                DateTimeOffset.Now,
+                                finalBlocksVersion,
+                                finalBlocks?.ToList())
+                        })
+                        .ToList();
+                    var checkpoint = ChatArchiveStore.SaveSnapshot(_conversationId, _mode, prompt, partialMessages, "Hermes in corso", finalResponseId ?? _previousResponseId);
+                    _conversationId = checkpoint.Id;
+                    _previousResponseId = checkpoint.PreviousResponseId;
+                }
             }
 
             if (string.IsNullOrEmpty(finalText) && streamError is not null && settings.DemoMode)
@@ -391,7 +415,7 @@ public sealed partial class HomePage : Page
             }
 
             _messageHistory.Add(new ChatMessageRecord("Hermes", finalText, DateTimeOffset.Now, finalBlocksVersion, finalBlocks?.ToList()));
-            var saved = ChatArchiveStore.SaveExchange(_conversationId, _mode, prompt, finalText, source, finalResponseId, finalBlocks, finalBlocksVersion);
+            var saved = ChatArchiveStore.SaveSnapshot(_conversationId, _mode, prompt, _messageHistory, source, finalResponseId ?? _previousResponseId);
             _conversationId = saved.Id;
             _previousResponseId = saved.PreviousResponseId;
 
@@ -405,6 +429,12 @@ public sealed partial class HomePage : Page
             ShowError($"Stream interrotto: {ex.Message}");
             bubble?.AppendText($"\n[errore stream] {ex.Message}");
             bubble?.Complete(new ChatStreamStats(null, null, null, null, null));
+            var interruptedMessages = _messageHistory
+                .Concat(new[] { new ChatMessageRecord("Stato", $"Stream interrotto: {ex.Message}", DateTimeOffset.Now) })
+                .ToList();
+            var saved = ChatArchiveStore.SaveSnapshot(_conversationId, _mode, prompt, interruptedMessages, "Errore Hermes", _previousResponseId);
+            _conversationId = saved.Id;
+            _previousResponseId = saved.PreviousResponseId;
         }
         finally
         {
