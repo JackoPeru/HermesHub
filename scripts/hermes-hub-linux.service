@@ -9,6 +9,7 @@ Environment=HERMES_API_HOST=0.0.0.0
 Environment=HERMES_API_PORT=8642
 Environment=API_SERVER_KEY=hermes-hub
 Environment=HERMES_MAX_ITERATIONS=0
+Environment=HERMES_AUXILIARY_LOCAL_ONLY=true
 Environment=HERMES_INFERENCE_PROVIDER=lm_studio
 Environment=LM_STUDIO_BASE_URL=http://127.0.0.1:1234
 Environment=HERMES_VIDEO_LIBRARY_PATH=%h/.hermes/media/video

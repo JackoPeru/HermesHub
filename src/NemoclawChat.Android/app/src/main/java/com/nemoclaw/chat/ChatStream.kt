@@ -244,6 +244,7 @@ fun streamChatRequest(
     val accumText = StringBuilder()
     val accumThink = StringBuilder()
     var lastError: String? = null
+    val videoMode = isVideoRequest(prompt)
 
     suspend fun emitAndTrack(ev: ChatStreamEvent): Boolean {
         when (ev) {
@@ -283,10 +284,10 @@ fun streamChatRequest(
             .put("input", prompt)
             .put(
                 "instructions",
-                if (mode.equals("Agente", ignoreCase = true))
+                (if (mode.equals("Agente", ignoreCase = true))
                     hermesHubAgentInstructions()
                 else
-                    hermesHubChatInstructions()
+                    hermesHubChatInstructions()) + if (videoMode) "\n\n" + hermesHubVideoInstructions(settings) else ""
             )
             .put("store", true)
             .put("stream", true)
@@ -328,6 +329,13 @@ fun streamChatRequest(
                         .put("role", "system")
                         .put("content", if (mode.equals("Agente", ignoreCase = true)) hermesHubAgentInstructions() else hermesHubChatInstructions())
                 )
+                if (videoMode) {
+                    put(
+                        JSONObject()
+                            .put("role", "system")
+                            .put("content", hermesHubVideoInstructions(settings))
+                    )
+                }
                 history.filter { !it.isAction }.forEach { msg ->
                     put(
                         JSONObject()
@@ -636,6 +644,24 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
     }
 
     return out
+}
+
+private fun isVideoRequest(prompt: String): Boolean {
+    val text = prompt.lowercase()
+    return listOf("video", "filmato", "clip", "montaggio", "remotion", "youtube", "mp4", "render").any { text.contains(it) }
+}
+
+private fun hermesHubVideoInstructions(settings: AppSettings): String {
+    val path = settings.videoLibraryPath.ifBlank { "HERMES_VIDEO_LIBRARY_PATH" }
+    return """
+        System prompt video Hermes Hub:
+        - La sezione Video e' un watched-folder feed, non dipende dalla chat.
+        - La cartella ufficiale sul PC Hermes e': $path
+        - Quando l'utente chiede creazione, download, montaggio, rendering o preparazione di un video, salva sempre il file video finale in quella cartella.
+        - Ogni file .mp4/.m4v/.mov/.mkv/.webm/.avi messo in quella cartella apparira' automaticamente nella sezione Video tramite /v1/video/library.
+        - Se mostri anche il video in chat, pubblicalo tramite proxy /v1/media/... come visual_blocks media_file; non scrivere file:// o path locali come risposta finale.
+        - Se non riesci a generare/renderizzare il video, spiega il blocco concreto e non fingere di averlo mandato.
+    """.trimIndent()
 }
 
 private fun extractToolEventsFromAnyJson(obj: JSONObject): List<ChatStreamEvent> {

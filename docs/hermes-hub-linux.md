@@ -15,6 +15,7 @@ Default:
 Hermes Gateway API: http://0.0.0.0:8642/v1
 API key: hermes-hub
 Max iterations: unlimited (`HERMES_MAX_ITERATIONS=0`)
+Auxiliary local-only: true (`HERMES_AUXILIARY_LOCAL_ONLY=true`)
 Provider: lm_studio
 Inference: http://127.0.0.1:1234/v1
 Config: ~/.hermes/config.yaml
@@ -62,13 +63,15 @@ Environment=HERMES_INFERENCE_MODEL=nome-modello-vllm
 
 Il servizio deve esporre sempre `http://SERVER:8642/v1` verso Hermes Hub e usare `API_SERVER_KEY=hermes-hub`, cosi' Android/Windows non cambiano configurazione quando si passa da Windows test a Ubuntu/vLLM.
 
-La sezione Video usa una cartella watched-folder ufficiale esposta da `/health/detailed`:
+`HERMES_AUXILIARY_LOCAL_ONLY=true` mantiene i task ausiliari dentro il provider locale e impedisce fallback esterni OpenRouter/Nous durante i test LM Studio o su vLLM headless.
+
+La sezione Video usa una cartella watched-folder ufficiale esposta da `/health/detailed` e interrogabile da Android tramite `GET /v1/video/library`:
 
 ```text
 video_library_path=~/.hermes/media/video
 ```
 
-Quando Hermes crea/scarica/renderizza un video destinato a Hermes Hub, il file finale deve essere salvato dentro `HERMES_VIDEO_LIBRARY_PATH`. Android/Windows sincronizzano quel path da `/health/detailed`; Windows puo' leggere la cartella locale, Android usa metadata e media proxy `/v1/media/...`.
+Quando Hermes crea/scarica/renderizza un video destinato a Hermes Hub, il file finale deve essere salvato dentro `HERMES_VIDEO_LIBRARY_PATH`. Android chiama `/v1/video/library`, riceve item con `media_url=/v1/media/...` e mostra il feed senza dipendere dalla chat; Windows puo' leggere la cartella locale quando gira sullo stesso PC e usare gli stessi metadata quando arrivano dal gateway.
 
 Verifica media proxy:
 

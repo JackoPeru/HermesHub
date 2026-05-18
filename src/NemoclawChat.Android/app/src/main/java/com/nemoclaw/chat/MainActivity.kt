@@ -329,6 +329,17 @@ data class WorkspaceRequest(
     val updatedAt: Long = System.currentTimeMillis()
 )
 
+data class VideoLibraryItem(
+    val id: String,
+    val title: String,
+    val filename: String,
+    val mediaUrl: String,
+    val path: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val modifiedAt: Long
+)
+
 private data class UpdateCheckResult(
     val hasUpdate: Boolean,
     val latestVersion: String?,
@@ -2555,16 +2566,92 @@ private fun OperatorActionButton(label: String, onClick: () -> Unit) {
 
 @Composable
 private fun VideoScreen(context: Context, settings: AppSettings, onOpenChatPrompt: (String) -> Unit) {
-    WorkspaceFeedScreen(
-        context = context,
-        settings = settings,
-        kind = "Video",
-        title = "Video",
-        description = "Feed video Hermes. Desktop monitora cartella video configurata; Android usa stessi metadata e feedback per affinare i prossimi output.",
-        empty = "Nessun video ancora. Metti file nella cartella video Hermes o crea uno spunto dalla chat primaria.",
-        chatPrompt = "Crea o aggiorna un video per la cartella monitorata della sezione Video di Hermes Hub: ",
-        onOpenChatPrompt = onOpenChatPrompt
-    )
+    var refreshKey by remember { mutableStateOf(0) }
+    var status by remember { mutableStateOf("Sincronizzo cartella video Hermes...") }
+    var items by remember { mutableStateOf<List<VideoLibraryItem>>(emptyList()) }
+
+    LaunchedEffect(settings.gatewayUrl, settings.videoLibraryPath, refreshKey) {
+        val result = loadVideoLibrary(settings, loadGatewaySecret(context))
+        items = result.first
+        status = result.second
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Text("Video", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Feed automatico dalla cartella video del PC Hermes. Ogni file video messo li compare qui senza passare dalla chat.",
+                color = AppColors.Muted
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                settings.videoLibraryPath.ifBlank { "Cartella non ancora sincronizzata dal gateway." },
+                color = AppColors.Faint,
+                fontSize = 12.sp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = {
+                    onOpenChatPrompt(
+                        "Modalita Video Hermes Hub. Usa la cartella video monitorata del PC Hermes: ${settings.videoLibraryPath}. " +
+                            "Crea, scarica o prepara un video e salva sempre il file finale in quella cartella, cosi appare automaticamente nella sezione Video. Richiesta: "
+                    )
+                }) { Text("Nuovo video in chat") }
+                Button(onClick = {
+                    status = "Aggiorno feed video..."
+                    refreshKey++
+                }) { Text("Aggiorna feed") }
+            }
+        }
+        item {
+            PremiumPanel {
+                Text(modifier = Modifier.padding(14.dp), text = status, color = AppColors.Muted)
+            }
+        }
+        if (items.isEmpty()) {
+            item {
+                PremiumPanel {
+                    Text(
+                        modifier = Modifier.padding(16.dp),
+                        text = "Nessun video trovato. Metti un file .mp4/.mov/.mkv/.webm/.avi nella cartella video Hermes sul PC e premi Aggiorna feed.",
+                        color = AppColors.Muted
+                    )
+                }
+            }
+        }
+        items(items, key = { it.id }) { video ->
+            VideoLibraryCard(settings, video)
+        }
+    }
+}
+
+@Composable
+private fun VideoLibraryCard(settings: AppSettings, item: VideoLibraryItem) {
+    val context = LocalContext.current
+    PremiumPanel {
+        Column(modifier = Modifier.padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+            Text("${item.filename} · ${item.sizeBytes.toReadableFileSize()}", color = AppColors.Muted, fontSize = 12.sp)
+            Text(item.path, color = AppColors.Faint, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = {
+                    val mediaUri = Uri.parse(resolveWorkspaceUrl(settings, item.mediaUrl))
+                    val mediaType = item.mimeType.ifBlank { "video/*" }
+                    openAndroidIntent(context, Intent(Intent.ACTION_VIEW).setDataAndType(mediaUri, mediaType))
+                }) { Text("Apri") }
+                Button(onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("hermes-video", item.path))
+                }) { Text("Copia path") }
+            }
+        }
+    }
 }
 
 @Composable
@@ -3246,11 +3333,11 @@ internal fun hermesHubSharedContext(): String {
         Hermes Hub non e' un modello separato: deve usare la stessa memoria agente, gli stessi jobs e lo stesso profilo operativo disponibili anche da CLI Hermes.
         Sezioni app:
         - Chat: conversazione principale.
-        - Video: feed personale di video generati su PC/Hermes. Esiste una Video Library ufficiale annunciata dal gateway in video_library_path. Se l'utente chiede di creare, scaricare, montare o preparare un video, salva/registra il file finale in quella cartella, cosi la sezione Video lo vede. Il telefono riceve stream_url/download_url o media proxy, non file locali diretti.
+        - Video: feed personale di video generati su PC/Hermes. Esiste una Video Library ufficiale annunciata dal gateway in video_library_path e interrogabile da Android con /v1/video/library. Se l'utente chiede di creare, scaricare, montare o preparare un video, salva/registra il file finale in quella cartella, cosi la sezione Video lo vede. Il telefono riceve media proxy /v1/media/..., non file locali diretti.
         - News: feed personale di articoli/briefing con fonti e feedback utente.
         - Jobs/Runs: coda operativa Hermes e lavori programmati.
         - Archivio: storico locale dell'app, non memoria agente principale.
-        Video Library: non ignorare la sezione Video. Ogni output video finale destinato all'utente deve finire in video_library_path/HERMES_VIDEO_LIBRARY_PATH e, se lo mostri in chat, anche in visual_blocks media_file con media_url proxy /v1/media/...
+        Video Library: non ignorare la sezione Video. Ogni output video finale destinato all'utente deve finire in video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni file .mp4/.m4v/.mov/.mkv/.webm/.avi in quella cartella appare tramite /v1/video/library. Se lo mostri in chat, usa anche visual_blocks media_file con media_url proxy /v1/media/...
         File multimediali in chat: usa visual_blocks image_gallery per piu' immagini o media_file per singoli asset image/video/audio/document.
         media_url e thumbnail_url devono puntare a proxy Hermes/same-host tipo /v1/media/...; vietati file://, data: e path locali diretti.
         Non scrivere mai markdown `MEDIA:[path](file://...)` o path Windows/Linux nel testo finale. Se un tool produce un file locale, pubblicalo prima tramite proxy Hermes e restituisci solo `/v1/media/...` dentro visual_blocks. Se non puoi pubblicarlo, dillo esplicitamente invece di inviare path locali.
@@ -3388,7 +3475,7 @@ private fun visualBlocksMetadata(settings: AppSettings): JSONObject {
             "hub_sections",
             JSONObject()
                 .put("chat", "Conversazione principale Hermes Hub.")
-                .put("video", "Feed personale video: Hermes conosce video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni video creato/scaricato per Matteo deve essere salvato o registrato li, desktop mostra file locali, app salva feedback e metadata.")
+                .put("video", "Feed personale video: Hermes conosce video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni video creato/scaricato per Matteo deve essere salvato o registrato li; Android legge /v1/video/library, desktop mostra file locali, app salva feedback e metadata.")
                 .put("news", "Feed personale articoli: Hermes produce articoli con fonti, app salva feedback.")
                 .put("jobs", "Coda Hermes Jobs condivisa con CLI/server.")
                 .put("runs", "Runs operative Hermes.")
@@ -3409,7 +3496,7 @@ private fun visualBlocksMetadata(settings: AppSettings): JSONObject {
             JSONObject()
                 .put("mode", "watched-folder")
                 .put("library_path", settings.videoLibraryPath)
-                .put("required_behavior", "When the user asks for video creation/download/editing, store the final video file in video_library_path/HERMES_VIDEO_LIBRARY_PATH and expose it through media proxy if referenced in chat.")
+                .put("required_behavior", "When the user asks for video creation/download/editing, store the final video file in video_library_path/HERMES_VIDEO_LIBRARY_PATH, let /v1/video/library expose it, and use media proxy if referenced in chat.")
         )
         .put(
             "visual_blocks",
@@ -3864,6 +3951,49 @@ private suspend fun httpGet(url: String, apiKey: String? = null): String = withC
         }
     }
     last?.second.orEmpty()
+}
+
+private suspend fun loadVideoLibrary(settings: AppSettings, apiKey: String?): Pair<List<VideoLibraryItem>, String> = withContext(Dispatchers.IO) {
+    return@withContext try {
+        val body = httpGet(resolveHermesUrl(settings, "/v1/video/library"), apiKey)
+        if (body.isBlank()) {
+            return@withContext emptyList<VideoLibraryItem>() to "Gateway non ha restituito dati video."
+        }
+        val json = JSONObject(body)
+        if (json.has("error")) {
+            return@withContext emptyList<VideoLibraryItem>() to extractHumanError(body)
+        }
+        val libraryPath = json.optString("video_library_path", json.optString("library_path", settings.videoLibraryPath))
+        val array = json.optJSONArray("items") ?: JSONArray()
+        val items = buildList {
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                val mediaUrl = obj.optString("media_url")
+                val filename = obj.optString("filename")
+                if (mediaUrl.isBlank() || filename.isBlank()) continue
+                add(
+                    VideoLibraryItem(
+                        id = obj.optString("id", filename),
+                        title = obj.optString("title", filename.substringBeforeLast('.')),
+                        filename = filename,
+                        mediaUrl = mediaUrl,
+                        path = obj.optString("path"),
+                        mimeType = obj.optString("mime_type", "video/*"),
+                        sizeBytes = obj.optLong("size_bytes", 0L),
+                        modifiedAt = (obj.optDouble("modified_at", 0.0) * 1000).toLong()
+                    )
+                )
+            }
+        }
+        val status = if (items.isEmpty()) {
+            "Cartella video sincronizzata: $libraryPath. Nessun video trovato."
+        } else {
+            "${items.size} video trovati in: $libraryPath"
+        }
+        items to status
+    } catch (ex: Exception) {
+        emptyList<VideoLibraryItem>() to "Errore feed video: ${ex.message ?: ex.javaClass.simpleName}"
+    }
 }
 
 private val apiHttpClient: OkHttpClient by lazy {
