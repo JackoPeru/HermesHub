@@ -158,29 +158,36 @@
                     <TextBlock FontSize="12" FontWeight="SemiBold" Text="Nuova" />
                 </StackPanel>
             </Button>
-            <Button
-                x:Name="ModeToggleButton"
-                MinWidth="108"
-                Padding="12,7"
+            <Border
+                x:Name="ContextMeter"
+                Width="54"
+                Height="54"
                 Background="{StaticResource ElevatedSurfaceBrush}"
                 BorderBrush="{StaticResource BorderBrushSoft}"
                 BorderThickness="1"
-                Click="ToggleMode_Click"
-                CornerRadius="18"
-                Foreground="White"
-                AutomationProperties.Name="Cambia modalita chat agente">
-                <StackPanel Orientation="Horizontal" Spacing="7">
-                    <FontIcon
-                        x:Name="ModeToggleIcon"
-                        FontSize="14"
-                        Glyph="&#xE8BD;" />
+                CornerRadius="27"
+                AutomationProperties.Name="Contesto chat">
+                <Grid Width="54" Height="54">
+                    <Ellipse Fill="#FF111821" />
+                    <Path
+                        x:Name="ContextMeterFill"
+                        Fill="{StaticResource AccentGreenBrush}"
+                        Opacity="0.88" />
+                    <Ellipse
+                        Margin="3"
+                        Stroke="{StaticResource AccentGreenBrush}"
+                        StrokeThickness="1.25"
+                        Opacity="0.72" />
                     <TextBlock
-                        x:Name="ModeBadge"
+                        x:Name="ContextMeterText"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
                         FontSize="12"
                         FontWeight="SemiBold"
-                        Text="Chat" />
-                </StackPanel>
-            </Button>
+                        Foreground="White"
+                        Text="0%" />
+                </Grid>
+            </Border>
         </StackPanel>
 
         <Grid

@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
+using Microsoft.UI.Xaml.Shapes;
 using NemoclawChat_Windows.Services;
 using System.Collections.ObjectModel;
 using Windows.ApplicationModel.DataTransfer;
@@ -20,11 +21,16 @@ namespace NemoclawChat_Windows.Pages;
 
 public sealed partial class HomePage : Page
 {
+    private const int DefaultContextWindowTokens = 32768;
+    private const int ContextSystemOverheadTokens = 900;
+    private const int MessageContextOverheadTokens = 6;
+
     public ObservableCollection<MessageViewModel> Messages { get; } = [];
     private string _mode = "Chat";
     private string? _conversationId;
     private string? _previousResponseId;
     private readonly List<ChatMessageRecord> _messageHistory = [];
+    private int _lastPromptTokens;
     private volatile bool _isSending;
     private StreamingBubble? _currentStreamingBubble;
 
@@ -85,6 +91,7 @@ public sealed partial class HomePage : Page
     private void HomePage_Loaded(object sender, RoutedEventArgs e)
     {
         BuildSlashPopup();
+        UpdateContextMeter();
     }
 
     private async void Send_Click(object sender, RoutedEventArgs e)
@@ -259,19 +266,19 @@ public sealed partial class HomePage : Page
     private void NewChat_Click(object sender, RoutedEventArgs e)
     {
         _messageHistory.Clear();
+        _lastPromptTokens = 0;
         _conversationId = null;
         _previousResponseId = null;
         Messages.Clear();
         EmptyState.Visibility = Visibility.Visible;
         PromptBox.Text = string.Empty;
+        UpdateContextMeter();
         PromptBox.Focus(FocusState.Programmatic);
     }
 
     private void SetMode(string mode)
     {
         _mode = mode;
-        ModeBadge.Text = _mode;
-        ModeToggleIcon.Glyph = _mode == "Agente" ? "" : "";
     }
 
     private async Task SendCurrentPromptAsync()
@@ -360,6 +367,7 @@ public sealed partial class HomePage : Page
                         break;
                     case StreamDone done:
                         bubble.Complete(done.Stats);
+                        UpdateContextMeter(done.Stats.PromptTokens);
                         if (string.IsNullOrEmpty(finalText) && !string.IsNullOrEmpty(done.AccumulatedText))
                         {
                             finalText = done.AccumulatedText;
@@ -418,6 +426,7 @@ public sealed partial class HomePage : Page
             var saved = ChatArchiveStore.SaveSnapshot(_conversationId, _mode, prompt, _messageHistory, source, finalResponseId ?? _previousResponseId);
             _conversationId = saved.Id;
             _previousResponseId = saved.PreviousResponseId;
+            UpdateContextMeter();
 
             if (usedFallback || source.Contains("Errore", StringComparison.OrdinalIgnoreCase))
             {
@@ -485,6 +494,7 @@ public sealed partial class HomePage : Page
 
         _conversationId = conversation.Id;
         _previousResponseId = conversation.PreviousResponseId;
+        _lastPromptTokens = 0;
         EmptyState.Visibility = Visibility.Collapsed;
         Messages.Clear();
         _messageHistory.Clear();
@@ -499,6 +509,7 @@ public sealed partial class HomePage : Page
                 message.Author == "Tu" ? HorizontalAlignment.Right : HorizontalAlignment.Left,
                 message.VisualBlocks);
         }
+        UpdateContextMeter();
     }
 
     private void AddBubble(
@@ -553,6 +564,7 @@ public sealed partial class HomePage : Page
 
         Messages.Add(new MessageViewModel(bubble));
         _ = MessagesScroll.ChangeView(null, MessagesScroll.ScrollableHeight, null);
+        UpdateContextMeter();
     }
 
     private StreamingBubble CreateStreamingAssistantBubble()
@@ -589,6 +601,103 @@ public sealed partial class HomePage : Page
         ErrorInfoBar.IsOpen = true;
     }
 
+    private void UpdateContextMeter(int? serverPromptTokens = null)
+    {
+        if (serverPromptTokens is > 0)
+        {
+            _lastPromptTokens = serverPromptTokens.Value;
+        }
+
+        var estimatedTokens = EstimateCurrentContextTokens();
+        var tokens = Math.Max(estimatedTokens, _lastPromptTokens);
+        var percent = (int)Math.Round(
+            Math.Min(tokens, DefaultContextWindowTokens) * 100.0 / DefaultContextWindowTokens,
+            MidpointRounding.AwayFromZero);
+        percent = Math.Clamp(percent, 0, 100);
+
+        ContextMeterText.Text = $"{percent}%";
+        ContextMeterFill.Data = BuildContextMeterGeometry(percent / 100.0, 54, 54);
+        ToolTipService.SetToolTip(
+            ContextMeter,
+            $"Contesto chat: {tokens:N0}/{DefaultContextWindowTokens:N0} token stimati. Modalita: {_mode}.");
+    }
+
+    private int EstimateCurrentContextTokens()
+    {
+        var historyTokens = _messageHistory.Sum(message =>
+            EstimateTokenCount(message.Author) + EstimateTokenCount(message.Text) + MessageContextOverheadTokens);
+        var draft = PromptBox.Text?.Trim() ?? string.Empty;
+        var draftTokens = string.IsNullOrWhiteSpace(draft)
+            ? 0
+            : EstimateTokenCount(draft) + MessageContextOverheadTokens;
+
+        return ContextSystemOverheadTokens + historyTokens + draftTokens;
+    }
+
+    private static int EstimateTokenCount(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return 0;
+        }
+
+        return Math.Max(1, (text.Length + 3) / 4);
+    }
+
+    private static Geometry? BuildContextMeterGeometry(double fraction, double width, double height)
+    {
+        fraction = Math.Clamp(fraction, 0, 1);
+        if (fraction <= 0)
+        {
+            return null;
+        }
+
+        var diameter = Math.Min(width, height) - 8;
+        var radius = diameter / 2;
+        var center = new Point(width / 2, height / 2);
+        if (fraction >= 0.999)
+        {
+            return new EllipseGeometry
+            {
+                Center = center,
+                RadiusX = radius,
+                RadiusY = radius
+            };
+        }
+
+        var startAngle = -90.0;
+        var endAngle = startAngle + (360.0 * fraction);
+        var start = PointOnCircle(center, radius, startAngle);
+        var end = PointOnCircle(center, radius, endAngle);
+
+        var figure = new PathFigure
+        {
+            StartPoint = center,
+            IsClosed = true,
+            IsFilled = true
+        };
+        figure.Segments.Add(new LineSegment { Point = start });
+        figure.Segments.Add(new ArcSegment
+        {
+            Point = end,
+            Size = new Size(radius, radius),
+            IsLargeArc = fraction > 0.5,
+            SweepDirection = SweepDirection.Clockwise
+        });
+
+        var geometry = new PathGeometry();
+        geometry.Figures.Add(figure);
+        return geometry;
+    }
+
+    private static Point PointOnCircle(Point center, double radius, double degrees)
+    {
+        var radians = degrees * Math.PI / 180.0;
+        return new Point(
+            center.X + radius * Math.Cos(radians),
+            center.Y + radius * Math.Sin(radians));
+    }
+
     private void NewChat_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         NewChat_Click(sender, new RoutedEventArgs());
@@ -598,11 +707,13 @@ public sealed partial class HomePage : Page
     private void ClearChat_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         _messageHistory.Clear();
+        _lastPromptTokens = 0;
         _conversationId = null;
         _previousResponseId = null;
         Messages.Clear();
         EmptyState.Visibility = Visibility.Visible;
         PromptBox.Text = string.Empty;
+        UpdateContextMeter();
         args.Handled = true;
     }
 
@@ -718,6 +829,7 @@ public sealed partial class HomePage : Page
     private void PromptBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         var text = PromptBox.Text ?? string.Empty;
+        UpdateContextMeter();
         if (string.IsNullOrEmpty(text) || !text.StartsWith("/", StringComparison.Ordinal) || text.Contains('\n'))
         {
             CloseSlashPopup();
@@ -820,10 +932,12 @@ public sealed partial class HomePage : Page
                 break;
             case SlashAction.Clear:
                 _messageHistory.Clear();
+                _lastPromptTokens = 0;
                 _conversationId = null;
                 _previousResponseId = null;
                 Messages.Clear();
                 EmptyState.Visibility = Visibility.Visible;
+                UpdateContextMeter();
                 break;
             case SlashAction.Help:
                 var lines = string.Join("\n", _slashCommands

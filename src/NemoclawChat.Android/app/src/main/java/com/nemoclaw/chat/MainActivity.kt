@@ -147,6 +147,8 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
@@ -178,6 +180,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -421,6 +424,12 @@ private data class GatewayChatResult(
     val responseId: String? = null,
     val visualBlocks: List<VisualBlock> = emptyList(),
     val visualBlocksVersion: Int? = null
+)
+
+private data class ContextUsage(
+    val tokens: Int,
+    val maxTokens: Int = DEFAULT_CONTEXT_WINDOW_TOKENS,
+    val percent: Int
 )
 
 private data class GatewayTaskResult(
@@ -838,6 +847,18 @@ private fun ChatScreen(
             listState.animateScrollToItem(totalItems - 1)
         }
     }
+    val contextUsage = remember(
+        state.messages.size,
+        state.draft,
+        state.streamingState?.stats?.promptTokens,
+        streamingTextLen
+    ) {
+        estimateChatContextUsage(
+            messages = state.messages.toList(),
+            draft = state.draft,
+            streamingState = state.streamingState
+        )
+    }
 
     val isEmptyChat = state.messages.isEmpty() && state.streamingState == null
     val emptyChatBrush = remember {
@@ -863,10 +884,7 @@ private fun ChatScreen(
             .background(if (isEmptyChat) emptyChatBrush else solidBrush)
     ) {
         TopBar(
-            mode = state.mode,
-            onModeToggle = {
-                state.mode = if (state.mode == "Agente") "Chat" else "Agente"
-            },
+            contextUsage = contextUsage,
             onNewChat = { state.resetForNewChat() },
             onOpenSidebar = onOpenSidebar
         )
@@ -1115,7 +1133,7 @@ private fun executeSlashCommand(
 }
 
 @Composable
-private fun TopBar(mode: String, onModeToggle: () -> Unit, onNewChat: () -> Unit = {}, onOpenSidebar: () -> Unit = {}) {
+private fun TopBar(contextUsage: ContextUsage, onNewChat: () -> Unit = {}, onOpenSidebar: () -> Unit = {}) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1153,18 +1171,88 @@ private fun TopBar(mode: String, onModeToggle: () -> Unit, onNewChat: () -> Unit
             Text(text = "Nuova", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
         }
         Spacer(modifier = Modifier.size(8.dp))
-        val modeIcon = if (mode == "Agente") Icons.Rounded.SmartToy else Icons.Rounded.ChatBubbleOutline
-        Row(
+        ContextMeter(
+            usage = contextUsage,
             modifier = Modifier
-                .clickable(onClick = onModeToggle)
-                .padding(horizontal = 12.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(modeIcon, contentDescription = mode, tint = AppColors.Accent, modifier = Modifier.size(16.dp))
-            Text(text = mode, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-        }
+                .size(50.dp)
+        )
     }
+}
+
+@Composable
+private fun ContextMeter(usage: ContextUsage, modifier: Modifier = Modifier) {
+    val fill = (usage.percent.coerceIn(0, 100) / 100f)
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val strokeWidth = 2.2.dp.toPx()
+            val inset = strokeWidth / 2f
+            val arcSize = Size(size.width - strokeWidth, size.height - strokeWidth)
+            drawCircle(
+                color = AppColors.Elevated,
+                radius = size.minDimension / 2f,
+                center = center
+            )
+            if (fill > 0f) {
+                drawArc(
+                    color = AppColors.Accent.copy(alpha = 0.88f),
+                    startAngle = -90f,
+                    sweepAngle = 360f * fill,
+                    useCenter = true,
+                    topLeft = Offset(inset, inset),
+                    size = arcSize
+                )
+            }
+            drawCircle(
+                color = AppColors.Border,
+                radius = size.minDimension / 2f - inset,
+                center = center,
+                style = Stroke(width = strokeWidth)
+            )
+            drawCircle(
+                color = AppColors.Accent.copy(alpha = 0.62f),
+                radius = size.minDimension / 2f - (strokeWidth * 1.8f),
+                center = center,
+                style = Stroke(width = 1.dp.toPx())
+            )
+        }
+        Text(
+            text = "${usage.percent.coerceIn(0, 100)}%",
+            color = Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+private fun estimateChatContextUsage(
+    messages: List<ChatMessage>,
+    draft: String,
+    streamingState: StreamingState?
+): ContextUsage {
+    val historyTokens = messages
+        .takeLast(CHAT_HISTORY_MAX_MESSAGES)
+        .sumOf { estimateTokenCount(it.author) + estimateTokenCount(it.text) + MESSAGE_CONTEXT_OVERHEAD_TOKENS }
+    val draftTokens = draft.trim()
+        .takeIf { it.isNotBlank() }
+        ?.let { estimateTokenCount(it) + MESSAGE_CONTEXT_OVERHEAD_TOKENS }
+        ?: 0
+    val estimated = CONTEXT_SYSTEM_OVERHEAD_TOKENS + historyTokens + draftTokens
+    val serverPromptTokens = streamingState?.stats?.promptTokens ?: 0
+    val tokens = maxOf(estimated, serverPromptTokens).coerceAtLeast(0)
+    val percent = ((tokens.coerceAtMost(DEFAULT_CONTEXT_WINDOW_TOKENS).toDouble() / DEFAULT_CONTEXT_WINDOW_TOKENS) * 100.0)
+        .roundToInt()
+        .coerceIn(0, 100)
+    return ContextUsage(tokens = tokens, percent = percent)
+}
+
+private fun estimateTokenCount(text: String): Int {
+    if (text.isBlank()) return 0
+    return ((text.length + 3) / 4).coerceAtLeast(1)
 }
 
 @Composable
@@ -2915,6 +3003,7 @@ private fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vide
     var feedback by remember(item.id) { mutableStateOf(loadVideoFeedback(context, item.id)) }
     var reaction by remember(item.id) { mutableStateOf(loadVideoReaction(context, item.id)) }
     var status by remember(item.id) { mutableStateOf("Lascia feedback: Hermes lo usera' come memoria editoriale per i prossimi video.") }
+    var fullScreen by rememberSaveable(item.id) { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -2925,21 +3014,37 @@ private fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vide
             Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Button(onClick = onBack) { Text("Indietro") }
             }
-            AndroidView(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f)
                     .background(Color.Black),
-                factory = { viewContext ->
-                    PlayerView(viewContext).apply {
-                        useController = true
-                        this.player = player
-                    }
-                },
-                update = { view ->
-                    view.player = player
+                contentAlignment = Alignment.Center
+            ) {
+                if (!fullScreen) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { viewContext ->
+                            PlayerView(viewContext).apply {
+                                useController = true
+                                this.player = player
+                            }
+                        },
+                        update = { view ->
+                            view.player = player
+                        }
+                    )
                 }
-            )
+                IconButton(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .background(Color.Black.copy(alpha = 0.62f), CircleShape),
+                    onClick = { fullScreen = true }
+                ) {
+                    Icon(Icons.Rounded.CropFree, contentDescription = "Schermo intero", tint = Color.White)
+                }
+            }
         }
         item {
             Column(modifier = Modifier.padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2997,6 +3102,39 @@ private fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vide
                         status = result
                     }
                 }) { Text("Invia feedback") }
+            }
+        }
+    }
+    if (fullScreen) {
+        Dialog(
+            onDismissRequest = { fullScreen = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            ) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { viewContext ->
+                        PlayerView(viewContext).apply {
+                            useController = true
+                            this.player = player
+                        }
+                    },
+                    update = { view ->
+                        view.player = player
+                    }
+                )
+                Button(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(16.dp),
+                    onClick = { fullScreen = false }
+                ) {
+                    Text("Chiudi")
+                }
             }
         }
     }
@@ -6413,6 +6551,9 @@ private const val GATEWAY_SECRET_AAD = "HermesHub.ApiKey.v1"
 private const val MIN_FONT_SCALE = 0.85f
 private const val MAX_FONT_SCALE = 1.25f
 private const val CHAT_HISTORY_MAX_MESSAGES = 30
+private const val DEFAULT_CONTEXT_WINDOW_TOKENS = 32768
+private const val CONTEXT_SYSTEM_OVERHEAD_TOKENS = 900
+private const val MESSAGE_CONTEXT_OVERHEAD_TOKENS = 6
 private const val SETTINGS_FIELD_MAX_LENGTH = 2048
 private val gatewaySecretKeyLock = Any()
 

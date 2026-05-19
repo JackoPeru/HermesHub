@@ -76,6 +76,17 @@ public sealed partial class VideoPage : Page
         RefreshFeed();
     }
 
+    private void FullScreen_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedVideo is null)
+        {
+            FeedbackStatusText.Text = "Seleziona un video prima di aprire lo schermo intero.";
+            return;
+        }
+
+        VideoPlayer.IsFullWindow = true;
+    }
+
     private void VideoListView_ItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is LocalVideoRecord model)
