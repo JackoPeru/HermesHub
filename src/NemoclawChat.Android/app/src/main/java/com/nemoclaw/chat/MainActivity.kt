@@ -1244,7 +1244,11 @@ private fun estimateChatContextUsage(
         .takeIf { it.isNotBlank() }
         ?.let { estimateTokenCount(it) + MESSAGE_CONTEXT_OVERHEAD_TOKENS }
         ?: 0
-    val estimated = CONTEXT_SYSTEM_OVERHEAD_TOKENS + historyTokens + draftTokens
+    val estimated = if (historyTokens == 0 && draftTokens == 0) {
+        0
+    } else {
+        CONTEXT_SYSTEM_OVERHEAD_TOKENS + historyTokens + draftTokens
+    }
     val serverPromptTokens = streamingState?.stats?.promptTokens ?: 0
     val tokens = maxOf(estimated, serverPromptTokens).coerceAtLeast(0)
     val percent = ((tokens.coerceAtMost(DEFAULT_CONTEXT_WINDOW_TOKENS).toDouble() / DEFAULT_CONTEXT_WINDOW_TOKENS) * 100.0)

@@ -689,6 +689,11 @@ public sealed partial class HomePage : Page
             ? 0
             : EstimateTokenCount(draft) + MessageContextOverheadTokens;
 
+        if (historyTokens == 0 && draftTokens == 0)
+        {
+            return 0;
+        }
+
         return ContextSystemOverheadTokens + historyTokens + draftTokens;
     }
 
