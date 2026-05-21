@@ -11,7 +11,10 @@ public sealed record ChatStreamStats(
     double? TotalMs,
     int? TokensOut,
     double? TokensPerSecond,
-    int? PromptTokens);
+    int? PromptTokens,
+    int? ContextTokens = null,
+    int? ContextLength = null,
+    int? ContextPercent = null);
 
 public abstract record ChatStreamEvent;
 public sealed record StreamTextDelta(string Delta) : ChatStreamEvent;
@@ -51,6 +54,9 @@ public static class ChatStreamClient
         double? ttft = null;
         int? promptTokens = null;
         int? completionTokens = null;
+        int? contextTokens = null;
+        int? contextLength = null;
+        int? contextPercent = null;
         bool sawAnyDelta = false;
         string? lastError = null;
         var nativeMode = HermesHubProtocol.IsNativePreferred(settings);
@@ -116,6 +122,12 @@ public static class ChatStreamClient
                 {
                     promptTokens = u.PromptTokens;
                     completionTokens = u.CompletionTokens;
+                }
+                else if (ev is StreamContextUsage cu)
+                {
+                    contextTokens = cu.ContextTokens ?? contextTokens;
+                    contextLength = cu.ContextLength ?? contextLength;
+                    contextPercent = cu.ContextPercent ?? contextPercent;
                 }
 
                 yield return ev;
@@ -206,6 +218,12 @@ public static class ChatStreamClient
                     promptTokens = u.PromptTokens;
                     completionTokens = u.CompletionTokens;
                 }
+                else if (ev is StreamContextUsage cu)
+                {
+                    contextTokens = cu.ContextTokens ?? contextTokens;
+                    contextLength = cu.ContextLength ?? contextLength;
+                    contextPercent = cu.ContextPercent ?? contextPercent;
+                }
 
                 yield return ev;
             }
@@ -234,7 +252,7 @@ public static class ChatStreamClient
         }
 
         yield return new StreamDone(
-            new ChatStreamStats(ttft, totalMs, tokensOut, tps, promptTokens),
+            new ChatStreamStats(ttft, totalMs, tokensOut, tps, promptTokens, contextTokens, contextLength, contextPercent),
             accumulatedText.ToString(),
             accumulatedThinking.ToString());
     }
@@ -452,6 +470,15 @@ public static class ChatStreamClient
         if (!string.IsNullOrWhiteSpace(type))
         {
             var t = type!.ToLowerInvariant();
+            if (t.Contains("hermes.context.usage") || t.Contains("context.usage"))
+            {
+                yield return new StreamContextUsage(
+                    GetInt(element, "context_tokens") ?? GetInt(element, "tokens"),
+                    GetInt(element, "context_length") ?? GetInt(element, "max_tokens"),
+                    GetInt(element, "context_percent") ?? GetInt(element, "percent"));
+                yield break;
+            }
+
             if (t.Contains("hermes.visual_blocks") || t.Contains("visual_blocks"))
             {
                 var blocks = ExtractVisualBlocksFromElement(element);
@@ -732,6 +759,23 @@ public static class ChatStreamClient
         return null;
     }
 
+    private static int? GetInt(JsonElement element, string key)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(key, out var prop))
+        {
+            return null;
+        }
+        if (prop.ValueKind == JsonValueKind.Number && prop.TryGetInt32(out var value))
+        {
+            return value;
+        }
+        if (prop.ValueKind == JsonValueKind.String && int.TryParse(prop.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+        return null;
+    }
+
     private static StreamUsage ExtractUsage(JsonElement usage)
     {
         int? prompt = null, completion = null;
@@ -846,3 +890,4 @@ public static class ChatStreamClient
 }
 
 internal sealed record StreamUsage(int? PromptTokens, int? CompletionTokens) : ChatStreamEvent;
+internal sealed record StreamContextUsage(int? ContextTokens, int? ContextLength, int? ContextPercent) : ChatStreamEvent;

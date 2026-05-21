@@ -191,6 +191,56 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
         )
         changes.append("responses stream raw hermes emitter")
 
+    if "def _agent_context_usage" not in text:
+        text, _ = _replace_once(
+            text,
+            '                await _write_event(event_type, payload)\n'
+            "\n"
+            "            async def _dispatch(it) -> None:",
+            '                await _write_event(event_type, payload)\n'
+            "\n"
+            '            def _agent_context_usage() -> Optional[Dict[str, Any]]:\n'
+            "                agent = agent_ref[0] if agent_ref else None\n"
+            '                compressor = getattr(agent, "context_compressor", None) if agent is not None else None\n'
+            "                if compressor is None:\n"
+            "                    return None\n"
+            '                context_tokens = int(getattr(compressor, "last_prompt_tokens", 0) or 0)\n'
+            '                context_length = int(getattr(compressor, "context_length", 0) or 0)\n'
+            "                if context_tokens <= 0 and context_length <= 0:\n"
+            "                    return None\n"
+            "                payload: Dict[str, Any] = {\n"
+            '                    "type": "hermes.context.usage",\n'
+            '                    "source": "hermes-cli-status",\n'
+            '                    "context_tokens": context_tokens,\n'
+            '                    "context_length": context_length,\n'
+            '                    "threshold_tokens": int(getattr(compressor, "threshold_tokens", 0) or 0),\n'
+            '                    "compressions": int(getattr(compressor, "compression_count", 0) or 0),\n'
+            "                }\n"
+            "                if context_length > 0:\n"
+            '                    payload["context_percent"] = max(0, min(100, round((context_tokens / context_length) * 100)))\n'
+            "                return payload\n"
+            "\n"
+            "            async def _dispatch(it) -> None:",
+            "responses stream cli context usage helper",
+        )
+        changes.append("responses stream cli context usage helper")
+
+    if "context_usage = _agent_context_usage()" not in text:
+        text, _ = _replace_once(
+            text,
+            "                result, agent_usage = await agent_task\n"
+            "                usage = agent_usage or usage\n"
+            "                # If the agent produced a final_response but no text",
+            "                result, agent_usage = await agent_task\n"
+            "                usage = agent_usage or usage\n"
+            "                context_usage = _agent_context_usage()\n"
+            "                if context_usage is not None:\n"
+            "                    await _emit_raw_hermes_event(context_usage)\n"
+            "                # If the agent produced a final_response but no text",
+            "responses stream emit cli context usage",
+        )
+        changes.append("responses stream emit cli context usage")
+
     if 'tag == "__hermes_raw_event__"' not in text:
         text, _ = _replace_once(
             text,

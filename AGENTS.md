@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.46 Release Hermes Hub 0.6.46
+v0.6.47 Release Hermes Hub 0.6.47
 ```
 
 ## Regola Memoria
@@ -54,7 +54,7 @@ Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
 
-Hermes Hub 0.6.46 (Windows + Android):
+Hermes Hub 0.6.47 (Windows + Android):
 
 Decisione Hermes Native:
 - Hermes Hub usa `preferredApi=hermes-native` come default su Windows, Android e config.
@@ -96,6 +96,10 @@ Release 0.6.46:
 - Android/Windows: raw Hermes events `hermes.*` conservati e mostrati; Visual Blocks forward-compatible con fallback `unknown_block`.
 - Gateway locale: capability/native alias/eventi raw aggiornati per non castrare Hermes Agent; Linux helper/docs allineati per Ubuntu/vLLM.
 - Linux headless: aggiunto patcher idempotente `scripts/patch-hermes-gateway-native.py`, chiamato automaticamente dal launcher con `HERMES_NATIVE_GATEWAY_PATCH=true`, per portare su Ubuntu lo stesso fix gateway native Windows.
+
+Release 0.6.47:
+- Android/Windows/Gateway: context meter usa evento nativo `hermes.context.usage`, derivato dagli stessi dati della CLI Hermes (`last_prompt_tokens`, `context_length`, `context_percent`), con stima locale solo fallback.
+- Android/Windows: footer metriche mostra `ctx` e `max`; il cerchio resta reattivo anche dopo fine stream perche' conserva metrica server persistita.
 
 Release 0.6.45:
 - Android/Windows: fix indicatore `Contesto chat`: a chat e draft vuoti mostra 0% invece del 3%; overhead fisso di sistema viene aggiunto solo quando esiste contenuto reale.
@@ -165,6 +169,8 @@ Release 0.6.35:
 - Gateway Hermes locale `%LOCALAPPDATA%\hermes\hermes-agent\gateway\platforms\api_server.py` aggiornato per dichiarare `hermes_native`, `native_event_passthrough`, `raw_hermes_events`, `context_owner=hermes-agent`, alias `POST /v1/hermes/native` e primo evento SSE `hermes.native.protocol`; tool/progress custom `hermes.*` vengono inoltrati raw oltre alla compat Responses.
 - Linux helper/docs aggiornati per `HERMES_NATIVE_EVENTS=true`, `HERMES_RAW_EVENT_PASSTHROUGH=true`, `HERMES_NATIVE_GATEWAY_PATCH=true`, patcher automatico `scripts/patch-hermes-gateway-native.py` e contratto `/v1/hermes/native`; quando si aggiorna Hermes o si passa a Ubuntu/vLLM, il launcher prova a patchare il gateway installato prima dell'avvio.
 - Android/Windows mostrano protocollo effettivo/fallback e conservano raw Hermes events; Visual Blocks ora forward-compatible (`visual_blocks_version >= 1`, fallback `unknown_block` JSON); context meter mostra delega a Hermes finche' server non invia `promptTokens`.
+- Hotfix post-0.6.46: context meter Android/Windows corretto per usare token server persistiti anche dopo fine stream e `ctx=prompt+output` su finestra 90k; prima poteva tornare alla stima locale e mostrare percentuali tipo 4% anche con 68k token reali.
+- Evoluzione post-hotfix: gateway ora emette `hermes.context.usage` usando lo stesso dato della CLI Hermes (`context_compressor.last_prompt_tokens`, `context_length`, `context_percent`); Android/Windows preferiscono questo indicatore nativo e usano stima locale solo come fallback.
 - Verifiche passate: `python -m py_compile %LOCALAPPDATA%\hermes\hermes-agent\gateway\platforms\api_server.py`, `python -m py_compile scripts\patch-hermes-gateway-native.py`, `python scripts\patch-hermes-gateway-native.py --target %LOCALAPPDATA%\hermes\hermes-agent\gateway\platforms\api_server.py --check`, `dotnet build NemoclawChat.sln`, `dotnet build NemoclawChat.sln -c Release`, Android `:app:compileDebugKotlin`, Android `:app:lintDebug`, Android `:app:assembleRelease`, `scripts/verify-visual-blocks-contract.ps1`, `git diff --check`.
 
 ## Release 0.6.34

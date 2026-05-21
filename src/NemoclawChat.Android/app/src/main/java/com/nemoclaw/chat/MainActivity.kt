@@ -863,6 +863,10 @@ private fun ChatScreen(
         state.messages.size,
         state.draft,
         state.streamingState?.stats?.promptTokens,
+        state.streamingState?.stats?.tokensOut,
+        state.streamingState?.stats?.contextTokens,
+        state.streamingState?.stats?.contextLength,
+        state.streamingState?.stats?.contextPercent,
         streamingTextLen,
         settings.preferredApi
     ) {
@@ -1257,8 +1261,13 @@ private fun estimateChatContextUsage(
     draft: String,
     streamingState: StreamingState?
 ): ContextUsage {
-    val serverPromptTokens = streamingState?.stats?.promptTokens ?: 0
-    if (isHermesNative(settings) && serverPromptTokens <= 0) {
+    val authoritativeStats = streamingState?.stats
+        ?: messages.asReversed().firstNotNullOfOrNull { it.stats?.takeIf { stats -> stats.contextTokens() > 0 } }
+    val contextWindow = authoritativeStats?.contextLength?.takeIf { it > 0 } ?: DEFAULT_CONTEXT_WINDOW_TOKENS
+    val explicitPercent = authoritativeStats?.contextPercent?.takeIf { it in 0..100 }
+    val serverContextTokens = authoritativeStats?.contextTokens()
+        ?: 0
+    if (isHermesNative(settings) && serverContextTokens <= 0) {
         return ContextUsage(tokens = 0, percent = 0, delegatedToHermes = true)
     }
     val historyTokens = messages
@@ -1273,11 +1282,11 @@ private fun estimateChatContextUsage(
     } else {
         CONTEXT_SYSTEM_OVERHEAD_TOKENS + historyTokens + draftTokens
     }
-    val tokens = if (isHermesNative(settings)) serverPromptTokens else maxOf(estimated, serverPromptTokens).coerceAtLeast(0)
-    val percent = ((tokens.coerceAtMost(DEFAULT_CONTEXT_WINDOW_TOKENS).toDouble() / DEFAULT_CONTEXT_WINDOW_TOKENS) * 100.0)
+    val tokens = if (isHermesNative(settings)) serverContextTokens else maxOf(estimated, serverContextTokens).coerceAtLeast(0)
+    val percent = explicitPercent ?: ((tokens.coerceAtMost(contextWindow).toDouble() / contextWindow) * 100.0)
         .roundToInt()
         .coerceIn(0, 100)
-    return ContextUsage(tokens = tokens, percent = percent, delegatedToHermes = isHermesNative(settings))
+    return ContextUsage(tokens = tokens, maxTokens = contextWindow, percent = percent, delegatedToHermes = isHermesNative(settings))
 }
 
 private fun estimateTokenCount(text: String): Int {
@@ -1485,6 +1494,8 @@ private fun formatChatStatsLine(stats: ChatStreamStats?): String {
     }
     stats.tokensOut?.takeIf { it > 0 }?.let { parts += "$it tok" }
     stats.promptTokens?.takeIf { it > 0 }?.let { parts += "prompt $it" }
+    stats.contextTokens().takeIf { it > 0 }?.let { parts += "ctx $it" }
+    stats.contextLength?.takeIf { it > 0 }?.let { parts += "max $it" }
     stats.totalMs?.takeIf { it > 0 }?.let {
         parts += "${String.format(java.util.Locale.US, "%.1f", it / 1000.0)}s"
     }
@@ -6607,10 +6618,14 @@ private fun readChatStats(obj: JSONObject?): ChatStreamStats? {
         totalMs = obj.optNullableDouble("totalMs"),
         tokensOut = obj.optNullableInt("tokensOut"),
         tokensPerSecond = obj.optNullableDouble("tokensPerSecond"),
-        promptTokens = obj.optNullableInt("promptTokens")
+        promptTokens = obj.optNullableInt("promptTokens"),
+        contextTokens = obj.optNullableInt("contextTokens"),
+        contextLength = obj.optNullableInt("contextLength"),
+        contextPercent = obj.optNullableInt("contextPercent")
     ).takeIf {
         it.ttftMs != null || it.totalMs != null || it.tokensOut != null ||
-            it.tokensPerSecond != null || it.promptTokens != null
+            it.tokensPerSecond != null || it.promptTokens != null ||
+            it.contextTokens != null || it.contextLength != null || it.contextPercent != null
     }
 }
 
@@ -6622,6 +6637,9 @@ private fun writeChatStats(stats: ChatStreamStats?): JSONObject? {
         .put("tokensOut", stats.tokensOut ?: JSONObject.NULL)
         .put("tokensPerSecond", stats.tokensPerSecond ?: JSONObject.NULL)
         .put("promptTokens", stats.promptTokens ?: JSONObject.NULL)
+        .put("contextTokens", stats.contextTokens ?: JSONObject.NULL)
+        .put("contextLength", stats.contextLength ?: JSONObject.NULL)
+        .put("contextPercent", stats.contextPercent ?: JSONObject.NULL)
 }
 
 private fun JSONObject.optNullableDouble(name: String): Double? {
@@ -6778,7 +6796,7 @@ private const val GATEWAY_SECRET_AAD = "HermesHub.ApiKey.v1"
 private const val MIN_FONT_SCALE = 0.85f
 private const val MAX_FONT_SCALE = 1.25f
 private const val CHAT_HISTORY_MAX_MESSAGES = 30
-private const val DEFAULT_CONTEXT_WINDOW_TOKENS = 32768
+private const val DEFAULT_CONTEXT_WINDOW_TOKENS = 90000
 private const val CONTEXT_SYSTEM_OVERHEAD_TOKENS = 900
 private const val MESSAGE_CONTEXT_OVERHEAD_TOKENS = 6
 private const val SETTINGS_FIELD_MAX_LENGTH = 2048

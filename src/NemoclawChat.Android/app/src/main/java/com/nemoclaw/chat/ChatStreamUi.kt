@@ -89,6 +89,8 @@ internal fun StreamingBubbleView(state: StreamingState) {
                     state.stats?.tokensPerSecond?.takeIf { it > 0 }?.let { parts += "${String.format(java.util.Locale.US, "%.2f", it)} t/s" }
                     state.stats?.tokensOut?.takeIf { it > 0 }?.let { parts += "$it tok" }
                     state.stats?.promptTokens?.takeIf { it > 0 }?.let { parts += "prompt $it" }
+                    state.stats?.contextTokens()?.takeIf { it > 0 }?.let { parts += "ctx $it" }
+                    state.stats?.contextLength?.takeIf { it > 0 }?.let { parts += "max $it" }
                     state.stats?.totalMs?.takeIf { it > 0 }?.let { parts += "${String.format(java.util.Locale.US, "%.1f", it / 1000.0)}s" }
                     if (parts.isNotEmpty()) {
                         Text(

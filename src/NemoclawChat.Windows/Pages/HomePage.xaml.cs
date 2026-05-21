@@ -22,7 +22,7 @@ namespace NemoclawChat_Windows.Pages;
 
 public sealed partial class HomePage : Page
 {
-    private const int DefaultContextWindowTokens = 32768;
+    private const int DefaultContextWindowTokens = 90000;
     private const int ContextSystemOverheadTokens = 900;
     private const int MessageContextOverheadTokens = 6;
 
@@ -31,7 +31,9 @@ public sealed partial class HomePage : Page
     private string? _conversationId;
     private string? _previousResponseId;
     private readonly List<ChatMessageRecord> _messageHistory = [];
-    private int _lastPromptTokens;
+    private int _lastServerContextTokens;
+    private int _lastServerContextLength;
+    private int? _lastServerContextPercent;
     private volatile bool _isSending;
     private StreamingBubble? _currentStreamingBubble;
 
@@ -267,7 +269,7 @@ public sealed partial class HomePage : Page
     private void NewChat_Click(object sender, RoutedEventArgs e)
     {
         _messageHistory.Clear();
-        _lastPromptTokens = 0;
+        ResetServerContextMeter();
         _conversationId = null;
         _previousResponseId = null;
         Messages.Clear();
@@ -383,7 +385,7 @@ public sealed partial class HomePage : Page
                     case StreamDone done:
                         finalStats = done.Stats;
                         bubble.Complete(done.Stats);
-                        UpdateContextMeter(done.Stats.PromptTokens);
+                        UpdateContextMeter(done.Stats);
                         if (string.IsNullOrEmpty(finalText) && !string.IsNullOrEmpty(done.AccumulatedText))
                         {
                             finalText = done.AccumulatedText;
@@ -516,7 +518,7 @@ public sealed partial class HomePage : Page
 
         _conversationId = conversation.Id;
         _previousResponseId = conversation.PreviousResponseId;
-        _lastPromptTokens = 0;
+        _lastServerContextTokens = 0;
         EmptyState.Visibility = Visibility.Collapsed;
         Messages.Clear();
         _messageHistory.Clear();
@@ -670,6 +672,15 @@ public sealed partial class HomePage : Page
         {
             parts.Add($"prompt {prompt}");
         }
+        var contextTokens = ContextTokensFromStats(stats);
+        if (contextTokens > 0)
+        {
+            parts.Add($"ctx {contextTokens}");
+        }
+        if (stats.ContextLength is { } maxCtx && maxCtx > 0)
+        {
+            parts.Add($"max {maxCtx}");
+        }
         if (stats.TotalMs is { } total && total > 0)
         {
             parts.Add($"{total / 1000.0:0.0}s");
@@ -711,15 +722,24 @@ public sealed partial class HomePage : Page
         ErrorInfoBar.IsOpen = true;
     }
 
-    private void UpdateContextMeter(int? serverPromptTokens = null)
+    private void UpdateContextMeter(ChatStreamStats? serverStats = null)
     {
-        if (serverPromptTokens is > 0)
+        var reportedContextTokens = ContextTokensFromStats(serverStats);
+        if (reportedContextTokens > 0)
         {
-            _lastPromptTokens = serverPromptTokens.Value;
+            _lastServerContextTokens = reportedContextTokens;
+        }
+        if (serverStats?.ContextLength is > 0)
+        {
+            _lastServerContextLength = serverStats.ContextLength.Value;
+        }
+        if (serverStats?.ContextPercent is >= 0 and <= 100)
+        {
+            _lastServerContextPercent = serverStats.ContextPercent.Value;
         }
 
         var settings = AppSettingsStore.Load();
-        if (HermesHubProtocol.IsNativePreferred(settings) && _lastPromptTokens <= 0)
+        if (HermesHubProtocol.IsNativePreferred(settings) && _lastServerContextTokens <= 0)
         {
             ContextMeterText.Text = "H";
             ContextMeterFill.Data = null;
@@ -730,11 +750,13 @@ public sealed partial class HomePage : Page
         }
 
         var estimatedTokens = EstimateCurrentContextTokens();
+        var contextWindow = _lastServerContextLength > 0 ? _lastServerContextLength : DefaultContextWindowTokens;
+        var explicitPercent = _lastServerContextPercent;
         var tokens = HermesHubProtocol.IsNativePreferred(settings)
-            ? Math.Max(0, _lastPromptTokens)
-            : Math.Max(estimatedTokens, _lastPromptTokens);
-        var percent = (int)Math.Round(
-            Math.Min(tokens, DefaultContextWindowTokens) * 100.0 / DefaultContextWindowTokens,
+            ? Math.Max(0, _lastServerContextTokens)
+            : Math.Max(estimatedTokens, _lastServerContextTokens);
+        var percent = explicitPercent ?? (int)Math.Round(
+            Math.Min(tokens, contextWindow) * 100.0 / contextWindow,
             MidpointRounding.AwayFromZero);
         percent = Math.Clamp(percent, 0, 100);
 
@@ -743,8 +765,32 @@ public sealed partial class HomePage : Page
         ToolTipService.SetToolTip(
             ContextMeter,
             HermesHubProtocol.IsNativePreferred(settings)
-                ? $"Contesto server Hermes: {tokens:N0}/{DefaultContextWindowTokens:N0} token reported. Modalita: {_mode}."
-                : $"Contesto chat: {tokens:N0}/{DefaultContextWindowTokens:N0} token stimati. Modalita: {_mode}.");
+                ? $"Contesto server Hermes: {tokens:N0}/{contextWindow:N0} token reported. Modalita: {_mode}."
+                : $"Contesto chat: {tokens:N0}/{contextWindow:N0} token stimati. Modalita: {_mode}.");
+    }
+
+    private void ResetServerContextMeter()
+    {
+        ResetServerContextMeter();
+        _lastServerContextLength = 0;
+        _lastServerContextPercent = null;
+    }
+
+    private static int ContextTokensFromStats(ChatStreamStats? stats)
+    {
+        if (stats is null)
+        {
+            return 0;
+        }
+
+        if (stats.ContextTokens is > 0)
+        {
+            return stats.ContextTokens.Value;
+        }
+
+        var prompt = stats.PromptTokens is > 0 ? stats.PromptTokens.Value : 0;
+        var output = stats.TokensOut is > 0 ? stats.TokensOut.Value : 0;
+        return Math.Max(Math.Max(prompt, output), prompt + output);
     }
 
     private int EstimateCurrentContextTokens()
@@ -837,7 +883,7 @@ public sealed partial class HomePage : Page
     private void ClearChat_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         _messageHistory.Clear();
-        _lastPromptTokens = 0;
+        ResetServerContextMeter();
         _conversationId = null;
         _previousResponseId = null;
         Messages.Clear();
@@ -1062,7 +1108,7 @@ public sealed partial class HomePage : Page
                 break;
             case SlashAction.Clear:
                 _messageHistory.Clear();
-                _lastPromptTokens = 0;
+                ResetServerContextMeter();
                 _conversationId = null;
                 _previousResponseId = null;
                 Messages.Clear();

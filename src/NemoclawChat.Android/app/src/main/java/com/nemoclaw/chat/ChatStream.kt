@@ -68,8 +68,18 @@ data class ChatStreamStats(
     val totalMs: Double? = null,
     val tokensOut: Int? = null,
     val tokensPerSecond: Double? = null,
-    val promptTokens: Int? = null
+    val promptTokens: Int? = null,
+    val contextTokens: Int? = null,
+    val contextLength: Int? = null,
+    val contextPercent: Int? = null
 )
+
+internal fun ChatStreamStats.contextTokens(): Int {
+    contextTokens?.takeIf { it > 0 }?.let { return it }
+    val prompt = promptTokens?.takeIf { it > 0 } ?: 0
+    val output = tokensOut?.takeIf { it > 0 } ?: 0
+    return (prompt + output).coerceAtLeast(prompt).coerceAtLeast(output)
+}
 
 @androidx.compose.runtime.Immutable
 data class ToolCallState(
@@ -169,6 +179,14 @@ data class StreamingState(
         is ChatStreamEvent.Usage -> copy(
             status = "Usage ricevuta: prompt ${event.promptTokens ?: "-"}, output ${event.completionTokens ?: "-"}."
         ).withActivity("Usage ricevuta.")
+        is ChatStreamEvent.ContextUsage -> copy(
+            stats = (stats ?: ChatStreamStats()).copy(
+                contextTokens = event.tokens ?: stats?.contextTokens,
+                contextLength = event.length ?: stats?.contextLength,
+                contextPercent = event.percent ?: stats?.contextPercent
+            ),
+            status = "Contesto Hermes: ${event.tokens ?: "-"} / ${event.length ?: "-"} (${event.percent ?: "-"}%)."
+        ).withActivity("Contesto Hermes aggiornato.")
     }
 }
 
@@ -225,6 +243,7 @@ sealed class ChatStreamEvent {
     data class Status(val message: String) : ChatStreamEvent()
     data class RawHermesEvent(val name: String, val json: String) : ChatStreamEvent()
     data class Usage(val promptTokens: Int?, val completionTokens: Int?) : ChatStreamEvent()
+    data class ContextUsage(val tokens: Int?, val length: Int?, val percent: Int?) : ChatStreamEvent()
     data class PromptProgress(val percent: Int, val label: String = "Processing prompt...") : ChatStreamEvent()
     data class Done(val stats: ChatStreamStats) : ChatStreamEvent()
     data class Error(val message: String) : ChatStreamEvent()
@@ -244,6 +263,9 @@ fun streamChatRequest(
     var ttftMs: Double? = null
     var promptTokens: Int? = null
     var completionTokens: Int? = null
+    var contextTokens: Int? = null
+    var contextLength: Int? = null
+    var contextPercent: Int? = null
     val accumText = StringBuilder()
     val accumThink = StringBuilder()
     var lastError: String? = null
@@ -269,6 +291,12 @@ fun streamChatRequest(
             is ChatStreamEvent.Usage -> {
                 promptTokens = ev.promptTokens ?: promptTokens
                 completionTokens = ev.completionTokens ?: completionTokens
+                return false
+            }
+            is ChatStreamEvent.ContextUsage -> {
+                contextTokens = ev.tokens ?: contextTokens
+                contextLength = ev.length ?: contextLength
+                contextPercent = ev.percent ?: contextPercent
                 return false
             }
             is ChatStreamEvent.Error -> {
@@ -376,7 +404,7 @@ fun streamChatRequest(
     val ttftSnapshot = ttftMs
     val sinceFirst = if (ttftSnapshot != null) max(1.0, totalMs - ttftSnapshot) else totalMs
     val tps = if (tokensOut > 0 && sinceFirst > 0) tokensOut / (sinceFirst / 1000.0) else null
-    emit(ChatStreamEvent.Done(ChatStreamStats(ttftMs, totalMs, tokensOut, tps, promptTokens)))
+    emit(ChatStreamEvent.Done(ChatStreamStats(ttftMs, totalMs, tokensOut, tps, promptTokens, contextTokens, contextLength, contextPercent)))
 }.flowOn(Dispatchers.IO)
 
 private suspend inline fun openSseStream(
@@ -499,6 +527,14 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
     val t = type.lowercase()
 
     when {
+        t.contains("hermes.context.usage") || t.contains("context.usage") -> {
+            out += ChatStreamEvent.ContextUsage(
+                obj.optIntOrNull("context_tokens") ?: obj.optIntOrNull("tokens"),
+                obj.optIntOrNull("context_length") ?: obj.optIntOrNull("max_tokens"),
+                obj.optIntOrNull("context_percent") ?: obj.optIntOrNull("percent")
+            )
+            return out
+        }
         t.contains("prompt.progress") || t.contains("processing.progress") -> {
             val percent = obj.optInt("percent", obj.optInt("progress", -1))
             if (percent in 0..100) {
