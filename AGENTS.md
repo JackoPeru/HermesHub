@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.51 Release Hermes Hub 0.6.51
+v0.6.52 Release Hermes Hub 0.6.52
 ```
 
 ## Regola Memoria
@@ -54,7 +54,7 @@ Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
 
-Hermes Hub 0.6.51 (Windows + Android):
+Hermes Hub 0.6.52 (Windows + Android):
 
 Decisione Hermes Native:
 - Hermes Hub usa `preferredApi=hermes-native` come default su Windows, Android e config.
@@ -89,13 +89,19 @@ Decisione media chat:
 
 Decisione modalita vocale:
 - Aggiunta modalita `Voce` suggestiva come placeholder visuale per futura voce reale.
-- Android: tab `Voce` apre canvas fullscreen senza bottom nav; tap singolo assembla Hermes, doppio tap disassembla; back Android esce dalla modalita.
+- Android: tab `Voce` apre WebView fullscreen senza bottom nav e carica scena Three.js/WebGL offline da asset; tap touch assembla/disassembla Hermes; back Android esce dalla modalita.
 - Windows: sidebar e slash `/voce` aprono `VoicePage`; shell/sidebar/top bar vengono nascosti durante la pagina; tap singolo assembla Hermes, doppio tap disassembla, Esc torna indietro se disponibile.
 - Visual style: particelle orange holographic su fondo nero, idle random spaziale, assemblaggio rapido in figura Hermes/deity con ali/elmo e micro-fluttuazione continua.
 
 Terminologia gateway:
 - Il comando `hermes-hub` avvia **Hermes Gateway**: servizio ponte/API server che espone Hermes Agent alle app Hermes Hub Windows/Android e inoltra inferenza a LM Studio nei test o vLLM nel setup finale.
 - La versione Linux/headless deve restare aggiornata e funzionante: `scripts/hermes-hub-linux.sh`, `scripts/hermes-hub-linux.service` e `docs/hermes-hub-linux.md` devono supportare Ubuntu headless + vLLM, con API stabile `http://SERVER:8642/v1` e API key default `hermes-hub`.
+
+Release 0.6.52:
+- Android modalita `Voce`: renderer Compose/Canvas sostituito da WebView fullscreen che carica `src/NemoclawChat.Android/app/src/main/assets/hermes_scene/orange_particles_3d.html`.
+- Scena Voce Android porta asset offline: `three.min.js`, `reference_figure.png`, cartella `Hermes particelle/` e shape export `hermes-particles-shape.json`.
+- HTML patchato per non usare CDN, usare `hermes-particles-shape.json` come forma Hermes bundled default (`localStorage` v2), mantenere editor/import/export/reset e toggle touch equivalente a `Space`.
+- Release bump: Windows/AdminBridge `0.6.52`, Android `versionName 0.6.52`, `versionCode 65`.
 
 Release 0.6.51:
 - Android modalita `Voce`: recepito prompt tecnico Three.js come direzione visiva, ma portato nello stack nativo Compose/Canvas invece di introdurre React/WebGL nel progetto.
@@ -556,7 +562,7 @@ Windows:
 
 - Progetto: `src/NemoclawChat.Windows`
 - Stack: WinUI 3, C#, .NET 8, Windows App SDK self-contained.
-- Versione app: `0.6.51`.
+- Versione app: `0.6.52`.
 - Brand/UI: `Hermes Hub`, logo Hermes da `logo hermeshub.png` applicato agli asset Windows e alla UI principale, dark stile ChatGPT, sidebar, composer largo, menu `+`, settings reali.
 - UI design system applicato: superfici elevation-aware `#0F1115/#14171D/#1A1E26/#232831`, accent Hermes amber `#F5A524`, hover `#FFC857`, testo muted `#A2ADBF`, bubble utente amber scuro `#7A3E00`, card/composer radius premium e bordi soft.
 - Azioni locali: file picker Windows, screen clip, camera URI, nota vocale prompt.
@@ -595,12 +601,12 @@ Android:
 
 - Progetto: `src/NemoclawChat.Android/app`
 - Stack: Kotlin, Jetpack Compose, Gradle.
-- Versione app: `0.6.51`, versionCode `64`.
+- Versione app: `0.6.52`, versionCode `65`.
 - Brand/UI: `Hermes Hub`, logo Hermes da `logo hermeshub.png` applicato a launcher + UI, bottom nav con icone vere, composer mobile compatto stile ChatGPT Android, menu `+` con Material icons, profilo locale.
 - UI design system applicato: superfici elevation-aware `#0F1115/#14171D/#1A1E26/#232831`, accent Hermes amber `#F5A524`, testo muted `#A2ADBF`, bubble utente amber scuro `#7A3E00`, empty state con wash amber e logo grande.
 - Azioni locali: file picker Android, camera intent e prompt helper nel menu `+`; dettatura/mic placeholder rimossi finche' non c'e' integrazione reale.
 - Chat: action bubble per menu `+`, mode `Chat`/`Agente` nel menu `+` e slash, indicatore circolare `Contesto chat` in alto a destra, Hermes Native/Responses default con fallback `/v1/chat/completions` solo se strict native mode e' disattivato, fallback locale esplicito se abilitato, composer stabile compatto a campo singolo/multiriga con `+` esterno e send interno; keyboard handling usa `adjustResize` + `imePadding` solo sul composer, quindi resta sopra la tastiera senza gap inutile; durante generazione il send diventa stop e cancella job + chiamata OkHttp; mic placeholder rimosso; risposte assistente Android libere senza vignetta, thinking cliccabile con shimmer e reasoning espandibile; font globale regolabile da settings con slider continuo e percentuale editabile; sezioni Android rese come righe flat con separatori dritti al posto di card/vignette, salvataggio cronologia locale con `previous_response_id`.
-- Voce: tab fullscreen senza bottom nav, particelle orange holographic random; tap assembla Hermes, doppio tap disassembla, back Android esce.
+- Voce: tab fullscreen senza bottom nav con WebView Three.js/WebGL offline; usa `hermes-particles-shape.json` bundled come forma Hermes default, editor integrato attivo, touch assembla/disassembla, back Android esce.
 - Android streaming activity: durante generazione mostra una riga shimmer cliccabile con stato live (`Sto processando`, `Sto pensando`, `Sto generando`, `Uso tool: ...`). Espandendo si vedono stato, reasoning ricevuto dal server, tool call, argomenti e risultato; resta visibile anche quando il testo ha gia' iniziato a uscire.
 - Android streaming activity UI: header compatto senza frasi tecniche del trasporto; mostra freccia accanto allo stato e percentuale di progresso live. Shimmer deve scorrere da sinistra a destra su tutti gli stati attivi.
 - Android streaming latency: il path caldo evita la richiesta `/capabilities` pre-invio, usa loop SSE senza `source.exhausted()` prima di ogni read e mostra feedback immediato quando l'utente preme stop.
