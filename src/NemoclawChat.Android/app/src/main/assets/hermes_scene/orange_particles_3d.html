@@ -257,12 +257,44 @@
   const shapeFileInput = document.getElementById('shapeFileInput');
   const storageKey = 'orange-particles-hermes-shape-v2';
   const bundledShapePath = 'hermes-particles-shape.json';
+  const isAndroidRuntime = /Android/i.test(navigator.userAgent);
+  const mobileStrokeLimit = 180;
+  let lineGroupBuilt = false;
+  let lineGroupBuilding = false;
 
-  const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false});
+  function showBootError(message){
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;inset:0;display:grid;place-items:center;background:#050505;color:#ff8500;font:13px system-ui,sans-serif;padding:24px;text-align:center;z-index:99;';
+    box.textContent = 'Hermes WebGL non avviato: ' + message;
+    document.body.appendChild(box);
+  }
+
+  window.addEventListener('error', e=>showBootError(e.message || 'errore runtime'));
+  window.addEventListener('unhandledrejection', e=>showBootError((e.reason && e.reason.message) || 'promise rejected'));
+  if(!window.THREE){
+    showBootError('three.min.js non caricato');
+    return;
+  }
+
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false});
+  } catch(err) {
+    showBootError((err && err.message) || 'WebGLRenderer fallito');
+    return;
+  }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
 
-  const w = stage.clientWidth;
-  const h = stage.clientHeight;
+  function viewportWidth(){
+    return Math.max(1, stage.clientWidth || window.innerWidth || document.documentElement.clientWidth || screen.width || 360);
+  }
+
+  function viewportHeight(){
+    return Math.max(1, stage.clientHeight || window.innerHeight || document.documentElement.clientHeight || screen.height || 640);
+  }
+
+  const w = viewportWidth();
+  const h = viewportHeight();
   renderer.setSize(w, h);
 
   const scene = new THREE.Scene();
@@ -384,7 +416,7 @@
     return img;
   });
   buildReferencePlanes();
-  rebuildLineGroup();
+  setTimeout(()=>ensureLineGroupBuilt(), isAndroidRuntime ? 900 : 80);
 
   let isDragging = false, prevX = 0, prevY = 0;
   let rotX = 0, rotY = 0;
@@ -487,6 +519,7 @@
     editorStrokes = cloneStrokes(defaultHermesStrokes);
     applyEditorPoints(editorPoints);
     rebuildLineGroup();
+    lineGroupBuilt = true;
     drawEditor();
   });
   clearBtn.addEventListener('click', ()=>{
@@ -494,6 +527,7 @@
     editorStrokes = [];
     applyEditorPoints(editorPoints);
     rebuildLineGroup();
+    lineGroupBuilt = true;
     drawEditor();
   });
   exportBtn.addEventListener('click', ()=>{
@@ -508,6 +542,7 @@
       editorStrokes = imported.strokes;
       applyEditorPoints(editorPoints);
       rebuildLineGroup();
+      lineGroupBuilt = true;
       drawEditor();
     } catch(err) {
       jsonBox.value = 'JSON non valido';
@@ -548,6 +583,7 @@
     currentStroke = null;
     lastEditPoint = null;
     rebuildLineGroup();
+    lineGroupBuilt = true;
     if(editCanvas.hasPointerCapture(e.pointerId)){
       editCanvas.releasePointerCapture(e.pointerId);
     }
@@ -706,6 +742,7 @@
     })).filter(stroke=>stroke.points.length > 1);
     applyEditorPoints(editorPoints);
     rebuildLineGroup();
+    lineGroupBuilt = true;
     drawEditor();
   }
 
@@ -939,6 +976,7 @@
         editorStrokes = imported.strokes;
         applyEditorPoints(editorPoints);
         rebuildLineGroup();
+        lineGroupBuilt = true;
         savePoints();
         drawEditor();
         jsonBox.value = 'Caricato da file: ' + file.name;
@@ -1064,6 +1102,11 @@
       if(child.material) child.material.dispose();
     }
 
+    if(isAndroidRuntime){
+      rebuildMobileLineGroup();
+      return;
+    }
+
     for(let i=0;i<editorStrokes.length;i++){
       const stroke = editorStrokes[i];
       if(stroke.points.length < 2) continue;
@@ -1137,6 +1180,67 @@
       sparkleMaterial.userData.baseOpacity = sparkleMaterial.opacity;
       lineGroup.add(new THREE.Points(sparkleGeometry, sparkleMaterial));
     }
+  }
+
+  function ensureLineGroupBuilt(){
+    if(lineGroupBuilt || lineGroupBuilding) return;
+    lineGroupBuilding = true;
+    setTimeout(()=>{
+      rebuildLineGroup();
+      lineGroupBuilt = true;
+      lineGroupBuilding = false;
+    }, 0);
+  }
+
+  function selectRenderableStrokes(){
+    if(!isAndroidRuntime || editorStrokes.length <= mobileStrokeLimit) return editorStrokes;
+    const selected = [];
+    const step = editorStrokes.length / mobileStrokeLimit;
+    for(let i=0;i<mobileStrokeLimit;i++){
+      selected.push(editorStrokes[Math.floor(i * step)]);
+    }
+    return selected;
+  }
+
+  function rebuildMobileLineGroup(){
+    const strokes = selectRenderableStrokes();
+    const layers = [
+      {offset:-0.34, opacity:0.12, color:0xff4f05},
+      {offset:0, opacity:0.54, color:0xff9a19},
+      {offset:0.34, opacity:0.12, color:0xff4f05}
+    ];
+
+    layers.forEach(layer=>{
+      const vertices = [];
+      strokes.forEach(stroke=>{
+        if(!stroke || !stroke.points || stroke.points.length < 2) return;
+        const yaw = referenceConfigs[stroke.ref || 0] ? referenceConfigs[stroke.ref || 0].yaw : 0;
+        const nx = Math.sin(yaw);
+        const nz = Math.cos(yaw);
+        const radius = Math.max(0.035, (stroke.width || 0.35) * 0.045);
+        const shift = layer.offset * radius * 8.5;
+        for(let i=1;i<stroke.points.length;i++){
+          const a = stroke.points[i - 1];
+          const b = stroke.points[i];
+          vertices.push(
+            a.x + nx * shift, a.y, (a.z || 0) + nz * shift,
+            b.x + nx * shift, b.y, (b.z || 0) + nz * shift
+          );
+        }
+      });
+      if(!vertices.length) return;
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      const material = new THREE.LineBasicMaterial({
+        color: layer.color,
+        transparent: true,
+        opacity: layer.opacity,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      material.userData.baseOpacity = material.opacity;
+      lineGroup.add(new THREE.LineSegments(geometry, material));
+    });
   }
 
   function updateLineOpacity(value){
@@ -1299,8 +1403,9 @@
     } else {
       resetSceneTransform();
       const lineReveal = smoothstep(0.94, 0.998, eased);
+      if(lineReveal > 0.001) ensureLineGroupBuilt();
       pts.visible = true;
-      lineGroup.visible = lineReveal > 0.001;
+      lineGroup.visible = lineReveal > 0.001 && lineGroupBuilt;
       referenceGroup.visible = false;
       if(!isDragging){ velX*=0.96; velY*=0.96; rotX+=velX; rotY+=velY; }
       pts.rotation.x = rotX + (1-eased) * t*0.018;
@@ -1320,7 +1425,8 @@
   animate();
 
   function onResize(){
-    const nw=stage.clientWidth, nh=stage.clientHeight;
+    const nw = viewportWidth();
+    const nh = viewportHeight();
     camera.aspect=nw/nh; camera.updateProjectionMatrix();
     renderer.setSize(nw,nh);
     if(editorActive){
@@ -1329,6 +1435,10 @@
     }
   }
   window.addEventListener('resize', onResize);
+  requestAnimationFrame(onResize);
+  setTimeout(onResize, 80);
+  setTimeout(onResize, 350);
+  setTimeout(onResize, 1000);
 
   if(new URLSearchParams(window.location.search).has('editor')){
     setEditorActive(true);
