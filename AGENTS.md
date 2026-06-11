@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.53 Release Hermes Hub 0.6.53
+v0.6.54 Release Hermes Hub 0.6.54
 ```
 
 ## Regola Memoria
