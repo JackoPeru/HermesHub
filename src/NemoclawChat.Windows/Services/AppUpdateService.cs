@@ -317,13 +317,17 @@ public static class AppUpdateService
             }
 
             var aumid = GetCurrentAppUserModelId();
-            var relaunch = string.IsNullOrWhiteSpace(aumid)
+            var escapedAumid = string.IsNullOrWhiteSpace(aumid) ? string.Empty : EscapePowerShellSingleQuoted(aumid);
+            var relaunch = string.IsNullOrWhiteSpace(escapedAumid)
                 ? string.Empty
-                : $"`nStart-Process explorer.exe 'shell:AppsFolder\\{EscapePowerShellSingleQuoted(aumid)}'";
+                : "`nStart-Sleep -Seconds 1`n" +
+                  "for ($i = 0; $i -lt 10; $i++) {`n" +
+                  $"  try {{ Start-Process explorer.exe 'shell:AppsFolder\\{escapedAumid}'; break }} catch {{ Start-Sleep -Seconds 1 }}`n" +
+                  "}";
             var script =
                 "$ErrorActionPreference = 'Stop'`n" +
                 "Start-Sleep -Seconds 2`n" +
-                $"Add-AppxPackage -LiteralPath '{EscapePowerShellSingleQuoted(fullPath)}' -ForceUpdateFromAnyVersion" +
+                $"Add-AppxPackage -LiteralPath '{EscapePowerShellSingleQuoted(fullPath)}' -ForceUpdateFromAnyVersion`n" +
                 relaunch;
 
             var startInfo = new ProcessStartInfo
