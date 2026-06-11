@@ -69,7 +69,7 @@ public static class AppUpdateService
             var latest = NormalizeVersion(tag);
             var releaseUrl = root.GetProperty("html_url").GetString() ?? ReleasesPage;
             var releaseSummary = SummarizeReleaseNotes(root.TryGetProperty("body", out var bodyElement) ? bodyElement.GetString() ?? string.Empty : string.Empty);
-            var asset = FindAsset(root, [".msix", ".exe", ".zip"]);
+            var asset = FindPreferredAsset(root, [".msix", ".appinstaller", ".exe", ".zip"]);
 
             var hasUpdate = CompareVersions(latest, localVersion) > 0;
             var message = hasUpdate
@@ -78,7 +78,7 @@ public static class AppUpdateService
 
             if (hasUpdate && asset is null)
             {
-                message += " Release trovata, ma manca asset Windows (.msix/.exe/.zip).";
+                message += " Release trovata, ma manca asset Windows (.msix/.appinstaller/.exe/.zip).";
             }
 
             return new UpdateCheckResult(hasUpdate, localVersion, latest, message, releaseUrl, asset?.Url, asset?.Name, releaseSummary);
@@ -296,20 +296,24 @@ public static class AppUpdateService
         return Path.Combine(localAppData, "ChatClaw", "updates");
     }
 
-    private static AssetReference? FindAsset(JsonElement root, string[] suffixes)
+    private static AssetReference? FindPreferredAsset(JsonElement root, string[] suffixes)
     {
         if (!root.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
         {
             return null;
         }
 
-        foreach (var asset in assets.EnumerateArray())
+        var allAssets = assets.EnumerateArray()
+            .Select(asset => new AssetReference(
+                asset.GetProperty("name").GetString() ?? string.Empty,
+                asset.GetProperty("browser_download_url").GetString()))
+            .Where(asset => !string.IsNullOrWhiteSpace(asset.Name))
+            .ToList();
+
+        foreach (var suffix in suffixes)
         {
-            var name = asset.GetProperty("name").GetString() ?? string.Empty;
-            if (suffixes.Any(suffix => name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)))
-            {
-                return new AssetReference(name, asset.GetProperty("browser_download_url").GetString());
-            }
+            var match = allAssets.FirstOrDefault(asset => asset.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+            if (match is not null) return match;
         }
 
         return null;

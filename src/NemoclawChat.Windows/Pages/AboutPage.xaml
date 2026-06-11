@@ -129,7 +129,7 @@
                             <Button
                                 x:Name="InstallUpdateButton"
                                 Click="InstallUpdate_Click"
-                                Content="Installa update"
+                                Content="Installa e chiudi"
                                 IsEnabled="False"
                                 Visibility="Collapsed" />
                         </StackPanel>

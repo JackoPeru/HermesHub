@@ -24,9 +24,9 @@ import kotlin.math.max
 private const val STREAM_ACCUM_MAX_CHARS = 2_000_000
 
 private val streamHttpClient: OkHttpClient = OkHttpClient.Builder()
-    .connectTimeout(0, TimeUnit.SECONDS)
+    .connectTimeout(10, TimeUnit.SECONDS)
     .readTimeout(0, TimeUnit.SECONDS)
-    .writeTimeout(0, TimeUnit.SECONDS)
+    .writeTimeout(30, TimeUnit.SECONDS)
     .callTimeout(0, TimeUnit.SECONDS)
     .apply { debugHttpLoggingInterceptor()?.let { addInterceptor(it) } }
     .build()
@@ -407,13 +407,13 @@ fun streamChatRequest(
     emit(ChatStreamEvent.Done(ChatStreamStats(ttftMs, totalMs, tokensOut, tps, promptTokens, contextTokens, contextLength, contextPercent)))
 }.flowOn(Dispatchers.IO)
 
-private suspend inline fun openSseStream(
+private suspend fun openSseStream(
     url: String,
     payload: JSONObject,
     label: String,
     apiKey: String?,
     allowCompatAuth: Boolean,
-    crossinline onEvent: suspend (ChatStreamEvent) -> Boolean
+    onEvent: suspend (ChatStreamEvent) -> Boolean
 ): Boolean {
     var call: Call? = null
     val cancellationHook = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->

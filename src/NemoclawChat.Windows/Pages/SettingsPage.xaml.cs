@@ -96,6 +96,19 @@ public sealed partial class SettingsPage : Page
         StatusText.Text = "API key ripristinata a hermes-hub.";
     }
 
+    private void Backup_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var path = LocalBackupService.Export();
+            StatusText.Text = $"Backup locale creato: {path}";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Backup non riuscito: {ex.Message}";
+        }
+    }
+
     private AppSettings ReadSettings()
     {
         return new AppSettings

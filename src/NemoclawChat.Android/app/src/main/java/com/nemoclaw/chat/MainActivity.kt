@@ -1,6 +1,5 @@
 package com.nemoclaw.chat
 
-import android.app.Activity
 import android.content.Context
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -17,13 +16,6 @@ import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
-import android.util.Log
-import android.view.View
-import android.webkit.ConsoleMessage
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -151,7 +143,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -173,8 +164,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -703,70 +692,6 @@ private fun ChatApp() {
             }
         }
     }
-}
-
-@Composable
-private fun VoiceModeScreen() {
-    val context = LocalContext.current
-    val view = LocalView.current
-    var webViewRef by remember { mutableStateOf<WebView?>(null) }
-
-    DisposableEffect(view) {
-        val activity = context as? Activity
-        val controller = activity?.let { WindowInsetsControllerCompat(it.window, view) }
-        controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        controller?.hide(WindowInsetsCompat.Type.systemBars())
-        onDispose {
-            controller?.show(WindowInsetsCompat.Type.systemBars())
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            webViewRef?.stopLoading()
-            webViewRef?.destroy()
-            webViewRef = null
-        }
-    }
-
-    AndroidView(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black),
-        factory = { ctx ->
-            WebView(ctx).apply {
-                webViewRef = this
-                setBackgroundColor(android.graphics.Color.BLACK)
-                setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                isVerticalScrollBarEnabled = false
-                isHorizontalScrollBarEnabled = false
-                overScrollMode = View.OVER_SCROLL_NEVER
-                webViewClient = WebViewClient()
-                webChromeClient = object : WebChromeClient() {
-                    override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
-                        Log.d("HermesVoiceWebView", "${consoleMessage.messageLevel()}: ${consoleMessage.message()} (${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})")
-                        return true
-                    }
-                }
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.databaseEnabled = true
-                settings.cacheMode = WebSettings.LOAD_NO_CACHE
-                settings.loadsImagesAutomatically = true
-                settings.allowFileAccess = true
-                settings.allowContentAccess = true
-                settings.allowFileAccessFromFileURLs = true
-                settings.allowUniversalAccessFromFileURLs = true
-                settings.mediaPlaybackRequiresUserGesture = false
-                loadUrl("file:///android_asset/hermes_scene/orange_particles_3d.html")
-            }
-        },
-        update = { webView ->
-            if (webView.url == null) {
-                webView.loadUrl("file:///android_asset/hermes_scene/orange_particles_3d.html")
-            }
-        }
-    )
 }
 
 @Composable
@@ -4107,6 +4032,12 @@ private fun SettingsScreen(
                         }) {
                             Text("Reset")
                         }
+                        Button(onClick = {
+                            status = runCatching { exportLocalBackup(context, apiKey) }
+                                .getOrElse { "Backup non riuscito: ${it.message ?: it.javaClass.simpleName}" }
+                        }) {
+                            Text("Backup locale")
+                        }
                     }
                 }
             }
@@ -5019,10 +4950,10 @@ private suspend fun loadVideoLibrary(settings: AppSettings, apiKey: String?): Pa
 
 private val apiHttpClient: OkHttpClient by lazy {
     OkHttpClient.Builder()
-        .connectTimeout(0, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.SECONDS)
-        .writeTimeout(0, TimeUnit.SECONDS)
-        .callTimeout(0, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(90, TimeUnit.SECONDS)
         .build()
 }
 

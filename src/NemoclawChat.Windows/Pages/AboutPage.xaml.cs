@@ -109,7 +109,7 @@ public sealed partial class AboutPage : Page
             return;
         }
 
-        UpdateStatusText.Text = "Download completato. Premi Installa update.";
+        UpdateStatusText.Text = "Download completato. Premi Installa e chiudi.";
         InstallUpdateButton.Visibility = Visibility.Visible;
         InstallUpdateButton.IsEnabled = true;
         UpdateProgressBar.Visibility = Visibility.Collapsed;
@@ -123,8 +123,14 @@ public sealed partial class AboutPage : Page
         }
 
         var launched = await AppUpdateService.LaunchDownloadedAssetAsync(_downloadedAssetPath);
-        UpdateStatusText.Text = launched
-            ? "Installer/asset aperto. Completa l'aggiornamento da Windows."
-            : "Impossibile aprire l'asset scaricato.";
+        if (!launched)
+        {
+            UpdateStatusText.Text = "Impossibile aprire l'asset scaricato.";
+            return;
+        }
+
+        UpdateStatusText.Text = "Installer aperto. Hermes Hub si chiude per completare update.";
+        await Task.Delay(900);
+        Application.Current.Exit();
     }
 }

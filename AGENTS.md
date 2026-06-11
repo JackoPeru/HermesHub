@@ -54,7 +54,7 @@ Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
 
-Hermes Hub 0.6.53 (Windows + Android):
+Hermes Hub 0.6.54 (Windows + Android):
 
 Decisione Hermes Native:
 - Hermes Hub usa `preferredApi=hermes-native` come default su Windows, Android e config.
@@ -97,11 +97,22 @@ Terminologia gateway:
 - Il comando `hermes-hub` avvia **Hermes Gateway**: servizio ponte/API server che espone Hermes Agent alle app Hermes Hub Windows/Android e inoltra inferenza a LM Studio nei test o vLLM nel setup finale.
 - La versione Linux/headless deve restare aggiornata e funzionante: `scripts/hermes-hub-linux.sh`, `scripts/hermes-hub-linux.service` e `docs/hermes-hub-linux.md` devono supportare Ubuntu headless + vLLM, con API stabile `http://SERVER:8642/v1` e API key default `hermes-hub`.
 
+Release 0.6.54:
+- Release test update interno Windows: include fix Android build D8, stabilita timeout stream/API, `VoiceModeScreen` estratto, backup locale Android/Windows, packaging MSIX firmato e updater Windows `Installa e chiudi`.
+- Release bump: Windows/AdminBridge `0.6.54`, Android `versionName 0.6.54`, `versionCode 67`.
+
 Release 0.6.53:
 - Hotfix Android Voce: fix schermo nero WebView quando HTML parte prima del layout valido usando fallback `window.innerWidth/innerHeight` e resize ritardati.
 - Hotfix Android Voce: su Android i tratti Hermes non usano migliaia di `TubeGeometry`; renderer mobile usa `LineSegments` leggero e costruisce i tratti dopo il primo frame per evitare blocco GPU/memoria.
 - Hotfix Android Voce: aggiunto overlay errore WebGL/JS e log console WebView `HermesVoiceWebView` in Logcat.
 - Release bump: Windows/AdminBridge `0.6.53`, Android `versionName 0.6.53`, `versionCode 66`.
+
+Post-audit 2026-06-11:
+- Fix build Android debug: D8 falliva su coroutine stream generata da `suspend inline openSseStream`; `openSseStream` ora non e' inline e `:androidApp:assembleDebug` passa.
+- Stabilita stream/API: SSE mantiene read/call timeout illimitati ma con connect/write timeout finiti; client API Android non-stream usa timeout finiti.
+- Manutenibilita: `VoiceModeScreen` Android estratto da `MainActivity.kt` in file dedicato e WebView limitata alla scena asset locale.
+- Backup locale: aggiunto export JSON per settings/API key/conversazioni su Android e Windows.
+- Update Windows personale: packaging consigliato MSIX firmato self-signed, generato da `scripts/package-windows-msix.ps1`; updater Windows preferisce `.msix/.appinstaller`, scarica da GitHub Releases, apre installer e chiude Hermes Hub per completare install/update.
 
 Release 0.6.52:
 - Android modalita `Voce`: renderer Compose/Canvas sostituito da WebView fullscreen che carica `src/NemoclawChat.Android/app/src/main/assets/hermes_scene/orange_particles_3d.html`.
@@ -568,7 +579,7 @@ Windows:
 
 - Progetto: `src/NemoclawChat.Windows`
 - Stack: WinUI 3, C#, .NET 8, Windows App SDK self-contained.
-- Versione app: `0.6.53`.
+- Versione app: `0.6.54`.
 - Brand/UI: `Hermes Hub`, logo Hermes da `logo hermeshub.png` applicato agli asset Windows e alla UI principale, dark stile ChatGPT, sidebar, composer largo, menu `+`, settings reali.
 - UI design system applicato: superfici elevation-aware `#0F1115/#14171D/#1A1E26/#232831`, accent Hermes amber `#F5A524`, hover `#FFC857`, testo muted `#A2ADBF`, bubble utente amber scuro `#7A3E00`, card/composer radius premium e bordi soft.
 - Azioni locali: file picker Windows, screen clip, camera URI, nota vocale prompt.
@@ -588,7 +599,7 @@ Windows:
 - Auth Hermes lato app con API key: Windows usa `Authorization: Bearer <API key salvata>`; default `hermes-hub`. Settings permette modifica/ripristino key, salvata in Credential Locker.
 - Video: feed desktop ora cartella-centrico, non solo job-centrico. Ogni `.mp4/.m4v/.mov/.mkv/.webm/.avi` nella cartella monitorata compare automaticamente con player locale, fullscreen, note rapide e feedback a Hermes.
 - Profilo/About: info app/profilo locale, versione, privacy, gateway attivo.
-- Update system: controlla GitHub Releases latest, scarica asset Windows in app con progresso e poi apre installer/asset da bottone `Installa update`.
+- Update system: controlla GitHub Releases latest, preferisce asset `.msix/.appinstaller`, scarica in app con progresso e poi apre installer da bottone `Installa e chiudi`.
 - Compatibilita storage: usa `%LOCALAPPDATA%\\ChatClaw\\...` ma migra automaticamente da `%LOCALAPPDATA%\\NemoclawChat\\...` se esiste.
 - Settings: validazione URL/campi obbligatori, salvataggio locale, reset default, test Hermes `/health`.
 - Settings salvate in:
@@ -607,7 +618,7 @@ Android:
 
 - Progetto: `src/NemoclawChat.Android/app`
 - Stack: Kotlin, Jetpack Compose, Gradle.
-- Versione app: `0.6.53`, versionCode `66`.
+- Versione app: `0.6.54`, versionCode `67`.
 - Brand/UI: `Hermes Hub`, logo Hermes da `logo hermeshub.png` applicato a launcher + UI, bottom nav con icone vere, composer mobile compatto stile ChatGPT Android, menu `+` con Material icons, profilo locale.
 - UI design system applicato: superfici elevation-aware `#0F1115/#14171D/#1A1E26/#232831`, accent Hermes amber `#F5A524`, testo muted `#A2ADBF`, bubble utente amber scuro `#7A3E00`, empty state con wash amber e logo grande.
 - Azioni locali: file picker Android, camera intent e prompt helper nel menu `+`; dettatura/mic placeholder rimossi finche' non c'e' integrazione reale.

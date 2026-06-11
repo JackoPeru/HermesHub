@@ -73,6 +73,7 @@
                 <Button Click="TestGateway_Click" Content="Test Hermes" />
                 <Button Click="ResetApiKey_Click" Content="Ripristina API key" />
                 <Button Click="Reset_Click" Content="Reset default" />
+                <Button Click="Backup_Click" Content="Backup locale" />
             </StackPanel>
         </StackPanel>
     </Grid>
