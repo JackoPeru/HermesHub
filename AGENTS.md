@@ -56,6 +56,12 @@ Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 Hermes Hub 0.6.64 (Windows + Android):
 
+Nota blocco Android firma 2026-06-12:
+- Android installato sul telefono e release storiche `0.6.46-0.6.53` usano certificato debug SHA-256 `6a676291c8f11e4e6cc6d4c38ed3da8faab2c30aea94d152cd77b2745f45c02d`.
+- Il keystore presente su questo PC (`%USERPROFILE%\.android\debug.keystore`) firma invece SHA-256 `5e22fa7ca9bd9c8c39cb00788061ffbb7e254629283d3876c6d5274f6858494f`.
+- Android rifiuta update con errore "pacchetto in conflitto con un pacchetto esistente" quando firma diversa; non e' bypassabile via codice app o APK.
+- Finche' non si recupera il keystore privato `6a676...`, non pubblicare APK Android come aggiornamento compatibile. Opzioni reali: recuperare vecchio `%USERPROFILE%\.android\debug.keystore` dal PC/backup che firmava 0.6.46-0.6.53, oppure fare migrazione dati + reinstall una tantum.
+
 Release 0.6.64:
 - Release test per verificare updater Windows corretto installato manualmente in 0.6.63: solo bump versione sopra il nuovo helper update.
 - Release bump: Windows/AdminBridge `0.6.64`, Android `versionName 0.6.64`, `versionCode 76`.
