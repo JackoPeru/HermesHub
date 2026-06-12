@@ -677,6 +677,10 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
                     }
                 }
             }
+            val finishReason = choice.optString("finish_reason", "")
+            if (delta != null && out.isEmpty() && delta.has("role") && finishReason.isBlank()) {
+                return out
+            }
             val message = choice.optJSONObject("message")
             if (message != null) {
                 out += extractToolEventsFromAnyJson(message)

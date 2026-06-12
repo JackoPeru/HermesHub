@@ -334,10 +334,15 @@ public static class AppUpdateService
                 $"$logPath = '{EscapePowerShellSingleQuoted(logPath)}'`n" +
                 "\"Started $(Get-Date -Format o)\" | Set-Content -LiteralPath $logPath`n" +
                 "Start-Sleep -Seconds 3`n" +
-                $"Add-Content -LiteralPath $logPath -Value 'Installing {EscapePowerShellSingleQuoted(fullPath)}'`n" +
-                $"Add-AppxPackage -LiteralPath '{EscapePowerShellSingleQuoted(fullPath)}' -ForceUpdateFromAnyVersion`n" +
-                "Add-Content -LiteralPath $logPath -Value \"Installed $(Get-Date -Format o)\"`n" +
-                relaunch;
+                "try {`n" +
+                $"  Add-Content -LiteralPath $logPath -Value 'Installing {EscapePowerShellSingleQuoted(fullPath)}'`n" +
+                $"  Add-AppxPackage -Path '{EscapePowerShellSingleQuoted(fullPath)}' -ForceUpdateFromAnyVersion`n" +
+                "  Add-Content -LiteralPath $logPath -Value \"Installed $(Get-Date -Format o)\"`n" +
+                relaunch +
+                "`n} catch {`n" +
+                "  Add-Content -LiteralPath $logPath -Value (\"ERROR \" + $_.Exception.Message)`n" +
+                "  throw`n" +
+                "}`n";
             File.WriteAllText(scriptPath, script);
 
             var startInfo = new ProcessStartInfo

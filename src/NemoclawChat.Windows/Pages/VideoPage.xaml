@@ -58,13 +58,24 @@
                 </Grid>
             </Border>
 
-            <Grid Grid.Row="2" ColumnSpacing="18">
+            <Grid
+                x:Name="VideoContentGrid"
+                Grid.Row="2"
+                ColumnSpacing="18"
+                RowSpacing="18"
+                SizeChanged="VideoContentGrid_SizeChanged">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="1.2*" />
                     <ColumnDefinition Width="0.95*" />
                 </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="0" />
+                </Grid.RowDefinitions>
 
-                <Border Style="{StaticResource PremiumCardBorderStyle}">
+                <Border
+                    x:Name="VideoFeedPanel"
+                    Style="{StaticResource PremiumCardBorderStyle}">
                     <StackPanel Spacing="14">
                         <TextBlock FontWeight="SemiBold" Foreground="White" Text="Feed video" />
                         <ListView
@@ -76,18 +87,18 @@
                                 <DataTemplate x:DataType="services:LocalVideoRecord">
                                     <Grid Margin="0,0,0,14" ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="220" />
+                                            <ColumnDefinition Width="180" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
 
                                         <Border
-                                            Height="124"
+                                            Height="101"
                                             Background="#FF232831"
                                             BorderBrush="#33FFFFFF"
                                             BorderThickness="1"
-                                            CornerRadius="18">
+                                            CornerRadius="8">
                                             <Grid>
-                                                <Rectangle RadiusX="18" RadiusY="18">
+                                                <Rectangle RadiusX="8" RadiusY="8">
                                                     <Rectangle.Fill>
                                                         <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                                                             <GradientStop Color="#FF3A260B" Offset="0" />
@@ -138,7 +149,10 @@
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Column="1" Style="{StaticResource PremiumCardBorderStyle}">
+                <Border
+                    x:Name="VideoDetailPanel"
+                    Grid.Column="1"
+                    Style="{StaticResource PremiumCardBorderStyle}">
                     <StackPanel Spacing="14">
                         <TextBlock FontWeight="SemiBold" Foreground="White" Text="Video selezionato" />
                         <Grid Height="260" Background="Black">
@@ -167,12 +181,20 @@
                         <TextBlock x:Name="SelectedVideoTitleText" Foreground="White" FontSize="20" FontWeight="SemiBold" Text="Seleziona un video" />
                         <TextBlock x:Name="SelectedVideoMetaText" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
 
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Click="QuickFeedback_Click" Tag="Hook piu' forte nei primi 5 secondi" Content="Hook" />
-                            <Button Click="QuickFeedback_Click" Tag="Ritmo piu' veloce e meno pause" Content="Ritmo" />
-                            <Button Click="QuickFeedback_Click" Tag="Piu' chiarezza didattica e step concreti" Content="Chiarezza" />
-                            <Button Click="QuickFeedback_Click" Tag="Montaggio piu' pulito e meno ridondanza" Content="Montaggio" />
-                        </StackPanel>
+                        <Grid ColumnSpacing="8" RowSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Button HorizontalAlignment="Stretch" Click="QuickFeedback_Click" Tag="Hook piu' forte nei primi 5 secondi" Content="Hook" />
+                            <Button Grid.Column="1" HorizontalAlignment="Stretch" Click="QuickFeedback_Click" Tag="Ritmo piu' veloce e meno pause" Content="Ritmo" />
+                            <Button Grid.Row="1" HorizontalAlignment="Stretch" Click="QuickFeedback_Click" Tag="Piu' chiarezza didattica e step concreti" Content="Chiarezza" />
+                            <Button Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch" Click="QuickFeedback_Click" Tag="Montaggio piu' pulito e meno ridondanza" Content="Montaggio" />
+                        </Grid>
 
                         <TextBox
                             x:Name="FeedbackBox"
@@ -180,16 +202,21 @@
                             AcceptsReturn="True"
                             MinHeight="120"
                             PlaceholderText="Es: intro lenta, serve hook piu' forte, voiceover piu' naturale, taglia 20 secondi finali..." />
-                        <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Grid ColumnSpacing="10" RowSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
                             <Button
                                 x:Name="SendFeedbackButton"
+                                HorizontalAlignment="Stretch"
                                 Background="{StaticResource AccentGreenBrush}"
                                 BorderThickness="0"
                                 Click="SendFeedback_Click"
                                 Content="Invia feedback a Hermes"
                                 Foreground="White" />
-                            <Button Click="CopyPath_Click" Content="Copia path video" />
-                        </StackPanel>
+                            <Button Grid.Column="1" Click="CopyPath_Click" Content="Copia path video" />
+                        </Grid>
                         <TextBlock x:Name="FeedbackStatusText" Foreground="{StaticResource MutedTextBrush}" Text="Hermes deve usare questi feedback come memoria editoriale stabile quando appropriato." TextWrapping="Wrap" />
                         <TextBox
                             x:Name="AgentResponseBox"

@@ -575,7 +575,9 @@ private fun ChatApp() {
             containerColor = AppColors.Background,
             bottomBar = {
                 if (selectedTab != Tab.Voice) {
-                    val bottomTabs = remember { Tab.entries.filterNot { it == Tab.Archive || it == Tab.Tasks } }
+                    val bottomTabs = remember {
+                        listOf(Tab.Chat, Tab.Operator, Tab.Voice, Tab.Video, Tab.Profile)
+                    }
                     NavigationBar(containerColor = AppColors.Sidebar) {
                         bottomTabs.forEach { tab ->
                             NavigationBarItem(
@@ -652,10 +654,15 @@ private fun ChatApp() {
                             }
                         }
                     )
-                    Tab.Profile -> ProfileScreen(context, settings) { updated ->
-                        settings = updated
-                        saveSettings(context, updated)
-                    }
+                    Tab.Profile -> ProfileScreen(
+                        context = context,
+                        settings = settings,
+                        onSettingsChanged = { updated ->
+                            settings = updated
+                            saveSettings(context, updated)
+                        },
+                        onOpenTab = { tab -> setSelectedTab(tab) }
+                    )
                 }
                 if (sidebarOpen) {
                     Box(
@@ -820,8 +827,9 @@ private fun SidebarRow(icon: ImageVector, title: String, subtitle: String, onCli
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 9.dp),
+            .padding(horizontal = 4.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -1472,7 +1480,7 @@ private fun MessageBubble(message: ChatMessage) {
 
 @Composable
 private fun RawHermesEventsView(events: List<HermesRawEvent>) {
-    if (events.isEmpty()) return
+    if (events.isEmpty() || !SHOW_RAW_HERMES_EVENTS_IN_CHAT) return
     var expanded by remember { mutableStateOf(false) }
     Surface(
         modifier = Modifier
@@ -1557,24 +1565,7 @@ internal fun VisualBlockView(block: VisualBlock) {
 
 @Composable
 private fun MarkdownBlock(markdown: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        markdown.lines().map { it.trimEnd() }.filter { it.isNotBlank() }.forEach { line ->
-            val text = line.trimStart('#', '-', '*', ' ')
-            val isBullet = line.startsWith("- ") || line.startsWith("* ")
-            val size = when {
-                line.startsWith("# ") -> 20.sp
-                line.startsWith("## ") -> 17.sp
-                line.startsWith("### ") -> 15.sp
-                else -> 14.sp
-            }
-            Text(
-                text = if (isBullet) "• $text" else text,
-                color = Color.White,
-                fontSize = size,
-                fontWeight = if (line.startsWith("#")) FontWeight.SemiBold else FontWeight.Normal
-            )
-        }
-    }
+    MarkdownText(markdown, color = Color.White, fontSize = 14.sp)
 }
 
 @Composable
@@ -3607,7 +3598,12 @@ private fun runOperatorRpc(
 }
 
 @Composable
-private fun ProfileScreen(context: Context, settings: AppSettings, onSettingsChanged: (AppSettings) -> Unit) {
+private fun ProfileScreen(
+    context: Context,
+    settings: AppSettings,
+    onSettingsChanged: (AppSettings) -> Unit,
+    onOpenTab: (Tab) -> Unit = {}
+) {
     val scope = rememberCoroutineScope()
     val conversations = remember { loadConversations(context) }
     val version = remember { appVersion(context) }
@@ -3668,6 +3664,21 @@ private fun ProfileScreen(context: Context, settings: AppSettings, onSettingsCha
         }
         item {
             ServerMetric("Parita Windows", "Allineata", "Chat, archivio, progetti/recenti, jobs, Hermes server, runs, settings e profilo presenti anche su Android.")
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Aree rapide", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Schermate secondarie spostate qui per lasciare la barra bassa pulita.", color = AppColors.Muted, fontSize = 12.sp)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { onOpenTab(Tab.Server) }) { Text("Hermes") }
+                        Button(onClick = { onOpenTab(Tab.News) }) { Text("News") }
+                        Button(onClick = { onOpenTab(Tab.Settings) }) { Text("Impostazioni") }
+                        Button(onClick = { onOpenTab(Tab.Archive) }) { Text("Archivio") }
+                        Button(onClick = { onOpenTab(Tab.Tasks) }) { Text("Jobs") }
+                    }
+                }
+            }
         }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
@@ -3886,6 +3897,7 @@ private fun SettingsScreen(
     var strictNativeMode by remember(settings.strictNativeMode) { mutableStateOf(settings.strictNativeMode) }
     var demoMode by remember(settings.demoMode) { mutableStateOf(settings.demoMode) }
     var status by remember { mutableStateOf("Pronto.") }
+    var advancedVisible by rememberSaveable { mutableStateOf(false) }
 
     fun currentSettings(scale: Float = fontScale): AppSettings {
         return AppSettings(
@@ -3929,15 +3941,36 @@ private fun SettingsScreen(
                     }
                 )
             }
-            item { SettingsField("Hermes API URL", gatewayUrl, { gatewayUrl = it }) }
-            item { SettingsPasswordField("API key Hermes", apiKey, { apiKey = it }) }
-            item { SettingsField("Provider", provider, { provider = it }) }
-            item { SettingsField("Endpoint API lato server", inferenceEndpoint, { inferenceEndpoint = it }) }
-            item { SettingsField("API preferita", preferredApi, { preferredApi = it }) }
-            item { SettingsField("Modello", model, { model = it }) }
-            item { SettingsField("Accesso", accessMode, { accessMode = it }) }
-            item { SettingsField("Modalita visuale (auto / always / never)", visualBlocksMode, { visualBlocksMode = it }) }
-            item { SettingsField("Cartella video Hermes (sync server)", videoLibraryPath, { }) }
+            item {
+                PremiumPanel {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Connessione Hermes", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        SettingsField("Hermes API URL", gatewayUrl, { gatewayUrl = it })
+                        SettingsPasswordField("API key Hermes", apiKey, { apiKey = it })
+                        SettingsField("Cartella video Hermes (sync server)", videoLibraryPath, { })
+                    }
+                }
+            }
+            item {
+                Button(onClick = { advancedVisible = !advancedVisible }) {
+                    Text(if (advancedVisible) "Nascondi avanzate" else "Mostra avanzate")
+                }
+            }
+            if (advancedVisible) {
+                item {
+                    PremiumPanel {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Avanzate", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            SettingsField("Provider", provider, { provider = it })
+                            SettingsField("Endpoint API lato server", inferenceEndpoint, { inferenceEndpoint = it })
+                            SettingsField("API preferita", preferredApi, { preferredApi = it })
+                            SettingsField("Modello", model, { model = it })
+                            SettingsField("Accesso", accessMode, { accessMode = it })
+                            SettingsField("Modalita visuale (auto / always / never)", visualBlocksMode, { visualBlocksMode = it })
+                        }
+                    }
+                }
+            }
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Strict native mode", color = Color.White, modifier = Modifier.weight(1f))
@@ -6825,6 +6858,7 @@ private const val GATEWAY_SECRET_TRANSFORMATION = "AES/GCM/NoPadding"
 private const val GATEWAY_SECRET_AAD = "HermesHub.ApiKey.v1"
 private const val MIN_FONT_SCALE = 0.85f
 private const val MAX_FONT_SCALE = 1.25f
+private const val SHOW_RAW_HERMES_EVENTS_IN_CHAT = false
 private const val CHAT_HISTORY_MAX_MESSAGES = 30
 private const val DEFAULT_CONTEXT_WINDOW_TOKENS = 90000
 private const val CONTEXT_SYSTEM_OVERHEAD_TOKENS = 900

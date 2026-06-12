@@ -19,62 +19,89 @@
             FontWeight="SemiBold"
             Foreground="White"
             Text="Impostazioni" />
-        <StackPanel Grid.Row="1" MaxWidth="760" HorizontalAlignment="Left" Spacing="18">
+        <StackPanel Grid.Row="1" MaxWidth="820" HorizontalAlignment="Stretch" Spacing="16">
             <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Impostazioni salvate localmente. Hermes Hub invia API key Hermes come Bearer token; default hermes-hub." />
-            <TextBox x:Name="GatewayUrlBox" Header="Hermes API URL" PlaceholderText="http://hermes.local:8642/v1" />
-            <PasswordBox x:Name="ApiKeyBox" Header="API key Hermes" PlaceholderText="hermes-hub" />
-            <TextBox x:Name="GatewayWsUrlBox" Visibility="Collapsed" />
-            <TextBox x:Name="AdminBridgeUrlBox" Visibility="Collapsed" />
-            <TextBox x:Name="ProviderBox" Header="Provider" />
-            <TextBox x:Name="InferenceEndpointBox" Header="Endpoint API lato server" />
-            <ComboBox x:Name="PreferredApiBox" Header="API preferita" SelectedIndex="0">
-                <ComboBoxItem Content="hermes-native" />
-                <ComboBoxItem Content="openai-completions" />
-                <ComboBoxItem Content="openai-responses" />
-            </ComboBox>
-            <TextBox x:Name="ModelBox" Header="Modello" />
-            <TextBox x:Name="VideoLibraryPathBox" Header="Cartella video Hermes (sync server)" IsReadOnly="True" PlaceholderText="In attesa di sync da Hermes /health/detailed" />
-            <TextBox x:Name="ActiveProjectNameBox" Header="Progetto attivo" PlaceholderText="Nome progetto condiviso" />
-            <ComboBox x:Name="AccessModeBox" Header="Accesso consigliato" SelectedIndex="0">
-                <ComboBoxItem Content="Tailscale/LAN" />
-                <ComboBoxItem Content="LAN only" />
-                <ComboBoxItem Content="Public HTTPS" />
-            </ComboBox>
-            <ComboBox x:Name="VisualBlocksModeBox" Header="Modalita visuale" SelectedIndex="0">
-                <ComboBoxItem Content="auto" />
-                <ComboBoxItem Content="always" />
-                <ComboBoxItem Content="never" />
-            </ComboBox>
-            <ToggleSwitch x:Name="StrictNativeModeSwitch" Header="Strict native mode" OffContent="Fallback compat consentiti" OnContent="Solo Hermes native/Responses" />
-            <ToggleSwitch x:Name="DemoModeSwitch" Header="Fallback locale" OffContent="Solo Hermes" OnContent="Fallback locale attivo" />
-            <Border Padding="16" Background="{StaticResource SurfaceBrush}" BorderBrush="#FF3A3A3A" BorderThickness="1" CornerRadius="12">
+
+            <Border Padding="16" Background="{StaticResource SurfaceBrush}" BorderBrush="#FF3A3A3A" BorderThickness="1" CornerRadius="8">
                 <StackPanel Spacing="10">
-                    <TextBlock Foreground="White" FontWeight="SemiBold" Text="Memoria Hermes" />
-                    <TextBlock x:Name="MemoryStatusText" Foreground="{StaticResource MutedTextBrush}" Text="Memoria gateway non ancora letta." TextWrapping="Wrap" />
-                    <TextBox x:Name="MemoryVideoBox" Header="Preferenze video" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
-                    <TextBox x:Name="MemoryNewsBox" Header="Preferenze news" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
-                    <TextBox x:Name="MemoryStyleBox" Header="Stile risposta" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
-                    <TextBox x:Name="MemoryProjectBox" Header="Regole progetto" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
-                    <TextBox x:Name="MemoryNotesBox" Header="Note generali" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <Button Click="LoadMemory_Click" Content="Leggi memoria" />
-                        <Button Click="SaveMemory_Click" Content="Salva memoria" />
-                    </StackPanel>
+                    <TextBlock Foreground="White" FontSize="16" FontWeight="SemiBold" Text="Connessione Hermes" />
+                    <TextBox x:Name="GatewayUrlBox" Header="Hermes API URL" PlaceholderText="http://hermes.local:8642/v1" />
+                    <PasswordBox x:Name="ApiKeyBox" Header="API key Hermes" PlaceholderText="hermes-hub" />
+                    <TextBox x:Name="ActiveProjectNameBox" Header="Progetto attivo" PlaceholderText="Nome progetto condiviso" />
+                    <TextBox x:Name="VideoLibraryPathBox" Header="Cartella video Hermes (sync server)" IsReadOnly="True" PlaceholderText="In attesa di sync da Hermes /health/detailed" />
                 </StackPanel>
             </Border>
+
+            <TextBox x:Name="GatewayWsUrlBox" Visibility="Collapsed" />
+            <TextBox x:Name="AdminBridgeUrlBox" Visibility="Collapsed" />
+
+            <Expander Header="Avanzate">
+                <Border Padding="16" Background="{StaticResource SurfaceBrush}" BorderBrush="#FF3A3A3A" BorderThickness="1" CornerRadius="8">
+                    <StackPanel Spacing="10">
+                        <TextBox x:Name="ProviderBox" Header="Provider" />
+                        <TextBox x:Name="InferenceEndpointBox" Header="Endpoint API lato server" />
+                        <ComboBox x:Name="PreferredApiBox" Header="API preferita" SelectedIndex="0">
+                            <ComboBoxItem Content="hermes-native" />
+                            <ComboBoxItem Content="openai-completions" />
+                            <ComboBoxItem Content="openai-responses" />
+                        </ComboBox>
+                        <TextBox x:Name="ModelBox" Header="Modello" />
+                        <ComboBox x:Name="AccessModeBox" Header="Accesso consigliato" SelectedIndex="0">
+                            <ComboBoxItem Content="Tailscale/LAN" />
+                            <ComboBoxItem Content="LAN only" />
+                            <ComboBoxItem Content="Public HTTPS" />
+                        </ComboBox>
+                        <ComboBox x:Name="VisualBlocksModeBox" Header="Modalita visuale" SelectedIndex="0">
+                            <ComboBoxItem Content="auto" />
+                            <ComboBoxItem Content="always" />
+                            <ComboBoxItem Content="never" />
+                        </ComboBox>
+                        <ToggleSwitch x:Name="StrictNativeModeSwitch" Header="Strict native mode" OffContent="Fallback compat consentiti" OnContent="Solo Hermes native/Responses" />
+                        <ToggleSwitch x:Name="DemoModeSwitch" Header="Fallback locale" OffContent="Solo Hermes" OnContent="Fallback locale attivo" />
+                    </StackPanel>
+                </Border>
+            </Expander>
+
+            <Expander Header="Memoria Hermes">
+                <Border Padding="16" Background="{StaticResource SurfaceBrush}" BorderBrush="#FF3A3A3A" BorderThickness="1" CornerRadius="8">
+                    <StackPanel Spacing="10">
+                        <TextBlock x:Name="MemoryStatusText" Foreground="{StaticResource MutedTextBrush}" Text="Memoria gateway non ancora letta." TextWrapping="Wrap" />
+                        <TextBox x:Name="MemoryVideoBox" Header="Preferenze video" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
+                        <TextBox x:Name="MemoryNewsBox" Header="Preferenze news" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
+                        <TextBox x:Name="MemoryStyleBox" Header="Stile risposta" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
+                        <TextBox x:Name="MemoryProjectBox" Header="Regole progetto" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
+                        <TextBox x:Name="MemoryNotesBox" Header="Note generali" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button Click="LoadMemory_Click" Content="Leggi memoria" />
+                            <Button Grid.Column="1" Click="SaveMemory_Click" Content="Salva memoria" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Expander>
             <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedTextBrush}" Text="Pronto." />
-            <StackPanel Orientation="Horizontal" Spacing="10">
+            <Grid ColumnSpacing="10" RowSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <Button
                     Background="{StaticResource AccentGreenBrush}"
                     BorderThickness="0"
                     Click="Save_Click"
                     Content="Salva"
                     Foreground="White" />
-                <Button Click="TestGateway_Click" Content="Test Hermes" />
-                <Button Click="ResetApiKey_Click" Content="Ripristina API key" />
-                <Button Click="Reset_Click" Content="Reset default" />
-                <Button Click="Backup_Click" Content="Backup locale" />
-            </StackPanel>
+                <Button Grid.Column="1" Click="TestGateway_Click" Content="Test Hermes" />
+                <Button Grid.Column="2" Click="ResetApiKey_Click" Content="Ripristina API key" />
+                <Button Grid.Column="3" Click="Reset_Click" Content="Reset default" />
+                <Button Grid.Column="4" Click="Backup_Click" Content="Backup locale" />
+            </Grid>
         </StackPanel>
     </Grid>
     </ScrollViewer>

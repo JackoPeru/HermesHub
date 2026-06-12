@@ -15,7 +15,39 @@ public sealed partial class VideoPage : Page
     public VideoPage()
     {
         InitializeComponent();
+        UpdateAdaptiveLayout(ActualWidth);
         RefreshFeed();
+    }
+
+    private void VideoContentGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdateAdaptiveLayout(e.NewSize.Width);
+    }
+
+    private void UpdateAdaptiveLayout(double width)
+    {
+        if (VideoContentGrid.ColumnDefinitions.Count < 2 || VideoContentGrid.RowDefinitions.Count < 2)
+        {
+            return;
+        }
+
+        var narrow = width > 0 && width < 1040;
+        if (narrow)
+        {
+            VideoContentGrid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
+            VideoContentGrid.ColumnDefinitions[1].Width = new GridLength(0);
+            VideoContentGrid.RowDefinitions[1].Height = GridLength.Auto;
+            Grid.SetColumn(VideoDetailPanel, 0);
+            Grid.SetRow(VideoDetailPanel, 1);
+        }
+        else
+        {
+            VideoContentGrid.ColumnDefinitions[0].Width = new GridLength(1.2, GridUnitType.Star);
+            VideoContentGrid.ColumnDefinitions[1].Width = new GridLength(0.95, GridUnitType.Star);
+            VideoContentGrid.RowDefinitions[1].Height = new GridLength(0);
+            Grid.SetColumn(VideoDetailPanel, 1);
+            Grid.SetRow(VideoDetailPanel, 0);
+        }
     }
 
     private void RefreshFeed()

@@ -38,7 +38,7 @@
         <ScrollViewer
             x:Name="MessagesScroll"
             Grid.Row="1"
-            Padding="24,0,24,18"
+            Padding="24,64,24,18"
             VerticalScrollBarVisibility="Auto">
             <Grid MinHeight="620">
                 <Grid
@@ -67,37 +67,47 @@
                             FontSize="14"
                             Foreground="{StaticResource MutedTextBrush}"
                             Text="Chat normale, Runs e Jobs verso Hermes Agent sul tuo home-server." />
-                        <Grid ColumnSpacing="10">
+                        <Grid
+                            MaxWidth="430"
+                            ColumnSpacing="10"
+                            RowSpacing="10">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
                             <Button
                                 Padding="14,8"
+                                HorizontalAlignment="Stretch"
                                 Background="{StaticResource SurfaceBrush}"
                                 BorderBrush="{StaticResource BorderBrushSoft}"
                                 Click="PromptSetup_Click"
                                 Content="Prepara setup Hermes"
-                                CornerRadius="18"
+                                CornerRadius="8"
                                 Foreground="White" />
                             <Button
                                 Grid.Column="1"
                                 Padding="14,8"
+                                HorizontalAlignment="Stretch"
                                 Background="{StaticResource SurfaceBrush}"
                                 BorderBrush="{StaticResource BorderBrushSoft}"
                                 Click="PromptHealth_Click"
                                 Content="Controlla server"
-                                CornerRadius="18"
+                                CornerRadius="8"
                                 Foreground="White" />
                             <Button
-                                Grid.Column="2"
+                                Grid.Row="1"
+                                Grid.ColumnSpan="2"
                                 Padding="14,8"
+                                HorizontalAlignment="Stretch"
                                 Background="{StaticResource SurfaceBrush}"
                                 BorderBrush="{StaticResource BorderBrushSoft}"
                                 Click="PromptAgent_Click"
                                 Content="Crea ordine agente"
-                                CornerRadius="18"
+                                CornerRadius="8"
                                 Foreground="White" />
                         </Grid>
                     </StackPanel>
@@ -105,8 +115,8 @@
 
                 <ListView
                     x:Name="MessagesList"
-                    Width="860"
-                    HorizontalAlignment="Center"
+                    MaxWidth="860"
+                    HorizontalAlignment="Stretch"
                     Padding="0,32,0,32"
                     Background="Transparent"
                     BorderThickness="0"
@@ -195,10 +205,9 @@
             Padding="24,0,24,28"
             HorizontalAlignment="Stretch">
             <Border
-                Width="1040"
                 MaxWidth="1040"
                 MinHeight="58"
-                HorizontalAlignment="Center"
+                HorizontalAlignment="Stretch"
                 Background="{StaticResource ComposerBrush}"
                 BorderBrush="{StaticResource BorderBrushSoft}"
                 BorderThickness="1"

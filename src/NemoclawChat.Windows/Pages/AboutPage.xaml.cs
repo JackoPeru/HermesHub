@@ -109,7 +109,7 @@ public sealed partial class AboutPage : Page
             return;
         }
 
-        UpdateStatusText.Text = "Download completato. Premi Installa e chiudi.";
+        UpdateStatusText.Text = "Download completato. Premi Installa e riavvia.";
         InstallUpdateButton.Visibility = Visibility.Visible;
         InstallUpdateButton.IsEnabled = true;
         UpdateProgressBar.Visibility = Visibility.Collapsed;
@@ -129,7 +129,7 @@ public sealed partial class AboutPage : Page
             return;
         }
 
-        UpdateStatusText.Text = "Installer aperto. Hermes Hub si chiude per completare update.";
+        UpdateStatusText.Text = "Update avviato. Hermes Hub si chiude e si riapre dopo l'installazione.";
         await Task.Delay(900);
         Application.Current.Exit();
     }

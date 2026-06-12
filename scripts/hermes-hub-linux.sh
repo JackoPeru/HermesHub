@@ -8,11 +8,13 @@ set -euo pipefail
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 HERMES_ENV="$HERMES_HOME/.env"
 HERMES_CONFIG="$HERMES_HOME/config.yaml"
-HERMES_INFERENCE_PROVIDER="${HERMES_INFERENCE_PROVIDER:-lm_studio}"
+HERMES_INFERENCE_PROVIDER="${HERMES_INFERENCE_PROVIDER:-lmstudio}"
 LM_STUDIO_BASE_URL="${LM_STUDIO_BASE_URL:-http://127.0.0.1:1234}"
 VLLM_BASE_URL="${VLLM_BASE_URL:-http://127.0.0.1:8000}"
-HERMES_API_HOST="${HERMES_API_HOST:-0.0.0.0}"
-HERMES_API_PORT="${HERMES_API_PORT:-8642}"
+API_SERVER_HOST="${API_SERVER_HOST:-${HERMES_API_HOST:-0.0.0.0}}"
+API_SERVER_PORT="${API_SERVER_PORT:-${HERMES_API_PORT:-8642}}"
+HERMES_API_HOST="$API_SERVER_HOST"
+HERMES_API_PORT="$API_SERVER_PORT"
 API_SERVER_KEY="${API_SERVER_KEY:-hermes-hub}"
 HERMES_MAX_ITERATIONS="${HERMES_MAX_ITERATIONS:-0}"
 HERMES_AUXILIARY_LOCAL_ONLY="${HERMES_AUXILIARY_LOCAL_ONLY:-true}"
@@ -57,11 +59,25 @@ def read(path):
 
 api_models = read("/api/v1/models")
 if isinstance(api_models, dict):
+    candidates = []
     for item in api_models.get("data", []) or api_models.get("models", []):
         loaded = item.get("loaded_instances") or item.get("loadedInstances") or []
-        if loaded:
-            print(item.get("id") or item.get("name") or loaded[0].get("model_key") or loaded[0].get("id"))
-            raise SystemExit(0)
+        for instance in loaded:
+            config = instance.get("config") or {}
+            context = int(config.get("context_length") or instance.get("context_length") or 0)
+            model = (
+                instance.get("model_key")
+                or instance.get("id")
+                or item.get("key")
+                or item.get("id")
+                or item.get("name")
+            )
+            if model:
+                candidates.append((context, str(model)))
+    if candidates:
+        candidates.sort(reverse=True)
+        print(candidates[0][1])
+        raise SystemExit(0)
 
 v1_models = read("/v1/models")
 if isinstance(v1_models, dict) and v1_models.get("data"):
@@ -94,7 +110,7 @@ PY
 HERMES_INFERENCE_BASE_URL="${HERMES_INFERENCE_BASE_URL:-$(default_inference_base_url)}"
 if [ -n "${HERMES_INFERENCE_MODEL:-}" ]; then
   MODEL_ID="$HERMES_INFERENCE_MODEL"
-elif [ "$HERMES_INFERENCE_PROVIDER" = "lm_studio" ]; then
+elif [ "$HERMES_INFERENCE_PROVIDER" = "lmstudio" ] || [ "$HERMES_INFERENCE_PROVIDER" = "lm_studio" ] || [ "$HERMES_INFERENCE_PROVIDER" = "lm-studio" ]; then
   MODEL_ID="$(detect_lm_studio_model || true)"
 else
   MODEL_ID="$(detect_openai_model || true)"
@@ -103,8 +119,8 @@ MODEL_ID="${MODEL_ID:-hermes-agent}"
 
 cat > "$HERMES_ENV" <<EOF
 API_SERVER_ENABLED=true
-API_SERVER_HOST=$HERMES_API_HOST
-API_SERVER_PORT=$HERMES_API_PORT
+API_SERVER_HOST=$API_SERVER_HOST
+API_SERVER_PORT=$API_SERVER_PORT
 API_SERVER_KEY=$API_SERVER_KEY
 HERMES_MAX_ITERATIONS=$HERMES_MAX_ITERATIONS
 HERMES_AUXILIARY_LOCAL_ONLY=$HERMES_AUXILIARY_LOCAL_ONLY
@@ -122,6 +138,26 @@ HERMES_HUB_STATE_PATH=$HERMES_HUB_STATE_PATH
 HERMES_HUB_MEMORY_PATH=$HERMES_HUB_MEMORY_PATH
 TIRITH_ENABLED=false
 EOF
+
+export API_SERVER_ENABLED=true
+export API_SERVER_HOST
+export API_SERVER_PORT
+export API_SERVER_KEY
+export HERMES_MAX_ITERATIONS
+export HERMES_AUXILIARY_LOCAL_ONLY
+export HERMES_NATIVE_EVENTS
+export HERMES_RAW_EVENT_PASSTHROUGH
+export HERMES_NATIVE_GATEWAY_PATCH
+export HERMES_INFERENCE_PROVIDER
+export HERMES_INFERENCE_BASE_URL
+export HERMES_INFERENCE_MODEL="$MODEL_ID"
+export GATEWAY_ALLOW_ALL_USERS=true
+export TERMINAL_CWD="$HERMES_TERMINAL_CWD"
+export HERMES_VIDEO_LIBRARY_PATH
+export HERMES_MEDIA_ROOTS
+export HERMES_HUB_STATE_PATH
+export HERMES_HUB_MEMORY_PATH
+export TIRITH_ENABLED=false
 
 python3 - "$HERMES_CONFIG" "$MODEL_ID" "$HERMES_INFERENCE_PROVIDER" "$HERMES_INFERENCE_BASE_URL" "$HERMES_TERMINAL_CWD" <<'PY' || true
 import sys

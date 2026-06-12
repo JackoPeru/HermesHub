@@ -12,6 +12,7 @@ import importlib
 import inspect
 import os
 import py_compile
+import re
 import shutil
 import sys
 import time
@@ -89,58 +90,62 @@ def _replace_once(text: str, old: str, new: str, label: str) -> tuple[str, bool]
     return text.replace(old, new, 1), True
 
 
+def _replace_regex_once(text: str, pattern: str, repl: str, label: str) -> tuple[str, bool]:
+    patched, count = re.subn(pattern, repl, text, count=1, flags=re.MULTILINE)
+    if count != 1:
+        raise RuntimeError(f"Patch anchor not found: {label}")
+    return patched, True
+
+
 def _patch_text(text: str) -> tuple[str, list[str]]:
     changes: list[str] = []
 
     if '"native_protocol": {' not in text:
-        text, _ = _replace_once(
+        text, _ = _replace_regex_once(
             text,
-            '            "platform": "hermes-agent",\n'
-            '            "gateway_state": runtime.get("gateway_state"),',
-            '            "platform": "hermes-agent",\n'
-            '            "native_protocol": {\n'
-            '                "name": "hermes-native",\n'
-            '                "transport": "responses",\n'
-            '                "endpoint": "/v1/responses",\n'
-            '                "alias": "/v1/hermes/native",\n'
-            '                "context_owner": "hermes-agent",\n'
-            '                "raw_event_passthrough": True,\n'
-            '            },\n'
-            '            "gateway_state": runtime.get("gateway_state"),',
+            r'(^\s+"version": _hermes_version\(\),\n)(^\s+"gateway_state": runtime\.get\("gateway_state"\),)',
+            r'\1'
+            r'            "native_protocol": {' "\n"
+            r'                "name": "hermes-native",' "\n"
+            r'                "transport": "responses",' "\n"
+            r'                "endpoint": "/v1/responses",' "\n"
+            r'                "alias": "/v1/hermes/native",' "\n"
+            r'                "context_owner": "hermes-agent",' "\n"
+            r'                "raw_event_passthrough": True,' "\n"
+            r'            },' "\n"
+            r'\2',
             "health_detailed native_protocol",
         )
         changes.append("health_detailed native_protocol")
 
     if '"hermes_native": True,' not in text:
-        text, _ = _replace_once(
+        text, _ = _replace_regex_once(
             text,
-            '            "features": {\n'
-            '                "chat_completions": True,',
-            '            "features": {\n'
-            '                "hermes_native": True,\n'
-            '                "native_responses": True,\n'
-            '                "native_endpoint": "/v1/hermes/native",\n'
-            '                "native_event_passthrough": True,\n'
-            '                "raw_hermes_events": True,\n'
-            '                "strict_native_compatible": True,\n'
-            '                "context_owner": "hermes-agent",\n'
-            '                "planner_events": True,\n'
-            '                "memory_events": True,\n'
-            '                "retrieval_events": True,\n'
-            '                "artifact_events": True,\n'
-            '                "chat_completions": True,',
+            r'(^\s+"features": \{\n)(^\s+"chat_completions": True,)',
+            r'\1'
+            r'                "hermes_native": True,' "\n"
+            r'                "native_responses": True,' "\n"
+            r'                "native_endpoint": "/v1/hermes/native",' "\n"
+            r'                "native_event_passthrough": True,' "\n"
+            r'                "raw_hermes_events": True,' "\n"
+            r'                "strict_native_compatible": True,' "\n"
+            r'                "context_owner": "hermes-agent",' "\n"
+            r'                "planner_events": True,' "\n"
+            r'                "memory_events": True,' "\n"
+            r'                "retrieval_events": True,' "\n"
+            r'                "artifact_events": True,' "\n"
+            r'\2',
             "capabilities hermes_native",
         )
         changes.append("capabilities hermes_native")
 
     if '"hermes_native": {"method": "POST", "path": "/v1/hermes/native"}' not in text:
-        text, _ = _replace_once(
+        text, _ = _replace_regex_once(
             text,
-            '                "responses": {"method": "POST", "path": "/v1/responses"},\n'
-            '                "runs": {"method": "POST", "path": "/v1/runs"},',
-            '                "responses": {"method": "POST", "path": "/v1/responses"},\n'
-            '                "hermes_native": {"method": "POST", "path": "/v1/hermes/native"},\n'
-            '                "runs": {"method": "POST", "path": "/v1/runs"},',
+            r'(^\s+"responses": \{"method": "POST", "path": "/v1/responses"\},\n)(^\s+"runs": \{"method": "POST", "path": "/v1/runs"\},)',
+            r'\1'
+            r'                "hermes_native": {"method": "POST", "path": "/v1/hermes/native"},' "\n"
+            r'\2',
             "capabilities hermes_native endpoint",
         )
         changes.append("capabilities hermes_native endpoint")
@@ -241,6 +246,56 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
         )
         changes.append("responses stream emit cli context usage")
 
+    if "chat completions final_response fallback" not in text:
+        text, _ = _replace_once(
+            text,
+            "            async def _emit(item):\n"
+            "                \"\"\"Write a single queue item to the SSE stream.\n",
+            "            emitted_text = False\n"
+            "            # Hermes Hub patch: Chat Completions may receive only a final_response.\n"
+            "            # In that case emit it as one delta instead of returning an empty stream.\n"
+            "\n"
+            "            async def _emit(item):\n"
+            "                \"\"\"Write a single queue item to the SSE stream.\n",
+            "chat completions emitted_text tracker",
+        )
+        text, _ = _replace_once(
+            text,
+            "                    content_chunk = {\n"
+            "                        \"id\": completion_id, \"object\": \"chat.completion.chunk\",\n"
+            "                        \"created\": created, \"model\": model,\n"
+            "                        \"choices\": [{\"index\": 0, \"delta\": {\"content\": item}, \"finish_reason\": None}],\n"
+            "                    }\n"
+            "                    await response.write(f\"data: {json.dumps(content_chunk)}\\n\\n\".encode())",
+            "                    nonlocal emitted_text\n"
+            "                    if isinstance(item, str) and item:\n"
+            "                        emitted_text = True\n"
+            "                    content_chunk = {\n"
+            "                        \"id\": completion_id, \"object\": \"chat.completion.chunk\",\n"
+            "                        \"created\": created, \"model\": model,\n"
+            "                        \"choices\": [{\"index\": 0, \"delta\": {\"content\": item}, \"finish_reason\": None}],\n"
+            "                    }\n"
+            "                    await response.write(f\"data: {json.dumps(content_chunk)}\\n\\n\".encode())",
+            "chat completions mark emitted_text",
+        )
+        text, _ = _replace_once(
+            text,
+            "            try:\n"
+            "                result, agent_usage = await agent_task\n"
+            "                usage = agent_usage or usage\n"
+            "            except Exception as exc:",
+            "            try:\n"
+            "                result, agent_usage = await agent_task\n"
+            "                usage = agent_usage or usage\n"
+            "                agent_final = result.get(\"final_response\", \"\") if isinstance(result, dict) else \"\"\n"
+            "                if agent_final and not emitted_text:\n"
+            "                    # chat completions final_response fallback\n"
+            "                    last_activity = await _emit(agent_final)\n"
+            "            except Exception as exc:",
+            "chat completions final_response fallback",
+        )
+        changes.append("chat completions final_response fallback")
+
     if 'tag == "__hermes_raw_event__"' not in text:
         text, _ = _replace_once(
             text,
@@ -330,13 +385,12 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
         changes.append("responses tool_complete raw passthrough")
 
     if 'add_post("/v1/hermes/native", self._handle_responses)' not in text:
-        text, _ = _replace_once(
+        text, _ = _replace_regex_once(
             text,
-            '            self._app.router.add_post("/v1/responses", self._handle_responses)\n'
-            '            self._app.router.add_get("/v1/responses/{response_id}", self._handle_get_response)',
-            '            self._app.router.add_post("/v1/responses", self._handle_responses)\n'
-            '            self._app.router.add_post("/v1/hermes/native", self._handle_responses)\n'
-            '            self._app.router.add_get("/v1/responses/{response_id}", self._handle_get_response)',
+            r'(^\s+self\._app\.router\.add_post\("/v1/responses", self\._handle_responses\)\n)(^\s+self\._app\.router\.add_get\("/v1/responses/\{response_id\}", self\._handle_get_response\))',
+            r'\1'
+            r'            self._app.router.add_post("/v1/hermes/native", self._handle_responses)' "\n"
+            r'\2',
             "router hermes_native alias",
         )
         changes.append("router hermes_native alias")

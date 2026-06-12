@@ -19,7 +19,7 @@ Auxiliary local-only: true (`HERMES_AUXILIARY_LOCAL_ONLY=true`)
 Native events: true (`HERMES_NATIVE_EVENTS=true`)
 Raw event passthrough: true (`HERMES_RAW_EVENT_PASSTHROUGH=true`)
 Native gateway patch: true (`HERMES_NATIVE_GATEWAY_PATCH=true`)
-Provider: lm_studio
+Provider: lmstudio
 Inference: http://127.0.0.1:1234/v1
 Config: ~/.hermes/config.yaml
 Env: ~/.hermes/.env
@@ -67,7 +67,7 @@ Environment=VLLM_BASE_URL=http://127.0.0.1:8000
 Environment=HERMES_INFERENCE_MODEL=nome-modello-vllm
 ```
 
-Il servizio deve esporre sempre `http://SERVER:8642/v1` verso Hermes Hub e usare `API_SERVER_KEY=hermes-hub`, cosi' Android/Windows non cambiano configurazione quando si passa da Windows test a Ubuntu/vLLM.
+Il servizio deve esporre sempre `http://SERVER:8642/v1` verso Hermes Hub e usare `API_SERVER_KEY=hermes-hub`, cosi' Android/Windows non cambiano configurazione quando si passa da Windows test a Ubuntu/vLLM. Il launcher imposta sia `API_SERVER_HOST=0.0.0.0`/`API_SERVER_PORT=8642` sia le variabili compat `HERMES_API_HOST`/`HERMES_API_PORT`: Android deve usare l'IP del server o l'IP Tailscale, non `127.0.0.1`.
 
 `HERMES_AUXILIARY_LOCAL_ONLY=true` mantiene i task ausiliari dentro il provider locale e impedisce fallback esterni OpenRouter/Nous durante i test LM Studio o su vLLM headless.
 
