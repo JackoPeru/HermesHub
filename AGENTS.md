@@ -58,7 +58,7 @@ Hermes Hub 0.6.68 (Windows + Android):
 
 Release 0.6.68:
 - Fix reale updater Windows post-fallimento 0.6.66: lo script PowerShell generato ora contiene newline reali invece di letterali `` `n`` e usa path fisico MSIX `ApplicationData.Current.LocalCacheFolder\Local\ChatClaw\updates`, cosi il PowerShell esterno vede file/log dentro la virtualizzazione MSIX.
-- PC Matteo riparato manualmente installando `0.6.67.0`; release `0.6.68` serve per testare update interno da 0.6.67 a 0.6.68.
+- PC Matteo riparato manualmente prima installando `0.6.67.0`, poi aggiornato manualmente a `0.6.68.0`; app rilanciata e processo vivo.
 - Default personale plug-and-play: Windows e Android puntano direttamente a `http://100.105.46.6:8642/v1` su Tailscale, con `hermes.local` e alias LAN come fallback discovery.
 - Release bump: Windows/AdminBridge `0.6.68`, Android `versionName 0.6.68`, `versionCode 80`.
 
