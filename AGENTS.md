@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.68 Release Hermes Hub 0.6.68 updater repair + Tailscale defaults
+v0.6.69 Release Hermes Hub 0.6.69 chat UI + Android auth polish
 ```
 
 ## Regola Memoria
@@ -53,6 +53,15 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.69 (Windows + Android):
+
+Release 0.6.69:
+- Windows Chat UI pulita: messaggi utente allineati a destra in bubble arancione; risposte Hermes a sinistra come testo libero senza card/blob.
+- Nuovo toggle Windows `Dettagli chat avanzati` in Impostazioni/Avanzate: default OFF; quando OFF nasconde eventi Hermes, tool call e metriche TTFT/tok/context nella chat. Quando ON ripristina vista diagnostica.
+- Android auth polish: retry 401 piu' permissivo; se Hermes rifiuta token salvato, `hermes-hub` e no-auth, mostra errore italiano pulito invece di JSON raw `Invalid API key` da Chat Completions.
+- Prompt native Android/Windows: rispondere nella lingua dell'utente, italiano se l'utente scrive italiano.
+- Release bump: Windows/AdminBridge `0.6.69`, Android `versionName 0.6.69`, `versionCode 81`.
 
 Hermes Hub 0.6.68 (Windows + Android):
 

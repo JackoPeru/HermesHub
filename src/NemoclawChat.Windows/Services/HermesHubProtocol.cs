@@ -124,6 +124,7 @@ public static class HermesHubProtocol
         return $"""
             Hermes Hub client surface: windows-app.
             Protocol mode: hermes-native/{role}.
+            Reply in the user's language. If the user writes Italian, answer in Italian.
             Use Hermes Agent server-side memory, planner, tools, jobs, artifacts and policy as source of truth.
             Client history is UI snapshot only; recover conversation context from Hermes conversation/response ids when available.
             Emit realtime Hermes events for planner, memory, retrieval, tool, artifact and model-call state when supported.

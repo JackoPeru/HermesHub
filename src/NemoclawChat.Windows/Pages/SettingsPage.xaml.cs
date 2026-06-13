@@ -28,6 +28,7 @@ public sealed partial class SettingsPage : Page
         VideoLibraryPathBox.Text = settings.VideoLibraryPath;
         ActiveProjectNameBox.Text = settings.ActiveProjectName;
         StrictNativeModeSwitch.IsOn = settings.StrictNativeMode;
+        AdvancedChatDetailsSwitch.IsOn = settings.AdvancedChatDetails;
         DemoModeSwitch.IsOn = settings.DemoMode;
         SelectComboItem(PreferredApiBox, settings.PreferredApi);
         SelectComboItem(AccessModeBox, settings.AccessMode);
@@ -128,6 +129,7 @@ public sealed partial class SettingsPage : Page
             AccessMode = SelectedComboText(AccessModeBox),
             VisualBlocksMode = SelectedComboText(VisualBlocksModeBox),
             StrictNativeMode = StrictNativeModeSwitch.IsOn,
+            AdvancedChatDetails = AdvancedChatDetailsSwitch.IsOn,
             DemoMode = DemoModeSwitch.IsOn
         };
     }

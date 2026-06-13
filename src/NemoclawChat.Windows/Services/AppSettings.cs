@@ -16,4 +16,5 @@ public sealed class AppSettings
     public string ActiveProjectName { get; set; } = string.Empty;
     public bool StrictNativeMode { get; set; } = false;
     public bool DemoMode { get; set; } = false;
+    public bool AdvancedChatDetails { get; set; } = false;
 }

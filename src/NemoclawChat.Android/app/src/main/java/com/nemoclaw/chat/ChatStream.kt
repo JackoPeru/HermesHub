@@ -357,6 +357,10 @@ fun streamChatRequest(
         }
         if (lastError != null && !sawDelta) {
             Log.w("ChatStream", "Responses API fallback: $lastError")
+            if (nativeMode && isHermesAuthError(lastError)) {
+                emit(ChatStreamEvent.Error("Hermes ha rifiutato l'API key. Ho provato API key salvata, hermes-hub e no-auth. Ripristina API key in Impostazioni o allinea HERMES_API_KEY sul gateway."))
+                return@flow
+            }
             if (nativeMode && settings.strictNativeMode) {
                 emit(ChatStreamEvent.Error("Strict native mode: Hermes Native/Responses non disponibile. $lastError"))
                 return@flow
@@ -514,7 +518,14 @@ private suspend fun openSseStream(
                 }
             }
         }
-        lastHttpError?.let { onEvent(ChatStreamEvent.Error("$label HTTP ${it.first}: ${it.second}")) }
+        lastHttpError?.let {
+            val message = if (it.first == 401) {
+                "$label: API key rifiutata. Provati token salvato, hermes-hub e no-auth."
+            } else {
+                "$label HTTP ${it.first}: ${it.second}"
+            }
+            onEvent(ChatStreamEvent.Error(message))
+        }
             ?: onEvent(ChatStreamEvent.Error(lastNetworkError ?: "$label: Hermes Gateway non raggiungibile."))
         true
     } catch (ex: CancellationException) {
@@ -753,6 +764,7 @@ private fun streamHermesNativeInstructions(mode: String): String {
     return """
         Hermes Hub client surface: android-app.
         Protocol mode: hermes-native/$role.
+        Reply in the user's language. If the user writes Italian, answer in Italian.
         Use Hermes Agent server-side memory, planner, tools, jobs, artifacts and policy as source of truth.
         Client history is UI snapshot only; recover conversation context from Hermes conversation/response ids when available.
         Emit realtime Hermes events for planner, memory, retrieval, tool, artifact and model-call state when supported.

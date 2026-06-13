@@ -547,15 +547,21 @@ public sealed partial class HomePage : Page
         ChatStreamStats? stats = null,
         IReadOnlyList<HermesRawEventRecord>? rawEvents = null)
     {
+        var advanced = AppSettingsStore.Load().AdvancedChatDetails;
+        var isUser = string.Equals(author, "Tu", StringComparison.OrdinalIgnoreCase);
+        var isAssistant = string.Equals(author, "Hermes", StringComparison.OrdinalIgnoreCase);
         var content = new StackPanel { Spacing = 8 };
-        content.Children.Add(new TextBlock
+        if (!isAssistant)
         {
-            Text = author,
-            FontSize = 12,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Colors.White)
-        });
-        if (string.Equals(author, "Hermes", StringComparison.OrdinalIgnoreCase))
+            content.Children.Add(new TextBlock
+            {
+                Text = author,
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Colors.White)
+            });
+        }
+        if (isAssistant)
         {
             content.Children.Add(MarkdownRenderer.Render(text, Colors.White));
         }
@@ -576,7 +582,8 @@ public sealed partial class HomePage : Page
                 content.Children.Add(RenderVisualBlock(block));
             }
         }
-        if (string.Equals(author, "Hermes", StringComparison.OrdinalIgnoreCase) &&
+        if (advanced &&
+            isAssistant &&
             rawEvents is { Count: > 0 })
         {
             foreach (var raw in rawEvents.Take(40))
@@ -584,16 +591,19 @@ public sealed partial class HomePage : Page
                 content.Children.Add(RenderRawHermesEvent(raw));
             }
         }
-        AddStatsFooter(content, stats);
+        if (advanced)
+        {
+            AddStatsFooter(content, stats);
+        }
 
         var bubble = new Border
         {
-            MaxWidth = 720,
-            Padding = new Thickness(18, 14, 18, 14),
-            CornerRadius = new CornerRadius(20),
-            Background = (Brush)Application.Current.Resources[brushKey],
-            BorderBrush = (Brush)Application.Current.Resources["BorderBrushSoft"],
-            BorderThickness = new Thickness(1),
+            MaxWidth = isUser ? 520 : 820,
+            Padding = isAssistant ? new Thickness(4, 2, 4, 2) : new Thickness(18, 14, 18, 14),
+            CornerRadius = isAssistant ? new CornerRadius(0) : new CornerRadius(20),
+            Background = isAssistant ? new SolidColorBrush(Colors.Transparent) : (Brush)Application.Current.Resources[brushKey],
+            BorderBrush = isAssistant ? new SolidColorBrush(Colors.Transparent) : (Brush)Application.Current.Resources["BorderBrushSoft"],
+            BorderThickness = isAssistant ? new Thickness(0) : new Thickness(1),
             HorizontalAlignment = alignment,
             Child = content
         };
@@ -690,7 +700,11 @@ public sealed partial class HomePage : Page
 
     private StreamingBubble CreateStreamingAssistantBubble()
     {
-        var bubble = new StreamingBubble(this, element => Messages.Add(new MessageViewModel(element)), MessagesScroll);
+        var bubble = new StreamingBubble(
+            this,
+            element => Messages.Add(new MessageViewModel(element)),
+            MessagesScroll,
+            AppSettingsStore.Load().AdvancedChatDetails);
         return bubble;
     }
 

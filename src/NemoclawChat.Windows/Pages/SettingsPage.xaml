@@ -57,6 +57,7 @@
                             <ComboBoxItem Content="never" />
                         </ComboBox>
                         <ToggleSwitch x:Name="StrictNativeModeSwitch" Header="Strict native mode" OffContent="Fallback compat consentiti" OnContent="Solo Hermes native/Responses" />
+                        <ToggleSwitch x:Name="AdvancedChatDetailsSwitch" Header="Dettagli chat avanzati" OffContent="Nascondi eventi e metriche" OnContent="Mostra eventi, tool e metriche" />
                         <ToggleSwitch x:Name="DemoModeSwitch" Header="Fallback locale" OffContent="Solo Hermes" OnContent="Fallback locale attivo" />
                     </StackPanel>
                 </Border>

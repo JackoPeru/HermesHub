@@ -11,8 +11,8 @@ android {
         applicationId = "com.nemoclaw.chat"
         minSdk = 26
         targetSdk = 36
-        versionCode = 80
-        versionName = "0.6.68"
+        versionCode = 81
+        versionName = "0.6.69"
     }
 
     buildTypes {

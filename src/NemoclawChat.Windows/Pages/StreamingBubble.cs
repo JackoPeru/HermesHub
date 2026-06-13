@@ -24,6 +24,7 @@ internal sealed class StreamingBubble
     private readonly StackPanel _rawEventsPanel;
     private readonly ContentControl _assistantContainer;
     private readonly TextBlock _statsText;
+    private readonly bool _showAdvanced;
     private readonly LinearGradientBrush _shimmerBrush;
     private readonly DispatcherTimer _shimmerTimer;
     private readonly Dictionary<string, ToolCallView> _toolViews = new();
@@ -34,20 +35,24 @@ internal sealed class StreamingBubble
     private double _shimmerPhase;
     private DateTime _started = DateTime.UtcNow;
 
-    public StreamingBubble(Page page, Action<UIElement> addElement, ScrollViewer scroll)
+    public StreamingBubble(Page page, Action<UIElement> addElement, ScrollViewer scroll, bool showAdvanced)
     {
         _page = page;
         _addElement = addElement;
         _scroll = scroll;
+        _showAdvanced = showAdvanced;
         _content = new StackPanel { Spacing = 10 };
 
-        _content.Children.Add(new TextBlock
+        if (_showAdvanced)
         {
-            Text = "Hermes",
-            FontSize = 12,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Colors.White)
-        });
+            _content.Children.Add(new TextBlock
+            {
+                Text = "Hermes",
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Colors.White)
+            });
+        }
 
         _shimmerBrush = new LinearGradientBrush
         {
@@ -89,7 +94,10 @@ internal sealed class StreamingBubble
             Visibility = Visibility.Visible
         };
 
-        _content.Children.Add(_thinkingExpander);
+        if (_showAdvanced)
+        {
+            _content.Children.Add(_thinkingExpander);
+        }
 
         _toolCallsPanel = new StackPanel { Spacing = 8 };
         _content.Children.Add(_toolCallsPanel);
@@ -115,12 +123,12 @@ internal sealed class StreamingBubble
 
         var bubble = new Border
         {
-            MaxWidth = 720,
-            Padding = new Thickness(18, 14, 18, 14),
-            CornerRadius = new CornerRadius(20),
-            Background = (Brush)Application.Current.Resources["AssistantBubbleBrush"],
-            BorderBrush = (Brush)Application.Current.Resources["BorderBrushSoft"],
-            BorderThickness = new Thickness(1),
+            MaxWidth = 820,
+            Padding = _showAdvanced ? new Thickness(18, 14, 18, 14) : new Thickness(4, 2, 4, 2),
+            CornerRadius = _showAdvanced ? new CornerRadius(20) : new CornerRadius(0),
+            Background = _showAdvanced ? (Brush)Application.Current.Resources["AssistantBubbleBrush"] : new SolidColorBrush(Colors.Transparent),
+            BorderBrush = _showAdvanced ? (Brush)Application.Current.Resources["BorderBrushSoft"] : new SolidColorBrush(Colors.Transparent),
+            BorderThickness = _showAdvanced ? new Thickness(1) : new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Left,
             Child = _content
         };
@@ -171,6 +179,10 @@ internal sealed class StreamingBubble
 
     public void AppendThinking(string delta)
     {
+        if (!_showAdvanced)
+        {
+            return;
+        }
         if (string.IsNullOrEmpty(delta))
         {
             return;
@@ -194,6 +206,10 @@ internal sealed class StreamingBubble
 
     public void StartToolCall(string id, string name)
     {
+        if (!_showAdvanced)
+        {
+            return;
+        }
         if (_toolViews.ContainsKey(id))
         {
             return;
@@ -309,6 +325,10 @@ internal sealed class StreamingBubble
 
     public void AppendToolCallArguments(string id, string delta)
     {
+        if (!_showAdvanced)
+        {
+            return;
+        }
         if (string.IsNullOrEmpty(delta))
         {
             return;
@@ -325,6 +345,10 @@ internal sealed class StreamingBubble
 
     public void EndToolCall(string id)
     {
+        if (!_showAdvanced)
+        {
+            return;
+        }
         if (_toolViews.TryGetValue(id, out var view))
         {
             view.StatusBlock.Text = "completato";
@@ -337,6 +361,10 @@ internal sealed class StreamingBubble
 
     public void AddToolResult(string? id, string? name, string output)
     {
+        if (!_showAdvanced)
+        {
+            return;
+        }
         if (!string.IsNullOrWhiteSpace(id) && _toolViews.TryGetValue(id!, out var view))
         {
             view.StatusBlock.Text = "risultato pronto";
@@ -382,6 +410,10 @@ internal sealed class StreamingBubble
 
     public void AddRawEvent(string name, string json)
     {
+        if (!_showAdvanced)
+        {
+            return;
+        }
         var body = new TextBlock
         {
             Text = PrettifyJson(json),
@@ -416,6 +448,13 @@ internal sealed class StreamingBubble
 
     public void Complete(ChatStreamStats stats)
     {
+        if (!_showAdvanced)
+        {
+            _thinkingExpander.Visibility = Visibility.Collapsed;
+            _shimmerTimer.Stop();
+            ScheduleScroll();
+            return;
+        }
         if (_hasThinking && _shimmerTimer.IsEnabled)
         {
             FreezeThinkingLabel();

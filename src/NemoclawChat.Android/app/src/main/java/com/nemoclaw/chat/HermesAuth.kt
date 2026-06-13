@@ -24,9 +24,13 @@ internal fun isHermesNative(settings: AppSettings): Boolean {
 }
 
 internal fun shouldRetryHermesWithBearerAuth(code: Int, body: String): Boolean {
-    if (code != 401) return false
-    val normalized = body.lowercase()
-    return normalized.contains("invalid api key") ||
+    return code == 401
+}
+
+internal fun isHermesAuthError(message: String?): Boolean {
+    val normalized = message?.lowercase().orEmpty()
+    return normalized.contains("401") ||
+        normalized.contains("invalid api key") ||
         normalized.contains("invalid_api_key") ||
         normalized.contains("invalidapikey")
 }
