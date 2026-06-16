@@ -80,6 +80,7 @@ import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.ManageSearch
+import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.SmartToy
@@ -232,6 +233,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     Archive("Archivio", Icons.Rounded.FolderOpen),
     Tasks("Jobs", Icons.Rounded.TaskAlt),
     Server("Hermes", Icons.Rounded.Dns),
+    Hardware("Hardware", Icons.Rounded.Memory),
     Operator("Runs", Icons.Rounded.Terminal),
     Voice("Voce", Icons.Rounded.GraphicEq),
     Video("Video", Icons.Rounded.PlayCircle),
@@ -479,6 +481,54 @@ private data class ServerSnapshot(
     val videoLibraryPath: String
 )
 
+private data class HardwareDisk(
+    val device: String,
+    val mountpoint: String,
+    val fileSystem: String,
+    val totalBytes: Long,
+    val usedBytes: Long,
+    val freeBytes: Long,
+    val percent: Double
+)
+
+private data class HardwareTemperature(
+    val name: String,
+    val label: String,
+    val currentC: Double,
+    val highC: Double?,
+    val criticalC: Double?
+)
+
+private data class HardwareSnapshot(
+    val status: String = "loading",
+    val timestampMs: Long = System.currentTimeMillis(),
+    val hostname: String = "-",
+    val operatingSystem: String = "-",
+    val platform: String = "-",
+    val architecture: String = "-",
+    val processor: String = "-",
+    val uptimeSeconds: Long = 0,
+    val cpuPercent: Double = 0.0,
+    val physicalCores: Int = 0,
+    val logicalCores: Int = 0,
+    val currentMhz: Double? = null,
+    val maxMhz: Double? = null,
+    val memoryPercent: Double = 0.0,
+    val memoryTotalBytes: Long = 0,
+    val memoryUsedBytes: Long = 0,
+    val memoryAvailableBytes: Long = 0,
+    val swapPercent: Double = 0.0,
+    val swapTotalBytes: Long = 0,
+    val swapUsedBytes: Long = 0,
+    val networkBytesSent: Long = 0,
+    val networkBytesReceived: Long = 0,
+    val processCount: Int = 0,
+    val temperatureSupport: String = "unavailable",
+    val disks: List<HardwareDisk> = emptyList(),
+    val temperatures: List<HardwareTemperature> = emptyList(),
+    val message: String = "Caricamento hardware..."
+)
+
 private data class GatewayWsProbe(
     val wsUrl: String,
     val connected: Boolean,
@@ -629,6 +679,7 @@ private fun ChatApp() {
                     )
                     Tab.Tasks -> TasksScreen(context, settings)
                     Tab.Server -> ServerScreen(context, settings)
+                    Tab.Hardware -> HardwareScreen(context, settings)
                     Tab.Operator -> OperatorScreen(context, settings)
                     Tab.Voice -> VoiceModeScreen()
                     Tab.Video -> VideoScreen(context, settings) { prompt ->
@@ -1179,6 +1230,7 @@ private fun executeSlashCommand(
         SlashAction.PromptNews -> setDraft("Crea un articolo per la sezione News di Hermes Hub: ")
         SlashAction.Health -> setDraft("Controlla stato Hermes, modello disponibile e capabilities API.")
         SlashAction.OpenServer -> onSwitchTab(Tab.Server)
+        SlashAction.OpenHardware -> onSwitchTab(Tab.Hardware)
         SlashAction.OpenOperator -> onSwitchTab(Tab.Operator)
         SlashAction.OpenArchive -> onSwitchTab(Tab.Archive)
         SlashAction.OpenTasks -> onSwitchTab(Tab.Tasks)
@@ -2759,6 +2811,136 @@ private fun ServerMetric(title: String, value: String, detail: String) {
 }
 
 @Composable
+private fun HardwareScreen(context: Context, settings: AppSettings) {
+    var snapshot by remember(settings) { mutableStateOf(HardwareSnapshot()) }
+    var previous by remember(settings) { mutableStateOf<HardwareSnapshot?>(null) }
+    val apiKey = remember(settings.gatewayUrl) { loadGatewaySecret(context) }
+
+    LaunchedEffect(settings.gatewayUrl, apiKey) {
+        while (true) {
+            val next = loadHardwareSnapshot(settings, apiKey)
+            previous = snapshot.takeIf { it.status != "loading" }
+            snapshot = next
+            kotlinx.coroutines.delay(1000L)
+        }
+    }
+
+    val dtSeconds = previous?.let { ((snapshot.timestampMs - it.timestampMs).coerceAtLeast(100L)) / 1000.0 } ?: 0.0
+    val downRate = previous?.let { ((snapshot.networkBytesReceived - it.networkBytesReceived).coerceAtLeast(0) / dtSeconds).toLong() } ?: 0L
+    val upRate = previous?.let { ((snapshot.networkBytesSent - it.networkBytesSent).coerceAtLeast(0) / dtSeconds).toLong() } ?: 0L
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Text("Hardware", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Gestione attivita remoto via Hermes Gateway. Polling ogni secondo.", color = AppColors.Muted)
+        }
+        item {
+            ServerMetric(
+                "Host",
+                "${snapshot.hostname} - ${snapshot.operatingSystem} ${snapshot.architecture}",
+                "${snapshot.message} Uptime ${formatHardwareUptime(snapshot.uptimeSeconds)}. Processi ${snapshot.processCount}. ${snapshot.platform}"
+            )
+        }
+        item {
+            HardwareGauge(
+                title = "CPU",
+                percent = snapshot.cpuPercent,
+                value = "${snapshot.cpuPercent.roundToInt().coerceIn(0, 100)}%",
+                detail = "${snapshot.physicalCores} core fisici / ${snapshot.logicalCores} thread. ${formatMhz(snapshot.currentMhz)} / max ${formatMhz(snapshot.maxMhz)}. ${snapshot.processor}"
+            )
+        }
+        item {
+            HardwareGauge(
+                title = "Memoria",
+                percent = snapshot.memoryPercent,
+                value = "${snapshot.memoryPercent.roundToInt().coerceIn(0, 100)}%",
+                detail = "${snapshot.memoryUsedBytes.toReadableFileSize()} usati / ${snapshot.memoryTotalBytes.toReadableFileSize()} totali. Disponibili ${snapshot.memoryAvailableBytes.toReadableFileSize()}."
+            )
+        }
+        item {
+            HardwareGauge(
+                title = "Swap",
+                percent = snapshot.swapPercent,
+                value = "${snapshot.swapPercent.roundToInt().coerceIn(0, 100)}%",
+                detail = "${snapshot.swapUsedBytes.toReadableFileSize()} usati / ${snapshot.swapTotalBytes.toReadableFileSize()} totali."
+            )
+        }
+        item {
+            ServerMetric(
+                "Rete",
+                "Down ${downRate.toReadableFileSize()}/s - Up ${upRate.toReadableFileSize()}/s",
+                "Totale ricevuto ${snapshot.networkBytesReceived.toReadableFileSize()} - inviato ${snapshot.networkBytesSent.toReadableFileSize()}."
+            )
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Dischi", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    if (snapshot.disks.isEmpty()) {
+                        Text("Nessun disco esposto dal gateway.", color = AppColors.Muted, fontSize = 12.sp)
+                    } else {
+                        snapshot.disks.forEach { disk ->
+                            HardwareGauge(
+                                title = "${disk.mountpoint} (${disk.fileSystem})",
+                                percent = disk.percent,
+                                value = "${disk.percent.roundToInt().coerceIn(0, 100)}%",
+                                detail = "${disk.usedBytes.toReadableFileSize()} usati / ${disk.totalBytes.toReadableFileSize()} totali. Libero ${disk.freeBytes.toReadableFileSize()}. ${disk.device}",
+                                compact = true
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Temperature", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    if (snapshot.temperatures.isEmpty()) {
+                        Text("Sensori non disponibili o non esposti. Stato: ${snapshot.temperatureSupport}. Su Windows spesso servono driver/tool vendor; su Ubuntu installa psutil e abilita lm-sensors.", color = AppColors.Muted, fontSize = 12.sp)
+                    } else {
+                        snapshot.temperatures.sortedByDescending { it.currentC }.take(24).forEach { temp ->
+                            Surface(color = AppColors.Panel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, AppColors.Border)) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("${temp.label}: ${String.format(java.util.Locale.US, "%.1f", temp.currentC)} C", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                    Text("Fonte ${temp.name}. High ${formatTemperature(temp.highC)}, critical ${formatTemperature(temp.criticalC)}.", color = AppColors.Muted, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HardwareGauge(title: String, percent: Double, value: String, detail: String, compact: Boolean = false) {
+    val safePercent = (percent / 100.0).toFloat().coerceIn(0f, 1f)
+    Surface(color = AppColors.Panel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, AppColors.Border)) {
+        Column(modifier = Modifier.padding(if (compact) 12.dp else 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(value, color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
+            }
+            LinearProgressIndicator(
+                progress = { safePercent },
+                modifier = Modifier.fillMaxWidth(),
+                color = AppColors.Accent,
+                trackColor = Color(0xFF424242)
+            )
+            Text(detail, color = AppColors.Muted, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
 private fun OperatorScreen(context: Context, settings: AppSettings) {
     val scope = rememberCoroutineScope()
     var method by remember { mutableStateOf("GET /health") }
@@ -3663,7 +3845,7 @@ private fun ProfileScreen(
             ServerMetric("Privacy", "Locale-first", "Chat/settings restano sul dispositivo finche' non colleghi Hermes. API key salvata in Keystore.")
         }
         item {
-            ServerMetric("Parita Windows", "Allineata", "Chat, archivio, progetti/recenti, jobs, Hermes server, runs, settings e profilo presenti anche su Android.")
+            ServerMetric("Parita Windows", "Allineata", "Chat, archivio, progetti/recenti, jobs, Hermes server, hardware, runs, settings e profilo presenti anche su Android.")
         }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
@@ -3672,6 +3854,7 @@ private fun ProfileScreen(
                     Text("Schermate secondarie spostate qui per lasciare la barra bassa pulita.", color = AppColors.Muted, fontSize = 12.sp)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { onOpenTab(Tab.Server) }) { Text("Hermes") }
+                        Button(onClick = { onOpenTab(Tab.Hardware) }) { Text("Hardware") }
                         Button(onClick = { onOpenTab(Tab.News) }) { Text("News") }
                         Button(onClick = { onOpenTab(Tab.Settings) }) { Text("Impostazioni") }
                         Button(onClick = { onOpenTab(Tab.Archive) }) { Text("Archivio") }
@@ -4627,6 +4810,94 @@ private suspend fun loadServerSnapshot(context: Context, settings: AppSettings, 
     }
 }
 
+private suspend fun loadHardwareSnapshot(settings: AppSettings, apiKey: String?): HardwareSnapshot = withContext(Dispatchers.IO) {
+    try {
+        val body = httpGet(resolveHermesUrl(settings, "/v1/hub/hardware"), apiKey)
+        parseHardwareSnapshot(JSONObject(body))
+    } catch (ex: Exception) {
+        HardwareSnapshot(
+            status = "unavailable",
+            message = "Hardware gateway non disponibile: ${ex.message ?: ex.javaClass.simpleName}"
+        )
+    }
+}
+
+private fun parseHardwareSnapshot(json: JSONObject): HardwareSnapshot {
+    val host = json.optJSONObject("host") ?: JSONObject()
+    val cpu = json.optJSONObject("cpu") ?: JSONObject()
+    val memory = json.optJSONObject("memory") ?: JSONObject()
+    val swap = json.optJSONObject("swap") ?: JSONObject()
+    val network = json.optJSONObject("network") ?: JSONObject()
+    val timestampMs = (json.optFiniteDouble("timestamp")?.times(1000.0)?.toLong())
+        ?.takeIf { it > 0 }
+        ?: System.currentTimeMillis()
+
+    val disks = buildList {
+        val array = json.optJSONArray("disks") ?: JSONArray()
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            add(
+                HardwareDisk(
+                    device = item.optString("device", "-"),
+                    mountpoint = item.optString("mountpoint", "-"),
+                    fileSystem = item.optString("fstype", "-"),
+                    totalBytes = item.optLong("total_bytes", 0L),
+                    usedBytes = item.optLong("used_bytes", 0L),
+                    freeBytes = item.optLong("free_bytes", 0L),
+                    percent = item.optFiniteDouble("percent") ?: 0.0
+                )
+            )
+        }
+    }
+
+    val temperatures = buildList {
+        val array = json.optJSONArray("temperatures") ?: JSONArray()
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val current = item.optFiniteDouble("current_c") ?: continue
+            add(
+                HardwareTemperature(
+                    name = item.optString("name", "-"),
+                    label = item.optString("label", item.optString("name", "-")),
+                    currentC = current,
+                    highC = item.optFiniteDouble("high_c"),
+                    criticalC = item.optFiniteDouble("critical_c")
+                )
+            )
+        }
+    }
+
+    return HardwareSnapshot(
+        status = json.optString("status", "ok"),
+        timestampMs = timestampMs,
+        hostname = host.optString("hostname", "-"),
+        operatingSystem = host.optString("os", "-"),
+        platform = host.optString("platform", "-"),
+        architecture = host.optString("architecture", "-"),
+        processor = host.optString("processor", "-"),
+        uptimeSeconds = host.optLong("uptime_seconds", 0L),
+        cpuPercent = cpu.optFiniteDouble("percent") ?: 0.0,
+        physicalCores = cpu.optInt("physical_cores", 0),
+        logicalCores = cpu.optInt("logical_cores", 0),
+        currentMhz = cpu.optFiniteDouble("current_mhz"),
+        maxMhz = cpu.optFiniteDouble("max_mhz"),
+        memoryPercent = memory.optFiniteDouble("percent") ?: 0.0,
+        memoryTotalBytes = memory.optLong("total_bytes", 0L),
+        memoryUsedBytes = memory.optLong("used_bytes", 0L),
+        memoryAvailableBytes = memory.optLong("available_bytes", 0L),
+        swapPercent = swap.optFiniteDouble("percent") ?: 0.0,
+        swapTotalBytes = swap.optLong("total_bytes", 0L),
+        swapUsedBytes = swap.optLong("used_bytes", 0L),
+        networkBytesSent = network.optLong("bytes_sent", 0L),
+        networkBytesReceived = network.optLong("bytes_recv", 0L),
+        processCount = json.optInt("process_count", 0),
+        temperatureSupport = json.optString("temperature_support", "unavailable"),
+        disks = disks,
+        temperatures = temperatures,
+        message = "Statistiche aggiornate dal gateway Hermes."
+    )
+}
+
 private suspend fun testGateway(healthUrl: String, apiKey: String?): String = withContext(Dispatchers.IO) {
     try {
         var last: Pair<Int, String>? = null
@@ -5081,6 +5352,7 @@ private suspend fun runDiagnostics(settings: AppSettings, apiKey: String?): List
         "Health dettagliata" to "/health/detailed",
         "Modelli" to "/v1/models",
         "Capabilities" to "/v1/capabilities",
+        "Hardware" to "/v1/hub/hardware",
         "Media proxy" to "/v1/media/not-a-real-media-id",
         "Video library" to "/v1/video/library",
         "Memoria" to "/v1/hub/memory",
@@ -5103,6 +5375,7 @@ private suspend fun runDiagnostics(settings: AppSettings, apiKey: String?): List
                     "Tailscale/API" -> "Avvia Tailscale e hermes-hub, verifica IP/porta 8642."
                     "Memoria" -> "Aggiorna Hermes Gateway alla build 0.6.42 o riavvia hermes-hub."
                     "Hub state" -> "Aggiorna Hermes Gateway alla build 0.6.42 o riavvia hermes-hub."
+                    "Hardware" -> "Aggiorna Hermes Gateway/patcher e installa psutil su Linux se mancano metriche live."
                     "Video library" -> "Imposta HERMES_VIDEO_LIBRARY_PATH e riavvia gateway."
                     else -> "Controlla API key, gateway URL e log del terminale hermes-hub."
                 }
@@ -5651,6 +5924,12 @@ private fun JSONObject.extractNestedString(parentKey: String, childKey: String):
     return optJSONObject(parentKey)?.extractString(childKey)
 }
 
+private fun JSONObject.optFiniteDouble(key: String): Double? {
+    if (!has(key) || isNull(key)) return null
+    val value = optDouble(key, Double.NaN)
+    return value.takeIf { it.isFinite() }
+}
+
 private fun JSONObject.optLongOrNull(key: String): Long? {
     if (!has(key) || isNull(key)) return null
     return try { getLong(key) } catch (_: Exception) { null }
@@ -5923,7 +6202,7 @@ private fun Long.toReadableFileSize(): String {
         return "0 B"
     }
 
-    val units = listOf("B", "KB", "MB", "GB")
+    val units = listOf("B", "KB", "MB", "GB", "TB", "PB")
     var size = this.toDouble()
     var unitIndex = 0
     while (size >= 1024 && unitIndex < units.lastIndex) {
@@ -5936,6 +6215,22 @@ private fun Long.toReadableFileSize(): String {
     } else {
         String.format(java.util.Locale.US, "%.1f %s", size, units[unitIndex])
     }
+}
+
+private fun formatHardwareUptime(seconds: Long): String {
+    if (seconds <= 0L) return "n/d"
+    val days = seconds / 86_400
+    val hours = (seconds % 86_400) / 3_600
+    val minutes = (seconds % 3_600) / 60
+    return if (days > 0) "${days}g ${hours}h" else "${hours}h ${minutes}m"
+}
+
+private fun formatMhz(value: Double?): String {
+    return if (value != null && value > 0.0) "${value.roundToInt()} MHz" else "n/d"
+}
+
+private fun formatTemperature(value: Double?): String {
+    return if (value != null) "${String.format(java.util.Locale.US, "%.1f", value)} C" else "n/d"
 }
 
 private fun loadSettings(context: Context): AppSettings {

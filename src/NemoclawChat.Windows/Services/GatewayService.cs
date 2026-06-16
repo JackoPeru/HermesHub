@@ -41,6 +41,51 @@ public sealed record HubMemoryState(
 
 public sealed record DiagnosticCheckResult(string Label, string Endpoint, bool Ok, string Message, string Action);
 
+public sealed record HardwareDiskRecord(
+    string Device,
+    string Mountpoint,
+    string FileSystem,
+    long TotalBytes,
+    long UsedBytes,
+    long FreeBytes,
+    double Percent);
+
+public sealed record HardwareTemperatureRecord(
+    string Name,
+    string Label,
+    double CurrentC,
+    double? HighC,
+    double? CriticalC);
+
+public sealed record HardwareSnapshot(
+    string Status,
+    DateTimeOffset Timestamp,
+    string Hostname,
+    string OperatingSystem,
+    string Platform,
+    string Architecture,
+    string Processor,
+    long UptimeSeconds,
+    double CpuPercent,
+    int PhysicalCores,
+    int LogicalCores,
+    double? CurrentMhz,
+    double? MaxMhz,
+    double MemoryPercent,
+    long MemoryTotalBytes,
+    long MemoryUsedBytes,
+    long MemoryAvailableBytes,
+    double SwapPercent,
+    long SwapTotalBytes,
+    long SwapUsedBytes,
+    long NetworkBytesSent,
+    long NetworkBytesReceived,
+    int ProcessCount,
+    string TemperatureSupport,
+    IReadOnlyList<HardwareDiskRecord> Disks,
+    IReadOnlyList<HardwareTemperatureRecord> Temperatures,
+    string Message);
+
 public static class GatewayService
 {
     internal const string HermesFallbackApiKey = GatewayCredentialStore.DefaultApiKey;
@@ -441,6 +486,136 @@ public static class GatewayService
         }
     }
 
+    public static async Task<HardwareSnapshot> GetHardwareSnapshotAsync(AppSettings settings)
+    {
+        try
+        {
+            await EnsureReachableGatewayAsync(settings);
+            var response = await SendBufferedAsync(token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, "/v1/hub/hardware"), token));
+            if (!response.IsSuccessStatusCode)
+            {
+                return EmptyHardwareSnapshot($"Hardware gateway non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}");
+            }
+
+            using var document = JsonDocument.Parse(response.Body);
+            return ParseHardwareSnapshot(document.RootElement);
+        }
+        catch (Exception ex)
+        {
+            return EmptyHardwareSnapshot($"Hardware gateway non disponibile: {ex.Message}");
+        }
+    }
+
+    private static HardwareSnapshot EmptyHardwareSnapshot(string message)
+    {
+        return new HardwareSnapshot(
+            "unavailable",
+            DateTimeOffset.Now,
+            "-",
+            "-",
+            "-",
+            "-",
+            "-",
+            0,
+            0,
+            0,
+            0,
+            null,
+            null,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            "unavailable",
+            [],
+            [],
+            message);
+    }
+
+    private static HardwareSnapshot ParseHardwareSnapshot(JsonElement root)
+    {
+        var host = root.TryGetProperty("host", out var hostElement) ? hostElement : default;
+        var cpu = root.TryGetProperty("cpu", out var cpuElement) ? cpuElement : default;
+        var memory = root.TryGetProperty("memory", out var memoryElement) ? memoryElement : default;
+        var swap = root.TryGetProperty("swap", out var swapElement) ? swapElement : default;
+        var network = root.TryGetProperty("network", out var networkElement) ? networkElement : default;
+        var timestampSeconds = ExtractDouble(root, "timestamp");
+        var timestamp = timestampSeconds > 0
+            ? DateTimeOffset.FromUnixTimeMilliseconds((long)(timestampSeconds * 1000))
+            : DateTimeOffset.Now;
+
+        var disks = new List<HardwareDiskRecord>();
+        if (root.TryGetProperty("disks", out var diskArray) && diskArray.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in diskArray.EnumerateArray())
+            {
+                disks.Add(new HardwareDiskRecord(
+                    ExtractString(item, "device") ?? "-",
+                    ExtractString(item, "mountpoint") ?? "-",
+                    ExtractString(item, "fstype") ?? "-",
+                    ExtractLong(item, "total_bytes"),
+                    ExtractLong(item, "used_bytes"),
+                    ExtractLong(item, "free_bytes"),
+                    ExtractDouble(item, "percent")));
+            }
+        }
+
+        var temperatures = new List<HardwareTemperatureRecord>();
+        if (root.TryGetProperty("temperatures", out var tempArray) && tempArray.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in tempArray.EnumerateArray())
+            {
+                var current = ExtractDouble(item, "current_c");
+                if (current <= -273.15)
+                {
+                    continue;
+                }
+
+                temperatures.Add(new HardwareTemperatureRecord(
+                    ExtractString(item, "name") ?? "-",
+                    ExtractString(item, "label") ?? "-",
+                    current,
+                    ExtractNullableDouble(item, "high_c"),
+                    ExtractNullableDouble(item, "critical_c")));
+            }
+        }
+
+        return new HardwareSnapshot(
+            ExtractString(root, "status") ?? "ok",
+            timestamp,
+            ExtractString(host, "hostname") ?? "-",
+            ExtractString(host, "os") ?? "-",
+            ExtractString(host, "platform") ?? "-",
+            ExtractString(host, "architecture") ?? "-",
+            ExtractString(host, "processor") ?? "-",
+            ExtractLong(host, "uptime_seconds"),
+            ExtractDouble(cpu, "percent"),
+            ExtractInt(cpu, "physical_cores"),
+            ExtractInt(cpu, "logical_cores"),
+            ExtractNullableDouble(cpu, "current_mhz"),
+            ExtractNullableDouble(cpu, "max_mhz"),
+            ExtractDouble(memory, "percent"),
+            ExtractLong(memory, "total_bytes"),
+            ExtractLong(memory, "used_bytes"),
+            ExtractLong(memory, "available_bytes"),
+            ExtractDouble(swap, "percent"),
+            ExtractLong(swap, "total_bytes"),
+            ExtractLong(swap, "used_bytes"),
+            ExtractLong(network, "bytes_sent"),
+            ExtractLong(network, "bytes_recv"),
+            ExtractInt(root, "process_count"),
+            ExtractString(root, "temperature_support") ?? "unavailable",
+            disks,
+            temperatures,
+            "Statistiche aggiornate dal gateway Hermes.");
+    }
+
     private static GatewayTaskResult BuildTaskFallback(AppSettings settings, AgentTaskRecord task, string message)
     {
         if (settings.DemoMode)
@@ -656,6 +831,7 @@ public static class GatewayService
             ("Health dettagliata", "/health/detailed", "Controlla log gateway."),
             ("Modelli", "/v1/models", "Controlla LM Studio/vLLM e modello caricato."),
             ("Capabilities", "/v1/capabilities", "Controlla API key e versione gateway."),
+            ("Hardware", "/v1/hub/hardware", "Aggiorna Hermes Gateway/patcher e installa psutil su Linux se mancano metriche live."),
             ("Video library", "/v1/video/library", "Imposta HERMES_VIDEO_LIBRARY_PATH e riavvia gateway."),
             ("Memoria", "/v1/hub/memory", "Aggiorna Hermes Gateway alla build 0.6.42 o riavvia hermes-hub."),
             ("Hub state", "/v1/hub/state", "Aggiorna Hermes Gateway alla build 0.6.42 o riavvia hermes-hub."),
@@ -1064,6 +1240,63 @@ public static class GatewayService
         }
 
         return null;
+    }
+
+    private static int ExtractInt(JsonElement root, string key)
+    {
+        return (int)Math.Clamp(ExtractLong(root, key), int.MinValue, int.MaxValue);
+    }
+
+    private static long ExtractLong(JsonElement root, string key)
+    {
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty(key, out var property))
+        {
+            return 0;
+        }
+
+        if (property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out var value))
+        {
+            return value;
+        }
+
+        if (property.ValueKind == JsonValueKind.String && long.TryParse(property.GetString(), out value))
+        {
+            return value;
+        }
+
+        return 0;
+    }
+
+    private static double ExtractDouble(JsonElement root, string key)
+    {
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty(key, out var property))
+        {
+            return 0;
+        }
+
+        if (property.ValueKind == JsonValueKind.Number && property.TryGetDouble(out var value))
+        {
+            return double.IsFinite(value) ? value : 0;
+        }
+
+        if (property.ValueKind == JsonValueKind.String &&
+            double.TryParse(property.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value))
+        {
+            return double.IsFinite(value) ? value : 0;
+        }
+
+        return 0;
+    }
+
+    private static double? ExtractNullableDouble(JsonElement root, string key)
+    {
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty(key, out var property) || property.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        var value = ExtractDouble(root, key);
+        return double.IsFinite(value) ? value : null;
     }
 
     private static string? ExtractString(JsonElement root, params string[] keys)

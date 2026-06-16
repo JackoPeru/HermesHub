@@ -675,7 +675,7 @@ internal data class SlashCommand(
 
 internal enum class SlashAction {
     ModeChat, ModeAgent, Clear, Help, Health,
-    OpenServer, OpenOperator, OpenArchive, OpenTasks, OpenVoice, OpenVideo, OpenNews, OpenSettings, OpenAbout,
+    OpenServer, OpenHardware, OpenOperator, OpenArchive, OpenTasks, OpenVoice, OpenVideo, OpenNews, OpenSettings, OpenAbout,
     PromptSetup, PromptVisual, PromptResearch, PromptWeb, PromptImage, PromptVideo, PromptNews
 }
 
@@ -687,6 +687,8 @@ internal fun slashCommands(): List<SlashCommand> = listOf(
     SlashCommand("/new", "Nuova chat", "Inizia nuova conversazione", SlashAction.Clear),
     SlashCommand("/health", "Controlla Hermes", "Verifica health e capabilities", SlashAction.Health),
     SlashCommand("/server", "Apri Server", "Dashboard server", SlashAction.OpenServer),
+    SlashCommand("/hardware", "Apri Hardware", "Prestazioni server", SlashAction.OpenHardware),
+    SlashCommand("/prestazioni", "Apri Hardware", "Gestione attivita server", SlashAction.OpenHardware),
     SlashCommand("/runs", "Apri Operator/Runs", "Probe API Hermes", SlashAction.OpenOperator),
     SlashCommand("/archive", "Apri Archivio", "Conversazioni salvate", SlashAction.OpenArchive),
     SlashCommand("/tasks", "Apri Task agente", "Coda jobs Hermes", SlashAction.OpenTasks),

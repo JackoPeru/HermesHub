@@ -27,6 +27,7 @@ Media roots: $HERMES_TERMINAL_CWD, ~/.hermes/cache, ~/.hermes/media
 Video library: ~/.hermes/media/video
 Hub state: ~/.hermes/hub_state.json
 Hub memory: ~/.hermes/hub_memory.json
+Hardware endpoint: GET /v1/hub/hardware
 ```
 
 Il launcher prova a leggere il modello attualmente caricato in LM Studio da `/api/v1/models` e poi `/v1/models`.
@@ -100,6 +101,14 @@ curl -H "Authorization: Bearer hermes-hub" http://SERVER:8642/v1/capabilities
 ```
 
 La risposta deve includere `features.hermes_native=true`, `features.raw_hermes_events=true` e `endpoints.hermes_native.path=/v1/hermes/native`.
+
+La sezione Hardware/Prestazioni usa `GET /v1/hub/hardware` protetto da `Authorization: Bearer hermes-hub`. Android e Windows fanno polling ogni secondo e mostrano CPU, RAM, swap, dischi, rete, processi e temperature quando il sistema le espone:
+
+```bash
+curl -H "Authorization: Bearer hermes-hub" http://SERVER:8642/v1/hub/hardware
+```
+
+Su Ubuntu headless installa `psutil` nell'ambiente Python usato da Hermes; per temperature reali abilita anche i sensori OS, ad esempio `lm-sensors`. Se i sensori non sono disponibili il gateway restituisce `temperature_support=no_sensors_reported`, ma CPU/RAM/dischi/rete restano utilizzabili.
 
 La sezione Video usa una cartella watched-folder ufficiale esposta da `/health/detailed` e interrogabile da Android tramite `GET /v1/video/library`:
 

@@ -91,6 +91,12 @@
                             <TextBlock Text="Server" />
                         </StackPanel>
                     </Button>
+                    <Button Click="Hardware_Click" Style="{StaticResource SidebarButtonStyle}" ToolTipService.ToolTip="Prestazioni hardware" AutomationProperties.Name="Prestazioni hardware">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <FontIcon FontSize="15" Glyph="&#xE9D9;" />
+                            <TextBlock Text="Hardware" />
+                        </StackPanel>
+                    </Button>
                     <Button Click="Operator_Click" Style="{StaticResource SidebarButtonStyle}" ToolTipService.ToolTip="Runs Hermes" AutomationProperties.Name="Runs Hermes">
                         <StackPanel Orientation="Horizontal" Spacing="10">
                             <FontIcon FontSize="15" Glyph="&#xE950;" />

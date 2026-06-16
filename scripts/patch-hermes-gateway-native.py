@@ -100,6 +100,153 @@ def _replace_regex_once(text: str, pattern: str, repl: str, label: str) -> tuple
 def _patch_text(text: str) -> tuple[str, list[str]]:
     changes: list[str] = []
 
+    if "def _collect_hardware_snapshot" not in text:
+        text, _ = _replace_once(
+            text,
+            "def _multimodal_validation_error(exc: ValueError, *, param: str) -> \"web.Response\":",
+            'def _collect_hardware_snapshot() -> Dict[str, Any]:\n'
+            '    """Return physical host telemetry for Hermes Hub clients.\n'
+            "\n"
+            "    Uses psutil when available. Without psutil the endpoint still returns\n"
+            "    stable host/spec data and marks live counters as unavailable.\n"
+            '    """\n'
+            "    import datetime as _datetime\n"
+            "    import platform as _platform\n"
+            "    import socket as _socket_local\n"
+            "\n"
+            "    now = time.time()\n"
+            "    snapshot: Dict[str, Any] = {\n"
+            '        "object": "hermes.hardware.snapshot",\n'
+            '        "status": "ok",\n'
+            '        "timestamp": now,\n'
+            '        "timestamp_iso": _datetime.datetime.fromtimestamp(now, _datetime.timezone.utc).isoformat(),\n'
+            '        "sample_interval_seconds": 1,\n'
+            '        "host": {\n'
+            '            "hostname": _socket_local.gethostname(),\n'
+            '            "os": _platform.system(),\n'
+            '            "platform": _platform.platform(),\n'
+            '            "kernel": _platform.release(),\n'
+            '            "architecture": _platform.machine(),\n'
+            '            "processor": _platform.processor(),\n'
+            "        },\n"
+            '        "cpu": {},\n'
+            '        "memory": {},\n'
+            '        "swap": {},\n'
+            '        "disks": [],\n'
+            '        "network": {},\n'
+            '        "temperatures": [],\n'
+            '        "temperature_support": "unavailable",\n'
+            '        "notes": [],\n'
+            "    }\n"
+            "\n"
+            "    try:\n"
+            "        import psutil  # type: ignore\n"
+            "    except Exception as exc:\n"
+            '        snapshot["status"] = "degraded"\n'
+            '        snapshot["notes"].append(f"psutil unavailable: {exc}")\n'
+            "        return snapshot\n"
+            "\n"
+            "    try:\n"
+            "        boot_time = float(psutil.boot_time())\n"
+            '        snapshot["host"]["boot_time"] = boot_time\n'
+            '        snapshot["host"]["uptime_seconds"] = max(0, int(now - boot_time))\n'
+            "    except Exception:\n"
+            "        pass\n"
+            "\n"
+            "    try:\n"
+            "        freq = psutil.cpu_freq()\n"
+            "    except Exception:\n"
+            "        freq = None\n"
+            "    try:\n"
+            "        load_avg = list(os.getloadavg()) if hasattr(os, \"getloadavg\") else []\n"
+            "    except Exception:\n"
+            "        load_avg = []\n"
+            '    snapshot["cpu"] = {\n'
+            '        "percent": float(psutil.cpu_percent(interval=0.05)),\n'
+            '        "per_core_percent": [float(x) for x in psutil.cpu_percent(interval=None, percpu=True)],\n'
+            '        "physical_cores": psutil.cpu_count(logical=False) or 0,\n'
+            '        "logical_cores": psutil.cpu_count(logical=True) or 0,\n'
+            '        "load_average": load_avg,\n'
+            '        "current_mhz": float(getattr(freq, "current", 0.0) or 0.0) if freq else None,\n'
+            '        "min_mhz": float(getattr(freq, "min", 0.0) or 0.0) if freq else None,\n'
+            '        "max_mhz": float(getattr(freq, "max", 0.0) or 0.0) if freq else None,\n'
+            "    }\n"
+            "\n"
+            "    mem = psutil.virtual_memory()\n"
+            '    snapshot["memory"] = {\n'
+            '        "total_bytes": int(mem.total),\n'
+            '        "available_bytes": int(mem.available),\n'
+            '        "used_bytes": int(mem.used),\n'
+            '        "free_bytes": int(getattr(mem, "free", 0) or 0),\n'
+            '        "percent": float(mem.percent),\n'
+            "    }\n"
+            "    swap = psutil.swap_memory()\n"
+            '    snapshot["swap"] = {\n'
+            '        "total_bytes": int(swap.total),\n'
+            '        "used_bytes": int(swap.used),\n'
+            '        "free_bytes": int(swap.free),\n'
+            '        "percent": float(swap.percent),\n'
+            "    }\n"
+            "\n"
+            "    disks: List[Dict[str, Any]] = []\n"
+            "    for part in psutil.disk_partitions(all=False):\n"
+            "        try:\n"
+            "            usage = psutil.disk_usage(part.mountpoint)\n"
+            "        except Exception:\n"
+            "            continue\n"
+            "        disks.append({\n"
+            '            "device": part.device,\n'
+            '            "mountpoint": part.mountpoint,\n'
+            '            "fstype": part.fstype,\n'
+            '            "total_bytes": int(usage.total),\n'
+            '            "used_bytes": int(usage.used),\n'
+            '            "free_bytes": int(usage.free),\n'
+            '            "percent": float(usage.percent),\n'
+            "        })\n"
+            '    snapshot["disks"] = disks\n'
+            "\n"
+            "    net = psutil.net_io_counters()\n"
+            '    snapshot["network"] = {\n'
+            '        "bytes_sent": int(net.bytes_sent),\n'
+            '        "bytes_recv": int(net.bytes_recv),\n'
+            '        "packets_sent": int(net.packets_sent),\n'
+            '        "packets_recv": int(net.packets_recv),\n'
+            "    }\n"
+            "\n"
+            "    try:\n"
+            "        temps = psutil.sensors_temperatures(fahrenheit=False)\n"
+            "    except Exception as exc:\n"
+            "        temps = {}\n"
+            '        snapshot["notes"].append(f"temperature sensors unavailable: {exc}")\n'
+            "    flattened: List[Dict[str, Any]] = []\n"
+            "    for name, entries in (temps or {}).items():\n"
+            "        for entry in entries:\n"
+            "            current = getattr(entry, \"current\", None)\n"
+            "            if current is None:\n"
+            "                continue\n"
+            "            flattened.append({\n"
+            '                "name": name,\n'
+            '                "label": getattr(entry, "label", "") or name,\n'
+            '                "current_c": float(current),\n'
+            '                "high_c": None if getattr(entry, "high", None) is None else float(entry.high),\n'
+            '                "critical_c": None if getattr(entry, "critical", None) is None else float(entry.critical),\n'
+            "            })\n"
+            '    snapshot["temperatures"] = flattened\n'
+            '    snapshot["temperature_support"] = "available" if flattened else "no_sensors_reported"\n'
+            "\n"
+            "    try:\n"
+            "        snapshot[\"process_count\"] = len(psutil.pids())\n"
+            "    except Exception:\n"
+            "        pass\n"
+            "\n"
+            "    return snapshot\n"
+            "\n"
+            "\n"
+            "def _multimodal_validation_error(exc: ValueError, *, param: str) -> \"web.Response\":",
+            "hardware telemetry collector",
+        )
+        changes.append("hardware telemetry collector")
+
     if "def _is_hermes_hub_request" not in text:
         text, _ = _replace_once(
             text,
@@ -202,6 +349,41 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
             "capabilities hermes_native",
         )
         changes.append("capabilities hermes_native")
+
+    if '"hardware_monitoring": True,' not in text:
+        text, _ = _replace_regex_once(
+            text,
+            r'(^\s+"features": \{\n)',
+            r'\1'
+            r'                "hardware_monitoring": True,' "\n",
+            "capabilities hardware_monitoring",
+        )
+        changes.append("capabilities hardware_monitoring")
+
+    if '"hardware": {"method": "GET", "path": "/v1/hub/hardware"}' not in text:
+        text, _ = _replace_regex_once(
+            text,
+            r'(^\s+"health_detailed": \{"method": "GET", "path": "/health/detailed"\},\n)',
+            r'\1'
+            r'                "hardware": {"method": "GET", "path": "/v1/hub/hardware"},' "\n",
+            "capabilities hardware endpoint",
+        )
+        changes.append("capabilities hardware endpoint")
+
+    if "async def _handle_hub_hardware" not in text:
+        text, _ = _replace_once(
+            text,
+            "    async def _handle_models(self, request: \"web.Request\") -> \"web.Response\":",
+            "    async def _handle_hub_hardware(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_collect_hardware_snapshot())\n"
+            "\n"
+            "    async def _handle_models(self, request: \"web.Request\") -> \"web.Response\":",
+            "hardware endpoint handler",
+        )
+        changes.append("hardware endpoint handler")
 
     if '"hermes_native": {"method": "POST", "path": "/v1/hermes/native"}' not in text:
         text, _ = _replace_regex_once(
@@ -458,6 +640,16 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
             "router hermes_native alias",
         )
         changes.append("router hermes_native alias")
+
+    if 'add_get("/v1/hub/hardware", self._handle_hub_hardware)' not in text:
+        text, _ = _replace_regex_once(
+            text,
+            r'(^\s+self\._app\.router\.add_get\("/v1/capabilities", self\._handle_capabilities\)\n)',
+            r'\1'
+            r'            self._app.router.add_get("/v1/hub/hardware", self._handle_hub_hardware)' "\n",
+            "router hardware endpoint",
+        )
+        changes.append("router hardware endpoint")
 
     return text, changes
 

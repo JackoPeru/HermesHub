@@ -42,6 +42,7 @@ public sealed partial class ServerPage : Page
         ContractText.Text =
             "GET /health -> stato Hermes API Server\n" +
             "GET /health/detailed -> stato dettagliato\n" +
+            "GET /v1/hub/hardware -> prestazioni hardware host ogni secondo lato client\n" +
             "GET /v1/models -> modelli disponibili\n" +
             "GET /v1/capabilities -> API supportate\n" +
             "POST /v1/responses -> chat primaria con store/conversation\n" +

@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.71 Release Hermes Hub 0.6.71 gateway transparency
+v0.6.72 Release Hermes Hub 0.6.72 hardware monitoring
 ```
 
 ## Regola Memoria
@@ -53,6 +53,16 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.72 (Windows + Android):
+
+Release 0.6.72:
+- Nuova sezione Hardware/Prestazioni: Windows ha pagina `Hardware` in sidebar; Android la apre da Profilo e slash `/hardware`/`/prestazioni`.
+- Telemetria hardware passa dal gateway protetto `GET /v1/hub/hardware` con polling client 1 volta al secondo.
+- Dati mostrati: host/sistema, CPU, RAM, swap, dischi, rete, processi e temperature quando esposte dal sistema.
+- Gateway patcher aggiornato per Windows e Ubuntu/headless; Linux usa `psutil` e sensori OS/lm-sensors per temperature reali, Windows puo' indicare `temperature_support=no_sensors_reported` se i sensori non sono disponibili.
+- Gateway locale Windows patchato e verificato su `http://127.0.0.1:8642/v1/hub/hardware` e Tailscale `http://100.105.46.6:8642/v1/hub/hardware`.
+- Release bump: Windows/AdminBridge `0.6.72`, Android `versionName 0.6.72`, `versionCode 84`.
 
 Hermes Hub 0.6.71 (Windows + Android):
 
@@ -327,6 +337,9 @@ Release 0.6.35:
 
 ## Modifiche non rilasciate
 
+- Sezione Hardware/Prestazioni aggiunta come Gestione attivita remoto: Windows ha pagina `Hardware` in sidebar, Android la apre da Profilo e slash `/hardware`/`/prestazioni`; entrambe fanno polling 1 volta al secondo su `GET /v1/hub/hardware`.
+- Gateway Hermes patcher aggiunge endpoint protetto `GET /v1/hub/hardware` con snapshot host/CPU/RAM/swap/dischi/rete/processi/temperature quando disponibili. Linux Ubuntu headless usa `psutil` e, per temperature reali, sensori OS/lm-sensors; Windows puo' non esporre temperature senza driver/tool vendor e in quel caso restituisce `temperature_support=no_sensors_reported`.
+- Gateway locale Windows `%LOCALAPPDATA%\hermes\hermes-agent\gateway\platforms\api_server.py` patchato e riavviato per test hardware. Verificato `GET http://127.0.0.1:8642/v1/hub/hardware` e `GET http://100.105.46.6:8642/v1/hub/hardware`: risposta 200 con host `PC-Matteo`, CPU/RAM/dischi/rete/processi reali; temperature Windows non esposte (`temperature_support=no_sensors_reported`).
 - Audit architetturale aggiunto in `docs/hermes-hub-vs-hermes-native.md`: rischio che Hermes Hub castri Hermes Agent se resta orchestratore rigido. Direzione proposta: `Hermes Hub = thin operational client`, `Hermes Gateway = transport/security/media proxy`, `Hermes Agent = brain/memory/planner/tools/artifacts`.
 - Implementata direzione Hermes Native: default Android/Windows/config `preferredApi=hermes-native`, `strict native mode` default ON, Chat e Agente passano da Responses/native path con context delegato a Hermes; Chat Completions/no-auth restano solo fallback compat quando strict e' OFF.
 - Gateway Hermes locale `%LOCALAPPDATA%\hermes\hermes-agent\gateway\platforms\api_server.py` aggiornato per dichiarare `hermes_native`, `native_event_passthrough`, `raw_hermes_events`, `context_owner=hermes-agent`, alias `POST /v1/hermes/native` e primo evento SSE `hermes.native.protocol`; tool/progress custom `hermes.*` vengono inoltrati raw oltre alla compat Responses.
