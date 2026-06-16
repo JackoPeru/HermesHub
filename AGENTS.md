@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.72 Release Hermes Hub 0.6.72 hardware monitoring
+v0.6.73 Release Hermes Hub 0.6.73 hardware bottom nav
 ```
 
 ## Regola Memoria
@@ -53,6 +53,13 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.73 (Windows + Android):
+
+Release 0.6.73:
+- Hotfix visibilita Android: Hardware ora e' voce diretta nella bottom nav (`Chat`/`Hardware`/`Voce`/`Video`/`Profilo`), per non restare nascosta dentro Profilo.
+- Runs resta accessibile da Profilo/Aree rapide e slash `/runs`.
+- Release bump: Windows/AdminBridge `0.6.73`, Android `versionName 0.6.73`, `versionCode 85`.
 
 Hermes Hub 0.6.72 (Windows + Android):
 

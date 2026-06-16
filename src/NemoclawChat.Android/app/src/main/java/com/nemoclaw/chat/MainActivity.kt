@@ -626,7 +626,7 @@ private fun ChatApp() {
             bottomBar = {
                 if (selectedTab != Tab.Voice) {
                     val bottomTabs = remember {
-                        listOf(Tab.Chat, Tab.Operator, Tab.Voice, Tab.Video, Tab.Profile)
+                        listOf(Tab.Chat, Tab.Hardware, Tab.Voice, Tab.Video, Tab.Profile)
                     }
                     NavigationBar(containerColor = AppColors.Sidebar) {
                         bottomTabs.forEach { tab ->
@@ -3854,6 +3854,7 @@ private fun ProfileScreen(
                     Text("Schermate secondarie spostate qui per lasciare la barra bassa pulita.", color = AppColors.Muted, fontSize = 12.sp)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { onOpenTab(Tab.Server) }) { Text("Hermes") }
+                        Button(onClick = { onOpenTab(Tab.Operator) }) { Text("Runs") }
                         Button(onClick = { onOpenTab(Tab.Hardware) }) { Text("Hardware") }
                         Button(onClick = { onOpenTab(Tab.News) }) { Text("News") }
                         Button(onClick = { onOpenTab(Tab.Settings) }) { Text("Impostazioni") }
