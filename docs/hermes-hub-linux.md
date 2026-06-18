@@ -30,6 +30,75 @@ Hub memory: ~/.hermes/hub_memory.json
 Hardware endpoint: GET /v1/hub/hardware
 ```
 
+## Installazione iniziale e update
+
+Primo trasferimento sul server: copia la cartella `scripts/` oppure l'asset release Linux `HermesHub-X.Y.Z-linux-gateway.tar.gz`, poi esegui:
+
+```bash
+cd /percorso/HermesHub/scripts
+chmod +x install-hermes-hub-linux.sh hermes-hub-linux.sh hermes-hub-linux-update.sh
+./install-hermes-hub-linux.sh --enable-service --enable-auto-update
+```
+
+Questo installa:
+
+```text
+~/.local/share/hermes-hub-gateway/current
+~/hermes-hub-linux.sh
+~/patch-hermes-gateway-native.py
+~/.local/bin/hermes-hub-linux-update
+~/.config/systemd/user/hermes-hub.service
+~/.config/systemd/user/hermes-hub-linux-update.timer
+```
+
+Aggiornamento manuale da dare all'agente sul server:
+
+```bash
+~/.local/bin/hermes-hub-linux-update --restart
+```
+
+Il comando legge `https://api.github.com/repos/JackoPeru/app-interazione-nemoclaw/releases/latest`, cerca un asset release Linux (`.tar.gz`, `.tgz` o `.zip` con `linux` nel nome), lo installa in `~/.local/share/hermes-hub-gateway/releases/<versione>`, aggiorna il symlink `current`, aggiorna `~/hermes-hub-linux.sh` e riavvia `hermes-hub.service`.
+
+Check senza installare:
+
+```bash
+~/.local/bin/hermes-hub-linux-update --check
+```
+
+Forzare reinstall stessa versione:
+
+```bash
+~/.local/bin/hermes-hub-linux-update --force --restart
+```
+
+Auto-update giornaliero opzionale:
+
+```bash
+systemctl --user enable --now hermes-hub-linux-update.timer
+systemctl --user list-timers | grep hermes-hub
+```
+
+Se il repo GitHub diventa privato o serve piu' quota API, esporta un token:
+
+```bash
+export GH_TOKEN=ghp_xxx
+~/.local/bin/hermes-hub-linux-update --restart
+```
+
+Per creare l'asset Linux da pubblicare nella release GitHub:
+
+```powershell
+.\scripts\package-linux-gateway.ps1 -Version 0.6.74
+```
+
+Output:
+
+```text
+artifacts\HermesHub-0.6.74-linux-gateway.tar.gz
+```
+
+Carica questo asset nella stessa GitHub Release usata da Windows `.msix` e Android `.apk`. Da quel momento il server Linux puo' aggiornarsi da solo o con comando CLI, senza nuovo trasferimento manuale.
+
 Il launcher prova a leggere il modello attualmente caricato in LM Studio da `/api/v1/models` e poi `/v1/models`.
 Se lo trova, aggiorna `~/.hermes/config.yaml` e imposta `HERMES_INFERENCE_MODEL`.
 
@@ -44,6 +113,8 @@ cp scripts/hermes-hub-linux.service ~/.config/systemd/user/hermes-hub.service
 systemctl --user daemon-reload
 systemctl --user enable --now hermes-hub.service
 ```
+
+Il metodo consigliato resta `install-hermes-hub-linux.sh`, perche' prepara anche updater, directory release e timer.
 
 Se LM Studio gira su un altro host:
 

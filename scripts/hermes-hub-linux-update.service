@@ -1,0 +1,7 @@
+[Unit]
+Description=Update Hermes Hub Linux gateway helper
+Documentation=https://github.com/JackoPeru/app-interazione-nemoclaw
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/hermes-hub-linux-update --restart

@@ -22,6 +22,7 @@ Client Windows + Android per parlare con Hermes Agent su home-server.
 - Runs: endpoint manuale e preset reali per health, models, capabilities, runs e jobs.
 - Memoria/Sync: `/v1/hub/memory` e `/v1/hub/state` per preferenze, feedback Video/News, progetto attivo e stato letto.
 - Update: Android scarica APK in app e apre installer; Windows scarica asset `.msix`, `.exe` o `.zip`.
+- Linux Gateway: update da GitHub Releases con `~/.local/bin/hermes-hub-linux-update --restart` e timer systemd opzionale.
 
 ## Preset Hermes
 
@@ -70,3 +71,4 @@ Asset attesi dagli updater:
 
 - Android: `.apk`
 - Windows: `.msix`, `.exe` o `.zip`
+- Linux Gateway: `HermesHub-X.Y.Z-linux-gateway.tar.gz`
