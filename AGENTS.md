@@ -110,8 +110,9 @@ Stato server Linux verificato 2026-06-18:
 
 - Boot order impostato senza reboot: `tailscaled.service` -> `hermes-llama.service` -> `hermes-hub.service`.
 - `hermes-llama.service` e' system service: richiede Tailscale, attende `tailscale status`, poi carica modello in GPU con llama.cpp TurboQuant.
-- `hermes-hub.service` e' user service con `loginctl enable-linger matteo`: resta vivo dopo logout SSH, PATH completo include `/home/matteo/.local/bin`, attende Tailscale con `hermes-wait-tailscale`, attende llama.cpp con `hermes-wait-llama` su `http://127.0.0.1:8000/v1/models`, poi espone gateway su `0.0.0.0:8642`.
-- Fix applicati sul server diventati default repo: provider gateway `custom`, base `http://127.0.0.1:8000/v1`, modello `HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive:IQ4_XS`, timeout start 1000s e stop 240s.
+- `hermes-hub.service` e' user service con `loginctl enable-linger matteo`: resta vivo dopo logout SSH, PATH completo include `%h/.local/bin`, attende Tailscale con `hermes-wait-tailscale.sh`, attende llama.cpp con `hermes-wait-llama.sh` su `http://127.0.0.1:8000/v1/models`, poi espone gateway su `0.0.0.0:8642`.
+- Fix applicati sul server diventati default repo: provider gateway `custom`, base `http://127.0.0.1:8000/v1`, path systemd portabili con `%h`, timeout start 1000s e stop 240s.
+- Decisione 2026-06-19: non hardcodare nel service release ne' `/home/matteo` ne' il modello Qwen specifico. Il modello viene rilevato da llama.cpp via `/v1/models`; fallback launcher generico `hermes-agent`. Per configurazioni server specifiche usare override/drop-in systemd o variabili env, cosi' gli update futuri non reintroducono LM Studio o path utente sbagliati.
 - Verifica finale attesa: `tailscaled.service`, `hermes-llama.service`, `hermes-hub.service` active; `curl -H "Authorization: Bearer hermes-hub" http://127.0.0.1:8642/v1/capabilities` OK; timer auto-update enabled.
 - Firewall finale atteso: UFW apre solo `8642/tcp` da LAN `192.168.1.0/24` e su `tailscale0`; nessuna apertura WAN/router.
 - Backup creati sul server prima delle modifiche: `/etc/systemd/system/hermes-llama.service.*.bootseq.bak`, `/home/matteo/.config/systemd/user/hermes-hub.service.*.bootseq.bak`, `/etc/ufw/user.rules.*.hermeshub.bak`, `/etc/ufw/user6.rules.*.hermeshub.bak`.
@@ -134,10 +135,22 @@ Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
 
+Hermes Hub 0.6.79 (Linux Gateway):
+
+Release 0.6.79:
+- Gateway Linux service portabile: usa `%h` invece di `/home/matteo` per PATH e `ExecStartPre`.
+- Wait Tailscale/llama.cpp tornano obbligatori: se non pronti, systemd deve fallire/ritentare invece di avviare gateway senza backend.
+- Service non hardcoda piu' `HERMES_INFERENCE_MODEL`; il launcher rileva il modello da llama.cpp `/v1/models`, fallback generico `hermes-agent`.
+- Launcher esporta PATH con `$HOME/.local/bin`, `$HOME/.hermes/bin`, `$HOME/.hermes/node/bin` prima di avviare Hermes.
+- Asset update server atteso: `artifacts/HermesHub-0.6.79-linux-gateway.tar.gz`.
+
 Hermes Hub 0.6.78 (Linux Gateway):
 
 Release 0.6.78:
-- Hardening update transitorio: `ExecStartPre` wait scripts diventano best-effort (`-...`) per non rompere il primo update se un updater vecchio non installa subito i nuovi helper.
+- Correzione 2026-06-19: `hermes-hub-linux.service` usa `%h` invece di `/home/matteo`, quindi la release e' installabile anche su utenti Linux diversi.
+- Correzione 2026-06-19: `ExecStartPre` non e' piu' best-effort. Deve attendere davvero `hermes-wait-tailscale.sh` e `hermes-wait-llama.sh`; se Tailscale o llama.cpp non sono pronti, systemd deve ritentare invece di avviare gateway senza backend.
+- Correzione 2026-06-19: il service release non imposta piu' `HERMES_INFERENCE_MODEL` hardcoded su Qwen. Il launcher legge il modello esposto da llama.cpp su `/v1/models`; fallback solo generico `hermes-agent`.
+- Correzione 2026-06-19: `hermes-hub-linux.sh` esporta PATH con `$HOME/.local/bin`, `$HOME/.hermes/bin` e `$HOME/.hermes/node/bin`, cosi' `hermes` viene trovato anche in avvio systemd/headless.
 - `hermes-hub-linux.sh` aspetta comunque Tailscale e llama.cpp internamente con `HERMES_WAIT_ON_START=true`, quindi il gateway non parte prima che `tailscaled` e `http://127.0.0.1:8000/v1/models` siano pronti.
 - Asset update server atteso: `artifacts/HermesHub-0.6.78-linux-gateway.tar.gz`.
 

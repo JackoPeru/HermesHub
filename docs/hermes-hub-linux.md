@@ -21,7 +21,7 @@ Raw event passthrough: true (`HERMES_RAW_EVENT_PASSTHROUGH=true`)
 Native gateway patch: true (`HERMES_NATIVE_GATEWAY_PATCH=true`)
 Provider: custom
 Inference: http://127.0.0.1:8000/v1
-Model: HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive:IQ4_XS
+Model: rilevato da http://127.0.0.1:8000/v1/models; fallback hermes-agent
 Config: ~/.hermes/config.yaml
 Env: ~/.hermes/.env
 Wait Tailscale: ~/.local/bin/hermes-wait-tailscale.sh
@@ -93,18 +93,18 @@ export GH_TOKEN=ghp_xxx
 Per creare l'asset Linux da pubblicare nella release GitHub:
 
 ```powershell
-.\scripts\package-linux-gateway.ps1 -Version 0.6.78
+.\scripts\package-linux-gateway.ps1 -Version 0.6.79
 ```
 
 Output:
 
 ```text
-artifacts\HermesHub-0.6.78-linux-gateway.tar.gz
+artifacts\HermesHub-0.6.79-linux-gateway.tar.gz
 ```
 
 Carica questo asset nella stessa GitHub Release usata da Windows `.msix` e Android `.apk`. Da quel momento il server Linux puo' aggiornarsi da solo o con comando CLI, senza nuovo trasferimento manuale.
 
-Il launcher usa di default il server OpenAI-compatible locale llama.cpp su `http://127.0.0.1:8000/v1` e il modello `HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive:IQ4_XS`. Se il provider e' `lmstudio`, prova ancora a leggere il modello da `/api/v1/models` e poi `/v1/models`.
+Il launcher usa di default il server OpenAI-compatible locale llama.cpp su `http://127.0.0.1:8000/v1` e legge il modello da `/v1/models`; se non riceve un modello valido usa fallback generico `hermes-agent`. Se il provider e' `lmstudio`, prova ancora a leggere il modello da `/api/v1/models` e poi `/v1/models`.
 
 Installazione come servizio user systemd:
 
@@ -127,7 +127,6 @@ Profilo produzione server Hermes/llama.cpp:
 ```bash
 HERMES_INFERENCE_PROVIDER=custom \
 HERMES_INFERENCE_BASE_URL=http://127.0.0.1:8000/v1 \
-HERMES_INFERENCE_MODEL=HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive:IQ4_XS \
 ./scripts/hermes-hub-linux.sh
 ```
 

@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-Environment=PATH=/home/matteo/.local/bin:/home/matteo/.hermes/bin:/home/matteo/.hermes/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=%h/.local/bin:%h/.hermes/bin:%h/.hermes/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=HERMES_API_HOST=0.0.0.0
 Environment=HERMES_API_PORT=8642
 Environment=API_SERVER_HOST=0.0.0.0
@@ -19,13 +19,12 @@ Environment=HERMES_MAX_ITERATIONS=120
 Environment=HERMES_AUXILIARY_LOCAL_ONLY=true
 Environment=HERMES_INFERENCE_PROVIDER=custom
 Environment=HERMES_INFERENCE_BASE_URL=http://127.0.0.1:8000/v1
-Environment=HERMES_INFERENCE_MODEL=HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive:IQ4_XS
 Environment=HERMES_VIDEO_LIBRARY_PATH=%h/.hermes/media/video
 Environment=HERMES_MEDIA_ROOTS=%h:%h/.hermes/cache:%h/.hermes/media:%h/.hermes/media/video
 Environment=HERMES_HUB_STATE_PATH=%h/.hermes/hub_state.json
 Environment=HERMES_HUB_MEMORY_PATH=%h/.hermes/hub_memory.json
-ExecStartPre=-/home/matteo/.local/bin/hermes-wait-tailscale.sh
-ExecStartPre=-/home/matteo/.local/bin/hermes-wait-llama.sh
+ExecStartPre=%h/.local/bin/hermes-wait-tailscale.sh
+ExecStartPre=%h/.local/bin/hermes-wait-llama.sh
 ExecStart=%h/hermes-hub-linux.sh
 Restart=on-failure
 RestartSec=5

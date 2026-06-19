@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PATH="$HOME/.local/bin:$HOME/.hermes/bin:$HOME/.hermes/node/bin:$PATH"
+
 # Hermes Gateway launcher for Ubuntu/Linux.
 # Exposes Hermes Agent API on LAN/Tailscale for Hermes Hub clients and routes
 # inference to the production llama.cpp OpenAI-compatible server by default.
@@ -12,7 +14,7 @@ HERMES_INFERENCE_PROVIDER="${HERMES_INFERENCE_PROVIDER:-custom}"
 LM_STUDIO_BASE_URL="${LM_STUDIO_BASE_URL:-http://127.0.0.1:1234}"
 VLLM_BASE_URL="${VLLM_BASE_URL:-http://127.0.0.1:8000}"
 LLAMA_CPP_BASE_URL="${LLAMA_CPP_BASE_URL:-http://127.0.0.1:8000/v1}"
-DEFAULT_HERMES_INFERENCE_MODEL="${DEFAULT_HERMES_INFERENCE_MODEL:-HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive:IQ4_XS}"
+DEFAULT_HERMES_INFERENCE_MODEL="${DEFAULT_HERMES_INFERENCE_MODEL:-hermes-agent}"
 API_SERVER_HOST="${API_SERVER_HOST:-${HERMES_API_HOST:-0.0.0.0}}"
 API_SERVER_PORT="${API_SERVER_PORT:-${HERMES_API_PORT:-8642}}"
 HERMES_API_HOST="$API_SERVER_HOST"
