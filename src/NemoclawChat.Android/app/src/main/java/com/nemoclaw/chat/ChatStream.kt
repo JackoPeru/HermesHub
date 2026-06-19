@@ -283,6 +283,7 @@ fun streamChatRequest(
     var lastError: String? = null
     val videoMode = isVideoRequest(prompt)
     val nativeMode = isHermesNative(settings)
+    val serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
 
     suspend fun emitAndTrack(ev: ChatStreamEvent): Boolean {
         when (ev) {
@@ -326,7 +327,6 @@ fun streamChatRequest(
 
     if (shouldUseResponsesFirst(settings, mode)) {
         emit(ChatStreamEvent.Status(if (nativeMode) "Protocollo effettivo: Hermes Native via Responses. Context delegato a Hermes." else "Invio diretto a Hermes Responses API..."))
-        val serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
 
         fun buildResponsePayload(candidatePreviousResponseId: String?): JSONObject {
             val payload = JSONObject()
@@ -408,6 +408,7 @@ fun streamChatRequest(
         val payload = JSONObject()
             .put("model", settings.model)
             .put("stream", true)
+            .put("session_id", serverConversationId ?: JSONObject.NULL)
             .put("metadata", visualBlocksMetadataJson(settings, conversationId))
             .put("messages", JSONArray().apply {
                 if (!nativeMode) {
@@ -434,7 +435,7 @@ fun streamChatRequest(
         })
         val url = "${settings.gatewayUrl.trimEnd('/')}/chat/completions"
         lastError = null
-        openSseStream(url, payload, "Hermes Chat Completions", apiKey, true) { ev ->
+        openSseStream(url, payload, "Hermes Chat Completions", apiKey, true, serverConversationId) { ev ->
             emitAndTrack(ev)
         }
     }
@@ -461,6 +462,7 @@ private suspend fun openSseStream(
     label: String,
     apiKey: String?,
     allowCompatAuth: Boolean,
+    sessionId: String? = null,
     onEvent: suspend (ChatStreamEvent) -> Boolean
 ): Boolean {
     var call: Call? = null
@@ -482,6 +484,7 @@ private suspend fun openSseStream(
                     .header("Accept", "text/event-stream, application/json")
                     .header("User-Agent", "HermesHub-Android")
                 bearerToken?.let { builder.header("Authorization", "Bearer $it") }
+                sessionId?.takeIf { it.isNotBlank() }?.let { builder.header("X-Hermes-Session-Id", it) }
                 val request = builder.post(body).build()
                 val activeCall = streamHttpClient.newCall(request)
                 call = activeCall

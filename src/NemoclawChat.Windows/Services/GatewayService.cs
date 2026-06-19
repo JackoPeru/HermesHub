@@ -198,6 +198,7 @@ public static class GatewayService
         try
         {
             var nativeMode = HermesHubProtocol.IsNativePreferred(settings);
+            var serverConversationId = HermesHubProtocol.ServerConversationId(conversationId);
             var chatMessages = (nativeMode
                 ? Enumerable.Empty<object>()
                 : new object[]
@@ -216,12 +217,13 @@ public static class GatewayService
             {
                 model = settings.Model,
                 stream = false,
+                session_id = serverConversationId,
                 metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId),
                 messages = chatMessages
             });
 
             var response = await SendBufferedAsync(
-                token => BuildJsonRequest(HttpMethod.Post, $"{settings.GatewayUrl.TrimEnd('/')}/chat/completions", chatPayload, token),
+                token => BuildJsonRequest(HttpMethod.Post, $"{settings.GatewayUrl.TrimEnd('/')}/chat/completions", chatPayload, token, serverConversationId),
                 allowCompatAuth: true);
             var body = response.Body;
 
@@ -1028,7 +1030,7 @@ public static class GatewayService
         return last ?? new BufferedHermesResponse(0, "No Response", string.Empty, null);
     }
 
-    private static HttpRequestMessage BuildRequest(HttpMethod method, string uri, string? bearerToken = null)
+    private static HttpRequestMessage BuildRequest(HttpMethod method, string uri, string? bearerToken = null, string? sessionId = null)
     {
         var request = new HttpRequestMessage(method, uri);
         request.Headers.TryAddWithoutValidation("Accept", "application/json");
@@ -1037,13 +1039,17 @@ public static class GatewayService
         {
             request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {bearerToken}");
         }
+        if (!string.IsNullOrWhiteSpace(sessionId))
+        {
+            request.Headers.TryAddWithoutValidation("X-Hermes-Session-Id", sessionId);
+        }
 
         return request;
     }
 
-    private static HttpRequestMessage BuildJsonRequest(HttpMethod method, string uri, string payload, string? bearerToken = null)
+    private static HttpRequestMessage BuildJsonRequest(HttpMethod method, string uri, string payload, string? bearerToken = null, string? sessionId = null)
     {
-        var request = BuildRequest(method, uri, bearerToken);
+        var request = BuildRequest(method, uri, bearerToken, sessionId);
         if (method != HttpMethod.Get && method != HttpMethod.Delete)
         {
             request.Content = new StringContent(payload, Encoding.UTF8, "application/json");

@@ -182,6 +182,7 @@ public static class ChatStreamClient
             {
                 yield return new StreamStatus("Protocollo effettivo: Hermes Chat Completions compat.");
             }
+            var serverConversationId = HermesHubProtocol.ServerConversationId(conversationId);
             var chatMessages = (nativeMode
                 ? Enumerable.Empty<object>()
                 : new object[]
@@ -200,6 +201,7 @@ public static class ChatStreamClient
             {
                 model = settings.Model,
                 stream = true,
+                session_id = serverConversationId,
                 metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId),
                 messages = chatMessages
             });
@@ -210,7 +212,8 @@ public static class ChatStreamClient
                                chatPayload,
                                "Hermes Chat Completions stream",
                                true,
-                               cancellationToken))
+                               cancellationToken,
+                               serverConversationId))
             {
                 if (ev is StreamError err)
                 {
@@ -297,7 +300,8 @@ public static class ChatStreamClient
         string jsonPayload,
         string label,
         bool allowCompatAuth,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        string? sessionId = null)
     {
         var authCandidates = GatewayService.BuildHermesAuthCandidates(allowCompatAuth).ToArray();
         for (var attempt = 0; attempt < authCandidates.Length; attempt++)
@@ -311,6 +315,10 @@ public static class ChatStreamClient
             if (!string.IsNullOrWhiteSpace(authCandidates[attempt]))
             {
                 request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {authCandidates[attempt]}");
+            }
+            if (!string.IsNullOrWhiteSpace(sessionId))
+            {
+                request.Headers.TryAddWithoutValidation("X-Hermes-Session-Id", sessionId);
             }
 
             HttpResponseMessage? response = null;

@@ -4551,6 +4551,7 @@ private suspend fun sendChatRequest(
         val payload = JSONObject()
             .put("model", settings.model)
             .put("stream", false)
+            .put("session_id", serverConversationId ?: JSONObject.NULL)
             .put("metadata", visualBlocksMetadata(settings, conversationId))
             .put("messages", JSONArray().apply {
                 if (!isHermesNative(settings)) {
@@ -4569,7 +4570,7 @@ private suspend fun sendChatRequest(
                     )
                 }
             })
-        val response = postJson("${settings.gatewayUrl.trimEnd('/')}/chat/completions", payload, apiKey, allowCompatAuth = !(isHermesNative(settings) && settings.strictNativeMode))
+        val response = postJson("${settings.gatewayUrl.trimEnd('/')}/chat/completions", payload, apiKey, allowCompatAuth = !(isHermesNative(settings) && settings.strictNativeMode), sessionId = serverConversationId)
         if (response.first in 200..299) {
             val text = extractAssistantText(response.second)
             if (text.isNotBlank()) {
@@ -5318,13 +5319,14 @@ private suspend fun postJson(
     payload: JSONObject,
     apiKey: String? = null,
     method: String = "POST",
-    allowCompatAuth: Boolean = true
+    allowCompatAuth: Boolean = true,
+    sessionId: String? = null
 ): Pair<Int, String> = withContext(Dispatchers.IO) {
     var last: Pair<Int, String>? = null
     for (candidateUrl in plugAndPlayUrlCandidates(url)) {
         for (token in hermesAuthCandidates(apiKey, allowCompatAuth)) {
             val response = try {
-                executeJsonRequest(candidateUrl, payload, method, token)
+                executeJsonRequest(candidateUrl, payload, method, token, sessionId)
             } catch (ex: Exception) {
                 last = 0 to (ex.message ?: ex.javaClass.simpleName)
                 continue
@@ -5351,12 +5353,13 @@ private fun executeHttpGet(url: String, bearerToken: String?): Pair<Int, String>
     }
 }
 
-private fun executeJsonRequest(url: String, payload: JSONObject, method: String, bearerToken: String?): Pair<Int, String> {
+private fun executeJsonRequest(url: String, payload: JSONObject, method: String, bearerToken: String?, sessionId: String? = null): Pair<Int, String> {
     val builder = Request.Builder()
         .url(url)
         .header("Accept", "text/event-stream, application/json, text/plain")
         .header("User-Agent", "HermesHub-Android")
     bearerToken?.let { builder.header("Authorization", "Bearer $it") }
+    sessionId?.takeIf { it.isNotBlank() }?.let { builder.header("X-Hermes-Session-Id", it) }
     val normalizedMethod = method.uppercase()
     val request = when (normalizedMethod) {
         "DELETE" -> builder.delete().build()

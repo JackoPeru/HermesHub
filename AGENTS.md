@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.83 Release Hermes Hub 0.6.83 conversation hotfix
+v0.6.84 Release Hermes Hub 0.6.84 fallback isolation
 ```
 
 ## Regola Linux Gateway Update
@@ -134,6 +134,14 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.84 (Windows + Android fallback isolation):
+
+Release 0.6.84:
+- Hotfix isolamento fallback: anche il percorso Chat Completions compat riceve `X-Hermes-Session-Id` e `session_id` namespaced per chat/superficie.
+- Questo evita collisioni se Responses/Hermes Native non e' disponibile e il gateway deve usare Chat Completions, dove prima poteva derivare una sessione dal primo messaggio.
+- Windows e Android usano gli stessi id isolati gia' introdotti: `hermes-hub:windows-app:<id>` e `hermes-hub:android-app:<id>`.
+- Release bump: Windows/AdminBridge `0.6.84`, Android `versionName 0.6.84`, `versionCode 89`.
 
 Hermes Hub 0.6.83 (Windows + Android conversation hotfix):
 
