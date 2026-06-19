@@ -32,6 +32,8 @@ public sealed record StreamStatus(string Message) : ChatStreamEvent;
 
 public static class ChatStreamClient
 {
+    private const int StreamAccumMaxChars = 2_000_000;
+
     private static readonly HttpClient StreamClient = new()
     {
         Timeout = TimeSpan.FromMinutes(60)
@@ -71,7 +73,7 @@ public static class ChatStreamClient
             yield return new StreamStatus(nativeMode
                 ? "Protocollo effettivo: Hermes Native via Responses. Context delegato a Hermes."
                 : "Protocollo effettivo: Hermes Responses compat.");
-            yield return new StreamStatus("Processing prompt su llama.cpp...");
+            yield return new StreamStatus("llama.cpp: prefill prompt...");
             var serverConversationId = HermesHubProtocol.ServerConversationId(conversationId);
             string BuildResponsesPayload(string? candidatePreviousResponseId) => JsonSerializer.Serialize(new
             {
@@ -121,7 +123,7 @@ public static class ChatStreamClient
                             ttft = tokenAt;
                             sawAnyDelta = true;
                         }
-                        accumulatedText.Append(td.Delta);
+                        AppendBounded(accumulatedText, td.Delta);
                     }
                     else if (ev is StreamThinkingDelta th)
                     {
@@ -130,7 +132,7 @@ public static class ChatStreamClient
                             ttft = stopwatch.Elapsed.TotalMilliseconds;
                             sawAnyDelta = true;
                         }
-                        accumulatedThinking.Append(th.Delta);
+                        AppendBounded(accumulatedThinking, th.Delta);
                     }
                     else if (ev is StreamResponseId rid)
                     {
@@ -144,7 +146,9 @@ public static class ChatStreamClient
                     {
                         promptTokens = u.PromptTokens;
                         completionTokens = u.CompletionTokens;
-                        serverTokensPerSecond = ValidateTokensPerSecond(u.TokensPerSecond) ?? serverTokensPerSecond;
+                        serverTokensPerSecond = u.CompletionTokens is >= 8
+                            ? ValidateTokensPerSecond(u.TokensPerSecond) ?? serverTokensPerSecond
+                            : serverTokensPerSecond;
                     }
                     else if (ev is StreamContextUsage cu)
                     {
@@ -239,7 +243,7 @@ public static class ChatStreamClient
                         ttft = tokenAt;
                         sawAnyDelta = true;
                     }
-                    accumulatedText.Append(td.Delta);
+                    AppendBounded(accumulatedText, td.Delta);
                 }
                 else if (ev is StreamThinkingDelta th)
                 {
@@ -248,7 +252,7 @@ public static class ChatStreamClient
                         ttft = stopwatch.Elapsed.TotalMilliseconds;
                         sawAnyDelta = true;
                     }
-                    accumulatedThinking.Append(th.Delta);
+                    AppendBounded(accumulatedThinking, th.Delta);
                 }
                 else if (ev is StreamResponseId rid)
                 {
@@ -262,7 +266,9 @@ public static class ChatStreamClient
                 {
                     promptTokens = u.PromptTokens;
                     completionTokens = u.CompletionTokens;
-                    serverTokensPerSecond = ValidateTokensPerSecond(u.TokensPerSecond) ?? serverTokensPerSecond;
+                    serverTokensPerSecond = u.CompletionTokens is >= 8
+                        ? ValidateTokensPerSecond(u.TokensPerSecond) ?? serverTokensPerSecond
+                        : serverTokensPerSecond;
                 }
                 else if (ev is StreamContextUsage cu)
                 {
@@ -950,9 +956,27 @@ public static class ChatStreamClient
         return Math.Max(1, text.Length / 4);
     }
 
+    private static void AppendBounded(StringBuilder builder, string text)
+    {
+        if (string.IsNullOrEmpty(text) || builder.Length >= StreamAccumMaxChars)
+        {
+            return;
+        }
+
+        var remaining = StreamAccumMaxChars - builder.Length;
+        if (text.Length <= remaining)
+        {
+            builder.Append(text);
+            return;
+        }
+
+        builder.Append(text, 0, remaining);
+        builder.Append("\n\n[…troncato: limite 2000000 caratteri raggiunto.]");
+    }
+
     private static double? CalculateStableTokensPerSecond(int tokensOut, double? firstTokenMs, double? lastTokenMs, double totalMs)
     {
-        if (tokensOut < 2)
+        if (tokensOut < 8)
         {
             return null;
         }
@@ -960,12 +984,12 @@ public static class ChatStreamClient
         var durationMs = firstTokenMs.HasValue && lastTokenMs.HasValue
             ? Math.Max(0, lastTokenMs.Value - firstTokenMs.Value)
             : totalMs;
-        if (durationMs < 750)
+        if (durationMs < 1500)
         {
             return null;
         }
 
-        return ValidateTokensPerSecond(tokensOut / (durationMs / 1000.0));
+        return ValidateTokensPerSecond(Math.Max(1, tokensOut - 1) / (durationMs / 1000.0));
     }
 
     private static double? ValidateTokensPerSecond(double? value)
@@ -975,7 +999,7 @@ public static class ChatStreamClient
             return null;
         }
 
-        return value.Value is > 0 and <= 200 ? value.Value : null;
+        return value.Value is > 0 and <= 70 ? value.Value : null;
     }
 
     private static double? GetDouble(JsonElement element, string key)

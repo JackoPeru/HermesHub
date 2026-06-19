@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.86 Release Hermes Hub 0.6.86 Hermes endpoint correction
+v0.6.87 Release Hermes Hub 0.6.87 llama.cpp stream stability
 ```
 
 ## Regola Linux Gateway Update
@@ -135,6 +135,28 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.87 (Windows + Android llama.cpp stream stability):
+
+Release 0.6.87:
+- Hotfix Windows streaming UI: durante `await foreach` dello stream, il loop cede esplicitamente il thread UI ogni ~33ms con flush preview e micro-delay, cosi' WinUI puo' disegnare token/stato invece di restare bloccata e mostrare tutta la risposta solo alla fine.
+- `StreamingBubble` espone `FlushPreview()` per forzare update testo plain leggero fuori dal `DispatcherTimer` quando il timer non riesce a tickare per eventi SSE molto ravvicinati.
+- Hotfix Windows piu' profondo: producer SSE/JSON gira su threadpool via `Channel<ChatStreamEvent>` bounded con backpressure, cosi' `ReadLineAsync` e parsing burst llama.cpp non saturano il thread UI.
+- Ottimizzazione Windows per burst llama.cpp: producer coalescia `StreamTextDelta`/`StreamThinkingDelta` in batch max ~33ms o 2048 caratteri prima del canale UI, riducendo drasticamente wakeup/render quando il server spara token ravvicinati.
+- Ottimizzazione Android per burst llama.cpp: `streamChatRequest` coalescia testo/reasoning in batch max ~33ms o 2048 caratteri prima di aggiornare Compose, evitando ricomposizioni per ogni micro-delta.
+- Fix Android SSE Responses: eventi `response.output_text.done` e `response.completed` non vengono piu' trattati come delta testo finale, evitando duplicazione del contenuto gia' arrivato in streaming e metriche gonfiate.
+- Raw events Android cappati a 200 per chat negli snapshot e, con raw hidden, non sovrascrivono piu' lo stato UI con `Evento Hermes...`.
+- Ottimizzazione Windows raw events: con `Dettagli chat avanzati` OFF, i raw Hermes events non passano piu' nel channel UI e non vengono salvati negli snapshot; con dettagli ON sono cappati a 200 eventi per chat.
+- Ottimizzazione Windows render finale: Markdown completo viene applicato solo sotto 32k caratteri; risposte molto lunghe restano in preview plain con cap live 120k caratteri, evitando freeze del thread UI durante render finale.
+- Ottimizzazione checkpoint stream Windows/Android: snapshot parziali passano da 2s a 5s e salvano preview max 50k caratteri; snapshot finale resta completo. Riduce copie grandi e IO durante risposte lunghe.
+- Protezione memoria Windows: accumulatori stream service/UI cappati a 2M caratteri con marker di troncamento, per evitare crescita memoria se llama.cpp genera output enorme.
+- Metriche t/s rese piu' conservative su Windows/Android per llama.cpp: accetta t/s server solo con almeno 8 token output, stima locale solo su finestra >=1.5s, usa `(tokens - 1) / durata`, scarta valori oltre 70 t/s.
+- Verifica live gateway 2026-06-19 su `http://hermes:8642/v1/responses`: stream lungo ha prodotto burst reali (`291` delta, `124` gap <=33ms, min gap `0ms`), quindi batching 33ms e' necessario; altra prova 80 righe ha prodotto stima locale raw `87.7 t/s`, correttamente nascosta dal filtro >70.
+- Diagnostica Windows: producer stream scrive in `%LOCALAPPDATA%\ChatClaw\logs\app.log` riepilogo leggero con durata, delta input, batch emessi e max batch chars, utile per verificare test reali senza appesantire UI.
+- Stati stream piu' espliciti per llama.cpp: Android traduce `PromptProgress` generico in `llama.cpp: prefill prompt`, mostra `attesa primo token`/`elaborazione prompt` se il server non manda reasoning; Windows parte da `Invio prompt a Hermes...` e usa `llama.cpp: prefill prompt...`.
+- Obiettivo test: quando il server manda delta molto rapidi, finestra non deve andare in "Non risponde" e la risposta deve apparire progressiva.
+- Verifica locale: `dotnet build src\NemoclawChat.Windows\NemoclawChat.Windows.csproj -c Debug -p:Platform=x64` OK; `.\gradlew.bat :androidApp:assembleDebug` OK.
+- Release bump locale: Windows/AdminBridge `0.6.87`, Android `versionName 0.6.87`, `versionCode 92`.
 
 Hermes Hub 0.6.86 (Windows + Android endpoint correction):
 

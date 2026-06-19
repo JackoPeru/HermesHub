@@ -13,6 +13,9 @@ namespace NemoclawChat_Windows.Pages;
 
 internal sealed class StreamingBubble
 {
+    private const int MaxLivePreviewChars = 120_000;
+    private const int MaxMarkdownRenderChars = 32_000;
+
     private readonly Page _page;
     private readonly Action<UIElement> _addElement;
     private readonly ScrollViewer _scroll;
@@ -112,7 +115,7 @@ internal sealed class StreamingBubble
 
         _statusText = new TextBlock
         {
-            Text = "Processing prompt...",
+            Text = "Invio prompt a Hermes...",
             FontSize = 12,
             Foreground = _shimmerBrush,
             TextWrapping = TextWrapping.WrapWholeWords,
@@ -516,7 +519,10 @@ internal sealed class StreamingBubble
 
         if (_textBuilder.Length > 0)
         {
-            _assistantContainer.Content = MarkdownRenderer.Render(_textBuilder.ToString(), Colors.White);
+            var finalText = _textBuilder.ToString();
+            _assistantContainer.Content = finalText.Length <= MaxMarkdownRenderChars
+                ? MarkdownRenderer.Render(finalText, Colors.White)
+                : _assistantTextPreview;
         }
 
         var parts = new List<string>();
@@ -560,6 +566,11 @@ internal sealed class StreamingBubble
         }
     }
 
+    public void FlushPreview()
+    {
+        FlushTextPreview();
+    }
+
     private void ScheduleScroll()
     {
         if ((DateTime.UtcNow - _lastScroll).TotalMilliseconds < 80)
@@ -587,8 +598,19 @@ internal sealed class StreamingBubble
         }
 
         _renderPending = false;
-        _assistantTextPreview.Text = _textBuilder.ToString();
+        _assistantTextPreview.Text = PreviewText(_textBuilder);
         ScheduleScroll();
+    }
+
+    private static string PreviewText(StringBuilder builder)
+    {
+        if (builder.Length <= MaxLivePreviewChars)
+        {
+            return builder.ToString();
+        }
+
+        return builder.ToString(0, MaxLivePreviewChars) +
+               "\n\n[anteprima live limitata per stabilita UI; risposta completa salvata nella chat]";
     }
 
     private static string PrettifyJson(string raw)

@@ -23,6 +23,8 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 private const val STREAM_ACCUM_MAX_CHARS = 2_000_000
+private const val STREAM_UI_BATCH_MAX_CHARS = 2048
+private const val STREAM_UI_BATCH_NS = 33_000_000L
 private val plugAndPlayStreamGatewayRoots = listOf(
     "http://hermes:8642",
     "http://100.94.223.14:8642",
@@ -74,19 +76,19 @@ private fun StringBuilder.appendBounded(text: String): Boolean {
 }
 
 private fun calculateStableTokensPerSecond(tokensOut: Int, firstTokenNs: Long?, lastTokenNs: Long?, totalMs: Double): Double? {
-    if (tokensOut < 2) return null
+    if (tokensOut < 8) return null
     val durationMs = if (firstTokenNs != null && lastTokenNs != null) {
         ((lastTokenNs - firstTokenNs).coerceAtLeast(0L)) / 1_000_000.0
     } else {
         totalMs
     }
-    if (durationMs < 750.0) return null
-    return validateTokensPerSecond(tokensOut / (durationMs / 1000.0))
+    if (durationMs < 1500.0) return null
+    return validateTokensPerSecond((tokensOut - 1).coerceAtLeast(1) / (durationMs / 1000.0))
 }
 
 private fun validateTokensPerSecond(value: Double?): Double? {
     val v = value ?: return null
-    return if (v.isFinite() && v > 0.0 && v <= 200.0) v else null
+    return if (v.isFinite() && v > 0.0 && v <= 70.0) v else null
 }
 
 @androidx.compose.runtime.Immutable
@@ -304,6 +306,21 @@ fun streamChatRequest(
     val videoMode = isVideoRequest(prompt)
     val nativeMode = isHermesNative(settings)
     val serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
+    val textBatch = StringBuilder()
+    val thinkingBatch = StringBuilder()
+    var lastBatchFlushNs = System.nanoTime()
+
+    suspend fun flushDeltaBatches() {
+        if (textBatch.isNotEmpty()) {
+            emit(ChatStreamEvent.TextDelta(textBatch.toString()))
+            textBatch.clear()
+        }
+        if (thinkingBatch.isNotEmpty()) {
+            emit(ChatStreamEvent.ThinkingDelta(thinkingBatch.toString()))
+            thinkingBatch.clear()
+        }
+        lastBatchFlushNs = System.nanoTime()
+    }
 
     suspend fun emitAndTrack(ev: ChatStreamEvent): Boolean {
         when (ev) {
@@ -316,6 +333,14 @@ fun streamChatRequest(
                     sawDelta = true
                 }
                 accumText.appendBounded(ev.delta)
+                textBatch.append(ev.delta)
+                val now = System.nanoTime()
+                if (textBatch.length + thinkingBatch.length >= STREAM_UI_BATCH_MAX_CHARS ||
+                    now - lastBatchFlushNs >= STREAM_UI_BATCH_NS
+                ) {
+                    flushDeltaBatches()
+                }
+                return false
             }
             is ChatStreamEvent.ThinkingDelta -> {
                 if (!sawDelta) {
@@ -323,11 +348,23 @@ fun streamChatRequest(
                     sawDelta = true
                 }
                 accumThink.appendBounded(ev.delta)
+                thinkingBatch.append(ev.delta)
+                val now = System.nanoTime()
+                if (textBatch.length + thinkingBatch.length >= STREAM_UI_BATCH_MAX_CHARS ||
+                    now - lastBatchFlushNs >= STREAM_UI_BATCH_NS
+                ) {
+                    flushDeltaBatches()
+                }
+                return false
             }
             is ChatStreamEvent.Usage -> {
                 promptTokens = ev.promptTokens ?: promptTokens
                 completionTokens = ev.completionTokens ?: completionTokens
-                serverTokensPerSecond = validateTokensPerSecond(ev.tokensPerSecond) ?: serverTokensPerSecond
+                serverTokensPerSecond = if ((ev.completionTokens ?: 0) >= 8) {
+                    validateTokensPerSecond(ev.tokensPerSecond) ?: serverTokensPerSecond
+                } else {
+                    serverTokensPerSecond
+                }
                 return false
             }
             is ChatStreamEvent.ContextUsage -> {
@@ -340,10 +377,11 @@ fun streamChatRequest(
                 emittedResponseId = ev.id
             }
             is ChatStreamEvent.Error -> {
+                flushDeltaBatches()
                 lastError = ev.message
                 return true
             }
-            else -> Unit
+            else -> flushDeltaBatches()
         }
         emit(ev)
         return false
@@ -467,10 +505,12 @@ fun streamChatRequest(
 
     val totalMs = (System.nanoTime() - start) / 1_000_000.0
     if (!sawDelta) {
+        flushDeltaBatches()
         emit(ChatStreamEvent.Error(lastError ?: "Stream Hermes vuoto."))
         return@flow
     }
 
+    flushDeltaBatches()
     val tokensOut = completionTokens ?: max(1, accumText.length / 4)
     val tps = serverTokensPerSecond ?: calculateStableTokensPerSecond(tokensOut, firstOutputTokenNs, lastOutputTokenNs, totalMs)
     if (retriedWithoutPreviousResponseId && emittedResponseId.isNullOrBlank()) {
@@ -652,7 +692,13 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
         t.contains("prompt.progress") || t.contains("processing.progress") -> {
             val percent = obj.optInt("percent", obj.optInt("progress", -1))
             if (percent in 0..100) {
-                out += ChatStreamEvent.PromptProgress(percent, obj.optString("label", "Processing prompt..."))
+                val rawLabel = obj.optString("label", "")
+                val label = if (rawLabel.isBlank() || rawLabel.contains("processing prompt", ignoreCase = true)) {
+                    "llama.cpp: prefill prompt"
+                } else {
+                    rawLabel
+                }
+                out += ChatStreamEvent.PromptProgress(percent, label)
             }
             return out
         }
@@ -683,6 +729,21 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
         t.contains("output_text") && t.contains("delta") -> {
             val delta = obj.optString("delta", obj.optString("text", ""))
             if (delta.isNotEmpty()) out += ChatStreamEvent.TextDelta(delta)
+            return out
+        }
+        t.contains("output_text") && (t.contains("done") || t.contains("completed")) -> {
+            val usage = obj.optJSONObject("usage")
+            if (usage != null) {
+                out += ChatStreamEvent.Usage(
+                    usage.optIntOrNull("input_tokens") ?: usage.optIntOrNull("prompt_tokens"),
+                    usage.optIntOrNull("output_tokens") ?: usage.optIntOrNull("completion_tokens"),
+                    usage.tokensPerSecondOrNull() ?: obj.optJSONObject("timings")?.tokensPerSecondOrNull()
+                )
+            }
+            val blocks = extractVisualBlocksFromJson(obj.toString())
+            if (blocks.isNotEmpty()) {
+                out += ChatStreamEvent.VisualBlocks(blocks, VISUAL_BLOCKS_VERSION)
+            }
             return out
         }
         t.contains("reasoning") && t.contains("delta") -> {
@@ -754,8 +815,6 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
                         usage.tokensPerSecondOrNull() ?: resp.optJSONObject("timings")?.tokensPerSecondOrNull()
                     )
                 }
-                val text = extractTextFromAnyJson(resp)
-                if (text.isNotBlank()) out += ChatStreamEvent.TextDelta(text)
                 out += extractToolEventsFromAnyJson(resp)
                 val blocks = extractVisualBlocksFromJson(resp.toString())
                 if (blocks.isNotEmpty()) {

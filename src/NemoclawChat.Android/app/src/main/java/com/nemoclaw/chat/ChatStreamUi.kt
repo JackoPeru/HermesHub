@@ -127,11 +127,12 @@ internal fun HermesActivityExpander(state: StreamingState) {
     val elapsedSec = ((if (active) nowNs else System.nanoTime()) - state.startedAtNs) / 1_000_000_000.0
     val generationStarted = state.text.isNotBlank() || state.hasThinking || state.toolCalls.isNotEmpty()
     val processingPercent = state.promptProgressPercent
+    val preGenerationStatus = preGenerationStatusLabel(state.status, processingPercent, elapsedSec)
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (active && !generationStarted) {
             FlagRow(
-                title = state.status.ifBlank { "Processing prompt" },
+                title = preGenerationStatus,
                 value = processingPercent?.let { "$it%" } ?: String.format(java.util.Locale.US, "%.1fs", elapsedSec),
                 shimmer = true
             )
@@ -156,6 +157,18 @@ internal fun HermesActivityExpander(state: StreamingState) {
                 shimmer = true
             )
         }
+    }
+}
+
+private fun preGenerationStatusLabel(status: String, progressPercent: Int?, elapsedSec: Double): String {
+    val normalized = status.lowercase()
+    return when {
+        normalized.contains("connessione") -> "Connessione stream Hermes"
+        normalized.contains("prompt inviato") || normalized.contains("attendo primo token") -> "llama.cpp: attesa primo token"
+        normalized.contains("processing prompt") || progressPercent != null -> "llama.cpp: prefill prompt"
+        normalized.contains("responses") || normalized.contains("protocollo") -> "Preparazione sessione Hermes"
+        elapsedSec >= 1.0 -> "llama.cpp: elaborazione prompt"
+        else -> status.ifBlank { "Invio prompt a Hermes" }
     }
 }
 

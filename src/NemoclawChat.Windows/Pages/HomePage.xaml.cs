@@ -10,8 +10,10 @@ using Microsoft.UI.Xaml.Navigation;
 using Microsoft.UI.Xaml.Shapes;
 using NemoclawChat_Windows.Services;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
 using Windows.Storage.Pickers;
@@ -26,6 +28,9 @@ public sealed partial class HomePage : Page
     private const int DefaultContextWindowTokens = 90000;
     private const int ContextSystemOverheadTokens = 900;
     private const int MessageContextOverheadTokens = 6;
+    private const int StreamingCheckpointIntervalMs = 5000;
+    private const int StreamingCheckpointMaxChars = 50_000;
+    private const int StreamAccumMaxChars = 2_000_000;
 
     public ObservableCollection<MessageViewModel> Messages { get; } = [];
     private string _mode = "Chat";
@@ -308,6 +313,7 @@ public sealed partial class HomePage : Page
         CloseSlashPopup();
 
         StreamingBubble? bubble = null;
+        CancellationTokenSource? streamCts = null;
 
         try
         {
@@ -335,18 +341,37 @@ public sealed partial class HomePage : Page
             ChatStreamStats? finalStats = null;
             var rawEvents = new List<HermesRawEventRecord>();
             var lastCheckpointAt = DateTimeOffset.MinValue;
+            var lastUiPumpAt = Stopwatch.GetTimestamp();
+            streamCts = new CancellationTokenSource();
+            var streamEvents = StartStreamProducer(settings, _mode, prompt, _messageHistory.ToList(), _conversationId, _previousResponseId, streamCts.Token);
 
-            await foreach (var ev in ChatStreamClient.StreamChatAsync(settings, _mode, prompt, _messageHistory, _conversationId, _previousResponseId))
+            void AddRawEventIfEnabled(string name, string json)
+            {
+                if (!settings.AdvancedChatDetails)
+                {
+                    return;
+                }
+
+                rawEvents.Add(new HermesRawEventRecord(name, json, DateTimeOffset.Now));
+                if (rawEvents.Count > 200)
+                {
+                    rawEvents.RemoveRange(0, rawEvents.Count - 200);
+                }
+
+                bubble.AddRawEvent(name, json);
+            }
+
+            await foreach (var ev in streamEvents.ReadAllAsync())
             {
                 switch (ev)
                 {
                     case StreamTextDelta td:
                         bubble.AppendText(td.Delta);
-                        finalTextBuilder.Append(td.Delta);
+                        AppendBounded(finalTextBuilder, td.Delta);
                         break;
                     case StreamThinkingDelta th:
                         bubble.AppendThinking(th.Delta);
-                        finalThinkingBuilder.Append(th.Delta);
+                        AppendBounded(finalThinkingBuilder, th.Delta);
                         break;
                     case StreamToolCallStart tcs:
                         bubble.StartToolCall(tcs.Id, tcs.Name);
@@ -376,13 +401,11 @@ public sealed partial class HomePage : Page
                             ss.Message.Contains("Strict native", StringComparison.OrdinalIgnoreCase))
                         {
                             var rawStatus = $$"""{"message":{{JsonSerializer.Serialize(ss.Message)}}}""";
-                            rawEvents.Add(new HermesRawEventRecord("status", rawStatus, DateTimeOffset.Now));
-                            bubble.AddRawEvent("status", rawStatus);
+                            AddRawEventIfEnabled("status", rawStatus);
                         }
                         break;
                     case StreamRawHermesEvent raw:
-                        rawEvents.Add(new HermesRawEventRecord(raw.Name, raw.Json, DateTimeOffset.Now));
-                        bubble.AddRawEvent(raw.Name, raw.Json);
+                        AddRawEventIfEnabled(raw.Name, raw.Json);
                         break;
                     case StreamDone done:
                         finalStats = done.Stats;
@@ -390,11 +413,11 @@ public sealed partial class HomePage : Page
                         UpdateContextMeter(done.Stats);
                         if (finalTextBuilder.Length == 0 && !string.IsNullOrEmpty(done.AccumulatedText))
                         {
-                            finalTextBuilder.Append(done.AccumulatedText);
+                            AppendBounded(finalTextBuilder, done.AccumulatedText);
                         }
                         if (finalThinkingBuilder.Length == 0 && !string.IsNullOrEmpty(done.AccumulatedThinking))
                         {
-                            finalThinkingBuilder.Append(done.AccumulatedThinking);
+                            AppendBounded(finalThinkingBuilder, done.AccumulatedThinking);
                         }
                         break;
                     case StreamError se:
@@ -402,11 +425,18 @@ public sealed partial class HomePage : Page
                         break;
                 }
 
-                if ((DateTimeOffset.Now - lastCheckpointAt).TotalSeconds >= 2 &&
+                if (Stopwatch.GetElapsedTime(lastUiPumpAt).TotalMilliseconds >= 33)
+                {
+                    bubble.FlushPreview();
+                    lastUiPumpAt = Stopwatch.GetTimestamp();
+                    await Task.Delay(1);
+                }
+
+                if ((DateTimeOffset.Now - lastCheckpointAt).TotalMilliseconds >= StreamingCheckpointIntervalMs &&
                     (finalTextBuilder.Length > 0 || finalBlocks is { Count: > 0 }))
                 {
                     lastCheckpointAt = DateTimeOffset.Now;
-                    var checkpointText = finalTextBuilder.ToString();
+                    var checkpointText = SnapshotPreview(finalTextBuilder);
                     var partialMessages = _messageHistory
                         .Concat(new[]
                         {
@@ -476,6 +506,8 @@ public sealed partial class HomePage : Page
         }
         finally
         {
+            streamCts?.Cancel();
+            streamCts?.Dispose();
             bubble?.StopShimmer();
             if (ReferenceEquals(_currentStreamingBubble, bubble))
             {
@@ -484,6 +516,142 @@ public sealed partial class HomePage : Page
             _isSending = false;
             SendButton.IsEnabled = true;
         }
+    }
+
+    private static ChannelReader<ChatStreamEvent> StartStreamProducer(
+        AppSettings settings,
+        string mode,
+        string prompt,
+        IReadOnlyList<ChatMessageRecord> history,
+        string? conversationId,
+        string? previousResponseId,
+        CancellationToken cancellationToken)
+    {
+        var channel = Channel.CreateBounded<ChatStreamEvent>(new BoundedChannelOptions(512)
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            FullMode = BoundedChannelFullMode.Wait,
+            AllowSynchronousContinuations = false
+        });
+
+        _ = Task.Run(async () =>
+        {
+            var producerStopwatch = Stopwatch.StartNew();
+            var textBatch = new StringBuilder();
+            var thinkingBatch = new StringBuilder();
+            var lastBatchFlushAt = Stopwatch.GetTimestamp();
+            var inputTextDeltas = 0;
+            var inputThinkingDeltas = 0;
+            var emittedTextBatches = 0;
+            var emittedThinkingBatches = 0;
+            var maxBatchChars = 0;
+
+            async Task FlushBatchesAsync()
+            {
+                if (textBatch.Length > 0)
+                {
+                    maxBatchChars = Math.Max(maxBatchChars, textBatch.Length);
+                    await channel.Writer.WriteAsync(new StreamTextDelta(textBatch.ToString()), cancellationToken).ConfigureAwait(false);
+                    emittedTextBatches++;
+                    textBatch.Clear();
+                }
+                if (thinkingBatch.Length > 0)
+                {
+                    maxBatchChars = Math.Max(maxBatchChars, thinkingBatch.Length);
+                    await channel.Writer.WriteAsync(new StreamThinkingDelta(thinkingBatch.ToString()), cancellationToken).ConfigureAwait(false);
+                    emittedThinkingBatches++;
+                    thinkingBatch.Clear();
+                }
+                lastBatchFlushAt = Stopwatch.GetTimestamp();
+            }
+
+            try
+            {
+                await foreach (var ev in ChatStreamClient
+                                   .StreamChatAsync(settings, mode, prompt, history, conversationId, previousResponseId, cancellationToken)
+                                   .WithCancellation(cancellationToken)
+                                   .ConfigureAwait(false))
+                {
+                    switch (ev)
+                    {
+                        case StreamTextDelta textDelta:
+                            inputTextDeltas++;
+                            textBatch.Append(textDelta.Delta);
+                            break;
+                        case StreamThinkingDelta thinkingDelta:
+                            inputThinkingDeltas++;
+                            thinkingBatch.Append(thinkingDelta.Delta);
+                            break;
+                        case StreamRawHermesEvent when !settings.AdvancedChatDetails:
+                            break;
+                        default:
+                            await FlushBatchesAsync().ConfigureAwait(false);
+                            await channel.Writer.WriteAsync(ev, cancellationToken).ConfigureAwait(false);
+                            break;
+                    }
+
+                    if (textBatch.Length + thinkingBatch.Length >= 2048 ||
+                        Stopwatch.GetElapsedTime(lastBatchFlushAt).TotalMilliseconds >= 33)
+                    {
+                        await FlushBatchesAsync().ConfigureAwait(false);
+                    }
+                }
+                await FlushBatchesAsync().ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                await FlushBatchesAsync().ConfigureAwait(false);
+                channel.Writer.TryWrite(new StreamError($"Stream interrotto: {ex.Message}"));
+            }
+            finally
+            {
+                Trace.WriteLine(
+                    $"[ChatStreamProducer] done elapsedMs={producerStopwatch.ElapsedMilliseconds} " +
+                    $"inputTextDeltas={inputTextDeltas} inputThinkingDeltas={inputThinkingDeltas} " +
+                    $"textBatches={emittedTextBatches} thinkingBatches={emittedThinkingBatches} maxBatchChars={maxBatchChars}");
+                channel.Writer.TryComplete();
+            }
+        }, cancellationToken);
+
+        return channel.Reader;
+    }
+
+    private static string SnapshotPreview(StringBuilder builder)
+    {
+        if (builder.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        if (builder.Length <= StreamingCheckpointMaxChars)
+        {
+            return builder.ToString();
+        }
+
+        return builder.ToString(0, StreamingCheckpointMaxChars) +
+               "\n\n[checkpoint parziale limitato; risposta completa salvata a fine stream]";
+    }
+
+    private static void AppendBounded(StringBuilder builder, string text)
+    {
+        if (string.IsNullOrEmpty(text) || builder.Length >= StreamAccumMaxChars)
+        {
+            return;
+        }
+
+        var remaining = StreamAccumMaxChars - builder.Length;
+        if (text.Length <= remaining)
+        {
+            builder.Append(text);
+            return;
+        }
+
+        builder.Append(text, 0, remaining);
+        builder.Append("\n\n[…troncato: limite 2000000 caratteri raggiunto.]");
     }
 
     private static bool IsShiftPressed()

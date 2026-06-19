@@ -1090,11 +1090,17 @@ private fun ChatScreen(
                                 .collect { event ->
                                     if (event is ChatStreamEvent.RawHermesEvent) {
                                         rawEvents += HermesRawEvent(event.name, event.json)
+                                        if (rawEvents.size > 200) {
+                                            rawEvents.subList(0, rawEvents.size - 200).clear()
+                                        }
+                                        if (!SHOW_RAW_HERMES_EVENTS_IN_CHAT) {
+                                            return@collect
+                                        }
                                     }
                                     localState = localState.applyEvent(event)
                                     state.streamingState = localState
                                     val now = System.currentTimeMillis()
-                                    if (now - lastCheckpointAt >= 2000L && (localState.text.isNotBlank() || localState.visualBlocks.isNotEmpty())) {
+                                    if (now - lastCheckpointAt >= STREAMING_CHECKPOINT_INTERVAL_MS && (localState.text.isNotBlank() || localState.visualBlocks.isNotEmpty())) {
                                         lastCheckpointAt = now
                                         withContext(Dispatchers.IO) {
                                             saveConversationSnapshot(
@@ -1104,7 +1110,7 @@ private fun ChatScreen(
                                                 prompt = text,
                                                 messages = state.messages.toList() + ChatMessage(
                                                     "Hermes",
-                                                    localState.text.ifBlank { "Hermes sta lavorando..." },
+                                                    localState.text.streamingCheckpointPreview().ifBlank { "Hermes sta lavorando..." },
                                                     fromUser = false,
                                                     visualBlocksVersion = localState.visualBlocksVersion,
                                                     visualBlocks = localState.visualBlocks,
@@ -7122,6 +7128,15 @@ private fun writeChatStats(stats: ChatStreamStats?): JSONObject? {
         .put("contextPercent", stats.contextPercent ?: JSONObject.NULL)
 }
 
+private fun String.streamingCheckpointPreview(): String {
+    if (length <= STREAMING_CHECKPOINT_MAX_CHARS) {
+        return this
+    }
+
+    return take(STREAMING_CHECKPOINT_MAX_CHARS) +
+        "\n\n[checkpoint parziale limitato; risposta completa salvata a fine stream]"
+}
+
 private fun JSONObject.optNullableDouble(name: String): Double? {
     if (!has(name) || isNull(name)) return null
     return optDouble(name).takeIf { it.isFinite() }
@@ -7277,6 +7292,8 @@ private const val MIN_FONT_SCALE = 0.85f
 private const val MAX_FONT_SCALE = 1.25f
 private const val SHOW_RAW_HERMES_EVENTS_IN_CHAT = false
 private const val CHAT_HISTORY_MAX_MESSAGES = 30
+private const val STREAMING_CHECKPOINT_INTERVAL_MS = 5000L
+private const val STREAMING_CHECKPOINT_MAX_CHARS = 50_000
 private const val DEFAULT_CONTEXT_WINDOW_TOKENS = 90000
 private const val CONTEXT_SYSTEM_OVERHEAD_TOKENS = 900
 private const val MESSAGE_CONTEXT_OVERHEAD_TOKENS = 6
