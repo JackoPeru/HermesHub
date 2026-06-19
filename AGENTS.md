@@ -134,6 +134,13 @@ Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
 
+Hermes Hub 0.6.78 (Linux Gateway):
+
+Release 0.6.78:
+- Hardening update transitorio: `ExecStartPre` wait scripts diventano best-effort (`-...`) per non rompere il primo update se un updater vecchio non installa subito i nuovi helper.
+- `hermes-hub-linux.sh` aspetta comunque Tailscale e llama.cpp internamente con `HERMES_WAIT_ON_START=true`, quindi il gateway non parte prima che `tailscaled` e `http://127.0.0.1:8000/v1/models` siano pronti.
+- Asset update server atteso: `artifacts/HermesHub-0.6.78-linux-gateway.tar.gz`.
+
 Hermes Hub 0.6.77 (Linux Gateway):
 
 Release 0.6.77:

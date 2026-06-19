@@ -93,13 +93,13 @@ export GH_TOKEN=ghp_xxx
 Per creare l'asset Linux da pubblicare nella release GitHub:
 
 ```powershell
-.\scripts\package-linux-gateway.ps1 -Version 0.6.77
+.\scripts\package-linux-gateway.ps1 -Version 0.6.78
 ```
 
 Output:
 
 ```text
-artifacts\HermesHub-0.6.77-linux-gateway.tar.gz
+artifacts\HermesHub-0.6.78-linux-gateway.tar.gz
 ```
 
 Carica questo asset nella stessa GitHub Release usata da Windows `.msix` e Android `.apk`. Da quel momento il server Linux puo' aggiornarsi da solo o con comando CLI, senza nuovo trasferimento manuale.

@@ -24,8 +24,8 @@ Environment=HERMES_VIDEO_LIBRARY_PATH=%h/.hermes/media/video
 Environment=HERMES_MEDIA_ROOTS=%h:%h/.hermes/cache:%h/.hermes/media:%h/.hermes/media/video
 Environment=HERMES_HUB_STATE_PATH=%h/.hermes/hub_state.json
 Environment=HERMES_HUB_MEMORY_PATH=%h/.hermes/hub_memory.json
-ExecStartPre=/home/matteo/.local/bin/hermes-wait-tailscale.sh
-ExecStartPre=/home/matteo/.local/bin/hermes-wait-llama.sh
+ExecStartPre=-/home/matteo/.local/bin/hermes-wait-tailscale.sh
+ExecStartPre=-/home/matteo/.local/bin/hermes-wait-llama.sh
 ExecStart=%h/hermes-hub-linux.sh
 Restart=on-failure
 RestartSec=5
