@@ -131,7 +131,7 @@ internal fun HermesActivityExpander(state: StreamingState) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (active && !generationStarted) {
             FlagRow(
-                title = "Processing prompt",
+                title = state.status.ifBlank { "Processing prompt" },
                 value = processingPercent?.let { "$it%" } ?: String.format(java.util.Locale.US, "%.1fs", elapsedSec),
                 shimmer = true
             )
@@ -151,7 +151,7 @@ internal fun HermesActivityExpander(state: StreamingState) {
 
         if (active && state.text.isNotBlank()) {
             FlagRow(
-                title = "Generazione",
+                title = state.status.ifBlank { "Generazione" },
                 value = activityIndicator(state),
                 shimmer = true
             )

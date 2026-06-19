@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.84 Release Hermes Hub 0.6.84 fallback isolation
+v0.6.85 Release Hermes Hub 0.6.85 llama.cpp stream stability
 ```
 
 ## Regola Linux Gateway Update
@@ -91,6 +91,7 @@ chmod +x install-hermes-hub-linux.sh hermes-hub-linux.sh hermes-hub-linux-update
 ~/.local/bin/hermes-hub-linux-update --restart
 ```
 
+- Regola importante: quando una release GitHub diventa latest e il server deve restare aggiornato, includere sempre anche l'asset Linux gateway. Se latest non contiene `HermesHub-X.Y.Z-linux-gateway.tar.gz`, l'auto-update server ogni 2 minuti trova la release ma non puo' installare nulla (`No linux gateway asset found in latest release`).
 - Per ogni release GitHub che deve aggiornare anche il gateway Linux, creare e caricare l'asset:
 
 ```powershell
@@ -135,12 +136,24 @@ Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
 
+Hermes Hub 0.6.85 (Windows + Android llama.cpp stream stability):
+
+Release 0.6.85:
+- Stabilita streaming per server llama.cpp: Windows non aggiorna piu' il TextBlock a ogni token, ma usa batching UI circa 15 fps e scroll throttled per evitare freeze quando i delta arrivano rapidi.
+- Windows mostra sempre stato operativo anche con dettagli avanzati OFF: processing prompt, connessione stream, attesa primo token, generazione; le metriche finali sono visibili anche nella UI pulita.
+- Android mostra stati piu' reali invece del solo `Processing prompt`: connessione stream, prompt inviato/attesa primo token, generazione e tool/reasoning quando arrivano eventi.
+- Metriche `t/s` rese conservative: usa timings llama.cpp (`predicted_per_second`) quando disponibili, altrimenti calcolo su finestra primo/ultimo token; valori non plausibili, infiniti o calcolati su finestre sotto 750ms vengono nascosti.
+- Asset Linux gateway caricato nella release GitHub: `HermesHub-0.6.85-linux-gateway.tar.gz`, cosi' il server puo' continuare ad auto-aggiornarsi dalla latest release.
+- Release bump: Windows/AdminBridge `0.6.85`, Android `versionName 0.6.85`, `versionCode 90`.
+
 Hermes Hub 0.6.84 (Windows + Android fallback isolation):
 
 Release 0.6.84:
 - Hotfix isolamento fallback: anche il percorso Chat Completions compat riceve `X-Hermes-Session-Id` e `session_id` namespaced per chat/superficie.
 - Questo evita collisioni se Responses/Hermes Native non e' disponibile e il gateway deve usare Chat Completions, dove prima poteva derivare una sessione dal primo messaggio.
 - Windows e Android usano gli stessi id isolati gia' introdotti: `hermes-hub:windows-app:<id>` e `hermes-hub:android-app:<id>`.
+- Asset Linux gateway caricato nella release GitHub: `HermesHub-0.6.84-linux-gateway.tar.gz`, cosi' il server puo' auto-aggiornarsi dalla latest release.
+- Test Matteo 2026-06-19: dopo aggiornamento, le chat Android e Windows risultano separate; Hermes non sembra piu' fondere il contesto tra device.
 - Release bump: Windows/AdminBridge `0.6.84`, Android `versionName 0.6.84`, `versionCode 89`.
 
 Hermes Hub 0.6.83 (Windows + Android conversation hotfix):

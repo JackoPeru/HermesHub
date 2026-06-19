@@ -57,6 +57,9 @@ public static class ChatStreamClient
         int? contextTokens = null;
         int? contextLength = null;
         int? contextPercent = null;
+        double? serverTokensPerSecond = null;
+        double? firstOutputTokenMs = null;
+        double? lastOutputTokenMs = null;
         bool sawAnyDelta = false;
         bool retriedWithoutPreviousResponseId = false;
         string? lastError = null;
@@ -68,6 +71,7 @@ public static class ChatStreamClient
             yield return new StreamStatus(nativeMode
                 ? "Protocollo effettivo: Hermes Native via Responses. Context delegato a Hermes."
                 : "Protocollo effettivo: Hermes Responses compat.");
+            yield return new StreamStatus("Processing prompt su llama.cpp...");
             var serverConversationId = HermesHubProtocol.ServerConversationId(conversationId);
             string BuildResponsesPayload(string? candidatePreviousResponseId) => JsonSerializer.Serialize(new
             {
@@ -109,9 +113,12 @@ public static class ChatStreamClient
 
                     if (ev is StreamTextDelta td)
                     {
+                        var tokenAt = stopwatch.Elapsed.TotalMilliseconds;
+                        firstOutputTokenMs ??= tokenAt;
+                        lastOutputTokenMs = tokenAt;
                         if (!sawAnyDelta)
                         {
-                            ttft = stopwatch.Elapsed.TotalMilliseconds;
+                            ttft = tokenAt;
                             sawAnyDelta = true;
                         }
                         accumulatedText.Append(td.Delta);
@@ -137,6 +144,7 @@ public static class ChatStreamClient
                     {
                         promptTokens = u.PromptTokens;
                         completionTokens = u.CompletionTokens;
+                        serverTokensPerSecond = ValidateTokensPerSecond(u.TokensPerSecond) ?? serverTokensPerSecond;
                     }
                     else if (ev is StreamContextUsage cu)
                     {
@@ -223,9 +231,12 @@ public static class ChatStreamClient
 
                 if (ev is StreamTextDelta td)
                 {
+                    var tokenAt = stopwatch.Elapsed.TotalMilliseconds;
+                    firstOutputTokenMs ??= tokenAt;
+                    lastOutputTokenMs = tokenAt;
                     if (!sawAnyDelta)
                     {
-                        ttft = stopwatch.Elapsed.TotalMilliseconds;
+                        ttft = tokenAt;
                         sawAnyDelta = true;
                     }
                     accumulatedText.Append(td.Delta);
@@ -251,6 +262,7 @@ public static class ChatStreamClient
                 {
                     promptTokens = u.PromptTokens;
                     completionTokens = u.CompletionTokens;
+                    serverTokensPerSecond = ValidateTokensPerSecond(u.TokensPerSecond) ?? serverTokensPerSecond;
                 }
                 else if (ev is StreamContextUsage cu)
                 {
@@ -273,12 +285,7 @@ public static class ChatStreamClient
 
         var totalMs = stopwatch.Elapsed.TotalMilliseconds;
         var tokensOut = completionTokens ?? EstimateTokens(accumulatedText.ToString());
-        double? tps = null;
-        if (tokensOut > 0 && totalMs > 0)
-        {
-            var sinceFirst = ttft.HasValue ? Math.Max(1, totalMs - ttft.Value) : totalMs;
-            tps = tokensOut / (sinceFirst / 1000.0);
-        }
+        var tps = serverTokensPerSecond ?? CalculateStableTokensPerSecond(tokensOut, firstOutputTokenMs, lastOutputTokenMs, totalMs);
 
         if (responseId is not null)
         {
@@ -306,6 +313,7 @@ public static class ChatStreamClient
         var authCandidates = GatewayService.BuildHermesAuthCandidates(allowCompatAuth).ToArray();
         for (var attempt = 0; attempt < authCandidates.Length; attempt++)
         {
+            yield return new StreamStatus($"{label}: connessione stream...");
             using var request = new HttpRequestMessage(HttpMethod.Post, url)
             {
                 Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
@@ -354,6 +362,7 @@ public static class ChatStreamClient
 
             try
             {
+                yield return new StreamStatus("Prompt inviato. Attendo primo token...");
                 var mediaType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
                 var isSse = mediaType.Contains("event-stream", StringComparison.OrdinalIgnoreCase);
 
@@ -653,7 +662,7 @@ public static class ChatStreamClient
 
                     if (resp.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
                     {
-                        yield return ExtractUsage(usage);
+                        yield return ExtractUsage(usage, resp);
                     }
 
                     var blocks = ExtractVisualBlocksFromElement(resp);
@@ -723,7 +732,7 @@ public static class ChatStreamClient
 
             if (element.TryGetProperty("usage", out var usageChat) && usageChat.ValueKind == JsonValueKind.Object)
             {
-                yield return ExtractUsage(usageChat);
+                yield return ExtractUsage(usageChat, element);
             }
 
             var blocksChat = ExtractVisualBlocksFromElement(element);
@@ -819,9 +828,10 @@ public static class ChatStreamClient
         return null;
     }
 
-    private static StreamUsage ExtractUsage(JsonElement usage)
+    private static StreamUsage ExtractUsage(JsonElement usage, JsonElement? envelope = null)
     {
         int? prompt = null, completion = null;
+        double? tokensPerSecond = null;
         if (usage.TryGetProperty("input_tokens", out var p) && p.ValueKind == JsonValueKind.Number)
         {
             prompt = p.GetInt32();
@@ -838,7 +848,26 @@ public static class ChatStreamClient
         {
             completion = c2.GetInt32();
         }
-        return new StreamUsage(prompt, completion);
+        tokensPerSecond =
+            GetDouble(usage, "tokens_per_second") ??
+            GetDouble(usage, "predicted_per_second") ??
+            GetDouble(usage, "generation_tokens_per_second");
+        if (usage.TryGetProperty("timings", out var timings) && timings.ValueKind == JsonValueKind.Object)
+        {
+            tokensPerSecond ??= GetDouble(timings, "predicted_per_second") ??
+                                GetDouble(timings, "tokens_per_second");
+        }
+        if (envelope is { } outer)
+        {
+            tokensPerSecond ??= GetDouble(outer, "tokens_per_second") ??
+                                GetDouble(outer, "predicted_per_second");
+            if (outer.TryGetProperty("timings", out var outerTimings) && outerTimings.ValueKind == JsonValueKind.Object)
+            {
+                tokensPerSecond ??= GetDouble(outerTimings, "predicted_per_second") ??
+                                    GetDouble(outerTimings, "tokens_per_second");
+            }
+        }
+        return new StreamUsage(prompt, completion, ValidateTokensPerSecond(tokensPerSecond));
     }
 
     private static IReadOnlyList<VisualBlockRecord>? ExtractVisualBlocksFromElement(JsonElement element)
@@ -921,6 +950,50 @@ public static class ChatStreamClient
         return Math.Max(1, text.Length / 4);
     }
 
+    private static double? CalculateStableTokensPerSecond(int tokensOut, double? firstTokenMs, double? lastTokenMs, double totalMs)
+    {
+        if (tokensOut < 2)
+        {
+            return null;
+        }
+
+        var durationMs = firstTokenMs.HasValue && lastTokenMs.HasValue
+            ? Math.Max(0, lastTokenMs.Value - firstTokenMs.Value)
+            : totalMs;
+        if (durationMs < 750)
+        {
+            return null;
+        }
+
+        return ValidateTokensPerSecond(tokensOut / (durationMs / 1000.0));
+    }
+
+    private static double? ValidateTokensPerSecond(double? value)
+    {
+        if (!value.HasValue || double.IsNaN(value.Value) || double.IsInfinity(value.Value))
+        {
+            return null;
+        }
+
+        return value.Value is > 0 and <= 200 ? value.Value : null;
+    }
+
+    private static double? GetDouble(JsonElement element, string key)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(key, out var prop))
+        {
+            return null;
+        }
+        if (prop.ValueKind == JsonValueKind.Number && prop.TryGetDouble(out var value))
+        {
+            return value;
+        }
+        return prop.ValueKind == JsonValueKind.String &&
+               double.TryParse(prop.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+    }
+
     private static string Trim(string body)
     {
         if (string.IsNullOrWhiteSpace(body))
@@ -932,5 +1005,5 @@ public static class ChatStreamClient
     }
 }
 
-internal sealed record StreamUsage(int? PromptTokens, int? CompletionTokens) : ChatStreamEvent;
+internal sealed record StreamUsage(int? PromptTokens, int? CompletionTokens, double? TokensPerSecond = null) : ChatStreamEvent;
 internal sealed record StreamContextUsage(int? ContextTokens, int? ContextLength, int? ContextPercent) : ChatStreamEvent;

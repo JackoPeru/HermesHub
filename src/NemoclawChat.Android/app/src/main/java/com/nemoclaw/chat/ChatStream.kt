@@ -72,6 +72,22 @@ private fun StringBuilder.appendBounded(text: String): Boolean {
     return true
 }
 
+private fun calculateStableTokensPerSecond(tokensOut: Int, firstTokenNs: Long?, lastTokenNs: Long?, totalMs: Double): Double? {
+    if (tokensOut < 2) return null
+    val durationMs = if (firstTokenNs != null && lastTokenNs != null) {
+        ((lastTokenNs - firstTokenNs).coerceAtLeast(0L)) / 1_000_000.0
+    } else {
+        totalMs
+    }
+    if (durationMs < 750.0) return null
+    return validateTokensPerSecond(tokensOut / (durationMs / 1000.0))
+}
+
+private fun validateTokensPerSecond(value: Double?): Double? {
+    val v = value ?: return null
+    return if (v.isFinite() && v > 0.0 && v <= 200.0) v else null
+}
+
 @androidx.compose.runtime.Immutable
 data class ChatStreamStats(
     val ttftMs: Double? = null,
@@ -252,7 +268,7 @@ sealed class ChatStreamEvent {
     data class VisualBlocks(val blocks: List<VisualBlock>, val version: Int) : ChatStreamEvent()
     data class Status(val message: String) : ChatStreamEvent()
     data class RawHermesEvent(val name: String, val json: String) : ChatStreamEvent()
-    data class Usage(val promptTokens: Int?, val completionTokens: Int?) : ChatStreamEvent()
+    data class Usage(val promptTokens: Int?, val completionTokens: Int?, val tokensPerSecond: Double? = null) : ChatStreamEvent()
     data class ContextUsage(val tokens: Int?, val length: Int?, val percent: Int?) : ChatStreamEvent()
     data class PromptProgress(val percent: Int, val label: String = "Processing prompt...") : ChatStreamEvent()
     data class Done(val stats: ChatStreamStats) : ChatStreamEvent()
@@ -273,6 +289,9 @@ fun streamChatRequest(
     var ttftMs: Double? = null
     var promptTokens: Int? = null
     var completionTokens: Int? = null
+    var serverTokensPerSecond: Double? = null
+    var firstOutputTokenNs: Long? = null
+    var lastOutputTokenNs: Long? = null
     var contextTokens: Int? = null
     var contextLength: Int? = null
     var contextPercent: Int? = null
@@ -288,8 +307,11 @@ fun streamChatRequest(
     suspend fun emitAndTrack(ev: ChatStreamEvent): Boolean {
         when (ev) {
             is ChatStreamEvent.TextDelta -> {
+                val tokenAt = System.nanoTime()
+                if (firstOutputTokenNs == null) firstOutputTokenNs = tokenAt
+                lastOutputTokenNs = tokenAt
                 if (!sawDelta) {
-                    ttftMs = (System.nanoTime() - start) / 1_000_000.0
+                    ttftMs = (tokenAt - start) / 1_000_000.0
                     sawDelta = true
                 }
                 accumText.appendBounded(ev.delta)
@@ -304,6 +326,7 @@ fun streamChatRequest(
             is ChatStreamEvent.Usage -> {
                 promptTokens = ev.promptTokens ?: promptTokens
                 completionTokens = ev.completionTokens ?: completionTokens
+                serverTokensPerSecond = validateTokensPerSecond(ev.tokensPerSecond) ?: serverTokensPerSecond
                 return false
             }
             is ChatStreamEvent.ContextUsage -> {
@@ -327,6 +350,7 @@ fun streamChatRequest(
 
     if (shouldUseResponsesFirst(settings, mode)) {
         emit(ChatStreamEvent.Status(if (nativeMode) "Protocollo effettivo: Hermes Native via Responses. Context delegato a Hermes." else "Invio diretto a Hermes Responses API..."))
+        emit(ChatStreamEvent.Status("Processing prompt su llama.cpp..."))
 
         fun buildResponsePayload(candidatePreviousResponseId: String?): JSONObject {
             val payload = JSONObject()
@@ -447,9 +471,7 @@ fun streamChatRequest(
     }
 
     val tokensOut = completionTokens ?: max(1, accumText.length / 4)
-    val ttftSnapshot = ttftMs
-    val sinceFirst = if (ttftSnapshot != null) max(1.0, totalMs - ttftSnapshot) else totalMs
-    val tps = if (tokensOut > 0 && sinceFirst > 0) tokensOut / (sinceFirst / 1000.0) else null
+    val tps = serverTokensPerSecond ?: calculateStableTokensPerSecond(tokensOut, firstOutputTokenNs, lastOutputTokenNs, totalMs)
     if (retriedWithoutPreviousResponseId && emittedResponseId.isNullOrBlank()) {
         emit(ChatStreamEvent.ResponseId(""))
     }
@@ -479,6 +501,7 @@ private suspend fun openSseStream(
 
         for (candidateUrl in plugAndPlayStreamUrlCandidates(url)) {
             for ((index, bearerToken) in authCandidates.withIndex()) {
+                onEvent(ChatStreamEvent.Status("$label: connessione stream..."))
                 val builder = Request.Builder()
                     .url(candidateUrl)
                     .header("Accept", "text/event-stream, application/json")
@@ -504,6 +527,7 @@ private suspend fun openSseStream(
                         }
                         lastHttpError = null
                         onEvent(ChatStreamEvent.Status("$label connesso: $candidateUrl"))
+                        onEvent(ChatStreamEvent.Status("Prompt inviato. Attendo primo token..."))
                         val ct = responseBody.contentType()?.toString().orEmpty()
                         if (!ct.contains("event-stream", ignoreCase = true)) {
                             val full = responseBody.string()
@@ -725,7 +749,8 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
                 if (usage != null) {
                     out += ChatStreamEvent.Usage(
                         usage.optIntOrNull("input_tokens") ?: usage.optIntOrNull("prompt_tokens"),
-                        usage.optIntOrNull("output_tokens") ?: usage.optIntOrNull("completion_tokens")
+                        usage.optIntOrNull("output_tokens") ?: usage.optIntOrNull("completion_tokens"),
+                        usage.tokensPerSecondOrNull() ?: resp.optJSONObject("timings")?.tokensPerSecondOrNull()
                     )
                 }
                 val text = extractTextFromAnyJson(resp)
@@ -779,7 +804,8 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
         if (usage != null) {
             out += ChatStreamEvent.Usage(
                 usage.optIntOrNull("input_tokens") ?: usage.optIntOrNull("prompt_tokens"),
-                usage.optIntOrNull("output_tokens") ?: usage.optIntOrNull("completion_tokens")
+                usage.optIntOrNull("output_tokens") ?: usage.optIntOrNull("completion_tokens"),
+                usage.tokensPerSecondOrNull() ?: obj.optJSONObject("timings")?.tokensPerSecondOrNull()
             )
         }
         val blocks = extractVisualBlocksFromJson(obj.toString())
@@ -1045,6 +1071,23 @@ private fun extractVisualBlocksFromJson(json: String): List<VisualBlock> {
 private fun JSONObject.optIntOrNull(key: String): Int? {
     if (!has(key) || isNull(key)) return null
     return try { getInt(key) } catch (_: Exception) { null }
+}
+
+private fun JSONObject.optDoubleOrNull(key: String): Double? {
+    if (!has(key) || isNull(key)) return null
+    return try { getDouble(key) } catch (_: Exception) { null }
+}
+
+private fun JSONObject.tokensPerSecondOrNull(): Double? {
+    val direct = optDoubleOrNull("tokens_per_second")
+        ?: optDoubleOrNull("predicted_per_second")
+        ?: optDoubleOrNull("generation_tokens_per_second")
+    if (direct != null) return validateTokensPerSecond(direct)
+    val timings = optJSONObject("timings") ?: return null
+    return validateTokensPerSecond(
+        timings.optDoubleOrNull("predicted_per_second")
+            ?: timings.optDoubleOrNull("tokens_per_second")
+    )
 }
 
 private fun visualBlocksMetadataJson(settings: AppSettings, conversationId: String?): JSONObject {

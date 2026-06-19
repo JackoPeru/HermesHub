@@ -24,15 +24,19 @@ internal sealed class StreamingBubble
     private readonly StackPanel _rawEventsPanel;
     private readonly ContentControl _assistantContainer;
     private readonly TextBlock _assistantTextPreview;
+    private readonly TextBlock _statusText;
     private readonly TextBlock _statsText;
     private readonly bool _showAdvanced;
     private readonly LinearGradientBrush _shimmerBrush;
     private readonly DispatcherTimer _shimmerTimer;
+    private readonly DispatcherTimer _renderTimer;
     private readonly Dictionary<string, ToolCallView> _toolViews = new();
     private readonly StringBuilder _thinkingBuilder = new();
     private readonly StringBuilder _textBuilder = new();
     private bool _hasThinking;
     private bool _hasText;
+    private bool _renderPending;
+    private DateTime _lastScroll = DateTime.MinValue;
     private double _shimmerPhase;
     private DateTime _started = DateTime.UtcNow;
 
@@ -106,6 +110,16 @@ internal sealed class StreamingBubble
         _rawEventsPanel = new StackPanel { Spacing = 8 };
         _content.Children.Add(_rawEventsPanel);
 
+        _statusText = new TextBlock
+        {
+            Text = "Processing prompt...",
+            FontSize = 12,
+            Foreground = _shimmerBrush,
+            TextWrapping = TextWrapping.WrapWholeWords,
+            Visibility = Visibility.Visible
+        };
+        _content.Children.Add(_statusText);
+
         _assistantContainer = new ContentControl
         {
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
@@ -147,6 +161,9 @@ internal sealed class StreamingBubble
         _shimmerTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
         _shimmerTimer.Tick += (_, _) => AdvanceShimmer();
         _shimmerTimer.Start();
+
+        _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(66) };
+        _renderTimer.Tick += (_, _) => FlushTextPreview();
     }
 
     private void AdvanceShimmer()
@@ -167,11 +184,12 @@ internal sealed class StreamingBubble
             return;
         }
         _textBuilder.Append(delta);
-        _assistantTextPreview.Text = _textBuilder.ToString();
+        ScheduleTextRender();
         if (!_hasText)
         {
             _hasText = true;
             _assistantContainer.Visibility = Visibility.Visible;
+            SetStatus("Generazione risposta...");
             if (_hasThinking)
             {
                 FreezeThinkingLabel();
@@ -183,6 +201,20 @@ internal sealed class StreamingBubble
             }
         }
         ScheduleScroll();
+    }
+
+    public void SetStatus(string status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return;
+        }
+
+        _statusText.Text = status.Trim();
+        _statusText.Foreground = _hasText
+            ? (Brush)Application.Current.Resources["MutedTextBrush"]
+            : _shimmerBrush;
+        _statusText.Visibility = Visibility.Visible;
     }
 
     public void AppendThinking(string delta)
@@ -198,6 +230,7 @@ internal sealed class StreamingBubble
         _thinkingBuilder.Append(delta);
         _thinkingText.Text = _thinkingBuilder.ToString();
         _hasThinking = true;
+        SetStatus("Ragionamento in corso...");
         _thinkingExpander.Visibility = Visibility.Visible;
         ScheduleScroll();
     }
@@ -456,12 +489,14 @@ internal sealed class StreamingBubble
 
     public void Complete(ChatStreamStats stats)
     {
+        FlushTextPreview();
+        _renderTimer.Stop();
+        _statusText.Visibility = Visibility.Collapsed;
         if (!_showAdvanced)
         {
             _thinkingExpander.Visibility = Visibility.Collapsed;
             _shimmerTimer.Stop();
             ScheduleScroll();
-            return;
         }
         if (_hasThinking && _shimmerTimer.IsEnabled)
         {
@@ -519,11 +554,41 @@ internal sealed class StreamingBubble
         {
             _shimmerTimer.Stop();
         }
+        if (_renderTimer.IsEnabled)
+        {
+            _renderTimer.Stop();
+        }
     }
 
     private void ScheduleScroll()
     {
+        if ((DateTime.UtcNow - _lastScroll).TotalMilliseconds < 80)
+        {
+            return;
+        }
+        _lastScroll = DateTime.UtcNow;
         _ = _scroll.ChangeView(null, _scroll.ScrollableHeight, null, true);
+    }
+
+    private void ScheduleTextRender()
+    {
+        _renderPending = true;
+        if (!_renderTimer.IsEnabled)
+        {
+            _renderTimer.Start();
+        }
+    }
+
+    private void FlushTextPreview()
+    {
+        if (!_renderPending)
+        {
+            return;
+        }
+
+        _renderPending = false;
+        _assistantTextPreview.Text = _textBuilder.ToString();
+        ScheduleScroll();
     }
 
     private static string PrettifyJson(string raw)

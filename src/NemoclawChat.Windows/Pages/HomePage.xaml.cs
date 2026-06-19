@@ -370,6 +370,7 @@ public sealed partial class HomePage : Page
                         break;
                     case StreamStatus ss:
                         statusMessage = ss.Message;
+                        bubble.SetStatus(ss.Message);
                         if (ss.Message.Contains("Protocollo", StringComparison.OrdinalIgnoreCase) ||
                             ss.Message.Contains("Fallback compat", StringComparison.OrdinalIgnoreCase) ||
                             ss.Message.Contains("Strict native", StringComparison.OrdinalIgnoreCase))
