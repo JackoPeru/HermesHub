@@ -2,6 +2,8 @@ namespace NemoclawChat_Windows.Services;
 
 public static class HermesHubProtocol
 {
+    public const string WindowsSurface = "windows-app";
+
     public static string Instructions(string mode)
     {
         return Instructions(new AppSettings(), mode);
@@ -48,12 +50,37 @@ public static class HermesHubProtocol
             """;
     }
 
-    public static object Metadata(AppSettings settings, string? workspace = null, string? source = null)
+    public static string? ServerConversationId(string? conversationId, string surface = WindowsSurface)
     {
+        if (string.IsNullOrWhiteSpace(conversationId))
+        {
+            return null;
+        }
+
+        var localId = conversationId.Trim();
+        if (localId.StartsWith("hermes-hub:", StringComparison.OrdinalIgnoreCase))
+        {
+            return localId;
+        }
+
+        static string Clean(string value)
+        {
+            var chars = value.Select(ch => char.IsLetterOrDigit(ch) || ch is '_' or '-' or '.' or ':' ? ch : '-').ToArray();
+            return new string(chars).Trim('-');
+        }
+
+        var safeSurface = Clean(surface.ToLowerInvariant());
+        var safeLocal = Clean(localId);
+        return string.IsNullOrWhiteSpace(safeLocal) ? null : $"hermes-hub:{safeSurface}:{safeLocal}";
+    }
+
+    public static object Metadata(AppSettings settings, string? workspace = null, string? source = null, string? conversationId = null)
+    {
+        var serverConversationId = ServerConversationId(conversationId);
         return new
         {
             client = "hermes-hub",
-            client_surface = "windows-app",
+            client_surface = WindowsSurface,
             hub_client = true,
             requested_protocol = settings.PreferredApi,
             strict_native_mode = settings.StrictNativeMode,
@@ -62,12 +89,25 @@ public static class HermesHubProtocol
             project_name = settings.ActiveProjectName,
             workspace = workspace ?? (string.IsNullOrWhiteSpace(settings.ActiveProjectName) ? "default" : settings.ActiveProjectName),
             source,
+            hub_conversation = new
+            {
+                id = serverConversationId,
+                local_id = string.IsNullOrWhiteSpace(conversationId) ? null : conversationId.Trim(),
+                surface = WindowsSurface,
+                scope = "per-chat-per-surface",
+                isolation_required = true,
+                do_not_merge_with_other_conversations = true,
+                do_not_merge_with_other_surfaces = true,
+                shared_memory_policy = "Only stable user preferences may be shared; transient chat context must stay in this conversation id."
+            },
             memory_policy = new
             {
                 scope = "shared-hermes-agent-memory",
                 share_with_cli = true,
                 use_server_memory_tools = true,
                 do_not_create_app_only_memory = true,
+                runtime_context_scope = "isolated_conversation",
+                do_not_use_other_active_chats_as_context = true,
                 context_owner = IsNativePreferred(settings) ? "hermes-agent" : "client-compat"
             },
             native_context = new

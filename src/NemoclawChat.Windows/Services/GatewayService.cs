@@ -139,9 +139,9 @@ public static class GatewayService
                     input = prompt,
                     instructions = HermesHubProtocol.IsNativePreferred(settings) ? null : HermesHubProtocol.Instructions(settings, mode),
                     store = true,
-                    conversation = string.IsNullOrWhiteSpace(conversationId) ? null : conversationId,
+                    conversation = HermesHubProtocol.ServerConversationId(conversationId),
                     previous_response_id = string.IsNullOrWhiteSpace(previousResponseId) ? null : previousResponseId,
-                    metadata = HermesHubProtocol.Metadata(settings)
+                    metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId)
                 });
 
                 var response = await SendBufferedAsync(
@@ -215,7 +215,7 @@ public static class GatewayService
             {
                 model = settings.Model,
                 stream = false,
-                metadata = HermesHubProtocol.Metadata(settings),
+                metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId),
                 messages = chatMessages
             });
 

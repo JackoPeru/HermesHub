@@ -326,6 +326,7 @@ fun streamChatRequest(
 
     if (shouldUseResponsesFirst(settings, mode)) {
         emit(ChatStreamEvent.Status(if (nativeMode) "Protocollo effettivo: Hermes Native via Responses. Context delegato a Hermes." else "Invio diretto a Hermes Responses API..."))
+        val serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
 
         fun buildResponsePayload(candidatePreviousResponseId: String?): JSONObject {
             val payload = JSONObject()
@@ -333,9 +334,9 @@ fun streamChatRequest(
                 .put("input", prompt)
                 .put("store", true)
                 .put("stream", true)
-                .put("conversation", conversationId ?: JSONObject.NULL)
+                .put("conversation", serverConversationId ?: JSONObject.NULL)
                 .put("previous_response_id", candidatePreviousResponseId ?: JSONObject.NULL)
-                .put("metadata", visualBlocksMetadataJson(settings))
+                .put("metadata", visualBlocksMetadataJson(settings, conversationId))
             if (!nativeMode) {
                 payload.put(
                     "instructions",
@@ -407,7 +408,7 @@ fun streamChatRequest(
         val payload = JSONObject()
             .put("model", settings.model)
             .put("stream", true)
-            .put("metadata", visualBlocksMetadataJson(settings))
+            .put("metadata", visualBlocksMetadataJson(settings, conversationId))
             .put("messages", JSONArray().apply {
                 if (!nativeMode) {
                     put(
@@ -1043,10 +1044,11 @@ private fun JSONObject.optIntOrNull(key: String): Int? {
     return try { getInt(key) } catch (_: Exception) { null }
 }
 
-private fun visualBlocksMetadataJson(settings: AppSettings): JSONObject {
+private fun visualBlocksMetadataJson(settings: AppSettings, conversationId: String?): JSONObject {
+    val serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
     return JSONObject()
         .put("client", "hermes-hub")
-        .put("client_surface", "android-app")
+        .put("client_surface", HERMES_HUB_ANDROID_SURFACE)
         .put("hub_client", true)
         .put("requested_protocol", settings.preferredApi)
         .put("strict_native_mode", settings.strictNativeMode)
@@ -1055,12 +1057,26 @@ private fun visualBlocksMetadataJson(settings: AppSettings): JSONObject {
         .put("project_name", settings.activeProjectName)
         .put("workspace", settings.activeProjectName.ifBlank { "default" })
         .put(
+            "hub_conversation",
+            JSONObject()
+                .put("id", serverConversationId ?: JSONObject.NULL)
+                .put("local_id", conversationId ?: JSONObject.NULL)
+                .put("surface", HERMES_HUB_ANDROID_SURFACE)
+                .put("scope", "per-chat-per-surface")
+                .put("isolation_required", true)
+                .put("do_not_merge_with_other_conversations", true)
+                .put("do_not_merge_with_other_surfaces", true)
+                .put("shared_memory_policy", "Only stable user preferences may be shared; transient chat context must stay in this conversation id.")
+        )
+        .put(
             "memory_policy",
             JSONObject()
                 .put("scope", "shared-hermes-agent-memory")
                 .put("share_with_cli", true)
                 .put("use_server_memory_tools", true)
                 .put("do_not_create_app_only_memory", true)
+                .put("runtime_context_scope", "isolated_conversation")
+                .put("do_not_use_other_active_chats_as_context", true)
                 .put("context_owner", if (isHermesNative(settings)) "hermes-agent" else "client-compat")
         )
         .put(

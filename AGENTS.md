@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.81 Release Hermes Hub 0.6.81 app stability
+v0.6.82 Release Hermes Hub 0.6.82 chat isolation
 ```
 
 ## Regola Linux Gateway Update
@@ -134,6 +134,15 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.82 (Windows + Android chat isolation):
+
+Release 0.6.82:
+- Fix isolamento chat cross-device: ogni richiesta chat Windows/Android invia a Hermes un `conversation` server-side namespaced per superficie e chat locale (`hermes-hub:windows-app:<id>` / `hermes-hub:android-app:<id>`), cosi' Hermes non deve fondere sessioni Android e Windows simultanee.
+- Metadata chat aggiunge `hub_conversation` con `scope=per-chat-per-surface`, `isolation_required=true`, `do_not_merge_with_other_conversations=true`, `do_not_merge_with_other_surfaces=true`.
+- Policy memoria chiarita: memoria lunga condivisa resta valida solo per preferenze/decisioni stabili; contesto transitorio della chat deve restare isolato nella singola conversation id.
+- Migrazione anti-contaminazione: archivi locali salvano `serverConversationId`; se una chat vecchia non ha questo marker, il client non riusa il vecchio `previous_response_id` creato prima dell'isolamento.
+- Release bump: Windows/AdminBridge `0.6.82`, Android `versionName 0.6.82`, `versionCode 87`.
 
 Hermes Hub 0.6.81 (Windows + Android stability):
 

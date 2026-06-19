@@ -1,6 +1,7 @@
 package com.nemoclaw.chat
 
 internal const val HERMES_FALLBACK_API_KEY = "hermes-hub"
+internal const val HERMES_HUB_ANDROID_SURFACE = "android-app"
 
 internal fun hermesAuthRetryCandidates(apiKey: String?): List<String> {
     val candidates = linkedSetOf<String>()
@@ -45,4 +46,12 @@ internal fun isRecoverablePreviousResponseError(message: String?): Boolean {
         normalized.contains("conversation") ||
         normalized.contains("response not found") ||
         normalized.contains("not found")
+}
+
+internal fun hermesHubServerConversationId(surface: String, conversationId: String?): String? {
+    val localId = conversationId?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    if (localId.startsWith("hermes-hub:", ignoreCase = true)) return localId
+    val safeSurface = surface.trim().lowercase().replace(Regex("""[^a-z0-9_.-]+"""), "-").ifBlank { "unknown" }
+    val safeLocal = localId.replace(Regex("""[^A-Za-z0-9_.:-]+"""), "-")
+    return "hermes-hub:$safeSurface:$safeLocal"
 }

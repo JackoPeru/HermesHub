@@ -75,9 +75,9 @@ public static class ChatStreamClient
                 instructions = nativeMode ? null : HermesHubProtocol.Instructions(settings, mode),
                 store = true,
                 stream = true,
-                conversation = string.IsNullOrWhiteSpace(conversationId) ? null : conversationId,
+                conversation = HermesHubProtocol.ServerConversationId(conversationId),
                 previous_response_id = string.IsNullOrWhiteSpace(candidatePreviousResponseId) ? null : candidatePreviousResponseId,
-                metadata = HermesHubProtocol.Metadata(settings)
+                metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId)
             });
 
             var responsesUrl = $"{settings.GatewayUrl.TrimEnd('/')}/responses";
@@ -199,7 +199,7 @@ public static class ChatStreamClient
             {
                 model = settings.Model,
                 stream = true,
-                metadata = HermesHubProtocol.Metadata(settings),
+                metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId),
                 messages = chatMessages
             });
 

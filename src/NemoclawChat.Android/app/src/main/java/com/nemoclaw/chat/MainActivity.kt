@@ -357,7 +357,8 @@ data class LocalConversation(
     val prompt: String,
     val updatedAt: Long,
     val messages: List<ChatMessage>,
-    val previousResponseId: String? = null
+    val previousResponseId: String? = null,
+    val serverConversationId: String? = null
 )
 
 data class WorkspaceRequest(
@@ -911,7 +912,12 @@ private fun ChatScreen(
             val saved = withContext(Dispatchers.IO) { loadConversation(context, conversationId) }
             if (saved != null) {
                 state.activeConversationId = saved.id
-                state.previousResponseId = saved.previousResponseId
+                val expectedServerConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, saved.id)
+                state.previousResponseId = if (saved.serverConversationId == expectedServerConversationId) {
+                    saved.previousResponseId
+                } else {
+                    null
+                }
                 state.messages.clear()
                 state.messages.addAll(saved.messages)
             }
@@ -4488,6 +4494,7 @@ private suspend fun sendChatRequest(
     apiKey: String?
 ): GatewayChatResult = withContext(Dispatchers.IO) {
     var lastError = "errore sconosciuto"
+    val serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
 
     if (shouldUseResponsesFirst(settings, mode) && supportsResponsesApi(settings, apiKey)) {
         try {
@@ -4495,9 +4502,9 @@ private suspend fun sendChatRequest(
                 .put("model", settings.model)
                 .put("input", prompt)
                 .put("store", true)
-                .put("conversation", conversationId ?: JSONObject.NULL)
+                .put("conversation", serverConversationId ?: JSONObject.NULL)
                 .put("previous_response_id", previousResponseId ?: JSONObject.NULL)
-                .put("metadata", visualBlocksMetadata(settings))
+                .put("metadata", visualBlocksMetadata(settings, conversationId))
             if (!isHermesNative(settings)) {
                 payload.put(
                     "instructions",
@@ -4544,7 +4551,7 @@ private suspend fun sendChatRequest(
         val payload = JSONObject()
             .put("model", settings.model)
             .put("stream", false)
-            .put("metadata", visualBlocksMetadata(settings))
+            .put("metadata", visualBlocksMetadata(settings, conversationId))
             .put("messages", JSONArray().apply {
                 if (!isHermesNative(settings)) {
                     put(
@@ -4605,11 +4612,12 @@ private suspend fun sendChatRequest(
     }
 }
 
-private fun visualBlocksMetadata(settings: AppSettings): JSONObject {
+private fun visualBlocksMetadata(settings: AppSettings, conversationId: String?): JSONObject {
+    val serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
     return JSONObject()
         .put("client", "hermes-hub")
         .put("hub_client", true)
-        .put("client_surface", "android-app")
+        .put("client_surface", HERMES_HUB_ANDROID_SURFACE)
         .put("requested_protocol", settings.preferredApi)
         .put("strict_native_mode", settings.strictNativeMode)
         .put("profile", "Matteo")
@@ -4617,12 +4625,26 @@ private fun visualBlocksMetadata(settings: AppSettings): JSONObject {
         .put("project_name", settings.activeProjectName)
         .put("workspace", settings.activeProjectName.ifBlank { "default" })
         .put(
+            "hub_conversation",
+            JSONObject()
+                .put("id", serverConversationId ?: JSONObject.NULL)
+                .put("local_id", conversationId ?: JSONObject.NULL)
+                .put("surface", HERMES_HUB_ANDROID_SURFACE)
+                .put("scope", "per-chat-per-surface")
+                .put("isolation_required", true)
+                .put("do_not_merge_with_other_conversations", true)
+                .put("do_not_merge_with_other_surfaces", true)
+                .put("shared_memory_policy", "Only stable user preferences may be shared; transient chat context must stay in this conversation id.")
+        )
+        .put(
             "memory_policy",
             JSONObject()
                 .put("scope", "shared-hermes-agent-memory")
                 .put("share_with_cli", true)
                 .put("use_server_memory_tools", true)
                 .put("do_not_create_app_only_memory", true)
+                .put("runtime_context_scope", "isolated_conversation")
+                .put("do_not_use_other_active_chats_as_context", true)
                 .put("context_owner", if (isHermesNative(settings)) "hermes-agent" else "client-compat")
         )
         .put(
@@ -6738,6 +6760,7 @@ private fun saveConversationExchange(
         ChatMessage("Tu", prompt, fromUser = true),
         ChatMessage("Hermes", response, fromUser = false, visualBlocksVersion = visualBlocksVersion, visualBlocks = visualBlocks)
     )
+    val newConversationId = "conv_$now"
 
     val conversation = if (index >= 0) {
         val current = conversations[index]
@@ -6747,18 +6770,20 @@ private fun saveConversationExchange(
             prompt = prompt,
             updatedAt = now,
             messages = current.messages + newMessages,
-            previousResponseId = responseId ?: current.previousResponseId
+            previousResponseId = responseId ?: current.previousResponseId,
+            serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, current.id)
         )
     } else {
         LocalConversation(
-            id = "conv_$now",
+            id = newConversationId,
             title = makeTitle(prompt),
             kind = if (mode == "Agente") "Task" else "Chat",
             description = if (mode == "Agente") "Conversazione agente via $source." else "Conversazione chat via $source.",
             prompt = prompt,
             updatedAt = now,
             messages = newMessages,
-            previousResponseId = responseId
+            previousResponseId = responseId,
+            serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, newConversationId)
         )
     }
 
@@ -6783,6 +6808,7 @@ private fun saveConversationSnapshot(
     val conversations = loadConversations(context).toMutableList()
     val index = conversations.indexOfFirst { it.id == conversationId }
     val now = System.currentTimeMillis()
+    val newConversationId = "conv_$now"
     val conversation = if (index >= 0) {
         val current = conversations[index]
         current.copy(
@@ -6791,18 +6817,20 @@ private fun saveConversationSnapshot(
             prompt = prompt,
             updatedAt = now,
             messages = messages,
-            previousResponseId = responseId ?: current.previousResponseId
+            previousResponseId = responseId ?: current.previousResponseId,
+            serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, current.id)
         )
     } else {
         LocalConversation(
-            id = "conv_$now",
+            id = newConversationId,
             title = makeTitle(prompt),
             kind = if (mode == "Agente") "Task" else "Chat",
             description = if (mode == "Agente") "Conversazione agente via $source." else "Conversazione chat via $source.",
             prompt = prompt,
             updatedAt = now,
             messages = messages,
-            previousResponseId = responseId
+            previousResponseId = responseId,
+            serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, newConversationId)
         )
     }
 
@@ -6903,7 +6931,8 @@ private fun loadConversations(context: Context): List<LocalConversation> {
                         prompt = obj.optString("prompt"),
                         updatedAt = obj.optLong("updatedAt"),
                         messages = readMessages(obj.optJSONArray("messages") ?: JSONArray()),
-                        previousResponseId = obj.optString("previousResponseId").takeIf { it.isNotBlank() }
+                        previousResponseId = obj.optString("previousResponseId").takeIf { it.isNotBlank() },
+                        serverConversationId = obj.optString("serverConversationId").takeIf { it.isNotBlank() }
                     )
                 )
             }
@@ -6928,6 +6957,7 @@ private fun saveConversations(context: Context, conversations: List<LocalConvers
                     .put("prompt", conversation.prompt)
                     .put("updatedAt", conversation.updatedAt)
                     .put("previousResponseId", conversation.previousResponseId ?: JSONObject.NULL)
+                    .put("serverConversationId", conversation.serverConversationId ?: JSONObject.NULL)
                     .put("messages", writeMessages(conversation.messages))
             )
         }

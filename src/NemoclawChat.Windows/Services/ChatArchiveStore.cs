@@ -21,6 +21,7 @@ public sealed class ConversationRecord
     public string Description { get; set; } = string.Empty;
     public string Prompt { get; set; } = string.Empty;
     public string PreviousResponseId { get; set; } = string.Empty;
+    public string ServerConversationId { get; set; } = string.Empty;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
     public List<ChatMessageRecord> Messages { get; set; } = [];
 }
@@ -153,6 +154,7 @@ public static class ChatArchiveStore
             ? $"Conversazione agente via {source}."
             : $"Conversazione chat via {source}.";
         conversation.Prompt = prompt;
+        conversation.ServerConversationId = HermesHubProtocol.ServerConversationId(conversation.Id) ?? string.Empty;
         if (previousResponseId is not null)
         {
             conversation.PreviousResponseId = previousResponseId.Trim();
@@ -193,6 +195,7 @@ public static class ChatArchiveStore
             ? $"Conversazione agente via {source}."
             : $"Conversazione chat via {source}.";
         conversation.Prompt = prompt;
+        conversation.ServerConversationId = HermesHubProtocol.ServerConversationId(conversation.Id) ?? string.Empty;
         if (previousResponseId is not null)
         {
             conversation.PreviousResponseId = previousResponseId.Trim();

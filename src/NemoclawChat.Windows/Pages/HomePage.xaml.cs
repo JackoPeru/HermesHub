@@ -521,7 +521,10 @@ public sealed partial class HomePage : Page
         }
 
         _conversationId = conversation.Id;
-        _previousResponseId = conversation.PreviousResponseId;
+        var expectedServerConversationId = HermesHubProtocol.ServerConversationId(conversation.Id) ?? string.Empty;
+        _previousResponseId = string.Equals(conversation.ServerConversationId, expectedServerConversationId, StringComparison.Ordinal)
+            ? conversation.PreviousResponseId
+            : null;
         _lastServerContextTokens = 0;
         EmptyState.Visibility = Visibility.Collapsed;
         Messages.Clear();
