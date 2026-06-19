@@ -80,9 +80,10 @@ public static class AppSettingsStore
 
         if (string.IsNullOrWhiteSpace(settings.GatewayUrl) ||
             settings.GatewayUrl.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
-            settings.GatewayUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase))
+            settings.GatewayUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
+            settings.GatewayUrl.Contains("100.105.46.6", StringComparison.OrdinalIgnoreCase))
         {
-            settings.GatewayUrl = "http://100.105.46.6:8642/v1";
+            settings.GatewayUrl = "http://hermes:8642/v1";
             changed = true;
         }
 

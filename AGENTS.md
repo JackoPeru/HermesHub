@@ -11,7 +11,7 @@ Target:
 - UI moderna chatbot: dark premium operator console, composer largo, menu `+`, modalita `Chat`/`Agente`.
 - Nome visibile app: `Hermes Hub`.
 - Compatibilita Android: `applicationId` resta `com.nemoclaw.chat`.
-- Backend primario personale: Hermes Agent API Server su Tailscale `http://100.105.46.6:8642/v1` con fallback discovery `hermes.local`.
+- Backend primario personale: Hermes Agent API Server su Tailscale/MagicDNS `http://hermes:8642/v1`; fallback diretto IP server Linux verificato `http://100.94.223.14:8642/v1`, poi `hermes.local`.
 - Direzione nuova: Hermes Hub e' client operativo per Hermes Agent, non console del vecchio backend.
 
 ## Regola Git
@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.85 Release Hermes Hub 0.6.85 llama.cpp stream stability
+v0.6.86 Release Hermes Hub 0.6.86 Hermes endpoint correction
 ```
 
 ## Regola Linux Gateway Update
@@ -135,6 +135,15 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.86 (Windows + Android endpoint correction):
+
+Release 0.6.86:
+- Correzione endpoint Tailscale 2026-06-19: `100.105.46.6` risulta essere `pc-matteo-1` Windows, non server Linux Hermes; per questo la porta `8642` rispondeva con connection refused.
+- Default Windows/Android cambiato a `http://hermes:8642/v1` con fallback diretto `http://100.94.223.14:8642/v1`; `100.105.46.6` resta solo ultimo fallback legacy.
+- Migrazione settings: se un client ha salvato `100.105.46.6`, lo normalizza al nuovo default `http://hermes:8642/v1`.
+- Verifica locale: `http://hermes:8642/v1/capabilities` e `http://100.94.223.14:8642/v1/capabilities` rispondono 200 con API key `hermes-hub`.
+- Release bump: Windows/AdminBridge `0.6.86`, Android `versionName 0.6.86`, `versionCode 91`.
 
 Hermes Hub 0.6.85 (Windows + Android llama.cpp stream stability):
 

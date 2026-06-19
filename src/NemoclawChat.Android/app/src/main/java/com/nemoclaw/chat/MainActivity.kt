@@ -5215,13 +5215,14 @@ private fun resolveHermesUrl(settings: AppSettings, path: String): String {
 }
 
 private val plugAndPlayGatewayRoots = listOf(
-    "http://100.105.46.6:8642",
-    "http://hermes.local:8642",
     "http://hermes:8642",
+    "http://100.94.223.14:8642",
+    "http://hermes.local:8642",
     "http://hermes-hub:8642",
     "http://hermeshub:8642",
     "http://home-server:8642",
-    "http://server:8642"
+    "http://server:8642",
+    "http://100.105.46.6:8642"
 )
 
 private fun plugAndPlayUrlCandidates(url: String): List<String> {
@@ -6288,7 +6289,11 @@ private fun normalizePlugAndPlaySettings(context: Context, settings: AppSettings
     var changed = false
 
     val gateway = normalizeUrl(next.gatewayUrl)
-    if (gateway.isBlank() || gateway.contains("127.0.0.1", ignoreCase = true) || gateway.contains("localhost", ignoreCase = true)) {
+    if (gateway.isBlank() ||
+        gateway.contains("127.0.0.1", ignoreCase = true) ||
+        gateway.contains("localhost", ignoreCase = true) ||
+        gateway.contains("100.105.46.6", ignoreCase = true)
+    ) {
         next = next.copy(gatewayUrl = AppDefaults.gatewayUrl)
         changed = true
     } else if (gateway != next.gatewayUrl) {
@@ -7279,11 +7284,11 @@ private const val SETTINGS_FIELD_MAX_LENGTH = 2048
 private val gatewaySecretKeyLock = Any()
 
 private object AppDefaults {
-    const val gatewayUrl = "http://100.105.46.6:8642/v1"
+    const val gatewayUrl = "http://hermes:8642/v1"
     const val gatewayWsUrl = ""
-    const val adminBridgeUrl = "http://100.105.46.6:8642"
+    const val adminBridgeUrl = "http://hermes:8642"
     const val provider = "hermes-agent"
-    const val inferenceEndpoint = "http://100.105.46.6:8642/v1"
+    const val inferenceEndpoint = "http://hermes:8642/v1"
     const val preferredApi = "hermes-native"
     const val model = "hermes-agent"
     const val accessMode = "Tailscale/LAN plug-and-play"

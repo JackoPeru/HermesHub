@@ -91,13 +91,14 @@ public static class GatewayService
     internal const string HermesFallbackApiKey = GatewayCredentialStore.DefaultApiKey;
     private static readonly string[] PlugAndPlayGatewayUrls =
     [
-        "http://100.105.46.6:8642/v1",
-        "http://hermes.local:8642/v1",
         "http://hermes:8642/v1",
+        "http://100.94.223.14:8642/v1",
+        "http://hermes.local:8642/v1",
         "http://hermes-hub:8642/v1",
         "http://hermeshub:8642/v1",
         "http://home-server:8642/v1",
-        "http://server:8642/v1"
+        "http://server:8642/v1",
+        "http://100.105.46.6:8642/v1"
     ];
 
     private static readonly HttpClientHandler HttpHandler = new()

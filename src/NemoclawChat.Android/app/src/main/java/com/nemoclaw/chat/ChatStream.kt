@@ -24,13 +24,14 @@ import kotlin.math.max
 
 private const val STREAM_ACCUM_MAX_CHARS = 2_000_000
 private val plugAndPlayStreamGatewayRoots = listOf(
-    "http://100.105.46.6:8642",
-    "http://hermes.local:8642",
     "http://hermes:8642",
+    "http://100.94.223.14:8642",
+    "http://hermes.local:8642",
     "http://hermes-hub:8642",
     "http://hermeshub:8642",
     "http://home-server:8642",
-    "http://server:8642"
+    "http://server:8642",
+    "http://100.105.46.6:8642"
 )
 
 private val streamHttpClient: OkHttpClient = OkHttpClient.Builder()

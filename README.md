@@ -28,8 +28,8 @@ Client Windows + Android per parlare con Hermes Agent su home-server.
 
 Preset in [config/hermes-defaults.json](config/hermes-defaults.json):
 
-- Hermes API URL: `http://100.105.46.6:8642/v1`
-- Health: `http://100.105.46.6:8642/health`
+- Hermes API URL: `http://hermes:8642/v1`
+- Health: `http://hermes:8642/health`
 - Model: `hermes-agent`
 - API primaria: Hermes Native (`/v1/responses` o alias gateway `/v1/hermes/native`)
 - API fallback: `/v1/chat/completions` solo compat/strict OFF
@@ -64,7 +64,7 @@ src/NemoclawChat.Android/app/build/outputs/apk/debug/androidApp-debug.apk
 Versione corrente:
 
 ```text
-v0.6.85
+v0.6.86
 ```
 
 Asset attesi dagli updater:

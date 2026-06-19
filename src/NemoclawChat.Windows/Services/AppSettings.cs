@@ -2,11 +2,11 @@ namespace NemoclawChat_Windows.Services;
 
 public sealed class AppSettings
 {
-    public string GatewayUrl { get; set; } = "http://100.105.46.6:8642/v1";
+    public string GatewayUrl { get; set; } = "http://hermes:8642/v1";
     public string GatewayWsUrl { get; set; } = string.Empty;
-    public string AdminBridgeUrl { get; set; } = "http://100.105.46.6:8642";
+    public string AdminBridgeUrl { get; set; } = "http://hermes:8642";
     public string Provider { get; set; } = "hermes-agent";
-    public string InferenceEndpoint { get; set; } = "http://100.105.46.6:8642/v1";
+    public string InferenceEndpoint { get; set; } = "http://hermes:8642/v1";
     public string PreferredApi { get; set; } = "hermes-native";
     public string Model { get; set; } = "hermes-agent";
     public string AccessMode { get; set; } = "Tailscale/LAN";
