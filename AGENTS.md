@@ -132,6 +132,12 @@ Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
 
+Hermes Hub 0.6.75 (Linux Gateway):
+
+Release 0.6.75:
+- Auto-update gateway Linux: timer user systemd ora controlla update anche a ogni boot (`OnBootSec=2min`) oltre al check giornaliero 04:20 con jitter.
+- Asset update server atteso: `artifacts/HermesHub-0.6.75-linux-gateway.tar.gz`.
+
 Hermes Hub 0.6.74 (Linux Gateway):
 
 Release 0.6.74:

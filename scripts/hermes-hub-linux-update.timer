@@ -2,6 +2,7 @@
 Description=Daily Hermes Hub Linux gateway helper update check
 
 [Timer]
+OnBootSec=2min
 OnCalendar=*-*-* 04:20:00
 Persistent=true
 RandomizedDelaySec=30m
