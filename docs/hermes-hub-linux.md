@@ -24,8 +24,8 @@ Inference: http://127.0.0.1:8000/v1
 Model: HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive:IQ4_XS
 Config: ~/.hermes/config.yaml
 Env: ~/.hermes/.env
-Wait Tailscale: ~/.local/bin/hermes-wait-tailscale
-Wait llama.cpp: ~/.local/bin/hermes-wait-llama
+Wait Tailscale: ~/.local/bin/hermes-wait-tailscale.sh
+Wait llama.cpp: ~/.local/bin/hermes-wait-llama.sh
 Media roots: $HERMES_TERMINAL_CWD, ~/.hermes/cache, ~/.hermes/media
 Video library: ~/.hermes/media/video
 Hub state: ~/.hermes/hub_state.json
@@ -50,8 +50,8 @@ Questo installa:
 ~/hermes-hub-linux.sh
 ~/patch-hermes-gateway-native.py
 ~/.local/bin/hermes-hub-linux-update
-~/.local/bin/hermes-wait-tailscale
-~/.local/bin/hermes-wait-llama
+~/.local/bin/hermes-wait-tailscale.sh
+~/.local/bin/hermes-wait-llama.sh
 ~/.config/systemd/user/hermes-hub.service
 ~/.config/systemd/user/hermes-hub-linux-update.timer
 ```
@@ -93,13 +93,13 @@ export GH_TOKEN=ghp_xxx
 Per creare l'asset Linux da pubblicare nella release GitHub:
 
 ```powershell
-.\scripts\package-linux-gateway.ps1 -Version 0.6.76
+.\scripts\package-linux-gateway.ps1 -Version 0.6.77
 ```
 
 Output:
 
 ```text
-artifacts\HermesHub-0.6.76-linux-gateway.tar.gz
+artifacts\HermesHub-0.6.77-linux-gateway.tar.gz
 ```
 
 Carica questo asset nella stessa GitHub Release usata da Windows `.msix` e Android `.apk`. Da quel momento il server Linux puo' aggiornarsi da solo o con comando CLI, senza nuovo trasferimento manuale.
@@ -112,9 +112,9 @@ Installazione come servizio user systemd:
 mkdir -p ~/.config/systemd/user
 cp scripts/hermes-hub-linux.sh ~/hermes-hub-linux.sh
 cp scripts/patch-hermes-gateway-native.py ~/patch-hermes-gateway-native.py
-cp scripts/hermes-wait-tailscale.sh ~/.local/bin/hermes-wait-tailscale
-cp scripts/hermes-wait-llama.sh ~/.local/bin/hermes-wait-llama
-chmod +x ~/hermes-hub-linux.sh ~/.local/bin/hermes-wait-tailscale ~/.local/bin/hermes-wait-llama
+cp scripts/hermes-wait-tailscale.sh ~/.local/bin/hermes-wait-tailscale.sh
+cp scripts/hermes-wait-llama.sh ~/.local/bin/hermes-wait-llama.sh
+chmod +x ~/hermes-hub-linux.sh ~/.local/bin/hermes-wait-tailscale.sh ~/.local/bin/hermes-wait-llama.sh
 cp scripts/hermes-hub-linux.service ~/.config/systemd/user/hermes-hub.service
 systemctl --user daemon-reload
 systemctl --user enable --now hermes-hub.service

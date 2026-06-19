@@ -21,8 +21,8 @@ Installs:
   ~/hermes-hub-linux.sh
   ~/patch-hermes-gateway-native.py
   ~/.local/bin/hermes-hub-linux-update
-  ~/.local/bin/hermes-wait-tailscale
-  ~/.local/bin/hermes-wait-llama
+  ~/.local/bin/hermes-wait-tailscale.sh
+  ~/.local/bin/hermes-wait-llama.sh
   ~/.config/systemd/user/hermes-hub.service
 
 Optional:
@@ -97,6 +97,8 @@ ln -sfn "$RELEASE_DIR" "$INSTALL_DIR/current"
 ln -sfn "$INSTALL_DIR/current/hermes-hub-linux.sh" "$HOME/hermes-hub-linux.sh"
 ln -sfn "$INSTALL_DIR/current/patch-hermes-gateway-native.py" "$HOME/patch-hermes-gateway-native.py"
 ln -sfn "$INSTALL_DIR/current/hermes-hub-linux-update.sh" "$BIN_DIR/hermes-hub-linux-update"
+ln -sfn "$INSTALL_DIR/current/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-tailscale.sh"
+ln -sfn "$INSTALL_DIR/current/hermes-wait-llama.sh" "$BIN_DIR/hermes-wait-llama.sh"
 ln -sfn "$INSTALL_DIR/current/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-tailscale"
 ln -sfn "$INSTALL_DIR/current/hermes-wait-llama.sh" "$BIN_DIR/hermes-wait-llama"
 printf '%s\n' "$VERSION" > "$INSTALL_DIR/VERSION"

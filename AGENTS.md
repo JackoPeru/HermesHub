@@ -134,11 +134,18 @@ Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
 
+Hermes Hub 0.6.77 (Linux Gateway):
+
+Release 0.6.77:
+- Hotfix service wait path: `ExecStartPre` usa i path con estensione `.sh` come sul server (`/home/matteo/.local/bin/hermes-wait-tailscale.sh`, `/home/matteo/.local/bin/hermes-wait-llama.sh`).
+- Installer/updater creano sia symlink `.sh` sia alias senza estensione per compatibilita'.
+- Asset update server atteso: `artifacts/HermesHub-0.6.77-linux-gateway.tar.gz`.
+
 Hermes Hub 0.6.76 (Linux Gateway):
 
 Release 0.6.76:
 - Gateway Linux production defaults allineati al server Hermes llama.cpp: user service PATH completo, provider `custom`, base `http://127.0.0.1:8000/v1`, modello `HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive:IQ4_XS`.
-- Service gateway ora aspetta Tailscale e llama.cpp con `ExecStartPre=/home/matteo/.local/bin/hermes-wait-tailscale` e `ExecStartPre=/home/matteo/.local/bin/hermes-wait-llama`.
+- Service gateway ora aspetta Tailscale e llama.cpp con `ExecStartPre=/home/matteo/.local/bin/hermes-wait-tailscale.sh` e `ExecStartPre=/home/matteo/.local/bin/hermes-wait-llama.sh`.
 - Aggiunti script installati/versionati `hermes-wait-tailscale.sh` e `hermes-wait-llama.sh`; installer, updater e package Linux li includono e li linkano in `~/.local/bin`.
 - Timeout service: `TimeoutStartSec=1000`, `TimeoutStopSec=240`.
 - Asset update server atteso: `artifacts/HermesHub-0.6.76-linux-gateway.tar.gz`.
