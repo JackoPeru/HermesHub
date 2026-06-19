@@ -36,6 +36,84 @@ Ultimo push release fatto su richiesta utente:
 v0.6.73 Release Hermes Hub 0.6.73 hardware bottom nav
 ```
 
+## Regola Linux Gateway Update
+
+Quando serve preparare/aggiornare il server Linux Hermes Gateway:
+
+- Primo trasferimento manuale: copiare sul server questi file da `scripts/`: `hermes-hub-linux.sh`, `patch-hermes-gateway-native.py`, `install-hermes-hub-linux.sh`, `hermes-hub-linux-update.sh`, `hermes-hub-linux.service`, `hermes-hub-linux-update.service`, `hermes-hub-linux-update.timer`.
+- Se il trasferimento lo fa un'altra IA, darle queste istruzioni:
+
+```text
+Devi installare Hermes Gateway helper su server Linux.
+
+Dal repo HermesHub prendi SOLO questi file:
+- scripts/hermes-hub-linux.sh
+- scripts/patch-hermes-gateway-native.py
+- scripts/install-hermes-hub-linux.sh
+- scripts/hermes-hub-linux-update.sh
+- scripts/hermes-hub-linux.service
+- scripts/hermes-hub-linux-update.service
+- scripts/hermes-hub-linux-update.timer
+
+Copiali sul server Linux in una cartella temporanea, per esempio:
+~/hermes-hub-transfer/scripts/
+
+Poi sul server esegui:
+cd ~/hermes-hub-transfer/scripts
+chmod +x install-hermes-hub-linux.sh hermes-hub-linux.sh hermes-hub-linux-update.sh
+./install-hermes-hub-linux.sh --enable-service --enable-auto-update
+
+Verifica:
+systemctl --user status hermes-hub.service --no-pager
+systemctl --user list-timers | grep hermes-hub
+curl -H "Authorization: Bearer hermes-hub" http://127.0.0.1:8642/v1/capabilities
+
+Se curl non risponde, controlla log:
+journalctl --user -u hermes-hub.service -n 100 --no-pager
+
+Dopo install iniziale, non trasferire piu' file a mano: per aggiornare usa:
+~/.local/bin/hermes-hub-linux-update --restart
+```
+
+- Comando prima install sul server:
+
+```bash
+cd /percorso/dove/hai/messo/scripts
+chmod +x install-hermes-hub-linux.sh hermes-hub-linux.sh hermes-hub-linux-update.sh
+./install-hermes-hub-linux.sh --enable-service --enable-auto-update
+```
+
+- Dopo la prima install, gli update futuri vanno fatti dal server con:
+
+```bash
+~/.local/bin/hermes-hub-linux-update --restart
+```
+
+- Per ogni release GitHub che deve aggiornare anche il gateway Linux, creare e caricare l'asset:
+
+```powershell
+.\scripts\package-linux-gateway.ps1 -Version X.Y.Z
+```
+
+Asset atteso:
+
+```text
+artifacts\HermesHub-X.Y.Z-linux-gateway.tar.gz
+```
+
+- Caricare `HermesHub-X.Y.Z-linux-gateway.tar.gz` nella stessa GitHub Release di Android APK e Windows MSIX. Questo evita nuovi trasferimenti manuali: il server aggiorna launcher, patcher, updater e unit systemd da GitHub Releases.
+- Non dimenticare che gli script Linux devono restare LF; `.gitattributes` forza LF per `.sh`, `.service`, `.timer`.
+
+Stato server Linux verificato 2026-06-18:
+
+- Boot order impostato senza reboot: `tailscaled.service` -> `hermes-llama.service` -> `hermes-hub.service`.
+- `hermes-llama.service` e' system service: richiede Tailscale, attende `tailscale status`, poi carica modello in GPU con llama.cpp TurboQuant.
+- `hermes-hub.service` e' user service con `loginctl enable-linger matteo`: resta vivo dopo logout SSH, attende Tailscale, attende `http://127.0.0.1:8000/v1/models`, poi espone gateway su `0.0.0.0:8642`.
+- Fix applicati sul server: user service PATH include `~/.local/bin` per trovare `hermes`; provider gateway impostato su `custom` verso `http://127.0.0.1:8000/v1` invece del default `lmstudio` su `127.0.0.1:1234`.
+- Verifica finale attesa: `tailscaled.service`, `hermes-llama.service`, `hermes-hub.service` active; `curl -H "Authorization: Bearer hermes-hub" http://127.0.0.1:8642/v1/capabilities` OK; timer auto-update enabled.
+- Firewall finale atteso: UFW apre solo `8642/tcp` da LAN `192.168.1.0/24` e su `tailscale0`; nessuna apertura WAN/router.
+- Backup creati sul server prima delle modifiche: `/etc/systemd/system/hermes-llama.service.*.bootseq.bak`, `/home/matteo/.config/systemd/user/hermes-hub.service.*.bootseq.bak`, `/etc/ufw/user.rules.*.hermeshub.bak`, `/etc/ufw/user6.rules.*.hermeshub.bak`.
+
 ## Regola Memoria
 
 Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto:
@@ -53,6 +131,14 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.74 (Linux Gateway):
+
+Release 0.6.74:
+- Decisione operativa 2026-06-18: basta gateway su Windows; gateway produzione unico e' Linux sul server Hermes. Windows resta solo client.
+- Fix auth gateway Linux: launcher/service esportano `API_SERVER_KEY`, `HERMES_API_KEY`, `HERMESAPIKEY`, `HERMES_HUB_API_KEY`, `HERMES_GATEWAY_API_KEY` con default `hermes-hub`.
+- Patcher gateway Linux rende `_check_auth` compatibile con tutte le key alias e con default `hermes-hub`, cosi' richieste Android successive con `previous_response_id` non falliscono se config Hermes contiene una key precedente.
+- Asset update server atteso: `artifacts/HermesHub-0.6.74-linux-gateway.tar.gz`; pubblicarlo in GitHub Release per testare `~/.local/bin/hermes-hub-linux-update --restart`.
 
 Hermes Hub 0.6.73 (Windows + Android):
 

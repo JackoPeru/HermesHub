@@ -1,6 +1,6 @@
 # Hermes Gateway su Ubuntu/Linux
 
-`hermes-hub` e' il launcher del **Hermes Gateway**: il servizio ponte/API server che espone Hermes Agent alle app Hermes Hub Windows/Android. Durante i test puo' puntare a LM Studio; sul server finale Ubuntu headless deve restare compatibile con vLLM.
+`hermes-hub` e' il launcher del **Hermes Gateway**: il servizio ponte/API server che espone Hermes Agent alle app Hermes Hub Windows/Android. Da 2026-06-18 il gateway Windows non e' piu' target operativo: la produzione usa solo il gateway Linux sul server Hermes.
 
 Avvio manuale:
 
@@ -13,7 +13,7 @@ Default:
 
 ```text
 Hermes Gateway API: http://0.0.0.0:8642/v1
-API key: hermes-hub
+API key: hermes-hub (`API_SERVER_KEY`, `HERMES_API_KEY`, `HERMESAPIKEY`, `HERMES_HUB_API_KEY`)
 Max iterations: gateway loop guard (`HERMES_MAX_ITERATIONS=120`)
 Auxiliary local-only: true (`HERMES_AUXILIARY_LOCAL_ONLY=true`)
 Native events: true (`HERMES_NATIVE_EVENTS=true`)
@@ -139,7 +139,7 @@ Environment=VLLM_BASE_URL=http://127.0.0.1:8000
 Environment=HERMES_INFERENCE_MODEL=nome-modello-vllm
 ```
 
-Il servizio deve esporre sempre `http://SERVER:8642/v1` verso Hermes Hub e usare `API_SERVER_KEY=hermes-hub`, cosi' Android/Windows non cambiano configurazione quando si passa da Windows test a Ubuntu/vLLM. Il launcher imposta sia `API_SERVER_HOST=0.0.0.0`/`API_SERVER_PORT=8642` sia le variabili compat `HERMES_API_HOST`/`HERMES_API_PORT`: Android deve usare l'IP del server o l'IP Tailscale, non `127.0.0.1`.
+Il servizio deve esporre sempre `http://SERVER:8642/v1` verso Hermes Hub e usare `API_SERVER_KEY=hermes-hub`, cosi' Android/Windows restano puntati al server Linux. Il launcher imposta anche alias compat auth `HERMES_API_KEY`, `HERMESAPIKEY`, `HERMES_HUB_API_KEY` e `HERMES_GATEWAY_API_KEY`; il patcher gateway accetta tutti questi token e il default `hermes-hub`, anche se la config Hermes contiene una key precedente. Il launcher imposta sia `API_SERVER_HOST=0.0.0.0`/`API_SERVER_PORT=8642` sia le variabili compat `HERMES_API_HOST`/`HERMES_API_PORT`: Android deve usare l'IP del server o l'IP Tailscale, non `127.0.0.1`.
 
 `HERMES_AUXILIARY_LOCAL_ONLY=true` mantiene i task ausiliari dentro il provider locale e impedisce fallback esterni OpenRouter/Nous durante i test LM Studio o su vLLM headless.
 

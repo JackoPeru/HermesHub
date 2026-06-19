@@ -100,6 +100,34 @@ def _replace_regex_once(text: str, pattern: str, repl: str, label: str) -> tuple
 def _patch_text(text: str) -> tuple[str, list[str]]:
     changes: list[str] = []
 
+    if "def _hermes_hub_api_keys" not in text:
+        text, _ = _replace_once(
+            text,
+            "def _multimodal_validation_error(exc: ValueError, *, param: str) -> \"web.Response\":",
+            'def _hermes_hub_api_keys(primary: str = "") -> List[str]:\n'
+            '    """Accepted bearer keys for Hermes Hub Linux gateway deployments."""\n'
+            '    keys: List[str] = []\n'
+            '    for value in [\n'
+            '        primary,\n'
+            '        os.environ.get("API_SERVER_KEY", ""),\n'
+            '        os.environ.get("HERMES_API_KEY", ""),\n'
+            '        os.environ.get("HERMESAPIKEY", ""),\n'
+            '        os.environ.get("HERMES_HUB_API_KEY", ""),\n'
+            '        os.environ.get("HERMES_GATEWAY_API_KEY", ""),\n'
+            '        "hermes-hub",\n'
+            '    ]:\n'
+            '        for part in str(value or "").replace(";", ",").split(","):\n'
+            '            key = part.strip()\n'
+            '            if key and key not in keys:\n'
+            '                keys.append(key)\n'
+            '    return keys\n'
+            "\n"
+            "\n"
+            "def _multimodal_validation_error(exc: ValueError, *, param: str) -> \"web.Response\":",
+            "hermes hub api key aliases",
+        )
+        changes.append("hermes hub api key aliases")
+
     if "def _collect_hardware_snapshot" not in text:
         text, _ = _replace_once(
             text,
@@ -271,6 +299,43 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
             "hermes hub transparent request detector",
         )
         changes.append("hermes hub transparent request detector")
+
+    if "accepted_api_keys = _hermes_hub_api_keys(self._api_key)" not in text:
+        text, _ = _replace_once(
+            text,
+            '        if not self._api_key:\n'
+            '            return None\n'
+            '\n'
+            '        auth_header = request.headers.get("Authorization", "")\n'
+            '        if auth_header.startswith("Bearer "):\n'
+            '            token = auth_header[7:].strip()\n'
+            '            if hmac.compare_digest(token, self._api_key):\n'
+            '                return None  # Auth OK\n',
+            '        accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n'
+            '        if not accepted_api_keys:\n'
+            '            return None\n'
+            '\n'
+            '        auth_header = request.headers.get("Authorization", "")\n'
+            '        if auth_header.startswith("Bearer "):\n'
+            '            token = auth_header[7:].strip()\n'
+            '            if any(hmac.compare_digest(token, api_key) for api_key in accepted_api_keys):\n'
+            '                return None  # Auth OK\n',
+            "auth accept hermes hub key aliases",
+        )
+        changes.append("auth accept hermes hub key aliases")
+
+    if "if not _hermes_hub_api_keys(self._api_key):" not in text:
+        text, _ = _replace_once(
+            text,
+            '            if not self._api_key:\n'
+            '                logger.error(\n'
+            '                    "[%s] Refusing to start: API_SERVER_KEY is required for the API server, "',
+            '            if not _hermes_hub_api_keys(self._api_key):\n'
+            '                logger.error(\n'
+            '                    "[%s] Refusing to start: API_SERVER_KEY is required for the API server, "',
+            "startup auth accepts hermes hub key aliases",
+        )
+        changes.append("startup auth accepts hermes hub key aliases")
 
     if 'system_prompt = None if _is_hermes_hub_request(request, body) else (body.get("system_message") or body.get("instructions"))' not in text:
         text = text.replace(

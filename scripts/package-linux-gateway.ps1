@@ -46,5 +46,6 @@ if (Test-Path -LiteralPath $archive) {
 }
 
 tar -czf $archive -C $stageRoot .
+Remove-Item -LiteralPath $stageRoot -Recurse -Force
 
 Write-Host "Linux gateway asset: $archive"
