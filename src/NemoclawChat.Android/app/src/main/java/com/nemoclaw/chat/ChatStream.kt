@@ -775,7 +775,12 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
             val item = obj.optJSONObject("item")
             if (item != null) {
                 val itemType = item.optString("type", "")
-                if (itemType.contains("output", ignoreCase = true) || itemType.contains("result", ignoreCase = true)) {
+                if (itemType.contains("message", ignoreCase = true)) {
+                    val blocks = extractVisualBlocksFromJson(item.toString())
+                    if (blocks.isNotEmpty()) {
+                        out += ChatStreamEvent.VisualBlocks(blocks, VISUAL_BLOCKS_VERSION)
+                    }
+                } else if (itemType.contains("output", ignoreCase = true) || itemType.contains("result", ignoreCase = true)) {
                     val id = item.optString("call_id", item.optString("id", "tool"))
                     val name = item.optString("name", "")
                     val output = extractToolOutput(item)

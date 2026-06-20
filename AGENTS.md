@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.88 Release Hermes Hub 0.6.88 Android stream wording polish
+v0.6.89 Release Hermes Hub 0.6.89 Responses output item stability
 ```
 
 ## Regola Linux Gateway Update
@@ -135,6 +135,15 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.89 (Responses output item stability):
+
+Release 0.6.89:
+- Hotfix Android Responses SSE: `response.output_item.done` con item `message` non viene piu' trattato come nuovo `TextDelta`, per evitare duplicazione del testo gia' arrivato in streaming e metriche/stato finali incoerenti su llama.cpp.
+- Hotfix Windows Responses SSE: `response.output_item.done` con item `message` non genera piu' un tool-end finto; conserva solo eventuali Visual Blocks.
+- Verifica live gateway 2026-06-20: payload reale `response.output_item.done` contiene `item.type=message` e `content[].text`, quindi va ignorato come delta testo per client streaming.
+- Mantiene tutte le ottimizzazioni 0.6.87/0.6.88 per batching, metriche conservative, raw events, checkpoint e protezioni anti-freeze.
+- Release bump: Windows/AdminBridge `0.6.89`, Android `versionName 0.6.89`, `versionCode 94`.
 
 Hermes Hub 0.6.88 (Android stream wording polish):
 

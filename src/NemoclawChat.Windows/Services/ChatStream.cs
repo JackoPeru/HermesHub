@@ -632,12 +632,34 @@ public static class ChatStreamClient
             {
                 if (element.TryGetProperty("item", out var item) && item.ValueKind == JsonValueKind.Object)
                 {
-                    var id = GetString(item, "call_id") ?? GetString(item, "id") ?? "tool";
-                    var result = GetString(item, "result") ?? GetString(item, "output") ?? GetString(item, "content");
-                    if (!string.IsNullOrWhiteSpace(result))
+                    var itemType = GetString(item, "type") ?? string.Empty;
+                    if (itemType.Contains("message", StringComparison.OrdinalIgnoreCase))
                     {
-                        yield return new StreamToolResult(id, null, result!);
+                        var blocks = ExtractVisualBlocksFromElement(item);
+                        if (blocks is { Count: > 0 })
+                        {
+                            yield return new StreamVisualBlocks(blocks, VisualBlocksContract.Version);
+                        }
+
+                        yield break;
                     }
+
+                    var id = GetString(item, "call_id") ?? GetString(item, "id") ?? "tool";
+                    if (itemType.Contains("output", StringComparison.OrdinalIgnoreCase) ||
+                        itemType.Contains("result", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var result = GetString(item, "result") ?? GetString(item, "output") ?? GetString(item, "content");
+                        if (!string.IsNullOrWhiteSpace(result))
+                        {
+                            yield return new StreamToolResult(id, null, result!);
+                        }
+                    }
+                    else if (!itemType.Contains("function", StringComparison.OrdinalIgnoreCase) &&
+                             !itemType.Contains("tool", StringComparison.OrdinalIgnoreCase))
+                    {
+                        yield break;
+                    }
+
                     yield return new StreamToolCallEnd(id);
                 }
                 yield break;
