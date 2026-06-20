@@ -18,6 +18,7 @@ using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
 using Windows.Storage.Pickers;
 using Windows.Storage;
+using Windows.Storage.Streams;
 using Windows.System;
 using WinRT.Interop;
 
@@ -179,11 +180,7 @@ public sealed partial class HomePage : Page
     private async void AttachFile_Click(object sender, RoutedEventArgs e)
     {
         var picker = new FileOpenPicker();
-        picker.FileTypeFilter.Add(".png");
-        picker.FileTypeFilter.Add(".jpg");
-        picker.FileTypeFilter.Add(".jpeg");
-        picker.FileTypeFilter.Add(".webp");
-        picker.FileTypeFilter.Add(".bmp");
+        picker.FileTypeFilter.Add("*");
 
         if (App.MainWindow is not null)
         {
@@ -198,17 +195,19 @@ public sealed partial class HomePage : Page
         }
 
         var settings = AppSettingsStore.Load();
-        var attachment = await TryCreateImageAttachmentAsync(file, settings.MaxAttachmentMb);
+        var attachment = await TryCreateAttachmentAsync(file, settings.MaxAttachmentMb);
         if (attachment is null)
         {
-            AddAction("Allegato", $"Formato immagine non supportato o file troppo grande. Usa PNG/JPEG/WebP sotto {settings.MaxAttachmentMb} MB.");
+            AddAction("Allegato", $"File vuoto, non leggibile o troppo grande. Limite attuale: {settings.MaxAttachmentMb} MB.");
             return;
         }
 
         _pendingAttachments.Add(attachment);
         RenderAttachmentPreviews();
-        AddAction("Allegato vision", $"{file.Name} pronto per Hermes vision ({attachment.SizeBytes / 1024} KB).");
-        PromptBox.Text = AppendPrompt("Analizza l'immagine allegata.");
+        AddAction("Allegato", $"{file.Name} pronto per Hermes ({FormatAttachmentBytes(attachment.SizeBytes)}).");
+        PromptBox.Text = AppendPrompt(attachment.MimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+            ? "Analizza l'immagine allegata."
+            : "Analizza il file allegato.");
     }
 
     private async void CaptureScreenshot_Click(object sender, RoutedEventArgs e)
@@ -342,7 +341,7 @@ public sealed partial class HomePage : Page
             RenderAttachmentPreviews();
             var displayPrompt = attachments.Count == 0
                 ? prompt
-                : $"{prompt}\n\n[Allegati vision: {string.Join(", ", attachments.Select(a => a.FileName))}]";
+                : $"{prompt}\n\n[Allegati: {string.Join(", ", attachments.Select(a => a.FileName))}]";
             AddBubble("Tu", displayPrompt, "UserBubbleBrush", HorizontalAlignment.Right);
             _messageHistory.Add(new ChatMessageRecord("Tu", displayPrompt, DateTimeOffset.Now));
             PromptBox.Text = string.Empty;
@@ -702,15 +701,16 @@ public sealed partial class HomePage : Page
         builder.Append("\n\n[…troncato: limite 2000000 caratteri raggiunto.]");
     }
 
-    private static async Task<ChatInputAttachment?> TryCreateImageAttachmentAsync(StorageFile file, int maxAttachmentMb)
+    private static async Task<ChatInputAttachment?> TryCreateAttachmentAsync(StorageFile file, int maxAttachmentMb)
     {
-        var mimeType = ImageMimeType(file.FileType);
-        if (mimeType is null)
-        {
-            return null;
-        }
+        var mimeType = MimeTypeFromExtension(file.FileType);
 
-        var bytes = await File.ReadAllBytesAsync(file.Path);
+        var buffer = await FileIO.ReadBufferAsync(file);
+        var bytes = new byte[buffer.Length];
+        using (var reader = DataReader.FromBuffer(buffer))
+        {
+            reader.ReadBytes(bytes);
+        }
         var maxBytes = Math.Clamp(maxAttachmentMb, 1, 150) * 1024 * 1024;
         if (bytes.Length <= 0 || bytes.Length > maxBytes)
         {
@@ -721,7 +721,7 @@ public sealed partial class HomePage : Page
         return new ChatInputAttachment(file.Name, mimeType, dataUrl, bytes.LongLength);
     }
 
-    private static string? ImageMimeType(string extension)
+    private static string MimeTypeFromExtension(string extension)
     {
         return extension.ToLowerInvariant() switch
         {
@@ -729,7 +729,22 @@ public sealed partial class HomePage : Page
             ".jpg" or ".jpeg" => "image/jpeg",
             ".webp" => "image/webp",
             ".bmp" => "image/bmp",
-            _ => null
+            ".gif" => "image/gif",
+            ".pdf" => "application/pdf",
+            ".txt" => "text/plain",
+            ".md" => "text/markdown",
+            ".csv" => "text/csv",
+            ".json" => "application/json",
+            ".xml" => "application/xml",
+            ".html" or ".htm" => "text/html",
+            ".doc" => "application/msword",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xls" => "application/vnd.ms-excel",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".ppt" => "application/vnd.ms-powerpoint",
+            ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".zip" => "application/zip",
+            _ => "application/octet-stream"
         };
     }
 
@@ -760,13 +775,7 @@ public sealed partial class HomePage : Page
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var image = new Image
-        {
-            Width = 54,
-            Height = 54,
-            Stretch = Stretch.UniformToFill,
-            Source = BitmapFromDataUrl(attachment.DataUrl)
-        };
+        var preview = AttachmentPreviewVisual(attachment);
         var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         text.Children.Add(new TextBlock
         {
@@ -792,11 +801,42 @@ public sealed partial class HomePage : Page
         remove.Click += RemoveAttachment_Click;
         Grid.SetColumn(text, 1);
         Grid.SetColumn(remove, 2);
-        grid.Children.Add(image);
+        grid.Children.Add(preview);
         grid.Children.Add(text);
         grid.Children.Add(remove);
         root.Child = grid;
         return root;
+    }
+
+    private static UIElement AttachmentPreviewVisual(ChatInputAttachment attachment)
+    {
+        if (attachment.MimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) &&
+            BitmapFromDataUrl(attachment.DataUrl) is { } bitmap)
+        {
+            return new Image
+            {
+                Width = 54,
+                Height = 54,
+                Stretch = Stretch.UniformToFill,
+                Source = bitmap
+            };
+        }
+
+        return new Border
+        {
+            Width = 54,
+            Height = 54,
+            CornerRadius = new CornerRadius(8),
+            Background = (Brush)Application.Current.Resources["ElevatedSurfaceBrush"],
+            Child = new FontIcon
+            {
+                Glyph = "\uE8A5",
+                FontSize = 24,
+                Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            }
+        };
     }
 
     private void RemoveAttachment_Click(object sender, RoutedEventArgs e)

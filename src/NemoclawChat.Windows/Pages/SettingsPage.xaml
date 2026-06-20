@@ -29,7 +29,7 @@
                         <PasswordBox x:Name="ApiKeyBox" Header="API key Hermes" PlaceholderText="hermes-hub" />
                         <TextBox x:Name="ActiveProjectNameBox" Header="Progetto attivo" PlaceholderText="Nome progetto condiviso" />
                         <TextBox x:Name="VideoLibraryPathBox" Header="Cartella video Hermes (sync server)" IsReadOnly="True" PlaceholderText="In attesa di sync da Hermes /health/detailed" />
-                        <NumberBox x:Name="MaxAttachmentMbBox" Header="Limite allegati vision (MB)" Minimum="1" Maximum="150" SmallChange="1" LargeChange="10" />
+                        <NumberBox x:Name="MaxAttachmentMbBox" Header="Limite allegati file (MB)" Minimum="1" Maximum="150" SmallChange="1" LargeChange="10" />
                     </StackPanel>
                 </Border>
 

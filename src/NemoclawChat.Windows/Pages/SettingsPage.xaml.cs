@@ -137,7 +137,7 @@ public sealed partial class SettingsPage : Page
             ActiveProjectName = ActiveProjectNameBox.Text.Trim(),
             AccessMode = SelectedComboText(AccessModeBox),
             VisualBlocksMode = SelectedComboText(VisualBlocksModeBox),
-            MaxAttachmentMb = Math.Clamp(double.IsFinite(MaxAttachmentMbBox.Value) ? (int)Math.Round(MaxAttachmentMbBox.Value) : 6, 1, 150),
+            MaxAttachmentMb = Math.Clamp(double.IsFinite(MaxAttachmentMbBox.Value) ? (int)Math.Round(MaxAttachmentMbBox.Value) : 150, 1, 150),
             StrictNativeMode = StrictNativeModeSwitch.IsOn,
             ShowToolCalls = ShowToolCallsSwitch.IsOn,
             ShowMessageMetrics = ShowMessageMetricsSwitch.IsOn,

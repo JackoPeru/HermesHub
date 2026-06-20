@@ -659,17 +659,25 @@ private suspend fun openSseStream(
 }
 
 private fun buildMultimodalInput(prompt: String, attachments: List<ChatInputAttachment>): Any {
-    val imageAttachments = attachments.filter { it.mimeType.startsWith("image/", ignoreCase = true) }
-    if (imageAttachments.isEmpty()) return prompt
+    if (attachments.isEmpty()) return prompt
     val content = JSONArray()
         .put(JSONObject().put("type", "input_text").put("text", prompt))
-    imageAttachments.forEach { attachment ->
-        content.put(
-            JSONObject()
-                .put("type", "input_image")
-                .put("image_url", attachment.dataUrl)
-                .put("detail", "auto")
-        )
+    attachments.forEach { attachment ->
+        if (attachment.mimeType.startsWith("image/", ignoreCase = true)) {
+            content.put(
+                JSONObject()
+                    .put("type", "input_image")
+                    .put("image_url", attachment.dataUrl)
+                    .put("detail", "auto")
+            )
+        } else {
+            content.put(
+                JSONObject()
+                    .put("type", "input_file")
+                    .put("filename", attachment.filename)
+                    .put("file_data", attachment.dataUrl)
+            )
+        }
     }
     return JSONArray().put(JSONObject().put("role", "user").put("content", content))
 }

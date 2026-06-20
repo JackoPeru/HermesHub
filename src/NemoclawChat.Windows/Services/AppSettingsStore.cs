@@ -120,7 +120,7 @@ public static class AppSettingsStore
         settings.GatewayUrl = settings.GatewayUrl.Trim().TrimEnd('/');
         settings.InferenceEndpoint = settings.GatewayUrl;
         settings.AdminBridgeUrl = GatewayService.HermesRoot(settings);
-        settings.MaxAttachmentMb = Math.Clamp(settings.MaxAttachmentMb <= 0 ? 6 : settings.MaxAttachmentMb, 1, 150);
+        settings.MaxAttachmentMb = Math.Clamp(settings.MaxAttachmentMb <= 0 || settings.MaxAttachmentMb == 6 ? 150 : settings.MaxAttachmentMb, 1, 150);
 
         if (changed)
         {

@@ -16,6 +16,7 @@ Environment=HERMESAPIKEY=hermes-hub
 Environment=HERMES_HUB_API_KEY=hermes-hub
 Environment=HERMES_GATEWAY_API_KEY=hermes-hub
 Environment=HERMES_MAX_ITERATIONS=120
+Environment=HERMES_HUB_MAX_UPLOAD_MB=150
 Environment=HERMES_AUXILIARY_LOCAL_ONLY=true
 Environment=HERMES_INFERENCE_PROVIDER=custom
 Environment=HERMES_INFERENCE_BASE_URL=http://127.0.0.1:8000/v1

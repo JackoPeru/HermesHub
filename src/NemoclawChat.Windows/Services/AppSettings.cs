@@ -25,5 +25,5 @@ public sealed class AppSettings
     public bool MetricPromptTokens { get; set; } = true;
     public bool MetricContextTokens { get; set; } = true;
     public bool MetricDuration { get; set; } = true;
-    public int MaxAttachmentMb { get; set; } = 6;
+    public int MaxAttachmentMb { get; set; } = 150;
 }

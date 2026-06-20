@@ -224,7 +224,7 @@ public static class ChatStreamClient
                 chatMessages.Add(new Dictionary<string, object?>
                 {
                     ["role"] = string.Equals(m.Author, "Tu", StringComparison.OrdinalIgnoreCase) ? "user" : "assistant",
-                    ["content"] = isLastUser ? BuildContentParts(prompt, attachments) : m.Text
+                    ["content"] = isLastUser ? BuildContentParts(prompt, attachments, includeGenericFiles: false) : m.Text
                 });
             }
             var chatPayload = JsonSerializer.Serialize(new
@@ -622,12 +622,12 @@ public static class ChatStreamClient
             new Dictionary<string, object?>
             {
                 ["role"] = "user",
-                ["content"] = BuildContentParts(prompt, attachments)
+                ["content"] = BuildContentParts(prompt, attachments, includeGenericFiles: true)
             }
         };
     }
 
-    private static List<Dictionary<string, object?>> BuildContentParts(string prompt, IReadOnlyList<ChatInputAttachment> attachments)
+    private static List<Dictionary<string, object?>> BuildContentParts(string prompt, IReadOnlyList<ChatInputAttachment> attachments, bool includeGenericFiles)
     {
         var content = new List<Dictionary<string, object?>>
         {
@@ -637,14 +637,36 @@ public static class ChatStreamClient
                 ["text"] = prompt
             }
         };
-        foreach (var attachment in attachments.Where(a => a.MimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)))
+        foreach (var attachment in attachments)
         {
-            content.Add(new Dictionary<string, object?>
+            if (attachment.MimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
             {
-                ["type"] = "input_image",
-                ["image_url"] = attachment.DataUrl,
-                ["detail"] = "auto"
-            });
+                content.Add(new Dictionary<string, object?>
+                {
+                    ["type"] = "input_image",
+                    ["image_url"] = attachment.DataUrl,
+                    ["detail"] = "auto"
+                });
+                continue;
+            }
+
+            if (includeGenericFiles)
+            {
+                content.Add(new Dictionary<string, object?>
+                {
+                    ["type"] = "input_file",
+                    ["filename"] = attachment.FileName,
+                    ["file_data"] = attachment.DataUrl
+                });
+            }
+            else
+            {
+                content.Add(new Dictionary<string, object?>
+                {
+                    ["type"] = "text",
+                    ["text"] = $"Allegato disponibile solo in Responses API: {attachment.FileName} ({attachment.MimeType}, {attachment.SizeBytes} bytes)."
+                });
+            }
         }
         return content;
     }

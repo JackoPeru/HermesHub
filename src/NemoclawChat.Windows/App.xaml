@@ -20,6 +20,7 @@
             <SolidColorBrush x:Key="UserBubbleBrush" Color="#FF7A3E00" />
             <SolidColorBrush x:Key="MutedTextBrush" Color="#FFC8D2E0" />
             <SolidColorBrush x:Key="FaintTextBrush" Color="#FF8892A2" />
+            <SolidColorBrush x:Key="AccentBrush" Color="#FFF5A524" />
             <SolidColorBrush x:Key="AccentGreenBrush" Color="#FFF5A524" />
             <SolidColorBrush x:Key="AccentHoverBrush" Color="#FFFFC857" />
             <SolidColorBrush x:Key="BorderBrushSoft" Color="#FF232932" />

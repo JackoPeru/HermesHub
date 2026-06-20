@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.100 Release Hermes Hub 0.6.100 message media UX controls
+v0.6.101 Release Hermes Hub 0.6.101 generic files hotfix
 ```
 
 ## Regola Linux Gateway Update
@@ -137,6 +137,16 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.101 (Generic files hotfix):
+
+Release 0.6.101:
+- Hotfix Windows: aggiunta risorsa globale `AccentBrush`, necessaria a chat/streaming bubble; evita errore runtime `Cannot find a resource with the given key: AccentBrush`.
+- Hotfix Android release: APK release firmato con lo stesso debug keystore locale usato dagli update correnti; non caricare piu' `app-release-unsigned.apk`.
+- Windows/Android: default allegati portato a 150 MB e migrazione vecchio valore salvato `6` -> `150`.
+- Linux Gateway: default `HERMES_HUB_MAX_UPLOAD_MB=150` in launcher, `.env` e service; capabilities espone `max_upload_mb`.
+- Windows/Android: allegati generici `*/*` mantenuti sopra composer con preview immagini o card file.
+- Release bump: Windows/AdminBridge `0.6.101`, Android `versionName 0.6.101`, `versionCode 106`.
 
 Hermes Hub 0.6.100 (Message/media UX controls):
 

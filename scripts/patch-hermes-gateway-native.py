@@ -785,6 +785,16 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
         )
         changes.append("capabilities hub support features")
 
+    if '"max_upload_mb": int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "150")),' not in text:
+        text, _ = _replace_regex_once(
+            text,
+            r'(^\s+"features": \{\n)',
+            r'\1'
+            r'                "max_upload_mb": int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "150")),' "\n",
+            "capabilities max upload mb",
+        )
+        changes.append("capabilities max upload mb")
+
     if "_RUN_STREAM_TTL = 21600" not in text:
         patched = text.replace("_RUN_STREAM_TTL = 300", "_RUN_STREAM_TTL = 21600", 1)
         if patched != text:

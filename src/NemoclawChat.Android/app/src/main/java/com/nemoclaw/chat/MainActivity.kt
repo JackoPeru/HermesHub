@@ -1007,18 +1007,22 @@ private fun ChatScreen(
     val haptics = LocalHapticFeedback.current
     val online by rememberOnlineState(context)
     val isStreaming = state.streamingState != null
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             scope.launch {
-                val attachment = withContext(Dispatchers.IO) { createImageAttachmentFromUri(context, uri, settings.maxAttachmentMb) }
+                val attachment = withContext(Dispatchers.IO) { createAttachmentFromUri(context, uri, settings.maxAttachmentMb) }
                 if (attachment != null) {
                     state.pendingAttachments.add(attachment)
-                    state.messages.add(ChatMessage("Allegato vision", "${attachment.filename} pronto per Hermes vision (${attachment.sizeBytes / 1024} KB).", fromUser = false, isAction = true))
+                    state.messages.add(ChatMessage("Allegato", "${attachment.filename} pronto per Hermes (${attachment.sizeBytes.toReadableFileSize()}).", fromUser = false, isAction = true))
                     if (state.draft.isBlank()) {
-                        state.draft = "Analizza l'immagine allegata."
+                        state.draft = if (attachment.mimeType.startsWith("image/", ignoreCase = true)) {
+                            "Analizza l'immagine allegata."
+                        } else {
+                            "Analizza il file allegato."
+                        }
                     }
                 } else {
-                    state.messages.add(ChatMessage("Allegato", "Immagine non supportata o troppo grande. Usa PNG/JPEG/WebP sotto 6 MB.", fromUser = false, isAction = true))
+                    state.messages.add(ChatMessage("Allegato", "File vuoto, non leggibile o troppo grande. Limite attuale: ${settings.maxAttachmentMb} MB.", fromUser = false, isAction = true))
                 }
             }
         }
@@ -1138,7 +1142,7 @@ private fun ChatScreen(
             value = state.draft,
             attachments = state.pendingAttachments,
             onValueChange = { state.draft = it },
-            onAttachImage = { imagePicker.launch("image/*") },
+            onAttachImage = { filePicker.launch("*/*") },
             onRemoveAttachment = { attachment -> state.pendingAttachments.remove(attachment) },
             onAction = { title, text, prompt ->
                 state.messages.add(ChatMessage(title, text, fromUser = false, isAction = true))
@@ -1162,7 +1166,7 @@ private fun ChatScreen(
                     val displayText = if (attachments.isEmpty()) {
                         text
                     } else {
-                        "$text\n\n[Allegati vision: ${attachments.joinToString { it.filename }}]"
+                        "$text\n\n[Allegati: ${attachments.joinToString { it.filename }}]"
                     }
                     state.sending = true
                     state.messages.add(ChatMessage("Tu", displayText, true))
@@ -2179,7 +2183,7 @@ private fun Composer(
                 containerColor = AppColors.Elevated
             ) {
                 DropdownMenuItem(
-                    text = { Text("Allega immagine vision", color = Color.White) },
+                    text = { Text("Allega file", color = Color.White) },
                     leadingIcon = { Icon(Icons.Rounded.AttachFile, null, tint = Color.White) },
                     onClick = {
                         expanded = false
@@ -4657,7 +4661,7 @@ private fun SettingsScreen(
                         SettingsField("Hermes API URL", gatewayUrl, { gatewayUrl = it })
                         SettingsPasswordField("API key Hermes", apiKey, { apiKey = it })
                         SettingsField("Cartella video Hermes (sync server)", videoLibraryPath, { })
-                        SettingsField("Limite allegati vision (MB, max 150)", maxAttachmentMb.toString(), { value ->
+                        SettingsField("Limite allegati file (MB, max 150)", maxAttachmentMb.toString(), { value ->
                             maxAttachmentMb = value.filter { it.isDigit() }.toIntOrNull()?.coerceIn(1, 150) ?: maxAttachmentMb
                         })
                     }
@@ -5936,13 +5940,14 @@ private fun executeHttpGet(url: String, bearerToken: String?): Pair<Int, String>
     }
 }
 
-private fun createImageAttachmentFromUri(context: Context, uri: Uri, maxAttachmentMb: Int): ChatInputAttachment? {
+private fun createAttachmentFromUri(context: Context, uri: Uri, maxAttachmentMb: Int): ChatInputAttachment? {
     val resolver = context.contentResolver
-    val mimeType = resolver.getType(uri)?.takeIf { it.startsWith("image/", ignoreCase = true) } ?: return null
     val filename = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
         val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
         if (cursor.moveToFirst() && nameIndex >= 0) cursor.getString(nameIndex) else null
-    } ?: (uri.lastPathSegment ?: "immagine")
+    } ?: (uri.lastPathSegment ?: "allegato")
+    val mimeType = resolver.getType(uri)?.takeIf { it.isNotBlank() }
+        ?: mimeTypeFromFilename(filename)
     val bytes = resolver.openInputStream(uri)?.use { input ->
         input.readBytes()
     } ?: return null
@@ -5957,6 +5962,32 @@ private fun createImageAttachmentFromUri(context: Context, uri: Uri, maxAttachme
         dataUrl = "data:$mimeType;base64,$encoded",
         sizeBytes = bytes.size.toLong()
     )
+}
+
+private fun mimeTypeFromFilename(filename: String): String {
+    val lower = filename.lowercase(java.util.Locale.ROOT)
+    return when {
+        lower.endsWith(".png") -> "image/png"
+        lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
+        lower.endsWith(".webp") -> "image/webp"
+        lower.endsWith(".bmp") -> "image/bmp"
+        lower.endsWith(".gif") -> "image/gif"
+        lower.endsWith(".pdf") -> "application/pdf"
+        lower.endsWith(".txt") -> "text/plain"
+        lower.endsWith(".md") -> "text/markdown"
+        lower.endsWith(".csv") -> "text/csv"
+        lower.endsWith(".json") -> "application/json"
+        lower.endsWith(".xml") -> "application/xml"
+        lower.endsWith(".html") || lower.endsWith(".htm") -> "text/html"
+        lower.endsWith(".doc") -> "application/msword"
+        lower.endsWith(".docx") -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        lower.endsWith(".xls") -> "application/vnd.ms-excel"
+        lower.endsWith(".xlsx") -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        lower.endsWith(".ppt") -> "application/vnd.ms-powerpoint"
+        lower.endsWith(".pptx") -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        lower.endsWith(".zip") -> "application/zip"
+        else -> "application/octet-stream"
+    }
 }
 
 private fun executeJsonRequest(url: String, payload: JSONObject, method: String, bearerToken: String?, sessionId: String? = null): Pair<Int, String> {
@@ -6893,7 +6924,7 @@ private fun loadSettings(context: Context): AppSettings {
         metricPromptTokens = prefs.getBoolean("metricPromptTokens", AppDefaults.metricPromptTokens),
         metricContextTokens = prefs.getBoolean("metricContextTokens", AppDefaults.metricContextTokens),
         metricDuration = prefs.getBoolean("metricDuration", AppDefaults.metricDuration),
-        maxAttachmentMb = prefs.getInt("maxAttachmentMb", AppDefaults.maxAttachmentMb).coerceIn(1, 150),
+        maxAttachmentMb = prefs.getInt("maxAttachmentMb", AppDefaults.maxAttachmentMb).let { if (it <= 0 || it == 6) 150 else it }.coerceIn(1, 150),
         strictNativeMode = prefs.getBoolean("strictNativeMode", AppDefaults.strictNativeMode),
         demoMode = prefs.getBoolean("demoMode", AppDefaults.demoMode)
     )
@@ -7943,7 +7974,7 @@ private object AppDefaults {
     const val metricPromptTokens = true
     const val metricContextTokens = true
     const val metricDuration = true
-    const val maxAttachmentMb = 6
+    const val maxAttachmentMb = 150
     const val strictNativeMode = false
     const val demoMode = false
     const val releasesPage = "https://github.com/JackoPeru/app-interazione-nemoclaw/releases"
