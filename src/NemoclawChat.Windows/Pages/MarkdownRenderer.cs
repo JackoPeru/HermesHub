@@ -93,6 +93,12 @@ internal static class MarkdownRenderer
                 AddBlock(BuildInlineTextBlock($"- {line[2..].Trim()}", textColor, 14, FontWeights.Normal));
                 continue;
             }
+            if (IsOrderedListLine(line))
+            {
+                FlushParagraph();
+                AddBlock(BuildInlineTextBlock(line.Trim(), textColor, 14, FontWeights.Normal));
+                continue;
+            }
             if (string.IsNullOrWhiteSpace(line))
             {
                 FlushParagraph();
@@ -107,6 +113,21 @@ internal static class MarkdownRenderer
             panel.Children.Add(BuildInlineTextBlock("[troncato: limite 500 blocchi raggiunto]", textColor, 12, FontWeights.Normal));
         }
         return panel;
+    }
+
+    private static bool IsOrderedListLine(string line)
+    {
+        var value = line.AsSpan().TrimStart();
+        var i = 0;
+        while (i < value.Length && char.IsDigit(value[i]))
+        {
+            i++;
+        }
+
+        return i > 0 &&
+               i + 1 < value.Length &&
+               (value[i] == '.' || value[i] == ')') &&
+               char.IsWhiteSpace(value[i + 1]);
     }
 
     private static TextBlock BuildInlineTextBlock(string text, Color color, double fontSize, FontWeight weight)

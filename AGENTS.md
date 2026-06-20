@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.90 Release Hermes Hub 0.6.90 Windows metrics fallback
+v0.6.91 Release Hermes Hub 0.6.91 Markdown ordered list preservation
 ```
 
 ## Regola Linux Gateway Update
@@ -135,6 +135,13 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.91 (Markdown ordered list preservation):
+
+Release 0.6.91:
+- Hotfix Windows render finale: il Markdown renderer ora riconosce righe numerate (`1. ...`, `2) ...`) come blocchi lista ordinata e non le fonde piu' in un unico paragrafo.
+- Risolve bug test 0.6.90: durante lo streaming le righe numerate apparivano una per riga, ma a fine generazione il render finale le compattava tutte in una riga lunga.
+- Release bump: Windows/AdminBridge `0.6.91`, Android `versionName 0.6.91`, `versionCode 96`.
 
 Hermes Hub 0.6.90 (Windows metrics fallback):
 
