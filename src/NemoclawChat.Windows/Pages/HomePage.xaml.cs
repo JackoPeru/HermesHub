@@ -206,6 +206,7 @@ public sealed partial class HomePage : Page
         }
 
         _pendingAttachments.Add(attachment);
+        RenderAttachmentPreviews();
         AddAction("Allegato vision", $"{file.Name} pronto per Hermes vision ({attachment.SizeBytes / 1024} KB).");
         PromptBox.Text = AppendPrompt("Analizza l'immagine allegata.");
     }
@@ -338,6 +339,7 @@ public sealed partial class HomePage : Page
             EmptyState.Visibility = Visibility.Collapsed;
             var attachments = _pendingAttachments.ToList();
             _pendingAttachments.Clear();
+            RenderAttachmentPreviews();
             var displayPrompt = attachments.Count == 0
                 ? prompt
                 : $"{prompt}\n\n[Allegati vision: {string.Join(", ", attachments.Select(a => a.FileName))}]";
@@ -731,6 +733,117 @@ public sealed partial class HomePage : Page
         };
     }
 
+    private void RenderAttachmentPreviews()
+    {
+        AttachmentPreviewPanel.Children.Clear();
+        AttachmentPreviewPanel.Visibility = _pendingAttachments.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        foreach (var attachment in _pendingAttachments)
+        {
+            AttachmentPreviewPanel.Children.Add(AttachmentPreviewCard(attachment));
+        }
+    }
+
+    private UIElement AttachmentPreviewCard(ChatInputAttachment attachment)
+    {
+        var root = new Border
+        {
+            Padding = new Thickness(8),
+            Background = (Brush)Application.Current.Resources["SurfaceBrush"],
+            BorderBrush = (Brush)Application.Current.Resources["BorderBrushSoft"],
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12),
+            MaxWidth = 520,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        var grid = new Grid { ColumnSpacing = 10 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var image = new Image
+        {
+            Width = 54,
+            Height = 54,
+            Stretch = Stretch.UniformToFill,
+            Source = BitmapFromDataUrl(attachment.DataUrl)
+        };
+        var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock
+        {
+            Text = attachment.FileName,
+            Foreground = new SolidColorBrush(Colors.White),
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextTrimming = Microsoft.UI.Xaml.TextTrimming.CharacterEllipsis
+        });
+        text.Children.Add(new TextBlock
+        {
+            Text = $"{attachment.MimeType} · {FormatAttachmentBytes(attachment.SizeBytes)}",
+            Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
+            FontSize = 12
+        });
+        var remove = new Button
+        {
+            Width = 32,
+            Height = 32,
+            Content = new FontIcon { Glyph = "\uE711", FontSize = 12 },
+            Tag = attachment
+        };
+        ToolTipService.SetToolTip(remove, "Rimuovi allegato");
+        remove.Click += RemoveAttachment_Click;
+        Grid.SetColumn(text, 1);
+        Grid.SetColumn(remove, 2);
+        grid.Children.Add(image);
+        grid.Children.Add(text);
+        grid.Children.Add(remove);
+        root.Child = grid;
+        return root;
+    }
+
+    private void RemoveAttachment_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: ChatInputAttachment attachment })
+        {
+            _pendingAttachments.Remove(attachment);
+            RenderAttachmentPreviews();
+        }
+    }
+
+    private static BitmapImage? BitmapFromDataUrl(string dataUrl)
+    {
+        try
+        {
+            var comma = dataUrl.IndexOf(',');
+            if (comma < 0)
+            {
+                return null;
+            }
+            var bytes = Convert.FromBase64String(dataUrl[(comma + 1)..]);
+            using var stream = new MemoryStream(bytes);
+            var bitmap = new BitmapImage();
+            bitmap.SetSource(stream.AsRandomAccessStream());
+            return bitmap;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string FormatAttachmentBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB"];
+        var value = Math.Max(0, bytes);
+        var unit = 0;
+        var size = (double)value;
+        while (size >= 1024 && unit < units.Length - 1)
+        {
+            size /= 1024;
+            unit++;
+        }
+
+        return unit == 0 ? $"{value} {units[unit]}" : $"{size:0.#} {units[unit]}";
+    }
+
     private static bool IsShiftPressed()
     {
         return (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift) &
@@ -869,7 +982,7 @@ public sealed partial class HomePage : Page
 
     private static void AddStatsFooter(StackPanel content, ChatStreamStats? stats)
     {
-        var line = FormatChatStats(stats);
+        var line = FormatChatStats(stats, AppSettingsStore.Load());
         if (string.IsNullOrWhiteSpace(line))
         {
             return;
@@ -911,7 +1024,7 @@ public sealed partial class HomePage : Page
         };
     }
 
-    private static string FormatChatStats(ChatStreamStats? stats)
+    private static string FormatChatStats(ChatStreamStats? stats, AppSettings settings)
     {
         if (stats is null)
         {
@@ -919,32 +1032,32 @@ public sealed partial class HomePage : Page
         }
 
         var parts = new List<string>();
-        if (stats.TimeToFirstTokenMs is { } ttft && ttft > 0)
+        if (settings.MetricTtft && stats.TimeToFirstTokenMs is { } ttft && ttft > 0)
         {
             parts.Add($"TTFT {ttft:0}ms");
         }
-        if (stats.TokensPerSecond is { } tps && tps > 0)
+        if (settings.MetricTokensPerSecond && stats.TokensPerSecond is { } tps && tps > 0)
         {
             parts.Add($"{tps:0.00} t/s");
         }
-        if (stats.TokensOut is { } toks && toks > 0)
+        if (settings.MetricOutputTokens && stats.TokensOut is { } toks && toks > 0)
         {
             parts.Add($"{toks} tok");
         }
-        if (stats.PromptTokens is { } prompt && prompt > 0)
+        if (settings.MetricPromptTokens && stats.PromptTokens is { } prompt && prompt > 0)
         {
             parts.Add($"prompt {prompt}");
         }
         var contextTokens = ContextTokensFromStats(stats);
-        if (contextTokens > 0)
+        if (settings.MetricContextTokens && contextTokens > 0)
         {
             parts.Add($"ctx {contextTokens}");
         }
-        if (stats.ContextLength is { } maxCtx && maxCtx > 0)
+        if (settings.MetricContextTokens && stats.ContextLength is { } maxCtx && maxCtx > 0)
         {
             parts.Add($"max {maxCtx}");
         }
-        if (stats.TotalMs is { } total && total > 0)
+        if (settings.MetricDuration && stats.TotalMs is { } total && total > 0)
         {
             parts.Add($"{total / 1000.0:0.0}s");
         }

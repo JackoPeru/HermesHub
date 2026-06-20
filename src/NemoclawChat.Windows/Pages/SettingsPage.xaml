@@ -36,6 +36,39 @@
             <TextBox x:Name="GatewayWsUrlBox" Visibility="Collapsed" />
             <TextBox x:Name="AdminBridgeUrlBox" Visibility="Collapsed" />
 
+            <Border Padding="16" Background="{StaticResource SurfaceBrush}" BorderBrush="#FF3A3A3A" BorderThickness="1" CornerRadius="8">
+                <StackPanel Spacing="10">
+                    <TextBlock Foreground="White" FontSize="16" FontWeight="SemiBold" Text="Chat / Agente" />
+                    <TextBox x:Name="ModelBox" Header="Modello / agente" />
+                    <ToggleSwitch x:Name="ShowToolCallsSwitch" Header="Tool call in chat" OffContent="Nascondi pannello tool" OnContent="Mostra pannello tool compatto" />
+                    <ToggleSwitch x:Name="AdvancedChatDetailsSwitch" Header="Dettagli tecnici chat" OffContent="Nascondi eventi raw/reasoning" OnContent="Mostra eventi raw e reasoning" />
+                </StackPanel>
+            </Border>
+
+            <Border Padding="16" Background="{StaticResource SurfaceBrush}" BorderBrush="#FF3A3A3A" BorderThickness="1" CornerRadius="8">
+                <StackPanel Spacing="10">
+                    <TextBlock Foreground="White" FontSize="16" FontWeight="SemiBold" Text="Visualizzazione messaggi" />
+                    <ToggleSwitch x:Name="ShowMessageMetricsSwitch" Header="Metriche sotto messaggi" OffContent="Nascoste" OnContent="Visibili" />
+                    <Grid ColumnSpacing="12" RowSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <CheckBox x:Name="MetricTtftBox" Content="Tempo primo token" />
+                        <CheckBox x:Name="MetricTokensPerSecondBox" Grid.Column="1" Content="Token/sec" />
+                        <CheckBox x:Name="MetricOutputTokensBox" Grid.Row="1" Content="Token output" />
+                        <CheckBox x:Name="MetricPromptTokensBox" Grid.Row="1" Grid.Column="1" Content="Token input" />
+                        <CheckBox x:Name="MetricContextTokensBox" Grid.Row="2" Content="Contesto" />
+                        <CheckBox x:Name="MetricDurationBox" Grid.Row="2" Grid.Column="1" Content="Durata totale" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
             <Expander Header="Avanzate">
                 <Border Padding="16" Background="{StaticResource SurfaceBrush}" BorderBrush="#FF3A3A3A" BorderThickness="1" CornerRadius="8">
                     <StackPanel Spacing="10">
@@ -46,7 +79,6 @@
                             <ComboBoxItem Content="openai-completions" />
                             <ComboBoxItem Content="openai-responses" />
                         </ComboBox>
-                        <TextBox x:Name="ModelBox" Header="Modello" />
                         <ComboBox x:Name="AccessModeBox" Header="Accesso consigliato" SelectedIndex="0">
                             <ComboBoxItem Content="Tailscale/LAN" />
                             <ComboBoxItem Content="LAN only" />
@@ -58,9 +90,6 @@
                             <ComboBoxItem Content="never" />
                         </ComboBox>
                         <ToggleSwitch x:Name="StrictNativeModeSwitch" Header="Strict native mode" OffContent="Fallback compat consentiti" OnContent="Solo Hermes native/Responses" />
-                        <ToggleSwitch x:Name="ShowToolCallsSwitch" Header="Tool call in chat" OffContent="Nascondi pannello tool" OnContent="Mostra pannello tool compatto" />
-                        <ToggleSwitch x:Name="ShowMessageMetricsSwitch" Header="Metriche messaggi" OffContent="Nascondi TTFT/token/t/s" OnContent="Mostra TTFT/token/t/s" />
-                        <ToggleSwitch x:Name="AdvancedChatDetailsSwitch" Header="Dettagli chat avanzati" OffContent="Nascondi eventi raw/reasoning" OnContent="Mostra eventi raw e reasoning" />
                         <ToggleSwitch x:Name="DemoModeSwitch" Header="Fallback locale" OffContent="Solo Hermes" OnContent="Fallback locale attivo" />
                     </StackPanel>
                 </Border>

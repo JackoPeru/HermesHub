@@ -37,6 +37,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <StackPanel Spacing="6">
@@ -49,9 +50,25 @@
                         <Button Click="Refresh_Click" Content="Aggiorna feed" />
                     </StackPanel>
 
+                    <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox
+                            x:Name="ManualVideoUrlBox"
+                            Header="URL video manuale"
+                            PlaceholderText="https://..." />
+                        <Button
+                            Grid.Column="1"
+                            VerticalAlignment="Bottom"
+                            Click="OpenManualVideoUrl_Click"
+                            Content="Apri URL" />
+                    </Grid>
+
                     <TextBlock
                         x:Name="PageStatusText"
-                        Grid.Row="1"
+                        Grid.Row="2"
                         Grid.ColumnSpan="2"
                         Foreground="{StaticResource MutedTextBrush}"
                         Text="Pronto." />

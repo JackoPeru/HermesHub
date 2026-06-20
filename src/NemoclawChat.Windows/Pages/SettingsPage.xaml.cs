@@ -31,6 +31,12 @@ public sealed partial class SettingsPage : Page
         StrictNativeModeSwitch.IsOn = settings.StrictNativeMode;
         ShowToolCallsSwitch.IsOn = settings.ShowToolCalls;
         ShowMessageMetricsSwitch.IsOn = settings.ShowMessageMetrics;
+        MetricTtftBox.IsChecked = settings.MetricTtft;
+        MetricTokensPerSecondBox.IsChecked = settings.MetricTokensPerSecond;
+        MetricOutputTokensBox.IsChecked = settings.MetricOutputTokens;
+        MetricPromptTokensBox.IsChecked = settings.MetricPromptTokens;
+        MetricContextTokensBox.IsChecked = settings.MetricContextTokens;
+        MetricDurationBox.IsChecked = settings.MetricDuration;
         AdvancedChatDetailsSwitch.IsOn = settings.AdvancedChatDetails;
         DemoModeSwitch.IsOn = settings.DemoMode;
         SelectComboItem(PreferredApiBox, settings.PreferredApi);
@@ -135,6 +141,12 @@ public sealed partial class SettingsPage : Page
             StrictNativeMode = StrictNativeModeSwitch.IsOn,
             ShowToolCalls = ShowToolCallsSwitch.IsOn,
             ShowMessageMetrics = ShowMessageMetricsSwitch.IsOn,
+            MetricTtft = MetricTtftBox.IsChecked == true,
+            MetricTokensPerSecond = MetricTokensPerSecondBox.IsChecked == true,
+            MetricOutputTokens = MetricOutputTokensBox.IsChecked == true,
+            MetricPromptTokens = MetricPromptTokensBox.IsChecked == true,
+            MetricContextTokens = MetricContextTokensBox.IsChecked == true,
+            MetricDuration = MetricDurationBox.IsChecked == true,
             AdvancedChatDetails = AdvancedChatDetailsSwitch.IsOn,
             DemoMode = DemoModeSwitch.IsOn
         };

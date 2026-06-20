@@ -11,6 +11,7 @@ namespace NemoclawChat_Windows.Pages;
 public sealed partial class VideoPage : Page
 {
     private LocalVideoRecord? _selectedVideo;
+    private string? _manualVideoUrl;
 
     public VideoPage()
     {
@@ -77,6 +78,11 @@ public sealed partial class VideoPage : Page
             }
         }
 
+        if (!string.IsNullOrWhiteSpace(_manualVideoUrl))
+        {
+            return;
+        }
+
         if (videos.Count > 0)
         {
             SelectVideo(videos[0]);
@@ -84,6 +90,7 @@ public sealed partial class VideoPage : Page
         else
         {
             _selectedVideo = null;
+            _manualVideoUrl = null;
             VideoPlayer.Source = null;
             SelectedVideoTitleText.Text = "Seleziona un video";
             SelectedVideoMetaText.Text = "Nessun file video trovato nella cartella monitorata.";
@@ -110,7 +117,7 @@ public sealed partial class VideoPage : Page
 
     private void FullScreen_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedVideo is null)
+        if (_selectedVideo is null && string.IsNullOrWhiteSpace(_manualVideoUrl))
         {
             FeedbackStatusText.Text = "Seleziona un video prima di aprire lo schermo intero.";
             return;
@@ -130,6 +137,7 @@ public sealed partial class VideoPage : Page
     private void SelectVideo(LocalVideoRecord video)
     {
         _selectedVideo = video;
+        _manualVideoUrl = null;
         SelectedVideoTitleText.Text = video.Title;
         SelectedVideoMetaText.Text = $"{video.FileName}\n{video.ModifiedAt.LocalDateTime:g} · {VideoLibraryService.FormatSize(video.SizeBytes)}";
         FeedbackBox.Text = video.LastFeedback;
@@ -138,6 +146,28 @@ public sealed partial class VideoPage : Page
             : video.LastAgentStatus;
         AgentResponseBox.Text = video.LastAgentResponse;
         VideoPlayer.Source = MediaSource.CreateFromUri(new Uri(video.Path));
+    }
+
+    private void OpenManualVideoUrl_Click(object sender, RoutedEventArgs e)
+    {
+        var rawUrl = ManualVideoUrlBox.Text.Trim();
+        if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            PageStatusText.Text = "URL video non valido. Usa un link http/https diretto.";
+            return;
+        }
+
+        _selectedVideo = null;
+        _manualVideoUrl = uri.ToString();
+        VideoListView.SelectedItem = null;
+        SelectedVideoTitleText.Text = "URL video manuale";
+        SelectedVideoMetaText.Text = _manualVideoUrl;
+        FeedbackBox.Text = string.Empty;
+        FeedbackStatusText.Text = "URL manuale pronto. Puoi riprodurlo o lasciare feedback a Hermes.";
+        AgentResponseBox.Text = string.Empty;
+        VideoPlayer.Source = MediaSource.CreateFromUri(uri);
+        PageStatusText.Text = "URL video manuale caricato.";
     }
 
     private void QuickFeedback_Click(object sender, RoutedEventArgs e)
@@ -153,7 +183,9 @@ public sealed partial class VideoPage : Page
 
     private async void SendFeedback_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedVideo is null)
+        var activePath = _selectedVideo?.Path ?? _manualVideoUrl;
+        var activeTitle = _selectedVideo?.Title ?? "URL video manuale";
+        if (string.IsNullOrWhiteSpace(activePath))
         {
             FeedbackStatusText.Text = "Seleziona un video prima di inviare feedback.";
             return;
@@ -173,18 +205,18 @@ public sealed partial class VideoPage : Page
         try
         {
             var settings = AppSettingsStore.Load();
-            await GatewayService.SaveHubStateAsync(settings, "video_feedback", _selectedVideo.Path, new
+            await GatewayService.SaveHubStateAsync(settings, "video_feedback", activePath, new
             {
-                title = _selectedVideo.Title,
-                path = _selectedVideo.Path,
+                title = activeTitle,
+                path = activePath,
                 feedback,
                 reaction = "written"
             });
             var prompt = $$"""
                 Feedback editoriale su video in cartella monitorata Hermes Hub.
                 Cartella video: {{VideoLibraryService.EnsureLibraryPath(settings)}}
-                File video: {{_selectedVideo.Path}}
-                Titolo: {{_selectedVideo.Title}}
+                Riferimento video: {{activePath}}
+                Titolo: {{activeTitle}}
 
                 Feedback utente:
                 {{feedback}}
@@ -196,10 +228,13 @@ public sealed partial class VideoPage : Page
                 - rispondi con next step concreti per migliorare video e pipeline.
                 """;
             var result = await GatewayService.SendWorkspaceRunAsync(settings, "Video", prompt);
-            VideoFeedbackStore.Save(_selectedVideo.Path, _selectedVideo.Title, feedback, result.Status, result.Result);
+            VideoFeedbackStore.Save(activePath, activeTitle, feedback, result.Status, result.Result);
             FeedbackStatusText.Text = result.Status;
             AgentResponseBox.Text = result.Result;
-            RefreshFeed();
+            if (_selectedVideo is not null)
+            {
+                RefreshFeed();
+            }
         }
         finally
         {
@@ -209,15 +244,16 @@ public sealed partial class VideoPage : Page
 
     private void CopyPath_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedVideo is null)
+        var activePath = _selectedVideo?.Path ?? _manualVideoUrl;
+        if (string.IsNullOrWhiteSpace(activePath))
         {
             FeedbackStatusText.Text = "Nessun video selezionato.";
             return;
         }
 
         var package = new DataPackage();
-        package.SetText(_selectedVideo.Path);
+        package.SetText(activePath);
         Clipboard.SetContent(package);
-        FeedbackStatusText.Text = "Path video copiato.";
+        FeedbackStatusText.Text = "Riferimento video copiato.";
     }
 }

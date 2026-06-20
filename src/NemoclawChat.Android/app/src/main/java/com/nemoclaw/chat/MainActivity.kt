@@ -428,9 +428,24 @@ data class AppSettings(
     val fontScale: Float = AppDefaults.fontScale,
     val showToolCalls: Boolean = AppDefaults.showToolCalls,
     val showMessageMetrics: Boolean = AppDefaults.showMessageMetrics,
+    val metricTtft: Boolean = AppDefaults.metricTtft,
+    val metricTokensPerSecond: Boolean = AppDefaults.metricTokensPerSecond,
+    val metricOutputTokens: Boolean = AppDefaults.metricOutputTokens,
+    val metricPromptTokens: Boolean = AppDefaults.metricPromptTokens,
+    val metricContextTokens: Boolean = AppDefaults.metricContextTokens,
+    val metricDuration: Boolean = AppDefaults.metricDuration,
     val maxAttachmentMb: Int = AppDefaults.maxAttachmentMb,
     val strictNativeMode: Boolean = AppDefaults.strictNativeMode,
     val demoMode: Boolean = AppDefaults.demoMode
+)
+
+internal fun AppSettings.metricFilter(): MetricDisplayFilter = MetricDisplayFilter(
+    ttft = metricTtft,
+    tokensPerSecond = metricTokensPerSecond,
+    outputTokens = metricOutputTokens,
+    promptTokens = metricPromptTokens,
+    contextTokens = metricContextTokens,
+    duration = metricDuration
 )
 
 private data class HubMemoryState(
@@ -1088,7 +1103,7 @@ private fun ChatScreen(
                     MessageBubble(message, settings)
                 }
                 state.streamingState?.let { streaming ->
-                    item(key = "streaming") { StreamingBubbleView(streaming, settings.showToolCalls, settings.showMessageMetrics) }
+                    item(key = "streaming") { StreamingBubbleView(streaming, settings.showToolCalls, settings.showMessageMetrics, settings.metricFilter()) }
                 }
             }
         }
@@ -1585,7 +1600,7 @@ private fun MessageBubble(message: ChatMessage, settings: AppSettings) {
                 }
                 RawHermesEventsView(message.rawEvents)
                 if (settings.showMessageMetrics) {
-                    ChatStatsFooter(message.stats)
+                    ChatStatsFooter(message.stats, settings.metricFilter())
                 }
             }
             return@SelectionContainer
@@ -1626,7 +1641,7 @@ private fun MessageBubble(message: ChatMessage, settings: AppSettings) {
                     }
                     RawHermesEventsView(message.rawEvents)
                     if (settings.showMessageMetrics) {
-                        ChatStatsFooter(message.stats)
+                        ChatStatsFooter(message.stats, settings.metricFilter())
                     }
                 }
             }
@@ -1658,8 +1673,8 @@ private fun RawHermesEventsView(events: List<HermesRawEvent>) {
 }
 
 @Composable
-private fun ChatStatsFooter(stats: ChatStreamStats?) {
-    val line = remember(stats) { formatChatStatsLine(stats) }
+private fun ChatStatsFooter(stats: ChatStreamStats?, filter: MetricDisplayFilter) {
+    val line = remember(stats, filter) { formatChatStatsLine(stats, filter) }
     if (line.isNotBlank()) {
         Spacer(modifier = Modifier.height(2.dp))
         Text(
@@ -1671,20 +1686,20 @@ private fun ChatStatsFooter(stats: ChatStreamStats?) {
     }
 }
 
-private fun formatChatStatsLine(stats: ChatStreamStats?): String {
+private fun formatChatStatsLine(stats: ChatStreamStats?, filter: MetricDisplayFilter): String {
     if (stats == null) return ""
     val parts = mutableListOf<String>()
-    stats.ttftMs?.takeIf { it > 0 }?.let {
+    stats.ttftMs?.takeIf { filter.ttft && it > 0 }?.let {
         parts += "TTFT ${String.format(java.util.Locale.US, "%.0f", it)}ms"
     }
-    stats.tokensPerSecond?.takeIf { it > 0 }?.let {
+    stats.tokensPerSecond?.takeIf { filter.tokensPerSecond && it > 0 }?.let {
         parts += "${String.format(java.util.Locale.US, "%.2f", it)} t/s"
     }
-    stats.tokensOut?.takeIf { it > 0 }?.let { parts += "$it tok" }
-    stats.promptTokens?.takeIf { it > 0 }?.let { parts += "prompt $it" }
-    stats.contextTokens().takeIf { it > 0 }?.let { parts += "ctx $it" }
-    stats.contextLength?.takeIf { it > 0 }?.let { parts += "max $it" }
-    stats.totalMs?.takeIf { it > 0 }?.let {
+    stats.tokensOut?.takeIf { filter.outputTokens && it > 0 }?.let { parts += "$it tok" }
+    stats.promptTokens?.takeIf { filter.promptTokens && it > 0 }?.let { parts += "prompt $it" }
+    stats.contextTokens().takeIf { filter.contextTokens && it > 0 }?.let { parts += "ctx $it" }
+    stats.contextLength?.takeIf { filter.contextTokens && it > 0 }?.let { parts += "max $it" }
+    stats.totalMs?.takeIf { filter.duration && it > 0 }?.let {
         parts += "${String.format(java.util.Locale.US, "%.1f", it / 1000.0)}s"
     }
     return parts.joinToString("  ·  ")
@@ -1974,6 +1989,17 @@ private fun Bitmap.scaleBitmapToMaxWidth(maxWidth: Int): Bitmap {
     val ratio = maxWidth.toFloat() / width.toFloat()
     val targetHeight = (height * ratio).toInt().coerceAtLeast(1)
     return Bitmap.createScaledBitmap(this, maxWidth, targetHeight, true)
+}
+
+private fun decodeAttachmentPreview(dataUrl: String): Bitmap? {
+    return try {
+        val payload = dataUrl.substringAfter(',', missingDelimiterValue = "")
+        if (payload.isBlank()) return null
+        val bytes = Base64.decode(payload, Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.scaleBitmapToMaxWidth(240)
+    } catch (_: Exception) {
+        null
+    }
 }
 
 @Composable
@@ -2289,20 +2315,45 @@ private fun Composer(
                         .padding(vertical = 5.dp)
                 ) {
                     if (attachments.isNotEmpty()) {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             attachments.forEach { attachment ->
+                                val preview = remember(attachment.dataUrl) { decodeAttachmentPreview(attachment.dataUrl) }
                                 Surface(
                                     color = AppColors.Surface,
-                                    shape = RoundedCornerShape(14.dp),
+                                    shape = RoundedCornerShape(12.dp),
                                     border = BorderStroke(1.dp, AppColors.Border)
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(start = 9.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                        modifier = Modifier
+                                            .widthIn(max = 260.dp)
+                                            .padding(6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Icon(Icons.Rounded.Image, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(14.dp))
-                                        Text(attachment.filename, color = Color.White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 150.dp))
+                                        if (preview != null) {
+                                            Image(
+                                                bitmap = preview.asImageBitmap(),
+                                                contentDescription = attachment.filename,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .size(52.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                            )
+                                        } else {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(52.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(AppColors.Elevated),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(Icons.Rounded.Image, contentDescription = null, tint = AppColors.Accent)
+                                            }
+                                        }
+                                        Column(modifier = Modifier.weight(1f, fill = false)) {
+                                            Text(attachment.filename, color = Color.White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text("${attachment.mimeType} · ${attachment.sizeBytes.toReadableFileSize()}", color = AppColors.Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
                                         IconButton(onClick = { onRemoveAttachment(attachment) }, modifier = Modifier.size(22.dp)) {
                                             Icon(Icons.Rounded.Delete, contentDescription = "Rimuovi allegato", tint = AppColors.Muted, modifier = Modifier.size(14.dp))
                                         }
@@ -3481,12 +3532,18 @@ private fun VideoScreen(context: Context, settings: AppSettings, onOpenChatPromp
     var items by remember { mutableStateOf<List<VideoLibraryItem>>(emptyList()) }
     var selectedVideoId by rememberSaveable { mutableStateOf<String?>(null) }
     var videoFilter by rememberSaveable { mutableStateOf("Tutti") }
-    val selectedVideo = remember(items, selectedVideoId) { items.firstOrNull { it.id == selectedVideoId } }
-    val displayedItems = remember(items, videoFilter) {
+    var manualVideoUrl by rememberSaveable { mutableStateOf("") }
+    var manualVideoError by rememberSaveable { mutableStateOf("") }
+    val manualVideoItem = remember(manualVideoUrl) { createManualVideoItem(manualVideoUrl) }
+    val allItems = remember(items, manualVideoItem) {
+        if (manualVideoItem == null) items else listOf(manualVideoItem) + items
+    }
+    val selectedVideo = remember(allItems, selectedVideoId) { allItems.firstOrNull { it.id == selectedVideoId } }
+    val displayedItems = remember(allItems, videoFilter) {
         when (videoFilter) {
-            "Recenti" -> items.sortedByDescending { it.modifiedAt }
-            "Feedback" -> items.filter { loadVideoFeedback(context, it.id).isNotBlank() || loadVideoReaction(context, it.id).isNotBlank() }
-            else -> items
+            "Recenti" -> allItems.sortedByDescending { it.modifiedAt }
+            "Feedback" -> allItems.filter { loadVideoFeedback(context, it.id).isNotBlank() || loadVideoReaction(context, it.id).isNotBlank() }
+            else -> allItems
         }
     }
 
@@ -3494,7 +3551,7 @@ private fun VideoScreen(context: Context, settings: AppSettings, onOpenChatPromp
         val result = loadVideoLibrary(settings, loadGatewaySecret(context))
         items = result.first
         status = result.second
-        if (selectedVideoId != null && result.first.none { it.id == selectedVideoId }) {
+        if (selectedVideoId != null && selectedVideoId?.startsWith("manual:") != true && result.first.none { it.id == selectedVideoId }) {
             selectedVideoId = null
         }
     }
@@ -3547,6 +3604,39 @@ private fun VideoScreen(context: Context, settings: AppSettings, onOpenChatPromp
         item {
             Text(status, color = AppColors.Faint, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
+        item {
+            Surface(color = AppColors.Panel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, AppColors.Border)) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("URL video manuale", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    TextField(
+                        value = manualVideoUrl,
+                        onValueChange = {
+                            manualVideoUrl = it
+                            manualVideoError = ""
+                        },
+                        singleLine = true,
+                        placeholder = { Text("https://...") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Button(onClick = {
+                            val manual = createManualVideoItem(manualVideoUrl)
+                            if (manual == null) {
+                                manualVideoError = "URL non valido. Usa un link http/https diretto."
+                            } else {
+                                manualVideoError = ""
+                                selectedVideoId = manual.id
+                            }
+                        }) {
+                            Text("Apri URL")
+                        }
+                        if (manualVideoError.isNotBlank()) {
+                            Text(manualVideoError, color = AppColors.Accent, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
         if (displayedItems.isEmpty()) {
             item {
                 Surface(color = AppColors.Panel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, AppColors.Border)) {
@@ -3571,6 +3661,27 @@ private fun VideoScreen(context: Context, settings: AppSettings, onOpenChatPromp
             )
         }
     }
+}
+
+private fun createManualVideoItem(rawUrl: String): VideoLibraryItem? {
+    val trimmed = rawUrl.trim()
+    if (trimmed.isBlank()) return null
+    val uri = runCatching { URI(trimmed) }.getOrNull() ?: return null
+    val scheme = uri.scheme?.lowercase(java.util.Locale.ROOT)
+    if (scheme != "http" && scheme != "https") return null
+    val host = uri.host?.takeIf { it.isNotBlank() } ?: "link esterno"
+    return VideoLibraryItem(
+        id = "manual:${trimmed.hashCode()}",
+        title = "URL video manuale",
+        filename = host,
+        mediaUrl = trimmed,
+        thumbnailUrl = "",
+        path = trimmed,
+        mimeType = "video/url",
+        sizeBytes = 0L,
+        durationMs = 0L,
+        modifiedAt = System.currentTimeMillis()
+    )
 }
 
 @Composable
@@ -4476,6 +4587,12 @@ private fun SettingsScreen(
     var fontScale by remember(settings.fontScale) { mutableStateOf(settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)) }
     var showToolCalls by remember(settings.showToolCalls) { mutableStateOf(settings.showToolCalls) }
     var showMessageMetrics by remember(settings.showMessageMetrics) { mutableStateOf(settings.showMessageMetrics) }
+    var metricTtft by remember(settings.metricTtft) { mutableStateOf(settings.metricTtft) }
+    var metricTokensPerSecond by remember(settings.metricTokensPerSecond) { mutableStateOf(settings.metricTokensPerSecond) }
+    var metricOutputTokens by remember(settings.metricOutputTokens) { mutableStateOf(settings.metricOutputTokens) }
+    var metricPromptTokens by remember(settings.metricPromptTokens) { mutableStateOf(settings.metricPromptTokens) }
+    var metricContextTokens by remember(settings.metricContextTokens) { mutableStateOf(settings.metricContextTokens) }
+    var metricDuration by remember(settings.metricDuration) { mutableStateOf(settings.metricDuration) }
     var maxAttachmentMb by remember(settings.maxAttachmentMb) { mutableStateOf(settings.maxAttachmentMb.coerceIn(1, 150)) }
     var strictNativeMode by remember(settings.strictNativeMode) { mutableStateOf(settings.strictNativeMode) }
     var demoMode by remember(settings.demoMode) { mutableStateOf(settings.demoMode) }
@@ -4499,6 +4616,12 @@ private fun SettingsScreen(
             fontScale = scale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE),
             showToolCalls = showToolCalls,
             showMessageMetrics = showMessageMetrics,
+            metricTtft = metricTtft,
+            metricTokensPerSecond = metricTokensPerSecond,
+            metricOutputTokens = metricOutputTokens,
+            metricPromptTokens = metricPromptTokens,
+            metricContextTokens = metricContextTokens,
+            metricDuration = metricDuration,
             maxAttachmentMb = maxAttachmentMb.coerceIn(1, 150),
             strictNativeMode = strictNativeMode,
             demoMode = demoMode
@@ -4573,6 +4696,19 @@ private fun SettingsScreen(
                     Switch(checked = showMessageMetrics, onCheckedChange = { showMessageMetrics = it })
                 }
                 Text("ON = mostra TTFT, token e t/s nei messaggi.", color = AppColors.Muted, fontSize = 12.sp)
+            }
+            item {
+                PremiumPanel {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Metriche visibili", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        MetricSwitch("Tempo primo token", metricTtft) { metricTtft = it }
+                        MetricSwitch("Token/sec", metricTokensPerSecond) { metricTokensPerSecond = it }
+                        MetricSwitch("Token output", metricOutputTokens) { metricOutputTokens = it }
+                        MetricSwitch("Token input", metricPromptTokens) { metricPromptTokens = it }
+                        MetricSwitch("Contesto", metricContextTokens) { metricContextTokens = it }
+                        MetricSwitch("Durata totale", metricDuration) { metricDuration = it }
+                    }
+                }
             }
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -4800,6 +4936,14 @@ private fun SettingsPasswordField(label: String, value: String, onValueChange: (
             unfocusedIndicatorColor = Color.Transparent
         )
     )
+}
+
+@Composable
+private fun MetricSwitch(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Color.White, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
 }
 
 private fun appendPrompt(current: String, addition: String): String {
@@ -6743,6 +6887,12 @@ private fun loadSettings(context: Context): AppSettings {
         fontScale = prefs.getFloat("fontScale", AppDefaults.fontScale).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE),
         showToolCalls = prefs.getBoolean("showToolCalls", AppDefaults.showToolCalls),
         showMessageMetrics = prefs.getBoolean("showMessageMetrics", AppDefaults.showMessageMetrics),
+        metricTtft = prefs.getBoolean("metricTtft", AppDefaults.metricTtft),
+        metricTokensPerSecond = prefs.getBoolean("metricTokensPerSecond", AppDefaults.metricTokensPerSecond),
+        metricOutputTokens = prefs.getBoolean("metricOutputTokens", AppDefaults.metricOutputTokens),
+        metricPromptTokens = prefs.getBoolean("metricPromptTokens", AppDefaults.metricPromptTokens),
+        metricContextTokens = prefs.getBoolean("metricContextTokens", AppDefaults.metricContextTokens),
+        metricDuration = prefs.getBoolean("metricDuration", AppDefaults.metricDuration),
         maxAttachmentMb = prefs.getInt("maxAttachmentMb", AppDefaults.maxAttachmentMb).coerceIn(1, 150),
         strictNativeMode = prefs.getBoolean("strictNativeMode", AppDefaults.strictNativeMode),
         demoMode = prefs.getBoolean("demoMode", AppDefaults.demoMode)
@@ -6820,6 +6970,12 @@ private fun saveSettings(context: Context, settings: AppSettings) {
         .putFloat("fontScale", settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE))
         .putBoolean("showToolCalls", settings.showToolCalls)
         .putBoolean("showMessageMetrics", settings.showMessageMetrics)
+        .putBoolean("metricTtft", settings.metricTtft)
+        .putBoolean("metricTokensPerSecond", settings.metricTokensPerSecond)
+        .putBoolean("metricOutputTokens", settings.metricOutputTokens)
+        .putBoolean("metricPromptTokens", settings.metricPromptTokens)
+        .putBoolean("metricContextTokens", settings.metricContextTokens)
+        .putBoolean("metricDuration", settings.metricDuration)
         .putInt("maxAttachmentMb", settings.maxAttachmentMb.coerceIn(1, 150))
         .putBoolean("strictNativeMode", settings.strictNativeMode)
         .putBoolean("demoMode", settings.demoMode)
@@ -7781,6 +7937,12 @@ private object AppDefaults {
     const val fontScale = 1.0f
     const val showToolCalls = true
     const val showMessageMetrics = false
+    const val metricTtft = true
+    const val metricTokensPerSecond = true
+    const val metricOutputTokens = true
+    const val metricPromptTokens = true
+    const val metricContextTokens = true
+    const val metricDuration = true
     const val maxAttachmentMb = 6
     const val strictNativeMode = false
     const val demoMode = false

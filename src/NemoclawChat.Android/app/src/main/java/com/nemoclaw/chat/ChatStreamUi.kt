@@ -53,8 +53,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+internal data class MetricDisplayFilter(
+    val ttft: Boolean = true,
+    val tokensPerSecond: Boolean = true,
+    val outputTokens: Boolean = true,
+    val promptTokens: Boolean = true,
+    val contextTokens: Boolean = true,
+    val duration: Boolean = true
+)
+
 @Composable
-internal fun StreamingBubbleView(state: StreamingState, showToolCalls: Boolean, showMessageMetrics: Boolean) {
+internal fun StreamingBubbleView(
+    state: StreamingState,
+    showToolCalls: Boolean,
+    showMessageMetrics: Boolean,
+    metricFilter: MetricDisplayFilter
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -85,13 +99,13 @@ internal fun StreamingBubbleView(state: StreamingState, showToolCalls: Boolean, 
 
                 if (showMessageMetrics && state.isDone) {
                     val parts = mutableListOf<String>()
-                    state.stats?.ttftMs?.takeIf { it > 0 }?.let { parts += "TTFT ${String.format(java.util.Locale.US, "%.0f", it)}ms" }
-                    state.stats?.tokensPerSecond?.takeIf { it > 0 }?.let { parts += "${String.format(java.util.Locale.US, "%.2f", it)} t/s" }
-                    state.stats?.tokensOut?.takeIf { it > 0 }?.let { parts += "$it tok" }
-                    state.stats?.promptTokens?.takeIf { it > 0 }?.let { parts += "prompt $it" }
-                    state.stats?.contextTokens()?.takeIf { it > 0 }?.let { parts += "ctx $it" }
-                    state.stats?.contextLength?.takeIf { it > 0 }?.let { parts += "max $it" }
-                    state.stats?.totalMs?.takeIf { it > 0 }?.let { parts += "${String.format(java.util.Locale.US, "%.1f", it / 1000.0)}s" }
+                    state.stats?.ttftMs?.takeIf { metricFilter.ttft && it > 0 }?.let { parts += "TTFT ${String.format(java.util.Locale.US, "%.0f", it)}ms" }
+                    state.stats?.tokensPerSecond?.takeIf { metricFilter.tokensPerSecond && it > 0 }?.let { parts += "${String.format(java.util.Locale.US, "%.2f", it)} t/s" }
+                    state.stats?.tokensOut?.takeIf { metricFilter.outputTokens && it > 0 }?.let { parts += "$it tok" }
+                    state.stats?.promptTokens?.takeIf { metricFilter.promptTokens && it > 0 }?.let { parts += "prompt $it" }
+                    state.stats?.contextTokens()?.takeIf { metricFilter.contextTokens && it > 0 }?.let { parts += "ctx $it" }
+                    state.stats?.contextLength?.takeIf { metricFilter.contextTokens && it > 0 }?.let { parts += "max $it" }
+                    state.stats?.totalMs?.takeIf { metricFilter.duration && it > 0 }?.let { parts += "${String.format(java.util.Locale.US, "%.1f", it / 1000.0)}s" }
                     if (parts.isNotEmpty()) {
                         Text(
                             text = parts.joinToString("  ·  "),

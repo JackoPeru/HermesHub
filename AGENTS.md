@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.99 Release Hermes Hub 0.6.99 UI stability controls
+v0.6.100 Release Hermes Hub 0.6.100 message media UX controls
 ```
 
 ## Regola Linux Gateway Update
@@ -137,6 +137,19 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.100 (Message/media UX controls):
+
+Release 0.6.100:
+- Windows/Android: metriche messaggi configurabili singolarmente: TTFT, token/sec, token output, token input, contesto e durata. Il toggle generale `Metriche sotto messaggi` resta indipendente.
+- Windows: impostazioni chat importanti spostate fuori da `Avanzate`: modello/agente, tool call, dettagli tecnici e metriche sono visibili direttamente nella pagina impostazioni.
+- Windows: composer mostra anteprima allegati vision sopra la textbox con miniatura, nome file, mime type, dimensione e pulsante rimozione.
+- Android: composer mostra anteprima allegati vision con thumbnail reale, nome file, mime type, dimensione e rimozione; non e' piu' solo un chip testuale.
+- Windows/Android Video: aggiunto `URL video manuale` validato http/https, riproducibile direttamente nel player quando la sync cartella/libreria non basta.
+- Windows Video: feedback e copia riferimento funzionano anche per URL video manuali, non solo file locali del feed.
+- Nota server/headless: la vision continua a usare data URL inline verso il gateway; il server Ubuntu non richiede GUI per far vedere immagini al modello.
+- Release asset attesi: pubblicare anche `HermesHub-0.6.100-linux-gateway.tar.gz` nella release GitHub, anche se il gateway non cambia, per non rompere auto-update server.
+- Release bump: Windows/AdminBridge `0.6.100`, Android `versionName 0.6.100`, `versionCode 105`.
 
 Hermes Hub 0.6.99 (UI stability controls):
 

@@ -529,24 +529,33 @@ internal sealed class StreamingBubble
                 : _assistantTextPreview;
         }
 
+        var settings = AppSettingsStore.Load();
         var parts = new List<string>();
-        if (stats.TimeToFirstTokenMs is { } ttft && ttft > 0)
+        if (settings.MetricTtft && stats.TimeToFirstTokenMs is { } ttft && ttft > 0)
         {
             parts.Add($"TTFT {ttft:0}ms");
         }
-        if (stats.TokensPerSecond is { } tps && tps > 0)
+        if (settings.MetricTokensPerSecond && stats.TokensPerSecond is { } tps && tps > 0)
         {
             parts.Add($"{tps:0.0} t/s");
         }
-        if (stats.TokensOut is { } toks && toks > 0)
+        if (settings.MetricOutputTokens && stats.TokensOut is { } toks && toks > 0)
         {
             parts.Add($"{toks} tok");
         }
-        if (stats.PromptTokens is { } pt && pt > 0)
+        if (settings.MetricPromptTokens && stats.PromptTokens is { } pt && pt > 0)
         {
             parts.Add($"prompt {pt}");
         }
-        if (stats.TotalMs is { } total && total > 0)
+        if (settings.MetricContextTokens && stats.ContextTokens is { } ctx && ctx > 0)
+        {
+            parts.Add($"ctx {ctx}");
+        }
+        if (settings.MetricContextTokens && stats.ContextLength is { } maxCtx && maxCtx > 0)
+        {
+            parts.Add($"max {maxCtx}");
+        }
+        if (settings.MetricDuration && stats.TotalMs is { } total && total > 0)
         {
             parts.Add($"{total / 1000.0:0.0}s");
         }

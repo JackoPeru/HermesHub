@@ -19,5 +19,11 @@ public sealed class AppSettings
     public bool AdvancedChatDetails { get; set; } = false;
     public bool ShowToolCalls { get; set; } = true;
     public bool ShowMessageMetrics { get; set; } = false;
+    public bool MetricTtft { get; set; } = true;
+    public bool MetricTokensPerSecond { get; set; } = true;
+    public bool MetricOutputTokens { get; set; } = true;
+    public bool MetricPromptTokens { get; set; } = true;
+    public bool MetricContextTokens { get; set; } = true;
+    public bool MetricDuration { get; set; } = true;
     public int MaxAttachmentMb { get; set; } = 6;
 }
