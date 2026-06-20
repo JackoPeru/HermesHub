@@ -275,6 +275,161 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
         )
         changes.append("hardware telemetry collector")
 
+    if "def _hermes_hub_storage_path" not in text:
+        text, _ = _replace_once(
+            text,
+            "def _multimodal_validation_error(exc: ValueError, *, param: str) -> \"web.Response\":",
+            '''def _hermes_hub_storage_path(env_name: str, default_name: str) -> "Path":
+    """Return a Hermes Hub JSON store path under HERMES_HOME by default."""
+    from pathlib import Path as _Path
+    home = _Path(os.environ.get("HERMES_HOME", str(_Path.home() / ".hermes"))).expanduser()
+    raw = os.environ.get(env_name) or str(home / default_name)
+    return _Path(raw).expanduser()
+
+
+def _hermes_hub_read_json(path: "Path", default: Dict[str, Any]) -> Dict[str, Any]:
+    import json as _json
+
+    try:
+        if path.is_file():
+            with path.open("r", encoding="utf-8") as handle:
+                loaded = _json.load(handle)
+            if isinstance(loaded, dict):
+                return loaded
+    except Exception:
+        try:
+            logger.exception("Failed to read Hermes Hub store: %s", path)
+        except Exception:
+            pass
+    return dict(default)
+
+
+def _hermes_hub_write_json(path: "Path", payload: Dict[str, Any]) -> None:
+    import json as _json
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as handle:
+        _json.dump(payload, handle, ensure_ascii=False, indent=2)
+    tmp.replace(path)
+
+
+def _hermes_hub_memory_payload() -> Dict[str, Any]:
+    path = _hermes_hub_storage_path("HERMES_HUB_MEMORY_PATH", "hub_memory.json")
+    payload = _hermes_hub_read_json(path, {"categories": {}})
+    categories = payload.get("categories")
+    if not isinstance(categories, dict):
+        categories = {}
+    for key in ("video_preferences", "news_preferences", "response_style", "project_rules", "general_notes"):
+        categories.setdefault(key, "")
+    payload["categories"] = categories
+    payload["object"] = "hermes.hub.memory"
+    payload["status"] = "ok"
+    payload["path"] = str(path)
+    payload["description"] = "Preferenze e note persistenti lato Hermes Agent; non RAM del telefono."
+    return payload
+
+
+def _hermes_hub_patch_memory(payload: Dict[str, Any]) -> Dict[str, Any]:
+    current = _hermes_hub_memory_payload()
+    incoming = payload.get("categories") if isinstance(payload, dict) else None
+    if isinstance(incoming, dict):
+        categories = current.setdefault("categories", {})
+        for key, value in incoming.items():
+            categories[str(key)] = "" if value is None else str(value)
+    current["updated_at"] = time.time()
+    _hermes_hub_write_json(_hermes_hub_storage_path("HERMES_HUB_MEMORY_PATH", "hub_memory.json"), current)
+    return current
+
+
+def _hermes_hub_state_payload() -> Dict[str, Any]:
+    path = _hermes_hub_storage_path("HERMES_HUB_STATE_PATH", "hub_state.json")
+    payload = _hermes_hub_read_json(path, {"items": []})
+    items = payload.get("items")
+    if not isinstance(items, list):
+        items = []
+    payload["items"] = items
+    payload["object"] = "hermes.hub.state"
+    payload["status"] = "ok"
+    payload["path"] = str(path)
+    payload["description"] = "Stato operativo sincronizzato da Hermes Hub: feedback video/news, letture e riferimenti progetto."
+    return payload
+
+
+def _hermes_hub_add_state(payload: Dict[str, Any]) -> Dict[str, Any]:
+    current = _hermes_hub_state_payload()
+    items = current.setdefault("items", [])
+    if not isinstance(items, list):
+        items = []
+        current["items"] = items
+    item = dict(payload or {})
+    item.setdefault("id", f"hub_state_{int(time.time() * 1000)}")
+    item.setdefault("created_at", time.time())
+    items.append(item)
+    current["updated_at"] = time.time()
+    _hermes_hub_write_json(_hermes_hub_storage_path("HERMES_HUB_STATE_PATH", "hub_state.json"), current)
+    return item
+
+
+def _hermes_hub_delete_state(state_id: str) -> Dict[str, Any]:
+    current = _hermes_hub_state_payload()
+    before = len(current.get("items", []))
+    current["items"] = [item for item in current.get("items", []) if str(item.get("id", "")) != str(state_id)]
+    current["updated_at"] = time.time()
+    _hermes_hub_write_json(_hermes_hub_storage_path("HERMES_HUB_STATE_PATH", "hub_state.json"), current)
+    return {"object": "hermes.hub.state.delete", "deleted": before - len(current["items"]), "id": state_id}
+
+
+def _hermes_hub_video_library_payload(request: Optional["web.Request"] = None) -> Dict[str, Any]:
+    import mimetypes as _mimetypes
+    import urllib.parse as _urlparse
+    from pathlib import Path as _Path
+
+    raw = os.environ.get("HERMES_VIDEO_LIBRARY_PATH")
+    if not raw:
+        raw = str(_Path(os.environ.get("HERMES_HOME", str(_Path.home() / ".hermes"))).expanduser() / "media" / "video")
+    root = _Path(raw).expanduser()
+    extensions = {".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi"}
+    items: List[Dict[str, Any]] = []
+    if root.is_dir():
+        for path in sorted(root.rglob("*"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True):
+            if not path.is_file() or path.suffix.lower() not in extensions:
+                continue
+            try:
+                stat = path.stat()
+                rel = path.relative_to(root).as_posix()
+            except Exception:
+                continue
+            media_id = _urlparse.quote(rel, safe="")
+            items.append({
+                "id": rel,
+                "title": path.stem,
+                "filename": path.name,
+                "path": str(path),
+                "media_url": f"/v1/media/{media_id}",
+                "thumbnail_url": "",
+                "mime_type": _mimetypes.guess_type(path.name)[0] or "video/*",
+                "size_bytes": int(stat.st_size),
+                "modified_at": float(stat.st_mtime),
+                "duration_ms": 0,
+            })
+    return {
+        "object": "hermes.video.library",
+        "status": "ok",
+        "configured": bool(raw),
+        "video_library_path": str(root),
+        "library_path": str(root),
+        "items": items,
+        "count": len(items),
+        "description": "Feed Video Hermes Hub: file video presenti nella cartella monitorata dal server.",
+    }
+
+
+def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Response":''',
+            "hub support endpoint helpers",
+        )
+        changes.append("hub support endpoint helpers")
+
     if "def _is_hermes_hub_request" not in text:
         text, _ = _replace_once(
             text,
@@ -425,6 +580,18 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
         )
         changes.append("capabilities hardware_monitoring")
 
+    if '"video_library": True,' not in text:
+        text, _ = _replace_regex_once(
+            text,
+            r'(^\s+"features": \{\n)',
+            r'\1'
+            r'                "video_library": True,' "\n"
+            r'                "hub_memory": True,' "\n"
+            r'                "hub_state": True,' "\n",
+            "capabilities hub support features",
+        )
+        changes.append("capabilities hub support features")
+
     if '"hardware": {"method": "GET", "path": "/v1/hub/hardware"}' not in text:
         text, _ = _replace_regex_once(
             text,
@@ -434,6 +601,18 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
             "capabilities hardware endpoint",
         )
         changes.append("capabilities hardware endpoint")
+
+    if '"video_library": {"method": "GET", "path": "/v1/video/library"}' not in text:
+        text, _ = _replace_regex_once(
+            text,
+            r'(^\s+"health_detailed": \{"method": "GET", "path": "/health/detailed"\},\n)',
+            r'\1'
+            r'                "video_library": {"method": "GET", "path": "/v1/video/library"},' "\n"
+            r'                "hub_memory": {"method": "GET/PATCH", "path": "/v1/hub/memory"},' "\n"
+            r'                "hub_state": {"method": "GET/POST", "path": "/v1/hub/state"},' "\n",
+            "capabilities hub support endpoints",
+        )
+        changes.append("capabilities hub support endpoints")
 
     if "async def _handle_hub_hardware" not in text:
         text, _ = _replace_once(
@@ -449,6 +628,59 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
             "hardware endpoint handler",
         )
         changes.append("hardware endpoint handler")
+
+    if "async def _handle_video_library" not in text:
+        text, _ = _replace_once(
+            text,
+            "    async def _handle_models(self, request: \"web.Request\") -> \"web.Response\":",
+            "    async def _handle_video_library(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_video_library_payload(request))\n"
+            "\n"
+            "    async def _handle_hub_memory(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_memory_payload())\n"
+            "\n"
+            "    async def _handle_patch_hub_memory(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        try:\n"
+            "            body = await request.json()\n"
+            "        except Exception:\n"
+            "            body = {}\n"
+            "        return web.json_response(_hermes_hub_patch_memory(body if isinstance(body, dict) else {}))\n"
+            "\n"
+            "    async def _handle_get_hub_state(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_state_payload())\n"
+            "\n"
+            "    async def _handle_post_hub_state(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        try:\n"
+            "            body = await request.json()\n"
+            "        except Exception:\n"
+            "            body = {}\n"
+            "        return web.json_response(_hermes_hub_add_state(body if isinstance(body, dict) else {}))\n"
+            "\n"
+            "    async def _handle_delete_hub_state(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_delete_state(request.match_info.get(\"state_id\", \"\")))\n"
+            "\n"
+            "    async def _handle_models(self, request: \"web.Request\") -> \"web.Response\":",
+            "hub support endpoint handlers",
+        )
+        changes.append("hub support endpoint handlers")
 
     if '"hermes_native": {"method": "POST", "path": "/v1/hermes/native"}' not in text:
         text, _ = _replace_regex_once(
@@ -715,6 +947,21 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
             "router hardware endpoint",
         )
         changes.append("router hardware endpoint")
+
+    if 'add_get("/v1/video/library", self._handle_video_library)' not in text:
+        text, _ = _replace_regex_once(
+            text,
+            r'(^\s+self\._app\.router\.add_get\("/v1/capabilities", self\._handle_capabilities\)\n)',
+            r'\1'
+            r'            self._app.router.add_get("/v1/video/library", self._handle_video_library)' "\n"
+            r'            self._app.router.add_get("/v1/hub/memory", self._handle_hub_memory)' "\n"
+            r'            self._app.router.add_patch("/v1/hub/memory", self._handle_patch_hub_memory)' "\n"
+            r'            self._app.router.add_get("/v1/hub/state", self._handle_get_hub_state)' "\n"
+            r'            self._app.router.add_post("/v1/hub/state", self._handle_post_hub_state)' "\n"
+            r'            self._app.router.add_delete("/v1/hub/state/{state_id}", self._handle_delete_hub_state)' "\n",
+            "router hub support endpoints",
+        )
+        changes.append("router hub support endpoints")
 
     return text, changes
 

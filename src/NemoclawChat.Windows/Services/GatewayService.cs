@@ -836,9 +836,9 @@ public static class GatewayService
             ("Modelli", "/v1/models", "Controlla LM Studio/vLLM e modello caricato."),
             ("Capabilities", "/v1/capabilities", "Controlla API key e versione gateway."),
             ("Hardware", "/v1/hub/hardware", "Aggiorna Hermes Gateway/patcher e installa psutil su Linux se mancano metriche live."),
-            ("Video library", "/v1/video/library", "Imposta HERMES_VIDEO_LIBRARY_PATH e riavvia gateway."),
-            ("Memoria", "/v1/hub/memory", "Aggiorna Hermes Gateway alla build 0.6.42 o riavvia hermes-hub."),
-            ("Hub state", "/v1/hub/state", "Aggiorna Hermes Gateway alla build 0.6.42 o riavvia hermes-hub."),
+            ("Video library", "/v1/video/library", "Aggiorna Hermes Gateway alla latest release. Se il feed e' vuoto, imposta HERMES_VIDEO_LIBRARY_PATH sul server."),
+            ("Memoria", "/v1/hub/memory", "Aggiorna Hermes Gateway alla latest release e riavvia hermes-hub. Memoria = preferenze/profilo Hermes Agent lato server, non RAM telefono."),
+            ("Hub state", "/v1/hub/state", "Aggiorna Hermes Gateway alla latest release e riavvia hermes-hub."),
         };
         var list = new List<DiagnosticCheckResult>();
         foreach (var check in checks)

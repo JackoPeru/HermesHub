@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.92 Release Hermes Hub 0.6.92 Android tool UX stability
+v0.6.93 Release Hermes Hub 0.6.93 gateway status endpoints
 ```
 
 ## Regola Linux Gateway Update
@@ -105,6 +105,8 @@ artifacts\HermesHub-X.Y.Z-linux-gateway.tar.gz
 ```
 
 - Caricare `HermesHub-X.Y.Z-linux-gateway.tar.gz` nella stessa GitHub Release di Android APK e Windows MSIX. Questo evita nuovi trasferimenti manuali: il server aggiorna launcher, patcher, updater e unit systemd da GitHub Releases.
+- Se Android/Windows mostrano diagnostica 404 su endpoint gateway (`/v1/video/library`, `/v1/hub/memory`, `/v1/hub/state`, `/v1/hub/hardware`), non consigliare mai downgrade o build vecchie: aggiornare il patcher gateway nella release corrente, pubblicare asset Linux gateway, poi lasciare auto-update server o eseguire `~/.local/bin/hermes-hub-linux-update --restart`.
+- Memoria Hermes = preferenze/profilo/regole persistenti lato Hermes Agent/server condivise tra app, CLI, jobs e sezioni operative. Non e' RAM del telefono o memoria hardware.
 - Non dimenticare che gli script Linux devono restare LF; `.gitattributes` forza LF per `.sh`, `.service`, `.timer`.
 
 Stato server Linux verificato 2026-06-18:
@@ -135,6 +137,16 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.93 (Gateway status endpoints):
+
+Release 0.6.93:
+- Gateway Linux patcher aggiunge endpoint protetti `GET /v1/video/library`, `GET/PATCH /v1/hub/memory`, `GET/POST /v1/hub/state` e `DELETE /v1/hub/state/{id}`; i tre controlli Android non devono piu' finire in 404 dopo auto-update server.
+- Video Library ora risponde 200 anche con cartella vuota/non popolata, legge `HERMES_VIDEO_LIBRARY_PATH` e restituisce `items: []` con path monitorato invece di errore.
+- Memoria Hermes usa store JSON server-side `HERMES_HUB_MEMORY_PATH` e chiarisce che e' profilo/preferenze Hermes Agent, non RAM telefono.
+- Hub State usa store JSON server-side `HERMES_HUB_STATE_PATH` per feedback/stato operativo sincronizzato da app.
+- Android/Windows diagnostica: rimossi riferimenti a vecchia build 0.6.42; azione corretta e' aggiornare Hermes Gateway alla latest release e riavviare/autoupdate.
+- Release bump: Windows/AdminBridge `0.6.93`, Android `versionName 0.6.93`, `versionCode 98`.
 
 Hermes Hub 0.6.92 (Android tool UX stability):
 

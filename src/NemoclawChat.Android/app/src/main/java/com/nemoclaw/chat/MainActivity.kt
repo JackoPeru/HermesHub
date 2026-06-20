@@ -5409,10 +5409,10 @@ private suspend fun runDiagnostics(settings: AppSettings, apiKey: String?): List
                 message = if (ok) response.second.limitText(180) else "HTTP ${response.first}: ${extractHumanError(response.second)}",
                 action = when (label) {
                     "Tailscale/API" -> "Avvia Tailscale e hermes-hub, verifica IP/porta 8642."
-                    "Memoria" -> "Aggiorna Hermes Gateway alla build 0.6.42 o riavvia hermes-hub."
-                    "Hub state" -> "Aggiorna Hermes Gateway alla build 0.6.42 o riavvia hermes-hub."
+                    "Memoria" -> "Aggiorna Hermes Gateway alla latest release e riavvia hermes-hub. Memoria = preferenze/profilo Hermes Agent lato server, non RAM telefono."
+                    "Hub state" -> "Aggiorna Hermes Gateway alla latest release e riavvia hermes-hub."
                     "Hardware" -> "Aggiorna Hermes Gateway/patcher e installa psutil su Linux se mancano metriche live."
-                    "Video library" -> "Imposta HERMES_VIDEO_LIBRARY_PATH e riavvia gateway."
+                    "Video library" -> "Aggiorna Hermes Gateway alla latest release. Se il feed e' vuoto, imposta HERMES_VIDEO_LIBRARY_PATH sul server."
                     else -> "Controlla API key, gateway URL e log del terminale hermes-hub."
                 }
             )
