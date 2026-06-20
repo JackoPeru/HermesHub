@@ -252,12 +252,26 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
             "            current = getattr(entry, \"current\", None)\n"
             "            if current is None:\n"
             "                continue\n"
+            "            try:\n"
+            "                current_c = float(current)\n"
+            "            except Exception:\n"
+            "                continue\n"
+            "            if current_c < 0 or current_c > 150:\n"
+            "                continue\n"
+            "            high = getattr(entry, \"high\", None)\n"
+            "            critical = getattr(entry, \"critical\", None)\n"
+            "            high_c = None if high is None else float(high)\n"
+            "            critical_c = None if critical is None else float(critical)\n"
+            "            if high_c is not None and (high_c < 1 or high_c > 150):\n"
+            "                high_c = None\n"
+            "            if critical_c is not None and (critical_c < 1 or critical_c > 150):\n"
+            "                critical_c = None\n"
             "            flattened.append({\n"
             '                "name": name,\n'
             '                "label": getattr(entry, "label", "") or name,\n'
-            '                "current_c": float(current),\n'
-            '                "high_c": None if getattr(entry, "high", None) is None else float(entry.high),\n'
-            '                "critical_c": None if getattr(entry, "critical", None) is None else float(entry.critical),\n'
+            '                "current_c": current_c,\n'
+            '                "high_c": high_c,\n'
+            '                "critical_c": critical_c,\n'
             "            })\n"
             '    snapshot["temperatures"] = flattened\n'
             '    snapshot["temperature_support"] = "available" if flattened else "no_sensors_reported"\n'
@@ -429,6 +443,47 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
             "hub support endpoint helpers",
         )
         changes.append("hub support endpoint helpers")
+
+    if '"current_c": current_c,' not in text and '"current_c": float(current),' in text:
+        text, _ = _replace_once(
+            text,
+            '            current = getattr(entry, "current", None)\n'
+            '            if current is None:\n'
+            '                continue\n'
+            '            flattened.append({\n'
+            '                "name": name,\n'
+            '                "label": getattr(entry, "label", "") or name,\n'
+            '                "current_c": float(current),\n'
+            '                "high_c": None if getattr(entry, "high", None) is None else float(entry.high),\n'
+            '                "critical_c": None if getattr(entry, "critical", None) is None else float(entry.critical),\n'
+            '            })\n',
+            '            current = getattr(entry, "current", None)\n'
+            '            if current is None:\n'
+            '                continue\n'
+            '            try:\n'
+            '                current_c = float(current)\n'
+            '            except Exception:\n'
+            '                continue\n'
+            '            if current_c < 0 or current_c > 150:\n'
+            '                continue\n'
+            '            high = getattr(entry, "high", None)\n'
+            '            critical = getattr(entry, "critical", None)\n'
+            '            high_c = None if high is None else float(high)\n'
+            '            critical_c = None if critical is None else float(critical)\n'
+            '            if high_c is not None and (high_c < 1 or high_c > 150):\n'
+            '                high_c = None\n'
+            '            if critical_c is not None and (critical_c < 1 or critical_c > 150):\n'
+            '                critical_c = None\n'
+            '            flattened.append({\n'
+            '                "name": name,\n'
+            '                "label": getattr(entry, "label", "") or name,\n'
+            '                "current_c": current_c,\n'
+            '                "high_c": high_c,\n'
+            '                "critical_c": critical_c,\n'
+            '            })\n',
+            "hardware temperature sanity filter",
+        )
+        changes.append("hardware temperature sanity filter")
 
     if "def _is_hermes_hub_request" not in text:
         text, _ = _replace_once(

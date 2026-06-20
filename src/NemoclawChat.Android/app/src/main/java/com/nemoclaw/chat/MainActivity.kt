@@ -503,6 +503,15 @@ private data class HardwareTemperature(
     val criticalC: Double?
 )
 
+private data class HardwareTemperatureView(
+    val title: String,
+    val source: String,
+    val currentC: Double,
+    val highC: Double?,
+    val criticalC: Double?,
+    val sortKey: Int
+)
+
 private data class HardwareSnapshot(
     val status: String = "loading",
     val timestampMs: Long = System.currentTimeMillis(),
@@ -2892,6 +2901,7 @@ private fun HardwareScreen(context: Context, settings: AppSettings) {
     val dtSeconds = previous?.let { ((snapshot.timestampMs - it.timestampMs).coerceAtLeast(100L)) / 1000.0 } ?: 0.0
     val downRate = previous?.let { ((snapshot.networkBytesReceived - it.networkBytesReceived).coerceAtLeast(0) / dtSeconds).toLong() } ?: 0L
     val upRate = previous?.let { ((snapshot.networkBytesSent - it.networkBytesSent).coerceAtLeast(0) / dtSeconds).toLong() } ?: 0L
+    val temperatureViews = remember(snapshot.temperatures) { snapshot.temperatures.toHardwareTemperatureViews() }
 
     LazyColumn(
         modifier = Modifier
@@ -2900,9 +2910,9 @@ private fun HardwareScreen(context: Context, settings: AppSettings) {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Text("Hardware", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+            Text("Prestazioni", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.height(8.dp))
-            Text("Gestione attivita remoto via Hermes Gateway. Polling ogni secondo.", color = AppColors.Muted)
+            Text("Vista tipo Gestione attivita del server Hermes. Polling ogni secondo.", color = AppColors.Muted)
         }
         item {
             ServerMetric(
@@ -2921,7 +2931,7 @@ private fun HardwareScreen(context: Context, settings: AppSettings) {
         }
         item {
             HardwareGauge(
-                title = "Memoria",
+                title = "Memoria RAM",
                 percent = snapshot.memoryPercent,
                 value = "${snapshot.memoryPercent.roundToInt().coerceIn(0, 100)}%",
                 detail = "${snapshot.memoryUsedBytes.toReadableFileSize()} usati / ${snapshot.memoryTotalBytes.toReadableFileSize()} totali. Disponibili ${snapshot.memoryAvailableBytes.toReadableFileSize()}."
@@ -2966,14 +2976,17 @@ private fun HardwareScreen(context: Context, settings: AppSettings) {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Temperature", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    if (snapshot.temperatures.isEmpty()) {
+                    if (temperatureViews.isEmpty()) {
                         Text("Sensori non disponibili o non esposti. Stato: ${snapshot.temperatureSupport}. Su Windows spesso servono driver/tool vendor; su Ubuntu installa psutil e abilita lm-sensors.", color = AppColors.Muted, fontSize = 12.sp)
                     } else {
-                        snapshot.temperatures.sortedByDescending { it.currentC }.take(24).forEach { temp ->
+                        temperatureViews.forEach { temp ->
                             Surface(color = AppColors.Panel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, AppColors.Border)) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text("${temp.label}: ${String.format(java.util.Locale.US, "%.1f", temp.currentC)} C", color = Color.White, fontWeight = FontWeight.SemiBold)
-                                    Text("Fonte ${temp.name}. High ${formatTemperature(temp.highC)}, critical ${formatTemperature(temp.criticalC)}.", color = AppColors.Muted, fontSize = 12.sp)
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Text(temp.title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                        Text("${String.format(java.util.Locale.US, "%.1f", temp.currentC)} C", color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
+                                    }
+                                    Text("${temp.source}. Limite ${formatTemperature(temp.highC)}, critico ${formatTemperature(temp.criticalC)}.", color = AppColors.Muted, fontSize = 12.sp)
                                 }
                             }
                         }
@@ -3002,6 +3015,59 @@ private fun HardwareGauge(title: String, percent: Double, value: String, detail:
             Text(detail, color = AppColors.Muted, fontSize = 12.sp)
         }
     }
+}
+
+private fun List<HardwareTemperature>.toHardwareTemperatureViews(): List<HardwareTemperatureView> {
+    val hasNvmeComposite = any { it.name.equals("nvme", ignoreCase = true) && it.label.equals("Composite", ignoreCase = true) }
+    return mapNotNull { temp ->
+        val current = temp.currentC
+        if (!current.isFinite() || current < 0.0 || current > 150.0) {
+            return@mapNotNull null
+        }
+        if (hasNvmeComposite &&
+            temp.name.equals("nvme", ignoreCase = true) &&
+            temp.label.startsWith("Sensor 2", ignoreCase = true)
+        ) {
+            return@mapNotNull null
+        }
+        val rawName = temp.name.trim()
+        val rawLabel = temp.label.trim()
+        val name = rawName.lowercase()
+        val label = rawLabel.lowercase()
+        val title = when {
+            name == "k10temp" && label == "tctl" -> "CPU package"
+            name == "k10temp" && label.startsWith("tccd") -> "CPU CCD ${rawLabel.filter { it.isDigit() }.ifBlank { "1" }}"
+            name == "nvme" && label == "composite" -> "SSD NVMe"
+            name == "nvme" && label == "sensor 1" -> "SSD NVMe controller"
+            name == "nvme" && label == "sensor 3" -> "SSD NVMe NAND"
+            name.startsWith("spd") -> "RAM DIMM"
+            name.startsWith("r8169") -> "Ethernet controller ${rawName.substringAfter("_0_", "").ifBlank { "" }}".trim()
+            rawLabel.isNotBlank() && rawLabel != "-" -> rawLabel
+            else -> rawName.ifBlank { "Sensore temperatura" }
+        }
+        val sortKey = when {
+            title.startsWith("CPU package") -> 0
+            title.startsWith("CPU CCD") -> 1
+            title.startsWith("SSD") -> 2
+            title.startsWith("RAM") -> 3
+            title.startsWith("Ethernet") -> 4
+            else -> 9
+        }
+        HardwareTemperatureView(
+            title = title,
+            source = "Sensore ${rawName.ifBlank { "-" }}${if (rawLabel.isNotBlank() && rawLabel != rawName) " / $rawLabel" else ""}",
+            currentC = current,
+            highC = sanitizeTemperatureLimit(temp.highC),
+            criticalC = sanitizeTemperatureLimit(temp.criticalC),
+            sortKey = sortKey
+        )
+    }
+        .distinctBy { it.title }
+        .sortedWith(compareBy<HardwareTemperatureView> { it.sortKey }.thenByDescending { it.currentC })
+}
+
+private fun sanitizeTemperatureLimit(value: Double?): Double? {
+    return value?.takeIf { it.isFinite() && it in 1.0..150.0 }
 }
 
 @Composable
@@ -4937,6 +5003,7 @@ private fun parseHardwareSnapshot(json: JSONObject): HardwareSnapshot {
         for (i in 0 until array.length()) {
             val item = array.optJSONObject(i) ?: continue
             val current = item.optFiniteDouble("current_c") ?: continue
+            if (current < 0.0 || current > 150.0) continue
             add(
                 HardwareTemperature(
                     name = item.optString("name", "-"),

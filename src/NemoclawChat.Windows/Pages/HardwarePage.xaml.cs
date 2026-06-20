@@ -115,24 +115,117 @@ public sealed partial class HardwarePage : Page
     private void RenderTemperatures(HardwareSnapshot snapshot)
     {
         TemperaturesPanel.Children.Clear();
-        if (snapshot.Temperatures.Count == 0)
+        var temperatures = NormalizeTemperatures(snapshot.Temperatures);
+        if (temperatures.Count == 0)
         {
             TemperaturesPanel.Children.Add(MutedText($"Sensori non disponibili o non esposti. Stato: {snapshot.TemperatureSupport}. Su Windows spesso servono driver/tool vendor; su Ubuntu installa psutil e abilita lm-sensors."));
             return;
         }
 
-        foreach (var temp in snapshot.Temperatures.OrderByDescending(item => item.CurrentC).Take(24))
+        foreach (var temp in temperatures)
         {
+            var row = new Grid { ColumnSpacing = 10 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var title = new TextBlock
+            {
+                Text = temp.Title,
+                Foreground = WhiteBrush(),
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextTrimming = Microsoft.UI.Xaml.TextTrimming.CharacterEllipsis
+            };
+            var value = new TextBlock
+            {
+                Text = $"{temp.CurrentC:0.0} C",
+                Foreground = (Brush)Application.Current.Resources["AccentGreenBrush"],
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            };
+            Grid.SetColumn(value, 1);
+            row.Children.Add(title);
+            row.Children.Add(value);
+
             TemperaturesPanel.Children.Add(new StackPanel
             {
                 Spacing = 4,
                 Children =
                 {
-                    new TextBlock { Text = $"{temp.Label}: {temp.CurrentC:0.0} C", Foreground = WhiteBrush(), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
-                    MutedText($"Fonte {temp.Name}. High {FormatTemp(temp.HighC)}, critical {FormatTemp(temp.CriticalC)}.")
+                    row,
+                    MutedText($"{temp.Source}. Limite {FormatTemp(temp.HighC)}, critico {FormatTemp(temp.CriticalC)}.")
                 }
             });
         }
+    }
+
+    private sealed record TemperatureView(string Title, string Source, double CurrentC, double? HighC, double? CriticalC, int SortKey);
+
+    private static IReadOnlyList<TemperatureView> NormalizeTemperatures(IReadOnlyList<HardwareTemperatureRecord> temperatures)
+    {
+        var hasNvmeComposite = temperatures.Any(item =>
+            item.Name.Equals("nvme", StringComparison.OrdinalIgnoreCase) &&
+            item.Label.Equals("Composite", StringComparison.OrdinalIgnoreCase));
+
+        return temperatures
+            .Select(temp => NormalizeTemperature(temp, hasNvmeComposite))
+            .Where(temp => temp is not null)
+            .Select(temp => temp!)
+            .GroupBy(temp => temp.Title)
+            .Select(group => group.OrderByDescending(temp => temp.CurrentC).First())
+            .OrderBy(temp => temp.SortKey)
+            .ThenByDescending(temp => temp.CurrentC)
+            .ToList();
+    }
+
+    private static TemperatureView? NormalizeTemperature(HardwareTemperatureRecord temp, bool hasNvmeComposite)
+    {
+        if (!double.IsFinite(temp.CurrentC) || temp.CurrentC < 0 || temp.CurrentC > 150)
+        {
+            return null;
+        }
+
+        var name = temp.Name.Trim();
+        var label = temp.Label.Trim();
+        var lowerName = name.ToLowerInvariant();
+        var lowerLabel = label.ToLowerInvariant();
+        if (hasNvmeComposite && lowerName == "nvme" && lowerLabel.StartsWith("sensor 2", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var title = (lowerName, lowerLabel) switch
+        {
+            ("k10temp", "tctl") => "CPU package",
+            ("nvme", "composite") => "SSD NVMe",
+            ("nvme", "sensor 1") => "SSD NVMe controller",
+            ("nvme", "sensor 3") => "SSD NVMe NAND",
+            _ when lowerName == "k10temp" && lowerLabel.StartsWith("tccd", StringComparison.OrdinalIgnoreCase) => $"CPU CCD {new string(label.Where(char.IsDigit).ToArray())}",
+            _ when lowerName.StartsWith("spd", StringComparison.OrdinalIgnoreCase) => "RAM DIMM",
+            _ when lowerName.StartsWith("r8169", StringComparison.OrdinalIgnoreCase) => $"Ethernet controller {name.Split("_0_").LastOrDefault() ?? ""}".Trim(),
+            _ when !string.IsNullOrWhiteSpace(label) && label != "-" => label,
+            _ => string.IsNullOrWhiteSpace(name) ? "Sensore temperatura" : name
+        };
+        if (title == "CPU CCD ")
+        {
+            title = "CPU CCD 1";
+        }
+
+        var sortKey = title.StartsWith("CPU package", StringComparison.OrdinalIgnoreCase) ? 0 :
+            title.StartsWith("CPU CCD", StringComparison.OrdinalIgnoreCase) ? 1 :
+            title.StartsWith("SSD", StringComparison.OrdinalIgnoreCase) ? 2 :
+            title.StartsWith("RAM", StringComparison.OrdinalIgnoreCase) ? 3 :
+            title.StartsWith("Ethernet", StringComparison.OrdinalIgnoreCase) ? 4 : 9;
+
+        var source = $"Sensore {name}";
+        if (!string.IsNullOrWhiteSpace(label) && !label.Equals(name, StringComparison.OrdinalIgnoreCase))
+        {
+            source += $" / {label}";
+        }
+
+        return new TemperatureView(title, source, temp.CurrentC, SanitizeTemperatureLimit(temp.HighC), SanitizeTemperatureLimit(temp.CriticalC), sortKey);
+    }
+
+    private static double? SanitizeTemperatureLimit(double? value)
+    {
+        return value is > 1 and <= 150 ? value : null;
     }
 
     private static TextBlock MutedText(string text) => new()

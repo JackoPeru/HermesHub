@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.94 Release Hermes Hub 0.6.94 vision input and detached runs
+v0.6.95 Release Hermes Hub 0.6.95 hardware performance polish
 ```
 
 ## Regola Linux Gateway Update
@@ -137,6 +137,16 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.95 (Hardware performance polish):
+
+Release 0.6.95:
+- Windows/Android: sezione Hardware rinominata in `Prestazioni`, con testi e metriche piu' vicini alla sezione Prestazioni di Gestione attivita Windows.
+- Temperature normalizzate con nomi leggibili: `CPU package`, `CPU CCD`, `SSD NVMe`, `SSD NVMe controller`, `SSD NVMe NAND`, `RAM DIMM`, `Ethernet controller`.
+- Filtri anti-letture spurie: nascosti sensori con temperatura negativa o oltre 150 C e soglie impossibili tipo `65261 C`/`254 C`; `Sensor 2` NVMe viene nascosto quando e' la lettura fittizia sotto zero gia' coperta dal composito.
+- Gateway Linux patcher aggiorna anche la raccolta sensori lato server, cosi' le installazioni nuove o auto-aggiornate non espongono piu' valori termici palesemente falsi.
+- Chiarimento UI: `Memoria` nella pagina prestazioni diventa `Memoria RAM`, distinta dalla memoria Hermes/profilo agente.
+- Release bump: Windows/AdminBridge `0.6.95`, Android `versionName 0.6.95`, `versionCode 100`.
 
 Hermes Hub 0.6.94 (Vision input and detached runs):
 

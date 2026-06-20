@@ -23,11 +23,11 @@
                     FontSize="30"
                     FontWeight="SemiBold"
                     Foreground="White"
-                    Text="Hardware" />
+                    Text="Prestazioni" />
                 <TextBlock
                     MaxWidth="920"
                     Foreground="{StaticResource MutedTextBrush}"
-                    Text="Prestazioni fisiche del PC/server collegato via Hermes Gateway. Aggiornamento automatico ogni secondo." />
+                    Text="Vista tipo Gestione attivita del server Hermes via gateway. Aggiornamento automatico ogni secondo." />
             </StackPanel>
 
             <Border Grid.Row="1" Style="{StaticResource PremiumCardBorderStyle}">
@@ -70,7 +70,7 @@
 
                 <Border Grid.Column="1" Style="{StaticResource PremiumCardBorderStyle}">
                     <StackPanel Spacing="12">
-                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="Memoria" />
+                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="Memoria RAM" />
                         <TextBlock x:Name="MemoryText" Foreground="White" FontSize="28" FontWeight="SemiBold" />
                         <ProgressBar x:Name="MemoryBar" Maximum="100" />
                         <TextBlock x:Name="MemoryDetailText" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" />

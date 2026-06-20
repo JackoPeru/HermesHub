@@ -576,7 +576,7 @@ public static class GatewayService
             foreach (var item in tempArray.EnumerateArray())
             {
                 var current = ExtractDouble(item, "current_c");
-                if (current <= -273.15)
+                if (current < 0 || current > 150)
                 {
                     continue;
                 }
