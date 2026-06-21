@@ -137,6 +137,16 @@ public sealed partial class VideoPage : Page
 
     private void FullScreen_Click(object sender, RoutedEventArgs e)
     {
+        EnterFullScreen();
+    }
+
+    private void VideoSurface_DoubleTapped(object sender, Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs e)
+    {
+        EnterFullScreen();
+    }
+
+    private void EnterFullScreen()
+    {
         if (_selectedVideo is null && string.IsNullOrWhiteSpace(_manualVideoUrl))
         {
             FeedbackStatusText.Text = "Seleziona un video prima di aprire lo schermo intero.";
@@ -144,6 +154,7 @@ public sealed partial class VideoPage : Page
         }
 
         VideoPlayer.IsFullWindow = true;
+        VideoPlayer.MediaPlayer.Play();
     }
 
     private void VideoListView_ItemClick(object sender, ItemClickEventArgs e)

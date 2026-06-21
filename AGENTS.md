@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.108 Release Hermes Hub 0.6.108 vision payload and video streaming
+v0.6.109 Release Hermes Hub 0.6.109 minimal news reader and fullscreen video
 ```
 
 ## Regola Linux Gateway Update
@@ -137,6 +137,16 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.109 (Minimal News reader and fullscreen video):
+
+Release 0.6.109:
+- Windows News: sezione ridisegnata minimalista, senza pannelli tecnici/brief/feedback in vista primaria; mostra solo card articolo HTML a sinistra e reader WebView2 interno a destra.
+- Windows News: fix runtime WebView2; il reader chiama `EnsureCoreWebView2Async()` prima di `NavigateToString`, evitando errore "valid CoreWebView2 is not present".
+- Android News: home ridotta a lista card HTML + refresh; tap su card apre pagina HTML in WebView interna con `loadDataWithBaseURL`, senza mostrare sorgente HTML come testo.
+- Windows Video fullscreen: bottone piu' chiaro, doppio tap sul player apre fullscreen e avvia playback.
+- Android Video fullscreen: dialog immersivo reale, nasconde status/nav bar, forza landscape durante fullscreen e ripristina orientamento/UI all'uscita.
+- Release bump: Windows/AdminBridge `0.6.109`, Android `versionName 0.6.109`, `versionCode 114`.
 
 Hermes Hub 0.6.108 (Video streaming and compat playback):
 

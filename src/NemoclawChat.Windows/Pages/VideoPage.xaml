@@ -172,11 +172,15 @@
                     Style="{StaticResource PremiumCardBorderStyle}">
                     <StackPanel Spacing="14">
                         <TextBlock FontWeight="SemiBold" Foreground="White" Text="Video selezionato" />
-                        <Grid Height="260" Background="Black">
+                        <Grid
+                            Height="260"
+                            Background="Black"
+                            DoubleTapped="VideoSurface_DoubleTapped">
                             <MediaPlayerElement
                                 x:Name="VideoPlayer"
                                 AreTransportControlsEnabled="True"
-                                AutoPlay="False" />
+                                AutoPlay="False"
+                                Stretch="Uniform" />
                             <Button
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Top"
@@ -191,7 +195,7 @@
                                 AutomationProperties.Name="Guarda video a schermo intero">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <FontIcon FontSize="13" Glyph="&#xE740;" />
-                                    <TextBlock FontSize="12" FontWeight="SemiBold" Text="Full" />
+                                    <TextBlock FontSize="12" FontWeight="SemiBold" Text="Schermo intero" />
                                 </StackPanel>
                             </Button>
                         </Grid>

@@ -1,10 +1,12 @@
 package com.nemoclaw.chat
 
+import android.app.Activity
 import android.content.Context
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
@@ -17,6 +19,7 @@ import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.view.WindowManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -171,6 +174,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -179,6 +185,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -3897,6 +3904,31 @@ private fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vide
     var reaction by remember(item.id) { mutableStateOf(loadVideoReaction(context, item.id)) }
     var status by remember(item.id) { mutableStateOf("Lascia feedback: Hermes lo usera' come memoria editoriale per i prossimi video.") }
     var fullScreen by rememberSaveable(item.id) { mutableStateOf(false) }
+    DisposableEffect(fullScreen) {
+        if (!fullScreen) {
+            onDispose { }
+        } else {
+            val activity = context as? Activity
+            val previousOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            val window = activity?.window
+            val insetsController = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            if (window != null) {
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+            }
+            insetsController?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insetsController?.hide(WindowInsetsCompat.Type.systemBars())
+            onDispose {
+                activity?.requestedOrientation = previousOrientation
+                window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                insetsController?.show(WindowInsetsCompat.Type.systemBars())
+                if (window != null) {
+                    WindowCompat.setDecorFitsSystemWindows(window, true)
+                }
+            }
+        }
+    }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
@@ -3937,6 +3969,7 @@ private fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vide
                         factory = { viewContext ->
                             PlayerView(viewContext).apply {
                                 useController = true
+                                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                                 this.player = player
                             }
                         },
@@ -4018,7 +4051,11 @@ private fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vide
     if (fullScreen) {
         Dialog(
             onDismissRequest = { fullScreen = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
+            properties = DialogProperties(
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false
+            )
         ) {
             Box(
                 modifier = Modifier
@@ -4030,6 +4067,7 @@ private fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vide
                     factory = { viewContext ->
                         PlayerView(viewContext).apply {
                             useController = true
+                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                             this.player = player
                         }
                     },
@@ -4074,21 +4112,10 @@ private fun VideoReactionButton(label: String, icon: ImageVector, selected: Bool
 private fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPrompt: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var refreshKey by remember { mutableStateOf(0) }
-    var status by remember { mutableStateOf("Giornale Hermes pronto.") }
-    var selectedArticleId by rememberSaveable { mutableStateOf<String?>(null) }
+    var status by remember { mutableStateOf("Articoli HTML creati da Hermes.") }
     var selectedHtmlId by rememberSaveable { mutableStateOf<String?>(null) }
-    var newsFilter by rememberSaveable { mutableStateOf("Tutti") }
     var htmlItems by remember { mutableStateOf<List<NewsHtmlItem>>(emptyList()) }
-    val articles = remember(refreshKey) { loadWorkspaceRequests(context, "News") }
-    val selectedArticle = remember(articles, selectedArticleId) { articles.firstOrNull { it.id == selectedArticleId } }
     val selectedHtml = remember(htmlItems, selectedHtmlId) { htmlItems.firstOrNull { it.id == selectedHtmlId } }
-    val displayedArticles = remember(articles, newsFilter) {
-        when (newsFilter) {
-            "Recenti" -> articles.sortedByDescending { it.updatedAt }
-            "Feedback" -> articles.filter { it.feedback.isNotBlank() }
-            else -> articles
-        }
-    }
 
     LaunchedEffect(settings.gatewayUrl, refreshKey) {
         val result = loadNewsLibrary(settings, loadGatewaySecret(context))
@@ -4103,21 +4130,6 @@ private fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPrompt
             settings = settings,
             item = selectedHtml,
             onBack = { selectedHtmlId = null }
-        )
-        return
-    }
-
-    if (selectedArticle != null) {
-        BackHandler { selectedArticleId = null }
-        NewsArticleScreen(
-            context = context,
-            settings = settings,
-            article = selectedArticle,
-            onBack = { selectedArticleId = null },
-            onChanged = {
-                refreshKey++
-                status = it
-            }
         )
         return
     }
@@ -4141,55 +4153,32 @@ private fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPrompt
                 }
             }
             Spacer(modifier = Modifier.height(14.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                VideoFeedChip("Tutti", selected = newsFilter == "Tutti") { newsFilter = "Tutti" }
-                VideoFeedChip("Recenti", selected = newsFilter == "Recenti") { newsFilter = "Recenti" }
-                VideoFeedChip("Feedback", selected = newsFilter == "Feedback") { newsFilter = "Feedback" }
-                VideoFeedChip("Sincronizza") {
-                    status = "Sincronizzo articoli Hermes..."
-                    scope.launch {
-                        val syncStatus = syncWorkspaceJobs(context, settings, "News", loadGatewaySecret(context))
-                        val htmlStatus = loadNewsLibrary(settings, loadGatewaySecret(context))
-                        htmlItems = htmlStatus.first
-                        status = "${htmlStatus.second} $syncStatus"
-                        refreshKey++
-                    }
+            Button(onClick = {
+                status = "Sincronizzo articoli Hermes..."
+                scope.launch {
+                    val htmlStatus = loadNewsLibrary(settings, loadGatewaySecret(context))
+                    htmlItems = htmlStatus.first
+                    status = htmlStatus.second
+                    refreshKey++
                 }
-            }
+            }) { Text("Aggiorna") }
         }
         item {
             Text(status, color = AppColors.Faint, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        if (htmlItems.isNotEmpty()) {
-            item {
-                Text("Giornale HTML", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            }
-            items(htmlItems, key = { "html:${it.id}" }) { page ->
-                NewsHtmlCard(item = page, onClick = { selectedHtmlId = page.id })
-            }
-        }
-        if (displayedArticles.isNotEmpty()) {
-            item {
-                Text("Briefing locali", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            }
-        }
-        if (displayedArticles.isEmpty() && htmlItems.isEmpty()) {
+        if (htmlItems.isEmpty()) {
             item {
                 Surface(color = AppColors.Panel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, AppColors.Border)) {
                     Text(
                         modifier = Modifier.padding(16.dp),
-                        text = if (articles.isEmpty()) {
-                            "Nessuna pagina news ancora. Chiedi a Hermes di creare un giornale HTML e salvarlo in /home/matteo/news, poi sincronizza."
-                        } else {
-                            "Nessun articolo con feedback salvato."
-                        },
+                        text = "Nessun articolo HTML trovato. Chiedi a Hermes di creare un giornale HTML e salvarlo in /home/matteo/news.",
                         color = AppColors.Muted
                     )
                 }
             }
         }
-        items(displayedArticles, key = { it.id }) { article ->
-            NewsArticleCard(article = article, onClick = { selectedArticleId = article.id })
+        items(htmlItems, key = { "html:${it.id}" }) { page ->
+            NewsHtmlCard(item = page, onClick = { selectedHtmlId = page.id })
         }
     }
 }

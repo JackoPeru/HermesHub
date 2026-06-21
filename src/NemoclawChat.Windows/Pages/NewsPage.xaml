@@ -7,130 +7,75 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <ScrollViewer Background="{StaticResource AppBackgroundBrush}">
-        <Grid Padding="44,36" RowSpacing="22">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
+    <Grid Background="{StaticResource AppBackgroundBrush}" Padding="36,28" RowSpacing="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-            <StackPanel Spacing="8">
+        <Grid ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Spacing="4">
                 <TextBlock
                     FontSize="30"
                     FontWeight="SemiBold"
                     Foreground="White"
                     Text="News" />
                 <TextBlock
-                    MaxWidth="820"
+                    x:Name="NewsStatusText"
                     Foreground="{StaticResource MutedTextBrush}"
-                    Text="Sezione separata per ricerche, briefing e aggiornamenti periodici che Hermes potra' preparare senza sporcare la chat principale." />
+                    Text="Articoli HTML creati da Hermes."
+                    TextWrapping="Wrap" />
             </StackPanel>
+            <Button
+                x:Name="NewsHtmlRefreshButton"
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                Click="RefreshNewsHtml_Click"
+                Content="Aggiorna" />
+        </Grid>
 
-            <Grid Grid.Row="1" ColumnSpacing="16">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
+        <Grid Grid.Row="1" ColumnSpacing="18">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="360" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-                <Border Style="{StaticResource PremiumCardBorderStyle}">
-                    <StackPanel Spacing="12">
+            <Border Style="{StaticResource PremiumCardBorderStyle}">
+                <ScrollViewer>
+                    <StackPanel x:Name="NewsCardsPanel" Spacing="10" />
+                </ScrollViewer>
+            </Border>
+
+            <Border Grid.Column="1" Style="{StaticResource PremiumCardBorderStyle}" Padding="0">
+                <Grid RowSpacing="0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Padding="18,16" Spacing="4">
                         <TextBlock
+                            x:Name="NewsReaderTitleText"
+                            FontSize="20"
                             FontWeight="SemiBold"
                             Foreground="White"
-                            Text="Nuovo briefing news" />
+                            Text="Seleziona un articolo" />
                         <TextBlock
+                            x:Name="NewsReaderMetaText"
                             Foreground="{StaticResource MutedTextBrush}"
-                            Text="Definisci argomento, fonti desiderate, frequenza e formato del report." />
-                        <TextBox
-                            x:Name="NewsPromptBox"
-                            MinHeight="130"
-                            AcceptsReturn="True"
-                            Header="Brief news"
-                            PlaceholderText="Esempio: tienimi aggiornato ogni mattina su AI agent e home-server..."
+                            Text="La pagina HTML verra' mostrata qui dentro l'app."
                             TextWrapping="Wrap" />
-                        <Button
-                            x:Name="NewsRunButton"
-                            HorizontalAlignment="Left"
-                            Background="{StaticResource AccentGreenBrush}"
-                            BorderThickness="0"
-                            Click="PrepareNews_Click"
-                            Content="Invia a Hermes"
-                            Foreground="White" />
                     </StackPanel>
-                </Border>
 
-                <Border Grid.Column="1" Style="{StaticResource PremiumCardBorderStyle}">
-                    <StackPanel Spacing="12">
-                        <TextBlock FontWeight="SemiBold" Foreground="White" Text="Feedback articolo" />
-                        <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Apri un articolo recente, poi lascia feedback rapido o scritto. Hermes lo usa per migliorare i prossimi briefing." TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Click="QuickNewsFeedback_Click" Tag="utile" Content="Utile" />
-                            <Button Click="QuickNewsFeedback_Click" Tag="non utile" Content="Non utile" />
-                            <Button Click="QuickNewsFeedback_Click" Tag="piu' fonti verificabili" Content="Piu' fonti" />
-                            <Button Click="QuickNewsFeedback_Click" Tag="piu' breve" Content="Piu' breve" />
-                            <Button Click="QuickNewsFeedback_Click" Tag="piu' profondo" Content="Piu' profondo" />
-                            <Button Click="QuickNewsFeedback_Click" Tag="tono piu' diretto" Content="Tono" />
-                        </StackPanel>
-                        <TextBox x:Name="NewsFeedbackBox" Header="Feedback scritto" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="110" />
-                        <Button x:Name="NewsFeedbackButton" Click="SendNewsFeedback_Click" Content="Invia feedback" HorizontalAlignment="Left" />
-                    </StackPanel>
-                </Border>
-            </Grid>
-
-            <Border Grid.Row="2" Style="{StaticResource PremiumCardBorderStyle}">
-                <StackPanel Spacing="10">
-                    <TextBlock
-                        FontWeight="SemiBold"
-                        Foreground="White"
-                        Text="Stato" />
-                    <TextBlock
-                        x:Name="NewsStatusText"
-                        Foreground="{StaticResource MutedTextBrush}"
-                        Text="Pronto. Invia un brief: Hermes eseguira' un run reale o usera' fallback chat." />
-                    <Grid ColumnSpacing="14">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="360" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-
-                        <StackPanel Spacing="10">
-                            <TextBox
-                                x:Name="NewsResultBox"
-                                MinHeight="180"
-                                AcceptsReturn="True"
-                                IsReadOnly="True"
-                                TextWrapping="Wrap" />
-                            <Button
-                                x:Name="NewsHtmlRefreshButton"
-                                HorizontalAlignment="Left"
-                                Click="RefreshNewsHtml_Click"
-                                Content="Aggiorna pagine HTML" />
-                            <TextBlock
-                                x:Name="NewsHtmlStatusText"
-                                Foreground="{StaticResource MutedTextBrush}"
-                                Text="Pagine HTML non ancora caricate."
-                                TextWrapping="Wrap" />
-                            <StackPanel x:Name="NewsHtmlPanel" Spacing="8" />
-                        </StackPanel>
-
-                        <Border Grid.Column="1" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" MinHeight="560">
-                            <WebView2 x:Name="NewsWebView" MinHeight="560" />
-                        </Border>
-                    </Grid>
-                </StackPanel>
-            </Border>
-
-            <Border Grid.Row="3" Style="{StaticResource PremiumCardBorderStyle}">
-                <StackPanel Spacing="10">
-                    <TextBlock
-                        FontWeight="SemiBold"
-                        Foreground="White"
-                        Text="Recenti news" />
-                    <StackPanel x:Name="NewsRecentPanel" Spacing="8" />
-                </StackPanel>
+                    <Border Grid.Row="1" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="0,1,0,0">
+                        <WebView2 x:Name="NewsWebView" />
+                    </Border>
+                </Grid>
             </Border>
         </Grid>
-    </ScrollViewer>
+    </Grid>
 </Page>
