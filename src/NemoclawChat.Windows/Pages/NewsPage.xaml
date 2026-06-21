@@ -89,12 +89,36 @@
                         x:Name="NewsStatusText"
                         Foreground="{StaticResource MutedTextBrush}"
                         Text="Pronto. Invia un brief: Hermes eseguira' un run reale o usera' fallback chat." />
-                    <TextBox
-                        x:Name="NewsResultBox"
-                        MinHeight="180"
-                        AcceptsReturn="True"
-                        IsReadOnly="True"
-                        TextWrapping="Wrap" />
+                    <Grid ColumnSpacing="14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="360" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Spacing="10">
+                            <TextBox
+                                x:Name="NewsResultBox"
+                                MinHeight="180"
+                                AcceptsReturn="True"
+                                IsReadOnly="True"
+                                TextWrapping="Wrap" />
+                            <Button
+                                x:Name="NewsHtmlRefreshButton"
+                                HorizontalAlignment="Left"
+                                Click="RefreshNewsHtml_Click"
+                                Content="Aggiorna pagine HTML" />
+                            <TextBlock
+                                x:Name="NewsHtmlStatusText"
+                                Foreground="{StaticResource MutedTextBrush}"
+                                Text="Pagine HTML non ancora caricate."
+                                TextWrapping="Wrap" />
+                            <StackPanel x:Name="NewsHtmlPanel" Spacing="8" />
+                        </StackPanel>
+
+                        <Border Grid.Column="1" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" MinHeight="560">
+                            <WebView2 x:Name="NewsWebView" MinHeight="560" />
+                        </Border>
+                    </Grid>
                 </StackPanel>
             </Border>
 

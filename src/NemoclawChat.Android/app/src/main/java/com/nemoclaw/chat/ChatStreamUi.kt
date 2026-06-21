@@ -702,13 +702,13 @@ internal data class SlashCommand(
 
 internal enum class SlashAction {
     ModeChat, ModeAgent, Clear, Help, Health,
-    OpenServer, OpenHardware, OpenOperator, OpenArchive, OpenTasks, OpenVideo, OpenNews, OpenSettings, OpenAbout,
+    OpenServer, OpenHardware, OpenCron, OpenArchive, OpenVideo, OpenNews, OpenSettings, OpenAbout,
     PromptSetup, PromptVisual, PromptResearch, PromptWeb, PromptImage, PromptVideo, PromptNews
 }
 
 internal fun slashCommands(): List<SlashCommand> = listOf(
     SlashCommand("/chat", "Modalita Chat", "Conversazione normale", SlashAction.ModeChat),
-    SlashCommand("/agente", "Modalita Agente", "Esegui Runs/Jobs Hermes", SlashAction.ModeAgent),
+    SlashCommand("/agente", "Modalita Agente", "Esegui Hermes con tool server", SlashAction.ModeAgent),
     SlashCommand("/agent", "Modalita Agente", "Alias di /agente", SlashAction.ModeAgent),
     SlashCommand("/clear", "Pulisci chat", "Svuota conversazione corrente", SlashAction.Clear),
     SlashCommand("/new", "Nuova chat", "Inizia nuova conversazione", SlashAction.Clear),
@@ -716,9 +716,8 @@ internal fun slashCommands(): List<SlashCommand> = listOf(
     SlashCommand("/server", "Apri Server", "Dashboard server", SlashAction.OpenServer),
     SlashCommand("/hardware", "Apri Hardware", "Prestazioni server", SlashAction.OpenHardware),
     SlashCommand("/prestazioni", "Apri Hardware", "Gestione attivita server", SlashAction.OpenHardware),
-    SlashCommand("/runs", "Apri Operator/Runs", "Probe API Hermes", SlashAction.OpenOperator),
+    SlashCommand("/cron", "Apri Cron", "Automazioni Hermes attive", SlashAction.OpenCron),
     SlashCommand("/archive", "Apri Archivio", "Conversazioni salvate", SlashAction.OpenArchive),
-    SlashCommand("/tasks", "Apri Task agente", "Coda jobs Hermes", SlashAction.OpenTasks),
     SlashCommand("/video", "Video Hub", "Crea spunto o apri feed video", SlashAction.PromptVideo),
     SlashCommand("/news", "News Hub", "Crea articolo o apri feed news", SlashAction.PromptNews),
     SlashCommand("/settings", "Impostazioni", "Pagina settings", SlashAction.OpenSettings),

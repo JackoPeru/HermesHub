@@ -146,13 +146,13 @@ public sealed partial class VideoPage : Page
         _selectedVideo = video;
         _manualVideoUrl = null;
         SelectedVideoTitleText.Text = video.Title;
-        SelectedVideoMetaText.Text = $"{video.FileName}\n{video.ModifiedAt.LocalDateTime:g} · {VideoLibraryService.FormatSize(video.SizeBytes)}{(video.IsRemote ? "\nGateway media proxy" : "")}";
+        SelectedVideoMetaText.Text = $"{video.FileName}\n{video.ModifiedAt.LocalDateTime:g} · {VideoLibraryService.FormatSize(video.SizeBytes)}{(video.IsRemote ? "\nGateway media proxy · playback MP4 compat" : "")}";
         FeedbackBox.Text = video.LastFeedback;
         FeedbackStatusText.Text = string.IsNullOrWhiteSpace(video.LastAgentStatus)
             ? "Pronto per nuovo feedback."
             : video.LastAgentStatus;
         AgentResponseBox.Text = video.LastAgentResponse;
-        VideoPlayer.Source = MediaSource.CreateFromUri(new Uri(video.Path));
+        VideoPlayer.Source = MediaSource.CreateFromUri(new Uri(string.IsNullOrWhiteSpace(video.PlaybackPath) ? video.Path : video.PlaybackPath));
     }
 
     private void OpenManualVideoUrl_Click(object sender, RoutedEventArgs e)

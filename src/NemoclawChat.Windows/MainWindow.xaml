@@ -79,10 +79,10 @@
                             <TextBlock Text="Cerca chat" />
                         </StackPanel>
                     </Button>
-                    <Button Click="Tasks_Click" Style="{StaticResource SidebarButtonStyle}" ToolTipService.ToolTip="Jobs Hermes" AutomationProperties.Name="Jobs Hermes">
+                    <Button Click="Cron_Click" Style="{StaticResource SidebarButtonStyle}" ToolTipService.ToolTip="Cron Hermes" AutomationProperties.Name="Cron Hermes">
                         <StackPanel Orientation="Horizontal" Spacing="10">
                             <FontIcon FontSize="15" Glyph="&#xE7C1;" />
-                            <TextBlock Text="Jobs" />
+                            <TextBlock Text="Cron" />
                         </StackPanel>
                     </Button>
                     <Button Click="Server_Click" Style="{StaticResource SidebarButtonStyle}" ToolTipService.ToolTip="Server Hermes" AutomationProperties.Name="Server Hermes">
@@ -95,12 +95,6 @@
                         <StackPanel Orientation="Horizontal" Spacing="10">
                             <FontIcon FontSize="15" Glyph="&#xE9D9;" />
                             <TextBlock Text="Prestazioni" />
-                        </StackPanel>
-                    </Button>
-                    <Button Click="Operator_Click" Style="{StaticResource SidebarButtonStyle}" ToolTipService.ToolTip="Runs Hermes" AutomationProperties.Name="Runs Hermes">
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <FontIcon FontSize="15" Glyph="&#xE950;" />
-                            <TextBlock Text="Runs" />
                         </StackPanel>
                     </Button>
                     <Button Click="Video_Click" Style="{StaticResource SidebarButtonStyle}" ToolTipService.ToolTip="Video" AutomationProperties.Name="Video">

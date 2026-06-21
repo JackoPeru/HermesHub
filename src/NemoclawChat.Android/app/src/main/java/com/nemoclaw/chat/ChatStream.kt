@@ -1077,7 +1077,8 @@ private fun hermesHubVideoInstructions(settings: AppSettings): String {
         - La sezione Video e' un watched-folder feed, non dipende dalla chat.
         - La cartella ufficiale sul PC Hermes e': $path
         - Quando l'utente chiede creazione, download, montaggio, rendering o preparazione di un video, salva sempre il file video finale in quella cartella.
-        - Ogni file .mp4/.m4v/.mov/.mkv/.webm/.avi messo in quella cartella apparira' automaticamente nella sezione Video tramite /v1/video/library.
+        - Ogni file video comune (.mp4/.m4v/.mov/.mkv/.webm/.avi/.wmv/.flv/.mpg/.mpeg/.ts/.m2ts/.3gp/.ogv) messo in quella cartella apparira' automaticamente nella sezione Video tramite /v1/video/library.
+        - Per massima compatibilita crea preferibilmente MP4 H.264 + AAC + yuv420p + faststart; il gateway puo' anche servire playback compat con ?format=mp4.
         - Se mostri anche il video in chat, pubblicalo tramite proxy /v1/media/... come visual_blocks media_file; non scrivere file:// o path locali come risposta finale.
         - Se non riesci a generare/renderizzare il video, spiega il blocco concreto e non fingere di averlo mandato.
     """.trimIndent()
@@ -1272,7 +1273,7 @@ private fun inferMediaKind(filename: String, url: String): String {
     return when {
         listOf(".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp").any { value.contains(it) } -> "image"
         isLikelyRemoteImageUrl(url) -> "image"
-        listOf(".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi").any { value.contains(it) } -> "video"
+        listOf(".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi", ".wmv", ".flv", ".mpg", ".mpeg", ".ts", ".m2ts", ".3gp", ".ogv").any { value.contains(it) } -> "video"
         listOf(".mp3", ".wav", ".m4a", ".flac", ".ogg").any { value.contains(it) } -> "audio"
         else -> "document"
     }
@@ -1289,6 +1290,14 @@ private fun inferMimeType(filename: String, url: String): String {
         value.contains(".mp4") || value.contains(".m4v") -> "video/mp4"
         value.contains(".mov") -> "video/quicktime"
         value.contains(".webm") -> "video/webm"
+        value.contains(".mkv") -> "video/x-matroska"
+        value.contains(".avi") -> "video/x-msvideo"
+        value.contains(".wmv") -> "video/x-ms-wmv"
+        value.contains(".flv") -> "video/x-flv"
+        value.contains(".mpg") || value.contains(".mpeg") -> "video/mpeg"
+        value.contains(".ts") || value.contains(".m2ts") -> "video/mp2t"
+        value.contains(".3gp") -> "video/3gpp"
+        value.contains(".ogv") -> "video/ogg"
         value.contains(".mp3") -> "audio/mpeg"
         value.contains(".wav") -> "audio/wav"
         value.contains(".pdf") -> "application/pdf"
@@ -1377,7 +1386,7 @@ private fun visualBlocksMetadataJson(settings: AppSettings, conversationId: Stri
             JSONObject()
                 .put("chat", "Conversazione principale Hermes Hub.")
                 .put("video", "Feed personale video: Hermes conosce video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni video creato/scaricato per Matteo deve essere salvato o registrato li, desktop mostra file locali, app salva feedback e metadata.")
-                .put("news", "Feed personale articoli: Hermes produce articoli con fonti, app salva feedback.")
+                .put("news", "Feed personale articoli: Hermes produce articoli con fonti; se crea HTML/giornale online salva in /home/matteo/news per /v1/news/library; app salva feedback.")
                 .put("jobs", "Coda Hermes Jobs condivisa con CLI/server.")
                 .put("runs", "Runs operative Hermes.")
         )

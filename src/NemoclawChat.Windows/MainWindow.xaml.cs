@@ -113,9 +113,9 @@ public sealed partial class MainWindow : Window
         ContentFrame.Navigate(typeof(ArchivePage));
     }
 
-    private void Tasks_Click(object sender, RoutedEventArgs e)
+    private void Cron_Click(object sender, RoutedEventArgs e)
     {
-        ContentFrame.Navigate(typeof(TasksPage));
+        ContentFrame.Navigate(typeof(CronPage));
     }
 
     private void Server_Click(object sender, RoutedEventArgs e)
@@ -126,11 +126,6 @@ public sealed partial class MainWindow : Window
     private void Hardware_Click(object sender, RoutedEventArgs e)
     {
         ContentFrame.Navigate(typeof(HardwarePage));
-    }
-
-    private void Operator_Click(object sender, RoutedEventArgs e)
-    {
-        ContentFrame.Navigate(typeof(OperatorPage));
     }
 
     private void Voice_Click(object sender, RoutedEventArgs e)

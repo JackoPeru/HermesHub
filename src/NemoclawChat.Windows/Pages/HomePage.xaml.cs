@@ -41,7 +41,7 @@ public sealed partial class HomePage : Page
     private int _lastServerContextTokens;
     private int _lastServerContextLength;
     private int? _lastServerContextPercent;
-    private volatile bool _isSending;
+    private string? _currentComposerRunId;
     private StreamingBubble? _currentStreamingBubble;
     private readonly List<ChatInputAttachment> _pendingAttachments = [];
 
@@ -265,7 +265,7 @@ public sealed partial class HomePage : Page
 
     private void Projects_Click(object sender, RoutedEventArgs e)
     {
-        AddAction("Workspace", "Workspace/progetti saranno collegati ai Jobs Hermes con audit trail.");
+        AddAction("Workspace", "Workspace/progetti saranno collegati agli artifact Hermes con audit trail.");
         PromptBox.Text = AppendPrompt("Lavora sul workspace/progetto selezionato e mostra piano prima di modificare file.");
     }
 
@@ -278,7 +278,7 @@ public sealed partial class HomePage : Page
     private void SetModeAgent_Click(object sender, RoutedEventArgs e)
     {
         SetMode("Agente");
-        AddAction("Modalita", "Agente attivo: usa Hermes Runs/Jobs se disponibili, altrimenti fallback locale.");
+        AddAction("Modalita", "Agente attivo: usa strumenti Hermes se disponibili, altrimenti fallback locale.");
     }
 
     private void ToggleMode_Click(object sender, RoutedEventArgs e)
@@ -288,6 +288,7 @@ public sealed partial class HomePage : Page
 
     private void NewChat_Click(object sender, RoutedEventArgs e)
     {
+        ReleaseCurrentComposerRun();
         _messageHistory.Clear();
         ResetServerContextMeter();
         _conversationId = null;
@@ -304,23 +305,51 @@ public sealed partial class HomePage : Page
         _mode = mode;
     }
 
+    private bool IsComposerRunCurrent(string runId)
+    {
+        return string.Equals(_currentComposerRunId, runId, StringComparison.Ordinal);
+    }
+
+    private void ReleaseComposerRun(string runId)
+    {
+        if (!IsComposerRunCurrent(runId))
+        {
+            return;
+        }
+
+        _currentComposerRunId = null;
+        SendButton.IsEnabled = true;
+    }
+
+    private void ReleaseCurrentComposerRun()
+    {
+        _currentComposerRunId = null;
+        SendButton.IsEnabled = true;
+        if (ReferenceEquals(_currentStreamingBubble, null))
+        {
+            return;
+        }
+
+        _currentStreamingBubble = null;
+    }
+
     private async Task SendCurrentPromptAsync()
     {
         // Atomic guard: set flag prima di qualsiasi await. UI thread single-threaded ma
         // multipli entry-point (Send_Click, PromptBox_KeyDown, slash command activate)
         // possono entrare back-to-back prima che Send button si disabiliti.
-        if (_isSending)
+        if (_currentComposerRunId is not null)
         {
             return;
         }
-        _isSending = true;
+        var composerRunId = Guid.NewGuid().ToString("N");
+        _currentComposerRunId = composerRunId;
         SendButton.IsEnabled = false;
 
         var prompt = PromptBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(prompt) && _pendingAttachments.Count == 0)
         {
-            _isSending = false;
-            SendButton.IsEnabled = true;
+            ReleaseComposerRun(composerRunId);
             return;
         }
         if (string.IsNullOrWhiteSpace(prompt))
@@ -332,6 +361,10 @@ public sealed partial class HomePage : Page
 
         StreamingBubble? bubble = null;
         CancellationTokenSource? streamCts = null;
+        var sendMode = _mode;
+        var conversationId = _conversationId;
+        var previousResponseId = _previousResponseId;
+        var localHistory = _messageHistory.ToList();
 
         try
         {
@@ -344,14 +377,23 @@ public sealed partial class HomePage : Page
                 : $"{prompt}\n\n[Allegati: {string.Join(", ", attachments.Select(a => a.FileName))}]";
             AddBubble("Tu", displayPrompt, "UserBubbleBrush", HorizontalAlignment.Right);
             _messageHistory.Add(new ChatMessageRecord("Tu", displayPrompt, DateTimeOffset.Now));
+            localHistory.Add(new ChatMessageRecord("Tu", displayPrompt, DateTimeOffset.Now));
             PromptBox.Text = string.Empty;
-            var initialSave = await Task.Run(() => ChatArchiveStore.SaveSnapshot(_conversationId, _mode, displayPrompt, _messageHistory.ToList(), "Hermes in corso", _previousResponseId));
-            _conversationId = initialSave.Id;
-            _previousResponseId = initialSave.PreviousResponseId;
+            var initialSave = await Task.Run(() => ChatArchiveStore.SaveSnapshot(conversationId, sendMode, displayPrompt, localHistory.ToList(), "Hermes in corso", previousResponseId));
+            conversationId = initialSave.Id;
+            previousResponseId = initialSave.PreviousResponseId;
+            if (IsComposerRunCurrent(composerRunId))
+            {
+                _conversationId = conversationId;
+                _previousResponseId = previousResponseId;
+            }
 
             var settings = AppSettingsStore.Load();
             bubble = CreateStreamingAssistantBubble();
-            _currentStreamingBubble = bubble;
+            if (IsComposerRunCurrent(composerRunId))
+            {
+                _currentStreamingBubble = bubble;
+            }
 
             IReadOnlyList<VisualBlockRecord>? finalBlocks = null;
             int? finalBlocksVersion = null;
@@ -370,7 +412,7 @@ public sealed partial class HomePage : Page
             double? uiFirstTextMs = null;
             double? uiLastTextMs = null;
             streamCts = new CancellationTokenSource();
-            var streamEvents = StartStreamProducer(settings, _mode, prompt, _messageHistory.ToList(), _conversationId, _previousResponseId, attachments, streamCts.Token);
+            var streamEvents = StartStreamProducer(settings, sendMode, prompt, localHistory.ToList(), conversationId, previousResponseId, attachments, streamCts.Token);
 
             void AddRawEventIfEnabled(string name, string json)
             {
@@ -440,7 +482,10 @@ public sealed partial class HomePage : Page
                     case StreamDone done:
                         finalStats = done.Stats;
                         bubble.Complete(done.Stats);
-                        UpdateContextMeter(done.Stats);
+                        if (IsComposerRunCurrent(composerRunId))
+                        {
+                            UpdateContextMeter(done.Stats);
+                        }
                         if (finalTextBuilder.Length == 0 && !string.IsNullOrEmpty(done.AccumulatedText))
                         {
                             AppendBounded(finalTextBuilder, done.AccumulatedText);
@@ -467,7 +512,7 @@ public sealed partial class HomePage : Page
                 {
                     lastCheckpointAt = DateTimeOffset.Now;
                     var checkpointText = SnapshotPreview(finalTextBuilder);
-                    var partialMessages = _messageHistory
+                    var partialMessages = localHistory
                         .Concat(new[]
                         {
                             new ChatMessageRecord(
@@ -480,9 +525,14 @@ public sealed partial class HomePage : Page
                                 rawEvents.ToList())
                         })
                         .ToList();
-                    var checkpoint = await Task.Run(() => ChatArchiveStore.SaveSnapshot(_conversationId, _mode, prompt, partialMessages, "Hermes in corso", finalResponseId ?? _previousResponseId));
-                    _conversationId = checkpoint.Id;
-                    _previousResponseId = checkpoint.PreviousResponseId;
+                    var checkpoint = await Task.Run(() => ChatArchiveStore.SaveSnapshot(conversationId, sendMode, prompt, partialMessages, "Hermes in corso", finalResponseId ?? previousResponseId));
+                    conversationId = checkpoint.Id;
+                    previousResponseId = checkpoint.PreviousResponseId;
+                    if (IsComposerRunCurrent(composerRunId))
+                    {
+                        _conversationId = conversationId;
+                        _previousResponseId = previousResponseId;
+                    }
                 }
             }
 
@@ -499,7 +549,10 @@ public sealed partial class HomePage : Page
                     CalculateFallbackTokensPerSecond(tokensOut, uiFirstTextMs, uiLastTextMs, totalMs),
                     null);
                 bubble.Complete(finalStats);
-                UpdateContextMeter(finalStats);
+                if (IsComposerRunCurrent(composerRunId))
+                {
+                    UpdateContextMeter(finalStats);
+                }
                 Trace.WriteLine(
                     $"[ChatStreamUi] synthesized stats totalMs={totalMs:0} tokensOut={tokensOut} " +
                     $"firstTextMs={uiFirstTextMs:0} lastTextMs={uiLastTextMs:0}");
@@ -523,32 +576,49 @@ public sealed partial class HomePage : Page
                 bubble.Complete(new ChatStreamStats(null, null, null, null, null));
             }
 
-            _messageHistory.Add(new ChatMessageRecord("Hermes", finalText, DateTimeOffset.Now, finalBlocksVersion, finalBlocks?.ToList(), null, rawEvents));
+            localHistory.Add(new ChatMessageRecord("Hermes", finalText, DateTimeOffset.Now, finalBlocksVersion, finalBlocks?.ToList(), null, rawEvents));
             if (finalStats is not null)
             {
-                _messageHistory[^1] = _messageHistory[^1] with { Stats = finalStats };
+                localHistory[^1] = localHistory[^1] with { Stats = finalStats };
             }
-            var saved = await Task.Run(() => ChatArchiveStore.SaveSnapshot(_conversationId, _mode, prompt, _messageHistory.ToList(), source, finalResponseId ?? _previousResponseId));
-            _conversationId = saved.Id;
-            _previousResponseId = saved.PreviousResponseId;
-            UpdateContextMeter();
+            if (IsComposerRunCurrent(composerRunId))
+            {
+                _messageHistory.Add(localHistory[^1]);
+            }
+            var saved = await Task.Run(() => ChatArchiveStore.SaveSnapshot(conversationId, sendMode, prompt, localHistory.ToList(), source, finalResponseId ?? previousResponseId));
+            conversationId = saved.Id;
+            previousResponseId = saved.PreviousResponseId;
+            if (IsComposerRunCurrent(composerRunId))
+            {
+                _conversationId = conversationId;
+                _previousResponseId = previousResponseId;
+                UpdateContextMeter();
+            }
 
-            if (usedFallback || source.Contains("Errore", StringComparison.OrdinalIgnoreCase))
+            if (IsComposerRunCurrent(composerRunId) && (usedFallback || source.Contains("Errore", StringComparison.OrdinalIgnoreCase)))
             {
                 AddAction("Stato", statusMessage);
             }
         }
         catch (Exception ex)
         {
-            ShowError($"Stream interrotto: {ex.Message}");
+            if (IsComposerRunCurrent(composerRunId))
+            {
+                ShowError($"Stream interrotto: {ex.Message}");
+            }
             bubble?.AppendText($"\n[errore stream] {ex.Message}");
             bubble?.Complete(new ChatStreamStats(null, null, null, null, null));
-            var interruptedMessages = _messageHistory
+            var interruptedMessages = localHistory
                 .Concat(new[] { new ChatMessageRecord("Stato", $"Stream interrotto: {ex.Message}", DateTimeOffset.Now) })
                 .ToList();
-            var saved = await Task.Run(() => ChatArchiveStore.SaveSnapshot(_conversationId, _mode, prompt, interruptedMessages, "Errore Hermes", _previousResponseId));
-            _conversationId = saved.Id;
-            _previousResponseId = saved.PreviousResponseId;
+            var saved = await Task.Run(() => ChatArchiveStore.SaveSnapshot(conversationId, sendMode, prompt, interruptedMessages, "Errore Hermes", previousResponseId));
+            conversationId = saved.Id;
+            previousResponseId = saved.PreviousResponseId;
+            if (IsComposerRunCurrent(composerRunId))
+            {
+                _conversationId = conversationId;
+                _previousResponseId = previousResponseId;
+            }
         }
         finally
         {
@@ -559,8 +629,7 @@ public sealed partial class HomePage : Page
             {
                 _currentStreamingBubble = null;
             }
-            _isSending = false;
-            SendButton.IsEnabled = true;
+            ReleaseComposerRun(composerRunId);
         }
     }
 
@@ -919,6 +988,7 @@ public sealed partial class HomePage : Page
             return;
         }
 
+        ReleaseCurrentComposerRun();
         _conversationId = conversation.Id;
         var expectedServerConversationId = HermesHubProtocol.ServerConversationId(conversation.Id) ?? string.Empty;
         _previousResponseId = string.Equals(conversation.ServerConversationId, expectedServerConversationId, StringComparison.Ordinal)
@@ -1324,6 +1394,7 @@ public sealed partial class HomePage : Page
 
     private void ClearChat_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
+        ReleaseCurrentComposerRun();
         _messageHistory.Clear();
         ResetServerContextMeter();
         _conversationId = null;
@@ -1373,15 +1444,14 @@ public sealed partial class HomePage : Page
         return new List<SlashCommand>
         {
             new("/chat", "Modalita Chat", "Conversazione normale", SlashAction.ModeChat),
-            new("/agente", "Modalita Agente", "Esegui Runs/Jobs Hermes", SlashAction.ModeAgent),
+            new("/agente", "Modalita Agente", "Esegui Hermes con tool server", SlashAction.ModeAgent),
             new("/agent", "Modalita Agente", "Alias di /agente", SlashAction.ModeAgent),
             new("/clear", "Pulisci chat", "Svuota la conversazione corrente", SlashAction.Clear),
             new("/new", "Nuova chat", "Inizia una conversazione nuova", SlashAction.Clear),
             new("/health", "Controlla Hermes", "Verifica /health e capabilities", SlashAction.Health),
             new("/server", "Apri Server", "Vai alla dashboard server", SlashAction.OpenServer),
-            new("/runs", "Apri Operator/Runs", "Apri probe API Hermes", SlashAction.OpenOperator),
+            new("/cron", "Apri Cron", "Vedi automazioni Hermes attive", SlashAction.OpenCron),
             new("/archive", "Apri Archivio", "Cerca conversazioni salvate", SlashAction.OpenArchive),
-            new("/tasks", "Apri Task agente", "Coda jobs Hermes", SlashAction.OpenTasks),
             new("/settings", "Impostazioni", "Apri pagina settings", SlashAction.OpenSettings),
             new("/about", "Info app", "Versione, profilo, gateway", SlashAction.OpenAbout),
             new("/setup", "Setup Hermes", "Prompt: prepara setup", SlashAction.PromptSetup),
@@ -1549,6 +1619,7 @@ public sealed partial class HomePage : Page
                 AddAction("Modalita", "Agente attivo.");
                 break;
             case SlashAction.Clear:
+                ReleaseCurrentComposerRun();
                 _messageHistory.Clear();
                 ResetServerContextMeter();
                 _conversationId = null;
@@ -1590,14 +1661,11 @@ public sealed partial class HomePage : Page
             case SlashAction.OpenServer:
                 Frame?.Navigate(typeof(ServerPage));
                 break;
-            case SlashAction.OpenOperator:
-                Frame?.Navigate(typeof(OperatorPage));
+            case SlashAction.OpenCron:
+                Frame?.Navigate(typeof(CronPage));
                 break;
             case SlashAction.OpenArchive:
                 Frame?.Navigate(typeof(ArchivePage));
-                break;
-            case SlashAction.OpenTasks:
-                Frame?.Navigate(typeof(TasksPage));
                 break;
             case SlashAction.OpenSettings:
                 Frame?.Navigate(typeof(SettingsPage));
@@ -2114,9 +2182,8 @@ internal enum SlashAction
     Help,
     Health,
     OpenServer,
-    OpenOperator,
+    OpenCron,
     OpenArchive,
-    OpenTasks,
     OpenVoice,
     OpenSettings,
     OpenAbout,

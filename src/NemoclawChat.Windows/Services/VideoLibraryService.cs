@@ -5,6 +5,7 @@ namespace NemoclawChat_Windows.Services;
 public sealed class LocalVideoRecord
 {
     public string Path { get; init; } = string.Empty;
+    public string PlaybackPath { get; init; } = string.Empty;
     public bool IsRemote { get; init; }
     public string FileName { get; init; } = string.Empty;
     public string Title { get; init; } = string.Empty;
@@ -25,7 +26,8 @@ public static class VideoLibraryService
 {
     private static readonly string[] SupportedExtensions =
     [
-        ".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi"
+        ".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi",
+        ".wmv", ".flv", ".mpg", ".mpeg", ".ts", ".m2ts", ".3gp", ".ogv"
     ];
 
     public static string GetLibraryPath(AppSettings settings)
@@ -102,6 +104,7 @@ public static class VideoLibraryService
                 return new LocalVideoRecord
                 {
                     Path = file.FullName,
+                    PlaybackPath = file.FullName,
                     FileName = file.Name,
                     Title = Path.GetFileNameWithoutExtension(file.Name).Replace('_', ' ').Replace('-', ' ').Trim(),
                     Extension = file.Extension.TrimStart('.').ToUpperInvariant(),
@@ -141,6 +144,10 @@ public static class VideoLibraryService
             }
 
             var resolved = GatewayService.ResolveHermesUri(settings, mediaUrl);
+            var playbackUrl = ReadString(item, "playback_url");
+            var resolvedPlayback = string.IsNullOrWhiteSpace(playbackUrl)
+                ? BuildCompatiblePlaybackUrl(resolved)
+                : GatewayService.ResolveHermesUri(settings, playbackUrl);
             var modified = ReadDouble(item, "modified_at");
             var modifiedAt = modified > 0
                 ? DateTimeOffset.FromUnixTimeSeconds((long)modified)
@@ -149,6 +156,7 @@ public static class VideoLibraryService
             list.Add(new LocalVideoRecord
             {
                 Path = resolved,
+                PlaybackPath = resolvedPlayback,
                 IsRemote = true,
                 FileName = filename,
                 Title = ReadString(item, "title") is { Length: > 0 } title ? title : Path.GetFileNameWithoutExtension(filename),
@@ -167,6 +175,24 @@ public static class VideoLibraryService
 
     private static bool IsRemoteLinuxPath(string path) =>
         path.StartsWith("/", StringComparison.Ordinal) && OperatingSystem.IsWindows();
+
+    private static string BuildCompatiblePlaybackUrl(string mediaUrl)
+    {
+        if (!Uri.TryCreate(mediaUrl, UriKind.Absolute, out var uri))
+        {
+            return mediaUrl;
+        }
+
+        if (!uri.AbsolutePath.Contains("/v1/media/", StringComparison.OrdinalIgnoreCase))
+        {
+            return mediaUrl;
+        }
+
+        var separator = string.IsNullOrWhiteSpace(uri.Query) ? "?" : "&";
+        return mediaUrl.Contains("format=mp4", StringComparison.OrdinalIgnoreCase)
+            ? mediaUrl
+            : $"{mediaUrl}{separator}format=mp4";
+    }
 
     private static string ReadString(JsonElement item, string name) =>
         item.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : string.Empty;

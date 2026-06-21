@@ -47,9 +47,9 @@ public sealed partial class ServerPage : Page
             "GET /v1/capabilities -> API supportate\n" +
             "POST /v1/responses -> chat primaria con store/conversation\n" +
             "POST /v1/chat/completions -> fallback OpenAI-compatible\n" +
-            "POST /v1/runs -> crea run agente\n" +
-            "GET /api/jobs -> lista jobs\n" +
-            "POST /api/jobs -> crea job";
+            "POST /v1/runs -> run agente distaccato\n" +
+            "GET /api/jobs -> lista cron Hermes\n" +
+            "POST /api/jobs -> crea cron Hermes";
     }
 
     private async void RunDiagnostics_Click(object sender, RoutedEventArgs e)

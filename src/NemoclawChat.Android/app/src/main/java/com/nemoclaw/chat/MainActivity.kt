@@ -17,6 +17,9 @@ import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -190,6 +193,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
+import java.net.URLEncoder
 import java.net.URL
 import java.security.KeyStore
 import java.util.concurrent.TimeUnit
@@ -235,10 +239,9 @@ class MainActivity : ComponentActivity() {
 private enum class Tab(val label: String, val icon: ImageVector) {
     Chat("Chat", Icons.Rounded.ChatBubbleOutline),
     Archive("Archivio", Icons.Rounded.FolderOpen),
-    Tasks("Jobs", Icons.Rounded.TaskAlt),
+    Cron("Cron", Icons.Rounded.TaskAlt),
     Server("Hermes", Icons.Rounded.Dns),
     Hardware("Hardware", Icons.Rounded.Memory),
-    Operator("Runs", Icons.Rounded.Terminal),
     Video("Video", Icons.Rounded.PlayCircle),
     News("News", Icons.AutoMirrored.Rounded.Article),
     Settings("Imposta", Icons.Rounded.Tune),
@@ -384,11 +387,23 @@ data class VideoLibraryItem(
     val title: String,
     val filename: String,
     val mediaUrl: String,
+    val playbackUrl: String = "",
     val thumbnailUrl: String,
     val path: String,
     val mimeType: String,
     val sizeBytes: Long,
     val durationMs: Long,
+    val modifiedAt: Long
+)
+
+data class NewsHtmlItem(
+    val id: String,
+    val title: String,
+    val filename: String,
+    val url: String,
+    val path: String,
+    val mimeType: String,
+    val sizeBytes: Long,
     val modifiedAt: Long
 )
 
@@ -622,6 +637,20 @@ private data class GatewayRpcCallResult(
     val summary: String
 )
 
+private data class CronJob(
+    val id: String,
+    val name: String,
+    val prompt: String,
+    val schedule: String,
+    val state: String,
+    val enabled: Boolean,
+    val nextRunAt: String,
+    val lastRunAt: String,
+    val lastStatus: String,
+    val deliver: String,
+    val origin: String
+)
+
 private data class WorkspaceRunResult(
     val result: String,
     val source: String,
@@ -752,10 +781,9 @@ private fun ChatApp() {
                             setSelectedTab(Tab.Chat)
                         }
                     )
-                    Tab.Tasks -> TasksScreen(context, settings)
+                    Tab.Cron -> CronScreen(context, settings)
                     Tab.Server -> ServerScreen(context, settings)
                     Tab.Hardware -> HardwareScreen(context, settings)
-                    Tab.Operator -> OperatorScreen(context, settings)
                     Tab.Video -> VideoScreen(context, settings) { prompt ->
                         pendingPrompt = prompt
                         setSelectedTab(Tab.Chat)
@@ -814,8 +842,8 @@ private fun ChatApp() {
                                 setSelectedTab(Tab.Archive)
                                 sidebarOpen = false
                             },
-                            onOpenJobs = {
-                                setSelectedTab(Tab.Tasks)
+                            onOpenCron = {
+                                setSelectedTab(Tab.Cron)
                                 sidebarOpen = false
                             }
                         )
@@ -833,7 +861,7 @@ private fun HermesSidebar(
     onNewChat: () -> Unit,
     onOpenConversation: (String) -> Unit,
     onOpenArchive: () -> Unit,
-    onOpenJobs: () -> Unit
+    onOpenCron: () -> Unit
 ) {
     val conversations = remember { loadConversations(context).sortedByDescending { it.updatedAt } }
     Surface(
@@ -898,9 +926,9 @@ private fun HermesSidebar(
             item {
                 SidebarRow(
                     icon = Icons.Rounded.TaskAlt,
-                    title = "Jobs",
-                    subtitle = "Coda lavori Hermes",
-                    onClick = onOpenJobs
+                    title = "Cron",
+                    subtitle = "Automazioni attive",
+                    onClick = onOpenCron
                 )
             }
             item {
@@ -1352,9 +1380,8 @@ private fun executeSlashCommand(
         SlashAction.Health -> setDraft("Controlla stato Hermes, modello disponibile e capabilities API.")
         SlashAction.OpenServer -> onSwitchTab(Tab.Server)
         SlashAction.OpenHardware -> onSwitchTab(Tab.Hardware)
-        SlashAction.OpenOperator -> onSwitchTab(Tab.Operator)
+        SlashAction.OpenCron -> onSwitchTab(Tab.Cron)
         SlashAction.OpenArchive -> onSwitchTab(Tab.Archive)
-        SlashAction.OpenTasks -> onSwitchTab(Tab.Tasks)
         SlashAction.OpenVideo -> onSwitchTab(Tab.Video)
         SlashAction.OpenNews -> onSwitchTab(Tab.News)
         SlashAction.OpenSettings -> onSwitchTab(Tab.Settings)
@@ -1524,7 +1551,7 @@ private fun EmptyState(onPrompt: (String) -> Unit) {
         )
         Spacer(modifier = Modifier.height(10.dp))
         Text(
-            text = "Chat live, Runs server-side e Jobs/coda verso Hermes Agent sul tuo home-server.",
+            text = "Chat live, cron e strumenti Hermes Agent sul tuo home-server.",
             color = AppColors.Muted,
             fontSize = 14.sp,
             textAlign = TextAlign.Center
@@ -2232,7 +2259,7 @@ private fun Composer(
                     onClick = {
                         expanded = false
                         onModeChange("Agente")
-                        onAction("Modalita", "Agente attivo: usa Hermes Runs/Jobs se disponibili, altrimenti fallback locale.", "")
+                        onAction("Modalita", "Agente attivo: usa strumenti Hermes se disponibili, altrimenti fallback locale.", "")
                     }
                 )
                 HorizontalDivider(color = AppColors.Border)
@@ -2291,7 +2318,7 @@ private fun Composer(
                         expanded = false
                         queueAction(
                             "Workspace",
-                            "Workspace/progetti saranno collegati ai Jobs Hermes con audit trail.",
+                            "Workspace/progetti saranno collegati agli artifact Hermes con audit trail.",
                             "Lavora sul workspace o progetto selezionato e mostra piano prima di modificare file."
                         )
                     }
@@ -2652,18 +2679,17 @@ private fun ArchiveCard(
 }
 
 @Composable
-private fun TasksScreen(context: Context, settings: AppSettings) {
+private fun CronScreen(context: Context, settings: AppSettings) {
     val scope = rememberCoroutineScope()
-    val tasks = remember { mutableStateListOf<AgentTask>() }
-    LaunchedEffect(Unit) {
-        val loaded = withContext(Dispatchers.IO) { loadTasks(context) }
-        tasks.clear()
-        tasks.addAll(loaded)
+    var jobs by remember { mutableStateOf<List<CronJob>>(emptyList()) }
+    var status by remember { mutableStateOf("Carico cron Hermes...") }
+    var refreshNonce by remember { mutableStateOf(0) }
+
+    LaunchedEffect(settings.gatewayUrl, refreshNonce) {
+        val result = loadCronJobs(settings, loadGatewaySecret(context))
+        jobs = result.first
+        status = result.second
     }
-    var title by remember { mutableStateOf("") }
-    var detail by remember { mutableStateOf("") }
-    var requiresApproval by remember { mutableStateOf(true) }
-    var status by remember { mutableStateOf("Pronto.") }
 
     LazyColumn(
         modifier = Modifier
@@ -2672,131 +2698,95 @@ private fun TasksScreen(context: Context, settings: AppSettings) {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Text("Lavori Hermes", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+            Text("Cron", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.height(8.dp))
-            Text("Lascia a Hermes un lavoro da fare. Scrivi cosa vuoi ottenere; non serve conoscere Jobs, Runs o API.", color = AppColors.Muted)
+            Text("Automazioni Hermes realmente programmate sul gateway. Per crearne una nuova, chiedilo in chat.", color = AppColors.Muted)
         }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Nuovo lavoro", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    SettingsField("Nome breve", title, { title = it })
-                    SettingsField("Cosa deve fare Hermes?", detail, { detail = it })
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Chiedi conferma prima di azioni rischiose", color = Color.White, modifier = Modifier.weight(1f))
-                        Switch(checked = requiresApproval, onCheckedChange = { requiresApproval = it })
-                    }
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(onClick = {
-                            if (title.isBlank()) {
-                                status = "Titolo obbligatorio."
-                                return@Button
-                            }
-                            val localTask = AgentTask(
-                                id = "task_${System.currentTimeMillis()}",
-                                title = title.trim(),
-                                mode = if (settings.demoMode) "Locale" else "Job",
-                                status = if (requiresApproval) "In attesa approvazione" else "Pronto",
-                                detail = detail.ifBlank { "Esegui con piano prima di azioni rischiose." }.trim(),
-                                requiresApproval = requiresApproval
-                            )
-                            tasks.add(0, localTask)
-                            saveTasks(context, tasks)
-                            title = ""
-                            detail = ""
-                            requiresApproval = true
-                            status = "Invio job a Hermes..."
-
-                            scope.launch {
-                                val result = queueTaskRequest(settings, localTask, loadGatewaySecret(context))
-                                replaceTask(tasks, result.task)
-                                saveTasks(context, tasks)
-                                status = result.message
-                            }
-                        }) {
-                            Text("Crea lavoro")
-                        }
-                        Button(onClick = {
-                            title = "Analizza workspace"
-                            detail = "Ispeziona il progetto con Hermes Agent, individua rischi e proponi un piano operativo."
-                            requiresApproval = true
-                            status = "Template workspace caricato."
-                        }) {
-                            Text("Template")
-                        }
-                        Button(onClick = {
-                            title = "Controlla home-server Hermes"
-                            detail = "Verifica API Hermes, modello, health e capabilities."
-                            requiresApproval = true
-                            status = "Template server caricato."
-                        }) {
-                            Text("Server")
-                        }
-                        Button(onClick = {
-                            title = "Crea video"
-                            detail = "Prepara o genera un video per Matteo. Salva il file finale in /home/matteo/video cosi compare automaticamente nella sezione Video dell'app."
-                            requiresApproval = true
-                            status = "Template video caricato."
-                        }) {
-                            Text("Video")
-                        }
-                        Button(onClick = {
-                            status = "Sincronizzo Jobs Hermes..."
-                            scope.launch {
-                                val result = syncRemoteTasks(settings, loadGatewaySecret(context))
-                                tasks.clear()
-                                tasks.addAll(result.first)
-                                saveTasks(context, tasks)
-                                status = result.second
-                            }
-                        }) {
-                            Text("Sincronizza")
-                        }
-                    }
-                    Text(status, color = AppColors.Muted)
+                    Text(status, color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Fonte: GET /api/jobs?type=cron&include_disabled=1. I cron in pausa restano visibili.", color = AppColors.Muted, fontSize = 12.sp)
+                    Button(onClick = {
+                        status = "Aggiorno cron..."
+                        refreshNonce++
+                    }) { Text("Aggiorna") }
                 }
             }
         }
-        if (tasks.isEmpty()) {
+        if (jobs.isEmpty()) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Nessun lavoro in coda.", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text("Crea un lavoro qui sopra o chiedilo in chat con modalita Agente.", color = AppColors.Muted, fontSize = 13.sp)
+                Card(colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble), shape = RoundedCornerShape(20.dp)) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Nessun cron trovato.", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text("Esempio in chat: programma un briefing ogni mattina alle 8.", color = AppColors.Muted, fontSize = 13.sp)
+                    }
                 }
             }
         }
-        items(tasks) { task ->
-            TaskCard(
-                task = task,
-                onApprove = {
+        items(jobs, key = { it.id.ifBlank { it.name } }) { job ->
+            CronCard(
+                job = job,
+                onRun = {
                     scope.launch {
-                        val result = updateTaskRequest(settings, task, "run", loadGatewaySecret(context))
-                        replaceTask(tasks, result.task)
-                        saveTasks(context, tasks)
-                        status = result.message
+                        status = cronAction(settings, job.id, "run", loadGatewaySecret(context))
+                        refreshNonce++
                     }
                 },
-                onDeny = {
+                onPauseResume = {
                     scope.launch {
-                        val result = updateTaskRequest(settings, task, "pause", loadGatewaySecret(context))
-                        replaceTask(tasks, result.task)
-                        saveTasks(context, tasks)
-                        status = result.message
+                        status = cronAction(settings, job.id, if (job.enabled) "pause" else "resume", loadGatewaySecret(context))
+                        refreshNonce++
                     }
                 },
-                onDone = {
+                onDelete = {
                     scope.launch {
-                        val result = updateTaskRequest(settings, task, "delete", loadGatewaySecret(context))
-                        replaceTask(tasks, result.task)
-                        saveTasks(context, tasks)
-                        status = result.message
+                        status = cronAction(settings, job.id, "delete", loadGatewaySecret(context))
+                        refreshNonce++
                     }
                 }
             )
         }
+    }
+}
+
+@Composable
+private fun CronCard(
+    job: CronJob,
+    onRun: () -> Unit,
+    onPauseResume: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble), shape = RoundedCornerShape(20.dp)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(job.name, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(if (job.enabled) "Attivo" else "Pausa", color = if (job.enabled) AppColors.Accent else Color(0xFFFFB020), fontSize = 12.sp)
+            }
+            CronDetail("ID", job.id)
+            CronDetail("Programmazione", job.schedule)
+            CronDetail("Prossima esecuzione", job.nextRunAt)
+            CronDetail("Ultima esecuzione", job.lastRunAt)
+            CronDetail("Stato", job.state)
+            CronDetail("Consegna", job.deliver)
+            CronDetail("Origine", job.origin)
+            Text(job.prompt.ifBlank { "Prompt non disponibile." }, color = Color.White)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(onClick = onRun) { Text("Esegui ora") }
+                Button(onClick = onPauseResume) { Text(if (job.enabled) "Pausa" else "Riprendi") }
+                Button(onClick = onDelete) { Text("Elimina") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CronDetail(label: String, value: String) {
+    if (value.isNotBlank()) {
+        Text("$label: $value", color = AppColors.Muted, fontSize = 12.sp)
     }
 }
 
@@ -2921,7 +2911,7 @@ private fun ServerScreen(context: Context, settings: AppSettings) {
                             Text("Aggiorna stato")
                         }
                         Button(onClick = {
-                            snapshot = snapshot.copy(statusMessage = "Contratto Hermes: GET /health, GET /health/detailed, GET /v1/models, GET /v1/capabilities, POST /v1/responses, POST /v1/chat/completions, POST /v1/runs, GET/POST /api/jobs.")
+                            snapshot = snapshot.copy(statusMessage = "Contratto Hermes: GET /health, GET /health/detailed, GET /v1/models, GET /v1/capabilities, POST /v1/responses, POST /v1/chat/completions, POST /v1/runs, GET/POST /api/jobs cron.")
                         }) {
                             Text("Mostra API")
                         }
@@ -3422,9 +3412,9 @@ private fun OperatorScreen(context: Context, settings: AppSettings) {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Text("Runs", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+            Text("Cron", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.height(8.dp))
-            Text("Runs = lavori server-side Hermes. Possono continuare sul gateway anche se chiudi app o perdi lo stream.", color = AppColors.Muted)
+            Text("Automazioni Hermes programmate sul gateway.", color = AppColors.Muted)
         }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
@@ -3483,8 +3473,8 @@ private fun OperatorScreen(context: Context, settings: AppSettings) {
         item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Jobs / coda", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    SettingsField("Job ID", approvalId, { approvalId = it })
+                    Text("Cron", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    SettingsField("Cron ID", approvalId, { approvalId = it })
                     OperatorActionButton("Lista") { runOperatorRpc(scope, context, settings, "GET /api/jobs", "", { status = it }, { summary = it }, { raw = it }) }
                     OperatorActionButton("Run") { runOperatorRpc(scope, context, settings, "POST /api/jobs/${approvalId.jsonEscaped()}/run", "{}", { status = it }, { summary = it }, { raw = it }) }
                     OperatorActionButton("Pausa") { runOperatorRpc(scope, context, settings, "POST /api/jobs/${approvalId.jsonEscaped()}/pause", "{}", { status = it }, { summary = it }, { raw = it }) }
@@ -3495,7 +3485,7 @@ private fun OperatorScreen(context: Context, settings: AppSettings) {
         item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Runs server-side", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Run tecnico", color = Color.White, fontWeight = FontWeight.SemiBold)
                     SettingsField("Run ID", baseHash, { baseHash = it })
                     SettingsField("Input run", configPatch, { configPatch = it })
                     OperatorActionButton("Capabilities") { runOperatorRpc(scope, context, settings, "GET /v1/capabilities", "", { status = it }, { summary = it }, { raw = it }) }
@@ -3508,9 +3498,9 @@ private fun OperatorScreen(context: Context, settings: AppSettings) {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Diagnostica", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    SettingsField("Filtro job", workspacePath, { workspacePath = it })
+                    SettingsField("Filtro cron", workspacePath, { workspacePath = it })
                     SettingsField("Input run rapido", workspaceText, { workspaceText = it })
-                    OperatorActionButton("Jobs") { runOperatorRpc(scope, context, settings, "GET /api/jobs", "", { status = it }, { summary = it }, { raw = it }) }
+                    OperatorActionButton("Cron") { runOperatorRpc(scope, context, settings, "GET /api/jobs", "", { status = it }, { summary = it }, { raw = it }) }
                     OperatorActionButton("Health") { runOperatorRpc(scope, context, settings, "GET /health/detailed", "", { status = it }, { summary = it }, { raw = it }) }
                     OperatorActionButton("Run") { runOperatorRpc(scope, context, settings, "POST /v1/runs", "{\"model\":\"hermes-agent\",\"input\":\"${workspaceText.jsonEscaped()}\"}", { status = it }, { summary = it }, { raw = it }) }
                 }
@@ -3681,7 +3671,7 @@ private fun VideoScreen(context: Context, settings: AppSettings, onOpenChatPromp
                     Text(
                         modifier = Modifier.padding(16.dp),
                         text = if (items.isEmpty()) {
-                            "Nessun video trovato. Metti un file .mp4/.mov/.mkv/.webm/.avi nella cartella video Hermes sul PC e premi Aggiorna feed."
+                            "Nessun video trovato. Metti un file video nella cartella video Hermes sul PC e premi Aggiorna feed."
                         } else {
                             "Nessun video con feedback salvato."
                         },
@@ -3720,6 +3710,19 @@ private fun createManualVideoItem(rawUrl: String): VideoLibraryItem? {
         durationMs = 0L,
         modifiedAt = System.currentTimeMillis()
     )
+}
+
+private fun resolveVideoPlaybackUrl(settings: AppSettings, item: VideoLibraryItem): String {
+    val raw = item.playbackUrl.ifBlank { item.mediaUrl }
+    val resolved = resolveWorkspaceUrl(settings, raw)
+    if (item.playbackUrl.isNotBlank() || !resolved.contains("/v1/media/", ignoreCase = true)) {
+        return resolved
+    }
+    if (resolved.contains("format=mp4", ignoreCase = true)) {
+        return resolved
+    }
+    val separator = if (resolved.contains("?")) "&" else "?"
+    return "$resolved${separator}format=mp4"
 }
 
 @Composable
@@ -3775,7 +3778,7 @@ private fun VideoFeedCard(settings: AppSettings, item: VideoLibraryItem, apiKey:
 
 @Composable
 private fun VideoThumbnail(settings: AppSettings, item: VideoLibraryItem, apiKey: String?, modifier: Modifier = Modifier) {
-    val videoUrl = remember(settings.gatewayUrl, item.mediaUrl) { resolveWorkspaceUrl(settings, item.mediaUrl) }
+    val videoUrl = remember(settings.gatewayUrl, item.mediaUrl, item.playbackUrl) { resolveVideoPlaybackUrl(settings, item) }
     val thumbUrl = remember(settings.gatewayUrl, item.thumbnailUrl) {
         item.thumbnailUrl.takeIf { it.isNotBlank() }?.let { resolveWorkspaceUrl(settings, it) }
     }
@@ -3826,7 +3829,7 @@ private fun VideoThumbnail(settings: AppSettings, item: VideoLibraryItem, apiKey
 private fun VideoWatchScreen(context: Context, settings: AppSettings, item: VideoLibraryItem, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val apiKey = remember { loadGatewaySecret(context) }
-    val videoUrl = remember(settings.gatewayUrl, item.mediaUrl) { resolveWorkspaceUrl(settings, item.mediaUrl) }
+    val videoUrl = remember(settings.gatewayUrl, item.mediaUrl, item.playbackUrl) { resolveVideoPlaybackUrl(settings, item) }
     val player = remember(videoUrl, apiKey) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setDefaultRequestProperties(authHeaders(apiKey))
@@ -4008,15 +4011,35 @@ private fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPrompt
     var refreshKey by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf("Giornale Hermes pronto.") }
     var selectedArticleId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedHtmlId by rememberSaveable { mutableStateOf<String?>(null) }
     var newsFilter by rememberSaveable { mutableStateOf("Tutti") }
+    var htmlItems by remember { mutableStateOf<List<NewsHtmlItem>>(emptyList()) }
     val articles = remember(refreshKey) { loadWorkspaceRequests(context, "News") }
     val selectedArticle = remember(articles, selectedArticleId) { articles.firstOrNull { it.id == selectedArticleId } }
+    val selectedHtml = remember(htmlItems, selectedHtmlId) { htmlItems.firstOrNull { it.id == selectedHtmlId } }
     val displayedArticles = remember(articles, newsFilter) {
         when (newsFilter) {
             "Recenti" -> articles.sortedByDescending { it.updatedAt }
             "Feedback" -> articles.filter { it.feedback.isNotBlank() }
             else -> articles
         }
+    }
+
+    LaunchedEffect(settings.gatewayUrl, refreshKey) {
+        val result = loadNewsLibrary(settings, loadGatewaySecret(context))
+        htmlItems = result.first
+        status = result.second
+    }
+
+    if (selectedHtml != null) {
+        BackHandler { selectedHtmlId = null }
+        NewsHtmlScreen(
+            context = context,
+            settings = settings,
+            item = selectedHtml,
+            onBack = { selectedHtmlId = null }
+        )
+        return
     }
 
     if (selectedArticle != null) {
@@ -4060,7 +4083,10 @@ private fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPrompt
                 VideoFeedChip("Sincronizza") {
                     status = "Sincronizzo articoli Hermes..."
                     scope.launch {
-                        status = syncWorkspaceJobs(context, settings, "News", loadGatewaySecret(context))
+                        val syncStatus = syncWorkspaceJobs(context, settings, "News", loadGatewaySecret(context))
+                        val htmlStatus = loadNewsLibrary(settings, loadGatewaySecret(context))
+                        htmlItems = htmlStatus.first
+                        status = "${htmlStatus.second} $syncStatus"
                         refreshKey++
                     }
                 }
@@ -4069,13 +4095,26 @@ private fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPrompt
         item {
             Text(status, color = AppColors.Faint, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        if (displayedArticles.isEmpty()) {
+        if (htmlItems.isNotEmpty()) {
+            item {
+                Text("Giornale HTML", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            }
+            items(htmlItems, key = { "html:${it.id}" }) { page ->
+                NewsHtmlCard(item = page, onClick = { selectedHtmlId = page.id })
+            }
+        }
+        if (displayedArticles.isNotEmpty()) {
+            item {
+                Text("Briefing locali", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        if (displayedArticles.isEmpty() && htmlItems.isEmpty()) {
             item {
                 Surface(color = AppColors.Panel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, AppColors.Border)) {
                     Text(
                         modifier = Modifier.padding(16.dp),
                         text = if (articles.isEmpty()) {
-                            "Nessun articolo ancora. Tocca + per chiedere a Hermes di crearne uno o sincronizza i Jobs."
+                            "Nessuna pagina news ancora. Chiedi a Hermes di creare un giornale HTML e salvarlo in /home/matteo/news, poi sincronizza."
                         } else {
                             "Nessun articolo con feedback salvato."
                         },
@@ -4131,6 +4170,98 @@ private fun NewsArticleCard(article: WorkspaceRequest, onClick: () -> Unit) {
                 Text("Feedback salvato", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
         }
+    }
+}
+
+@Composable
+private fun NewsHtmlCard(item: NewsHtmlItem, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        color = AppColors.Panel,
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, AppColors.Border)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(modifier = Modifier.size(44.dp), shape = CircleShape, color = AppColors.Accent.copy(alpha = 0.18f)) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Language, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(23.dp))
+                }
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "${item.filename} - ${item.sizeBytes.toReadableFileSize()} - ${formatVideoTimestamp(item.modifiedAt)}",
+                    color = AppColors.Muted,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NewsHtmlScreen(context: Context, settings: AppSettings, item: NewsHtmlItem, onBack: () -> Unit) {
+    val apiKey = remember { loadGatewaySecret(context) }
+    val pageUrl = remember(settings.gatewayUrl, item.url) { resolveWorkspaceUrl(settings, item.url) }
+    var status by remember(item.id) { mutableStateOf("Carico pagina HTML...") }
+    var html by remember(item.id) { mutableStateOf("") }
+
+    LaunchedEffect(pageUrl, apiKey) {
+        val loaded = loadNewsHtml(settings, item, apiKey)
+        html = loaded.first
+        status = loaded.second
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(AppColors.Background)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Button(onClick = onBack) { Text("Indietro") }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(status, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        HorizontalDivider(color = AppColors.Border)
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { viewContext ->
+                WebView(viewContext).apply {
+                    getSettings().javaScriptEnabled = true
+                    getSettings().domStorageEnabled = true
+                    getSettings().loadWithOverviewMode = true
+                    getSettings().useWideViewPort = true
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = false
+                    }
+                }
+            },
+            update = { webView ->
+                if (html.isBlank()) {
+                    webView.loadDataWithBaseURL(
+                        pageUrl,
+                        "<html><body style=\"font-family:sans-serif;background:#111827;color:#fff\"><p>Caricamento...</p></body></html>",
+                        "text/html",
+                        "utf-8",
+                        null
+                    )
+                } else {
+                    webView.loadDataWithBaseURL(pageUrl, injectHtmlBase(html, pageUrl), "text/html", "utf-8", null)
+                }
+            }
+        )
     }
 }
 
@@ -4206,7 +4337,7 @@ private fun WorkspaceFeedScreen(
 ) {
     val scope = rememberCoroutineScope()
     var refreshKey by remember { mutableStateOf(0) }
-    var status by remember { mutableStateOf("Feed sincronizzato localmente. I nuovi spunti arrivano dalla chat e dai Jobs Hermes.") }
+    var status by remember { mutableStateOf("Feed sincronizzato localmente. I nuovi spunti arrivano dalla chat e dagli artifact Hermes.") }
     val items = remember(refreshKey) { loadWorkspaceRequests(context, kind) }
 
     LazyColumn(
@@ -4223,7 +4354,7 @@ private fun WorkspaceFeedScreen(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onClick = { onOpenChatPrompt(chatPrompt) }) { Text("Nuovo spunto in chat") }
                 Button(onClick = {
-                    status = "Sincronizzo lista Jobs Hermes..."
+                    status = "Sincronizzo artifact Hermes..."
                     scope.launch {
                         status = syncWorkspaceJobs(context, settings, kind, loadGatewaySecret(context))
                         refreshKey++
@@ -4391,7 +4522,7 @@ private fun ProfileScreen(
             ServerMetric("Privacy", "Locale-first", "Chat/settings restano sul dispositivo finche' non colleghi Hermes. API key salvata in Keystore.")
         }
         item {
-            ServerMetric("Parita Windows", "Allineata", "Chat, archivio, progetti/recenti, jobs, Hermes server, hardware, runs, settings e profilo presenti anche su Android.")
+            ServerMetric("Parita Windows", "Allineata", "Chat, archivio, progetti/recenti, cron, Hermes server, prestazioni, video, news, settings e profilo presenti anche su Android.")
         }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
@@ -4400,12 +4531,11 @@ private fun ProfileScreen(
                     Text("Schermate secondarie spostate qui per lasciare la barra bassa pulita.", color = AppColors.Muted, fontSize = 12.sp)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { onOpenTab(Tab.Server) }) { Text("Hermes") }
-                        Button(onClick = { onOpenTab(Tab.Operator) }) { Text("Runs server") }
+                        Button(onClick = { onOpenTab(Tab.Cron) }) { Text("Cron") }
                         Button(onClick = { onOpenTab(Tab.Hardware) }) { Text("Prestazioni") }
                         Button(onClick = { onOpenTab(Tab.News) }) { Text("News") }
                         Button(onClick = { onOpenTab(Tab.Settings) }) { Text("Impostazioni") }
                         Button(onClick = { onOpenTab(Tab.Archive) }) { Text("Archivio") }
-                        Button(onClick = { onOpenTab(Tab.Tasks) }) { Text("Jobs") }
                     }
                 }
             }
@@ -5065,10 +5195,10 @@ internal fun hermesHubSharedContext(): String {
         Sezioni app:
         - Chat: conversazione principale.
         - Video: feed personale di video generati su PC/Hermes. Esiste una Video Library ufficiale annunciata dal gateway in video_library_path e interrogabile da Android con /v1/video/library. Se l'utente chiede di creare, scaricare, montare o preparare un video, salva/registra il file finale in quella cartella, cosi la sezione Video lo vede. Il telefono riceve media proxy /v1/media/..., non file locali diretti.
-        - News: feed personale di articoli/briefing con fonti e feedback utente.
-        - Jobs/Runs: coda operativa Hermes e lavori programmati.
+        - News: feed personale di articoli/briefing con fonti e feedback utente. Se l'utente chiede un giornale online/HTML, salva il file finale in /home/matteo/news o HERMES_NEWS_LIBRARY_PATH: Hermes Hub lo apre in app tramite /v1/news/library e /v1/media/....
+        - Cron: automazioni Hermes programmate sul gateway.
         - Archivio: storico locale dell'app, non memoria agente principale.
-        Video Library: non ignorare la sezione Video. Ogni output video finale destinato all'utente deve finire in video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni file .mp4/.m4v/.mov/.mkv/.webm/.avi in quella cartella appare tramite /v1/video/library. Se lo mostri in chat, usa anche visual_blocks media_file con media_url proxy /v1/media/...
+        Video Library: non ignorare la sezione Video. Ogni output video finale destinato all'utente deve finire in video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni file video comune (.mp4/.m4v/.mov/.mkv/.webm/.avi/.wmv/.flv/.mpg/.mpeg/.ts/.m2ts/.3gp/.ogv) in quella cartella appare tramite /v1/video/library. Se lo mostri in chat, usa anche visual_blocks media_file con media_url proxy /v1/media/...; il gateway puo' esporre playback compat MP4 con ?format=mp4.
         File multimediali in chat: usa visual_blocks image_gallery per piu' immagini o media_file per singoli asset image/video/audio/document.
         media_url e thumbnail_url devono puntare a proxy Hermes/same-host tipo /v1/media/...; vietati file://, data: e path locali diretti.
         Non scrivere mai markdown `MEDIA:[path](file://...)` o path Windows/Linux nel testo finale. Se un tool produce un file locale, pubblicalo prima tramite proxy Hermes e restituisci solo `/v1/media/...` dentro visual_blocks. Se non puoi pubblicarlo, dillo esplicitamente invece di inviare path locali.
@@ -5257,9 +5387,8 @@ private fun visualBlocksMetadata(settings: AppSettings, conversationId: String?)
             JSONObject()
                 .put("chat", "Conversazione principale Hermes Hub.")
                 .put("video", "Feed personale video: Hermes conosce video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni video creato/scaricato per Matteo deve essere salvato o registrato li; Android legge /v1/video/library, desktop mostra file locali, app salva feedback e metadata.")
-                .put("news", "Feed personale articoli: Hermes produce articoli con fonti, app salva feedback.")
-                .put("jobs", "Coda Hermes Jobs condivisa con CLI/server.")
-                .put("runs", "Runs operative Hermes.")
+                .put("news", "Feed personale articoli: Hermes produce articoli con fonti; se crea HTML/giornale online salva in /home/matteo/news per /v1/news/library; app salva feedback.")
+                .put("cron", "Automazioni Hermes programmate condivise con CLI/server.")
         )
         .put(
             "activity_stream",
@@ -5735,9 +5864,9 @@ private fun workspaceInstructions(settings: AppSettings, kind: String, prompt: S
             Destinazione: Hermes Hub / News.
             Memoria: usa la memoria agente condivisa Hermes/CLI/app per interessi, fonti preferite, profondita, tono e filtri di qualita. Se impari una preferenza stabile, salvala lato Hermes se possibile.
             Obiettivo: crea un articolo/briefing personale per Matteo con fonti verificabili e sintesi ragionata.
-            Produzione: cerca notizie rilevanti, filtra per interesse, cita fonti, separa fatti da inferenze e prepara testo leggibile come giornale personale.
+            Produzione: cerca notizie rilevanti, filtra per interesse, cita fonti, separa fatti da inferenze e prepara testo leggibile come giornale personale. Se l'utente chiede formato giornale online/HTML, salva il file finale in /home/matteo/news o HERMES_NEWS_LIBRARY_PATH: Hermes Hub lo legge con /v1/news/library e lo mostra in WebView interna.
             Feedback: usa feedback precedenti per adattare argomenti, profondita, tono, fonti e frequenza.
-            Output JSON richiesto: {"kind":"News","title":"...","summary":"...","status":"...","job_id":"...","sources":[{"title":"...","url":"..."}]}
+            Output JSON richiesto: {"kind":"News","title":"...","summary":"...","status":"...","job_id":"...","download_url":"/v1/media/...","sources":[{"title":"...","url":"..."}]}
 
             Richiesta utente:
             $prompt
@@ -5918,6 +6047,7 @@ private suspend fun loadVideoLibrary(settings: AppSettings, apiKey: String?): Pa
                         title = obj.optString("title", filename.substringBeforeLast('.')),
                         filename = filename,
                         mediaUrl = mediaUrl,
+                        playbackUrl = obj.optString("playback_url", obj.optString("playbackUrl")),
                         thumbnailUrl = obj.optString("thumbnail_url", obj.optString("thumbnailUrl")),
                         path = obj.optString("path"),
                         mimeType = obj.optString("mime_type", "video/*"),
@@ -5936,6 +6066,205 @@ private suspend fun loadVideoLibrary(settings: AppSettings, apiKey: String?): Pa
         items to status
     } catch (ex: Exception) {
         emptyList<VideoLibraryItem>() to "Errore feed video: ${ex.message ?: ex.javaClass.simpleName}"
+    }
+}
+
+private suspend fun loadNewsLibrary(settings: AppSettings, apiKey: String?): Pair<List<NewsHtmlItem>, String> = withContext(Dispatchers.IO) {
+    return@withContext try {
+        val response = httpGetResponse(resolveHermesUrl(settings, "/v1/news/library"), apiKey)
+        if (response.first !in 200..299) {
+            return@withContext emptyList<NewsHtmlItem>() to "News HTML HTTP ${response.first}: ${extractHumanError(response.second)}"
+        }
+        val body = response.second
+        if (body.isBlank()) {
+            return@withContext emptyList<NewsHtmlItem>() to "Gateway non ha restituito dati news."
+        }
+        val json = JSONObject(body)
+        if (json.has("error")) {
+            return@withContext emptyList<NewsHtmlItem>() to extractHumanError(body)
+        }
+        val libraryPath = json.optString("news_library_path", json.optString("library_path", "/home/matteo/news"))
+        val array = json.optJSONArray("items") ?: JSONArray()
+        val items = buildList {
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                val url = obj.optString("url", obj.optString("media_url", obj.optString("download_url")))
+                val filename = obj.optString("filename")
+                if (url.isBlank() || filename.isBlank()) continue
+                add(
+                    NewsHtmlItem(
+                        id = obj.optString("id", filename),
+                        title = obj.optString("title", filename.substringBeforeLast('.')),
+                        filename = filename,
+                        url = url,
+                        path = obj.optString("path"),
+                        mimeType = obj.optString("mime_type", "text/html"),
+                        sizeBytes = obj.optLong("size_bytes", 0L),
+                        modifiedAt = (obj.optDouble("modified_at", 0.0) * 1000).toLong()
+                    )
+                )
+            }
+        }.sortedByDescending { it.modifiedAt }
+        val status = if (items.isEmpty()) {
+            "Cartella news sincronizzata: $libraryPath. Nessun HTML trovato."
+        } else {
+            "${items.size} pagine HTML trovate in: $libraryPath"
+        }
+        items to status
+    } catch (ex: Exception) {
+        emptyList<NewsHtmlItem>() to "Errore feed news: ${ex.message ?: ex.javaClass.simpleName}"
+    }
+}
+
+private suspend fun loadNewsHtml(settings: AppSettings, item: NewsHtmlItem, apiKey: String?): Pair<String, String> = withContext(Dispatchers.IO) {
+    return@withContext try {
+        val url = resolveWorkspaceUrl(settings, item.url)
+        val response = httpGetResponse(url, apiKey)
+        if (response.first in 200..299) {
+            response.second to "Pagina caricata in app."
+        } else {
+            "<html><body style=\"font-family:sans-serif;background:#111827;color:#fff\"><h1>Errore News</h1><p>HTTP ${response.first}: ${extractHumanError(response.second)}</p></body></html>" to "Errore HTTP ${response.first}."
+        }
+    } catch (ex: Exception) {
+        "<html><body style=\"font-family:sans-serif;background:#111827;color:#fff\"><h1>Errore News</h1><p>${(ex.message ?: ex.javaClass.simpleName).replace("<", "&lt;").replace(">", "&gt;")}</p></body></html>" to "Errore apertura HTML."
+    }
+}
+
+private fun injectHtmlBase(html: String, baseUrl: String): String {
+    val base = baseUrl.replace("\"", "%22")
+    val tag = "<base href=\"$base\">"
+    val headIndex = html.indexOf("<head", ignoreCase = true)
+    if (headIndex >= 0) {
+        val headEnd = html.indexOf('>', headIndex)
+        if (headEnd >= 0) {
+            return html.substring(0, headEnd + 1) + tag + html.substring(headEnd + 1)
+        }
+    }
+    return "<!doctype html><html><head>$tag<meta charset=\"utf-8\"></head><body>$html</body></html>"
+}
+
+private suspend fun loadCronJobs(settings: AppSettings, apiKey: String?): Pair<List<CronJob>, String> = withContext(Dispatchers.IO) {
+    return@withContext try {
+        val response = httpGetResponse(resolveHermesUrl(settings, "/api/jobs?type=cron&include_disabled=1"), apiKey)
+        if (response.first !in 200..299) {
+            return@withContext emptyList<CronJob>() to "Cron HTTP ${response.first}: ${extractHumanError(response.second)}"
+        }
+        val jobs = parseCronJobs(response.second)
+            .sortedWith(compareByDescending<CronJob> { it.enabled }
+                .thenBy { it.nextRunAt.ifBlank { "9999" } }
+                .thenBy { it.name })
+        val active = jobs.count { it.enabled }
+        jobs to if (active == 1) "1 cron attivo." else "$active cron attivi."
+    } catch (ex: Exception) {
+        emptyList<CronJob>() to "Cron non disponibile: ${ex.message ?: ex.javaClass.simpleName}"
+    }
+}
+
+private suspend fun cronAction(settings: AppSettings, id: String, action: String, apiKey: String?): String = withContext(Dispatchers.IO) {
+    if (id.isBlank()) return@withContext "ID cron mancante."
+    return@withContext try {
+        val encodedId = URLEncoder.encode(id, "UTF-8")
+        val path = if (action == "delete") "/api/jobs/$encodedId" else "/api/jobs/$encodedId/$action"
+        val method = if (action == "delete") "DELETE" else "POST"
+        val response = postJson(resolveHermesUrl(settings, path), JSONObject(), apiKey, method)
+        if (response.first in 200..299) {
+            when (action) {
+                "run" -> "Cron avviato."
+                "pause" -> "Cron messo in pausa."
+                "resume" -> "Cron riattivato."
+                "delete" -> "Cron eliminato."
+                else -> "Cron aggiornato."
+            }
+        } else {
+            "Azione cron fallita: HTTP ${response.first}: ${extractHumanError(response.second)}"
+        }
+    } catch (ex: Exception) {
+        "Azione cron fallita: ${ex.message ?: ex.javaClass.simpleName}"
+    }
+}
+
+private fun parseCronJobs(body: String): List<CronJob> {
+    if (body.isBlank()) return emptyList()
+    val trimmed = body.trim()
+    val array = when {
+        trimmed.startsWith("[") -> JSONArray(trimmed)
+        else -> {
+            val root = JSONObject(trimmed)
+            root.optJSONArray("jobs")
+                ?: root.optJSONArray("crons")
+                ?: root.optJSONArray("items")
+                ?: root.optJSONArray("schedules")
+                ?: root.optJSONArray("data")
+                ?: JSONArray().apply {
+                    root.optJSONObject("job")?.let { put(it) }
+                    root.optJSONObject("cron")?.let { put(it) }
+                    if (length() == 0 && root.has("id")) put(root)
+                }
+        }
+    }
+    return buildList {
+        for (i in 0 until array.length()) {
+            val obj = array.optJSONObject(i) ?: continue
+            val state = obj.optString("state", obj.optString("status"))
+            val enabled = when {
+                obj.has("enabled") -> obj.optBoolean("enabled", true)
+                obj.has("active") -> obj.optBoolean("active", true)
+                else -> true
+            } && !state.equals("paused", true) && !state.equals("disabled", true)
+            val id = obj.optString("id", obj.optString("job_id", obj.optString("jobId", obj.optString("name"))))
+            val name = obj.optString("name", obj.optString("title", obj.optString("label", id.ifBlank { "Cron" })))
+            add(
+                CronJob(
+                    id = id,
+                    name = name,
+                    prompt = obj.optString("prompt", obj.optString("instructions", obj.optString("description", obj.optString("input")))),
+                    schedule = cronScheduleText(obj),
+                    state = state.ifBlank { if (enabled) "attivo" else "pausa" },
+                    enabled = enabled,
+                    nextRunAt = obj.optString("next_run_at", obj.optString("nextRunAt", obj.optString("next_run", obj.optString("nextRun")))),
+                    lastRunAt = obj.optString("last_run_at", obj.optString("lastRunAt", obj.optString("last_run", obj.optString("lastRun")))),
+                    lastStatus = obj.optString("last_status", obj.optString("lastStatus", obj.optString("last_result", obj.optString("lastResult")))),
+                    deliver = obj.optString("deliver", obj.optString("delivery", obj.optString("target"))),
+                    origin = cronOriginText(obj)
+                )
+            )
+        }
+    }.filter { it.id.isNotBlank() || it.name.isNotBlank() }
+}
+
+private fun cronScheduleText(obj: JSONObject): String {
+    val direct = obj.optString("schedule_display",
+        obj.optString("scheduleDisplay",
+            obj.optString("cron",
+                obj.optString("cron_expr", obj.optString("expression")))))
+    if (direct.isNotBlank()) return direct
+    val value = obj.opt("schedule") ?: return ""
+    return when (value) {
+        is String -> value
+        is JSONObject -> {
+            value.optString("expr", value.optString("cron", value.optString("display"))).ifBlank {
+                val kind = value.optString("kind")
+                val minutes = value.optLong("minutes", 0L)
+                val seconds = value.optLong("seconds", 0L)
+                when {
+                    kind.equals("interval", true) && minutes > 0 -> "ogni $minutes min"
+                    kind.equals("interval", true) && seconds > 0 -> "ogni $seconds sec"
+                    else -> value.toString()
+                }
+            }
+        }
+        else -> value.toString()
+    }
+}
+
+private fun cronOriginText(obj: JSONObject): String {
+    val origin = obj.opt("origin")
+    return when (origin) {
+        is String -> origin
+        is JSONObject -> origin.optString("client",
+            origin.optString("surface",
+                origin.optString("host", origin.optString("user", origin.toString()))))
+        else -> obj.optString("source", obj.optString("created_by", obj.optString("createdBy")))
     }
 }
 
@@ -6207,9 +6536,9 @@ private val OPERATOR_PRESETS = listOf(
     OperatorPreset("Dashboard", "Health detailed", "GET /health/detailed", ""),
     OperatorPreset("Dashboard", "Capabilities", "GET /v1/capabilities", ""),
     OperatorPreset("Modelli", "Lista modelli", "GET /v1/models", ""),
-    OperatorPreset("Runs", "Crea run", "POST /v1/runs", "{\"model\":\"hermes-agent\",\"input\":\"Controlla stato operativo e riassumi.\"}"),
-    OperatorPreset("Jobs", "Lista jobs", "GET /api/jobs", ""),
-    OperatorPreset("Jobs", "Crea job", "POST /api/jobs", "{\"title\":\"Controllo operativo\",\"instructions\":\"Controlla stato Hermes e segnala problemi.\"}")
+    OperatorPreset("Tecnico", "Crea run", "POST /v1/runs", "{\"model\":\"hermes-agent\",\"input\":\"Controlla stato operativo e riassumi.\"}"),
+    OperatorPreset("Cron", "Lista cron", "GET /api/jobs", ""),
+    OperatorPreset("Cron", "Crea cron", "POST /api/jobs", "{\"name\":\"Controllo operativo\",\"schedule\":\"0 8 * * *\",\"prompt\":\"Controlla stato Hermes e segnala problemi.\"}")
 )
 
 private fun String.limitText(maxLength: Int): String {

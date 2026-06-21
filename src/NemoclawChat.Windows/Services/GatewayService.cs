@@ -32,6 +32,21 @@ public enum TaskCommand
 public sealed record GatewayTaskResult(AgentTaskRecord Task, string Message);
 
 public sealed record WorkspaceRunResult(string Result, string Source, string Status);
+
+public sealed record NewsHtmlRecord(
+    string Id,
+    string Title,
+    string FileName,
+    string Url,
+    string Path,
+    string MimeType,
+    long SizeBytes,
+    DateTimeOffset ModifiedAt);
+
+public sealed record NewsLibraryResult(
+    IReadOnlyList<NewsHtmlRecord> Items,
+    string Status);
+
 public sealed record HubMemoryState(
     string VideoPreferences,
     string NewsPreferences,
@@ -40,6 +55,23 @@ public sealed record HubMemoryState(
     string GeneralNotes);
 
 public sealed record DiagnosticCheckResult(string Label, string Endpoint, bool Ok, string Message, string Action);
+
+public sealed record CronJobRecord(
+    string Id,
+    string Name,
+    string Prompt,
+    string Schedule,
+    string State,
+    bool Enabled,
+    string NextRunAt,
+    string LastRunAt,
+    string LastStatus,
+    string Deliver,
+    string Origin);
+
+public sealed record CronJobsResult(
+    IReadOnlyList<CronJobRecord> Jobs,
+    string Status);
 
 public sealed record HardwareDiskRecord(
     string Device,
@@ -807,6 +839,115 @@ public static class GatewayService
         return $"HTTP {response.StatusCode} {response.ReasonPhrase}: {ExtractHumanError(body)}";
     }
 
+    public static async Task<NewsLibraryResult> LoadNewsLibraryAsync(AppSettings settings)
+    {
+        try
+        {
+            var response = await SendBufferedAsync(
+                token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, "/v1/news/library"), token),
+                allowCompatAuth: true);
+            if (!response.IsSuccessStatusCode)
+            {
+                return new NewsLibraryResult([], $"News HTML non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}");
+            }
+
+            using var document = JsonDocument.Parse(response.Body);
+            var root = document.RootElement;
+            var libraryPath = ExtractString(root, "news_library_path", "library_path") ?? "/home/matteo/news";
+            var items = new List<NewsHtmlRecord>();
+            if (root.TryGetProperty("items", out var array) && array.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in array.EnumerateArray())
+                {
+                    var url = ExtractString(item, "url", "media_url", "download_url") ?? string.Empty;
+                    var filename = ExtractString(item, "filename", "name") ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(filename))
+                    {
+                        continue;
+                    }
+
+                    var modified = ExtractDouble(item, "modified_at");
+                    items.Add(new NewsHtmlRecord(
+                        ExtractString(item, "id") ?? filename,
+                        ExtractString(item, "title") ?? Path.GetFileNameWithoutExtension(filename),
+                        filename,
+                        ResolveHermesUri(settings, url),
+                        ExtractString(item, "path") ?? string.Empty,
+                        ExtractString(item, "mime_type") ?? "text/html",
+                        ExtractLong(item, "size_bytes"),
+                        modified > 0 ? DateTimeOffset.FromUnixTimeSeconds((long)modified) : DateTimeOffset.Now));
+                }
+            }
+
+            var ordered = items.OrderByDescending(item => item.ModifiedAt).ToArray();
+            return new NewsLibraryResult(
+                ordered,
+                ordered.Length == 0 ? $"Cartella news sincronizzata: {libraryPath}. Nessun HTML trovato." : $"{ordered.Length} pagine HTML trovate in: {libraryPath}");
+        }
+        catch (Exception ex)
+        {
+            return new NewsLibraryResult([], $"News HTML non disponibile: {ex.Message}");
+        }
+    }
+
+    public static async Task<string> LoadGatewayTextAsync(AppSettings settings, string url)
+    {
+        var response = await SendBufferedAsync(
+            token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, url), token),
+            allowCompatAuth: true);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {response.StatusCode}: {ExtractHumanError(response.Body)}");
+        }
+
+        return response.Body;
+    }
+
+    public static async Task<CronJobsResult> LoadCronJobsAsync(AppSettings settings, bool includeDisabled = true)
+    {
+        try
+        {
+            var path = includeDisabled ? "/api/jobs?type=cron&include_disabled=1" : "/api/jobs?type=cron";
+            var response = await SendBufferedAsync(token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, path), token));
+            if (!response.IsSuccessStatusCode)
+            {
+                return new CronJobsResult([], $"Cron non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}");
+            }
+
+            var jobs = ParseCronJobs(response.Body)
+                .OrderByDescending(job => job.Enabled)
+                .ThenBy(job => string.IsNullOrWhiteSpace(job.NextRunAt) ? "9999" : job.NextRunAt, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(job => job.Name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var active = jobs.Count(job => job.Enabled);
+            return new CronJobsResult(jobs, active == 1 ? "1 cron attivo." : $"{active} cron attivi.");
+        }
+        catch (Exception ex)
+        {
+            return new CronJobsResult([], $"Cron non disponibile: {ex.Message}");
+        }
+    }
+
+    public static async Task<string> RunCronJobAsync(AppSettings settings, string id)
+    {
+        return await CronJobActionAsync(settings, id, "run", HttpMethod.Post, "Cron avviato.");
+    }
+
+    public static async Task<string> PauseCronJobAsync(AppSettings settings, string id)
+    {
+        return await CronJobActionAsync(settings, id, "pause", HttpMethod.Post, "Cron messo in pausa.");
+    }
+
+    public static async Task<string> ResumeCronJobAsync(AppSettings settings, string id)
+    {
+        return await CronJobActionAsync(settings, id, "resume", HttpMethod.Post, "Cron riattivato.");
+    }
+
+    public static async Task<string> DeleteCronJobAsync(AppSettings settings, string id)
+    {
+        return await CronJobActionAsync(settings, id, null, HttpMethod.Delete, "Cron eliminato.");
+    }
+
     public static async Task<(HubMemoryState Memory, string Status)> LoadHubMemoryAsync(AppSettings settings)
     {
         try
@@ -959,6 +1100,28 @@ public static class GatewayService
         if (allowCompatAuth)
         {
             yield return null;
+        }
+    }
+
+    private static async Task<string> CronJobActionAsync(AppSettings settings, string id, string? action, HttpMethod method, string success)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return "ID cron mancante.";
+        }
+
+        var safeId = Uri.EscapeDataString(id.Trim());
+        var path = string.IsNullOrWhiteSpace(action) ? $"/api/jobs/{safeId}" : $"/api/jobs/{safeId}/{action}";
+        try
+        {
+            var response = await SendBufferedAsync(token => BuildJsonRequest(method, ResolveHermesUri(settings, path), "{}", token));
+            return response.IsSuccessStatusCode
+                ? success
+                : $"Azione cron fallita: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}";
+        }
+        catch (Exception ex)
+        {
+            return $"Azione cron fallita: {ex.Message}";
         }
     }
 
@@ -1255,6 +1418,199 @@ public static class GatewayService
         {
             return null;
         }
+    }
+
+    private static IReadOnlyList<CronJobRecord> ParseCronJobs(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return [];
+        }
+
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement;
+        var jobs = new List<CronJobRecord>();
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in root.EnumerateArray())
+            {
+                AddCronJob(jobs, item);
+            }
+        }
+        else if (root.ValueKind == JsonValueKind.Object)
+        {
+            if (TryGetArray(root, out var array, "jobs", "crons", "items", "schedules", "data"))
+            {
+                foreach (var item in array.EnumerateArray())
+                {
+                    AddCronJob(jobs, item);
+                }
+            }
+            else if (TryGetObject(root, out var job, "job", "cron", "schedule"))
+            {
+                AddCronJob(jobs, job);
+            }
+            else if (root.TryGetProperty("id", out _))
+            {
+                AddCronJob(jobs, root);
+            }
+        }
+
+        return jobs
+            .Where(job => !string.IsNullOrWhiteSpace(job.Id) || !string.IsNullOrWhiteSpace(job.Name))
+            .ToArray();
+    }
+
+    private static void AddCronJob(List<CronJobRecord> jobs, JsonElement item)
+    {
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        var id = ExtractString(item, "id", "job_id", "jobId", "name") ?? "";
+        var name = ExtractString(item, "name", "title", "label", "id") ?? "Cron";
+        var state = ExtractString(item, "state", "status") ?? "";
+        var enabled = ExtractBool(item, true, "enabled", "active");
+        if (state.Equals("paused", StringComparison.OrdinalIgnoreCase) || state.Equals("disabled", StringComparison.OrdinalIgnoreCase))
+        {
+            enabled = false;
+        }
+
+        jobs.Add(new CronJobRecord(
+            id,
+            name,
+            ExtractString(item, "prompt", "instructions", "description", "input") ?? "",
+            ExtractSchedule(item),
+            string.IsNullOrWhiteSpace(state) ? (enabled ? "attivo" : "pausa") : state,
+            enabled,
+            ExtractString(item, "next_run_at", "nextRunAt", "next_run", "nextRun") ?? "",
+            ExtractString(item, "last_run_at", "lastRunAt", "last_run", "lastRun") ?? "",
+            ExtractString(item, "last_status", "lastStatus", "last_result", "lastResult") ?? "",
+            ExtractString(item, "deliver", "delivery", "target") ?? "",
+            ExtractOrigin(item)));
+    }
+
+    private static string ExtractSchedule(JsonElement item)
+    {
+        var display = ExtractString(item, "schedule_display", "scheduleDisplay", "cron", "cron_expr", "expression");
+        if (!string.IsNullOrWhiteSpace(display))
+        {
+            return display;
+        }
+
+        if (item.TryGetProperty("schedule", out var schedule))
+        {
+            if (schedule.ValueKind == JsonValueKind.String)
+            {
+                return schedule.GetString() ?? "";
+            }
+
+            if (schedule.ValueKind == JsonValueKind.Object)
+            {
+                var expr = ExtractString(schedule, "expr", "cron", "display");
+                if (!string.IsNullOrWhiteSpace(expr))
+                {
+                    return expr;
+                }
+
+                var kind = ExtractString(schedule, "kind") ?? "";
+                var minutes = ExtractLong(schedule, "minutes");
+                var seconds = ExtractLong(schedule, "seconds");
+                if (kind.Equals("interval", StringComparison.OrdinalIgnoreCase) && minutes > 0)
+                {
+                    return $"ogni {minutes} min";
+                }
+
+                if (kind.Equals("interval", StringComparison.OrdinalIgnoreCase) && seconds > 0)
+                {
+                    return $"ogni {seconds} sec";
+                }
+
+                return schedule.ToString();
+            }
+        }
+
+        return "";
+    }
+
+    private static string ExtractOrigin(JsonElement item)
+    {
+        if (item.TryGetProperty("origin", out var origin))
+        {
+            if (origin.ValueKind == JsonValueKind.String)
+            {
+                return origin.GetString() ?? "";
+            }
+
+            if (origin.ValueKind == JsonValueKind.Object)
+            {
+                return ExtractString(origin, "client", "surface", "host", "user") ?? origin.ToString();
+            }
+        }
+
+        return ExtractString(item, "source", "created_by", "createdBy") ?? "";
+    }
+
+    private static bool TryGetArray(JsonElement root, out JsonElement array, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (root.TryGetProperty(key, out array) && array.ValueKind == JsonValueKind.Array)
+            {
+                return true;
+            }
+        }
+
+        array = default;
+        return false;
+    }
+
+    private static bool TryGetObject(JsonElement root, out JsonElement obj, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (root.TryGetProperty(key, out obj) && obj.ValueKind == JsonValueKind.Object)
+            {
+                return true;
+            }
+        }
+
+        obj = default;
+        return false;
+    }
+
+    private static bool ExtractBool(JsonElement root, bool fallback, params string[] keys)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return fallback;
+        }
+
+        foreach (var key in keys)
+        {
+            if (!root.TryGetProperty(key, out var property))
+            {
+                continue;
+            }
+
+            if (property.ValueKind == JsonValueKind.True)
+            {
+                return true;
+            }
+
+            if (property.ValueKind == JsonValueKind.False)
+            {
+                return false;
+            }
+
+            if (property.ValueKind == JsonValueKind.String && bool.TryParse(property.GetString(), out var value))
+            {
+                return value;
+            }
+        }
+
+        return fallback;
     }
 
     private static string? ExtractTaskStatus(string body)

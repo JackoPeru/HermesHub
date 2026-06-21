@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.103 Release Hermes Hub 0.6.103 stability hardening
+v0.6.104 Release Hermes Hub 0.6.104 cron, media and news HTML
 ```
 
 ## Regola Linux Gateway Update
@@ -137,6 +137,20 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.104 (Cron, media proxy and News HTML):
+
+Release 0.6.104:
+- Windows/Android: sezioni user-facing `Jobs` e `Runs` rimosse; nuova sezione unica `Cron` mostra cron reali del gateway via `GET /api/jobs?type=cron&include_disabled=1`.
+- Cron: azioni `Esegui ora`, `Pausa/Riprendi`, `Elimina` usano endpoint ufficiali `/api/jobs/{id}/run`, `/pause`, `/resume`, `DELETE /api/jobs/{id}`; slash command `/cron`, rimossi `/runs` e `/tasks`.
+- Windows chat: il blocco invio e' legato alla chat/composer corrente; una chat in generazione non impedisce di inviare prompt in una nuova chat.
+- Gateway Linux: aggiunto endpoint protetto `GET /v1/media/{media_id}` con risoluzione sicura dentro `HERMES_MEDIA_ROOTS`/`HERMES_VIDEO_LIBRARY_PATH`; `?format=mp4` transcodifica/cache con ffmpeg in MP4 H.264 + AAC + yuv420p + faststart.
+- Windows/Android Video: i player usano `playback_url` quando presente o aggiungono `?format=mp4` al media proxy; supporto feed esteso a mp4, mov, mkv, webm, avi, wmv, flv, mpeg, ts, m2ts, 3gp, ogv.
+- Gateway Linux News: nuova cartella default `HERMES_NEWS_LIBRARY_PATH=/home/matteo/news`, inclusa in `HERMES_MEDIA_ROOTS`; nuovo endpoint protetto `GET /v1/news/library` per file `.html/.htm`.
+- Windows News: aggiunto elenco pagine HTML dal gateway e rendering in WebView2 interno, senza aprire app esterne.
+- Android News: aggiunto elenco pagine HTML dal gateway e reader WebView interno fullscreen, senza intent esterni.
+- Istruzioni Hermes aggiornate: quando Matteo chiede un giornale online/HTML, salvare il file finale in `/home/matteo/news` o `HERMES_NEWS_LIBRARY_PATH` cosi' appare nella sezione News.
+- Release bump: Windows/AdminBridge `0.6.104`, Android `versionName 0.6.104`, `versionCode 109`.
 
 Hermes Hub 0.6.103 (Stability hardening):
 

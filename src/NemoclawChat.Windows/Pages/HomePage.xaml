@@ -66,7 +66,7 @@
                             HorizontalAlignment="Center"
                             FontSize="14"
                             Foreground="{StaticResource MutedTextBrush}"
-                            Text="Chat normale, Runs e Jobs verso Hermes Agent sul tuo home-server." />
+                            Text="Chat normale, cron e strumenti Hermes Agent sul tuo home-server." />
                         <Grid
                             MaxWidth="430"
                             ColumnSpacing="10"

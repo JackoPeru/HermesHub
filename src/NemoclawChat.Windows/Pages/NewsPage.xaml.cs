@@ -7,11 +7,13 @@ namespace NemoclawChat_Windows.Pages;
 public sealed partial class NewsPage : Page
 {
     private WorkspaceRequestRecord? _selectedArticle;
+    private IReadOnlyList<NewsHtmlRecord> _htmlPages = [];
 
     public NewsPage()
     {
         InitializeComponent();
         RefreshRecent();
+        _ = RefreshNewsHtmlAsync();
     }
 
     private async void PrepareNews_Click(object sender, RoutedEventArgs e)
@@ -47,6 +49,94 @@ public sealed partial class NewsPage : Page
         {
             NewsRunButton.IsEnabled = true;
         }
+    }
+
+    private async void RefreshNewsHtml_Click(object sender, RoutedEventArgs e)
+    {
+        await RefreshNewsHtmlAsync();
+    }
+
+    private async Task RefreshNewsHtmlAsync()
+    {
+        NewsHtmlRefreshButton.IsEnabled = false;
+        NewsHtmlStatusText.Text = "Cerco pagine HTML news sul gateway...";
+        try
+        {
+            var result = await GatewayService.LoadNewsLibraryAsync(AppSettingsStore.Load());
+            _htmlPages = result.Items;
+            NewsHtmlStatusText.Text = result.Status;
+            RenderHtmlPages();
+        }
+        finally
+        {
+            NewsHtmlRefreshButton.IsEnabled = true;
+        }
+    }
+
+    private void RenderHtmlPages()
+    {
+        NewsHtmlPanel.Children.Clear();
+        if (_htmlPages.Count == 0)
+        {
+            NewsHtmlPanel.Children.Add(new TextBlock
+            {
+                Text = "Nessuna pagina HTML trovata in /home/matteo/news.",
+                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["MutedTextBrush"],
+                TextWrapping = TextWrapping.Wrap
+            });
+            return;
+        }
+
+        foreach (var page in _htmlPages.Take(12))
+        {
+            var button = new Button
+            {
+                Tag = page,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Content = $"{page.Title} · {page.ModifiedAt.LocalDateTime:g}"
+            };
+            button.Click += async (_, _) => await OpenHtmlPageAsync(page);
+            NewsHtmlPanel.Children.Add(button);
+        }
+    }
+
+    private async Task OpenHtmlPageAsync(NewsHtmlRecord page)
+    {
+        _selectedArticle = null;
+        NewsStatusText.Text = $"Apro pagina HTML: {page.FileName}";
+        NewsResultBox.Text = page.Path;
+        NewsFeedbackBox.Text = string.Empty;
+
+        try
+        {
+            var html = await GatewayService.LoadGatewayTextAsync(AppSettingsStore.Load(), page.Url);
+            NewsWebView.NavigateToString(InjectBaseHref(html, page.Url));
+            NewsHtmlStatusText.Text = $"Pagina caricata in app: {page.Title}";
+            await GatewayService.SaveHubStateAsync(AppSettingsStore.Load(), "news_read", page.Id, new { title = page.Title, file = page.FileName, read = true });
+        }
+        catch (Exception ex)
+        {
+            NewsHtmlStatusText.Text = $"Errore apertura HTML: {ex.Message}";
+            NewsWebView.NavigateToString($"<html><body style=\"font-family:sans-serif;background:#111827;color:#fff\"><h1>Errore News</h1><p>{System.Net.WebUtility.HtmlEncode(ex.Message)}</p></body></html>");
+        }
+    }
+
+    private static string InjectBaseHref(string html, string baseUrl)
+    {
+        var safeBase = System.Net.WebUtility.HtmlEncode(baseUrl);
+        var baseTag = $"<base href=\"{safeBase}\">";
+        var headIndex = html.IndexOf("<head", StringComparison.OrdinalIgnoreCase);
+        if (headIndex >= 0)
+        {
+            var headEnd = html.IndexOf('>', headIndex);
+            if (headEnd >= 0)
+            {
+                return html.Insert(headEnd + 1, baseTag);
+            }
+        }
+
+        return $"<!doctype html><html><head>{baseTag}<meta charset=\"utf-8\"></head><body>{html}</body></html>";
     }
 
     private void RefreshRecent()

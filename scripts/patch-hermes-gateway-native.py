@@ -453,7 +453,7 @@ def _hermes_hub_video_library_payload(request: Optional["web.Request"] = None) -
     if not raw:
         raw = "/home/matteo/video"
     root = _Path(raw).expanduser()
-    extensions = {".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi"}
+    extensions = {".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi", ".wmv", ".flv", ".mpg", ".mpeg", ".ts", ".m2ts", ".3gp", ".ogv"}
     items: List[Dict[str, Any]] = []
     if root.is_dir():
         for path in sorted(root.rglob("*"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True):
@@ -471,6 +471,7 @@ def _hermes_hub_video_library_payload(request: Optional["web.Request"] = None) -
                 "filename": path.name,
                 "path": str(path),
                 "media_url": f"/v1/media/{media_id}",
+                "playback_url": f"/v1/media/{media_id}?format=mp4",
                 "thumbnail_url": "",
                 "mime_type": _mimetypes.guess_type(path.name)[0] or "video/*",
                 "size_bytes": int(stat.st_size),
@@ -497,10 +498,341 @@ def _hermes_hub_video_library_payload(request: Optional["web.Request"] = None) -
     }
 
 
+def _hermes_hub_media_roots() -> List["Path"]:
+    from pathlib import Path as _Path
+
+    roots: List[_Path] = []
+    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"
+    for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):
+        if part.strip():
+            roots.append(_Path(part.strip()).expanduser())
+    roots.append(_Path(raw_video).expanduser())
+    unique: List[_Path] = []
+    seen = set()
+    for root in roots:
+        try:
+            resolved = root.resolve()
+        except Exception:
+            resolved = root
+        key = str(resolved)
+        if key not in seen:
+            seen.add(key)
+            unique.append(resolved)
+    return unique
+
+
+def _hermes_hub_resolve_media_path(media_id: str) -> Optional["Path"]:
+    import urllib.parse as _urlparse
+    from pathlib import Path as _Path
+
+    decoded = _urlparse.unquote(str(media_id or "")).replace(chr(92), "/").lstrip("/")
+    if not decoded:
+        return None
+    for root in _hermes_hub_media_roots():
+        try:
+            candidate = (root / decoded).resolve()
+            root_resolved = root.resolve()
+            if root_resolved == candidate or root_resolved in candidate.parents:
+                if candidate.is_file():
+                    return candidate
+        except Exception:
+            continue
+
+    # Backward-compatible fallback: older clients may send just basename.
+    basename = _Path(decoded).name
+    if basename and basename == decoded:
+        for root in _hermes_hub_media_roots():
+            try:
+                for candidate in root.rglob(basename):
+                    if candidate.is_file():
+                        return candidate.resolve()
+            except Exception:
+                continue
+    return None
+
+
+def _hermes_hub_media_cache_path(source: "Path") -> "Path":
+    import hashlib as _hashlib
+    from pathlib import Path as _Path
+
+    stat = source.stat()
+    home = _Path(os.environ.get("HERMES_HOME", str(_Path.home() / ".hermes"))).expanduser()
+    digest = _hashlib.sha256(f"{source.resolve()}:{stat.st_size}:{stat.st_mtime_ns}".encode("utf-8")).hexdigest()[:24]
+    cache_dir = _Path(os.environ.get("HERMES_HUB_MEDIA_CACHE", str(home / "hub_media_cache"))).expanduser()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / f"{source.stem}.{digest}.compat.mp4"
+
+
+def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
+    import subprocess as _subprocess
+
+    target = _hermes_hub_media_cache_path(source)
+    if target.is_file() and target.stat().st_size > 0:
+        return target
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(source),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-c:v",
+        "libx264",
+        "-preset",
+        os.environ.get("HERMES_HUB_TRANSCODE_PRESET", "veryfast"),
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-c:a",
+        "aac",
+        "-b:a",
+        os.environ.get("HERMES_HUB_TRANSCODE_AUDIO_BITRATE", "160k"),
+        str(tmp),
+    ]
+    result = _subprocess.run(cmd, capture_output=True, text=True, timeout=int(os.environ.get("HERMES_HUB_TRANSCODE_TIMEOUT", "900")))
+    if result.returncode != 0:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise RuntimeError((result.stderr or result.stdout or "ffmpeg transcode failed").strip())
+    tmp.replace(target)
+    return target
+
+
 def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Response":''',
             "hub support endpoint helpers",
         )
         changes.append("hub support endpoint helpers")
+
+    if "def _hermes_hub_resolve_media_path" not in text:
+        text, _ = _replace_once(
+            text,
+            "def _multimodal_validation_error(exc: ValueError, *, param: str) -> \"web.Response\":",
+            '''def _hermes_hub_media_roots() -> List["Path"]:
+    from pathlib import Path as _Path
+
+    roots: List[_Path] = []
+    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"
+    for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):
+        if part.strip():
+            roots.append(_Path(part.strip()).expanduser())
+    roots.append(_Path(raw_video).expanduser())
+    unique: List[_Path] = []
+    seen = set()
+    for root in roots:
+        try:
+            resolved = root.resolve()
+        except Exception:
+            resolved = root
+        key = str(resolved)
+        if key not in seen:
+            seen.add(key)
+            unique.append(resolved)
+    return unique
+
+
+def _hermes_hub_resolve_media_path(media_id: str) -> Optional["Path"]:
+    import urllib.parse as _urlparse
+    from pathlib import Path as _Path
+
+    decoded = _urlparse.unquote(str(media_id or "")).replace(chr(92), "/").lstrip("/")
+    if not decoded:
+        return None
+    for root in _hermes_hub_media_roots():
+        try:
+            candidate = (root / decoded).resolve()
+            root_resolved = root.resolve()
+            if root_resolved == candidate or root_resolved in candidate.parents:
+                if candidate.is_file():
+                    return candidate
+        except Exception:
+            continue
+
+    basename = _Path(decoded).name
+    if basename and basename == decoded:
+        for root in _hermes_hub_media_roots():
+            try:
+                for candidate in root.rglob(basename):
+                    if candidate.is_file():
+                        return candidate.resolve()
+            except Exception:
+                continue
+    return None
+
+
+def _hermes_hub_media_cache_path(source: "Path") -> "Path":
+    import hashlib as _hashlib
+    from pathlib import Path as _Path
+
+    stat = source.stat()
+    home = _Path(os.environ.get("HERMES_HOME", str(_Path.home() / ".hermes"))).expanduser()
+    digest = _hashlib.sha256(f"{source.resolve()}:{stat.st_size}:{stat.st_mtime_ns}".encode("utf-8")).hexdigest()[:24]
+    cache_dir = _Path(os.environ.get("HERMES_HUB_MEDIA_CACHE", str(home / "hub_media_cache"))).expanduser()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / f"{source.stem}.{digest}.compat.mp4"
+
+
+def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
+    import subprocess as _subprocess
+
+    target = _hermes_hub_media_cache_path(source)
+    if target.is_file() and target.stat().st_size > 0:
+        return target
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(source),
+        "-map", "0:v:0", "-map", "0:a?",
+        "-c:v", "libx264",
+        "-preset", os.environ.get("HERMES_HUB_TRANSCODE_PRESET", "veryfast"),
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        "-c:a", "aac",
+        "-b:a", os.environ.get("HERMES_HUB_TRANSCODE_AUDIO_BITRATE", "160k"),
+        str(tmp),
+    ]
+    result = _subprocess.run(cmd, capture_output=True, text=True, timeout=int(os.environ.get("HERMES_HUB_TRANSCODE_TIMEOUT", "900")))
+    if result.returncode != 0:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise RuntimeError((result.stderr or result.stdout or "ffmpeg transcode failed").strip())
+    tmp.replace(target)
+    return target
+
+
+def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Response":''',
+            "media proxy helpers",
+        )
+        changes.append("media proxy helpers")
+
+    if '"playback_url": f"/v1/media/{media_id}?format=mp4",' not in text and '"media_url": f"/v1/media/{media_id}",' in text:
+        text, _ = _replace_once(
+            text,
+            '                "media_url": f"/v1/media/{media_id}",\n',
+            '                "media_url": f"/v1/media/{media_id}",\n'
+            '                "playback_url": f"/v1/media/{media_id}?format=mp4",\n',
+            "video library playback url",
+        )
+        changes.append("video library playback url")
+
+    if '{".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi"}' in text:
+        text = text.replace(
+            '{".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi"}',
+            '{".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi", ".wmv", ".flv", ".mpg", ".mpeg", ".ts", ".m2ts", ".3gp", ".ogv"}',
+            1,
+        )
+        changes.append("video library broad extensions")
+
+    if "def _hermes_hub_news_library_payload" not in text:
+        text, _ = _replace_once(
+            text,
+            "\n\ndef _hermes_hub_media_roots() -> List[\"Path\"]:",
+            '''
+
+def _hermes_hub_news_library_payload(request: Optional["web.Request"] = None) -> Dict[str, Any]:
+    import mimetypes as _mimetypes
+    import urllib.parse as _urlparse
+    from pathlib import Path as _Path
+
+    raw = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"
+    roots: List[_Path] = [_Path(raw).expanduser()]
+    for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):
+        if part.strip():
+            roots.append(_Path(part.strip()).expanduser())
+
+    unique_roots: List[_Path] = []
+    seen_roots = set()
+    for root in roots:
+        try:
+            resolved = root.resolve()
+        except Exception:
+            resolved = root
+        key = str(resolved)
+        if key not in seen_roots:
+            seen_roots.add(key)
+            unique_roots.append(resolved)
+
+    extensions = {".html", ".htm"}
+    seen_files = set()
+    items: List[Dict[str, Any]] = []
+    for root in unique_roots:
+        if not root.is_dir():
+            continue
+        try:
+            candidates = sorted(root.rglob("*"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+        except Exception:
+            continue
+        for path in candidates:
+            if not path.is_file() or path.suffix.lower() not in extensions:
+                continue
+            try:
+                stat = path.stat()
+                resolved_file = str(path.resolve())
+                if resolved_file in seen_files:
+                    continue
+                seen_files.add(resolved_file)
+                rel = path.relative_to(root).as_posix()
+            except Exception:
+                continue
+            media_id = _urlparse.quote(rel, safe="")
+            items.append({
+                "id": rel,
+                "title": path.stem.replace("_", " ").replace("-", " ").strip() or path.name,
+                "filename": path.name,
+                "path": str(path),
+                "media_url": f"/v1/media/{media_id}",
+                "url": f"/v1/media/{media_id}",
+                "mime_type": _mimetypes.guess_type(path.name)[0] or "text/html",
+                "size_bytes": int(stat.st_size),
+                "modified_at": float(stat.st_mtime),
+            })
+
+    return {
+        "object": "hermes.news.library",
+        "status": "ok",
+        "configured": bool(raw),
+        "news_library_path": str(_Path(raw).expanduser()),
+        "library_path": str(_Path(raw).expanduser()),
+        "media_roots": [str(root) for root in unique_roots],
+        "items": items,
+        "count": len(items),
+        "description": "Feed News Hermes Hub: file HTML presenti nella cartella news/media monitorata dal server.",
+    }
+
+
+def _hermes_hub_media_roots() -> List["Path"]:''',
+            "news library payload helper",
+        )
+        changes.append("news library payload helper")
+
+    if 'raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"' not in text and 'raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"' in text:
+        text = text.replace(
+            '    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"\n'
+            '    for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):\n',
+            '    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"\n'
+            '    raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"\n'
+            '    for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):\n',
+            1,
+        )
+        text = text.replace(
+            '    roots.append(_Path(raw_video).expanduser())\n'
+            '    unique: List[_Path] = []\n',
+            '    roots.append(_Path(raw_video).expanduser())\n'
+            '    roots.append(_Path(raw_news).expanduser())\n'
+            '    unique: List[_Path] = []\n',
+            1,
+        )
+        changes.append("media roots include news library")
 
     if '"current_c": current_c,' not in text and '"current_c": float(current),' in text:
         text, _ = _replace_once(
@@ -779,11 +1111,35 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
             r'(^\s+"features": \{\n)',
             r'\1'
             r'                "video_library": True,' "\n"
+            r'                "news_library": True,' "\n"
+            r'                "media_proxy": True,' "\n"
+            r'                "media_transcode_mp4": True,' "\n"
             r'                "hub_memory": True,' "\n"
             r'                "hub_state": True,' "\n",
             "capabilities hub support features",
         )
         changes.append("capabilities hub support features")
+    else:
+        if '"media_proxy": True,' not in text:
+            text, _ = _replace_regex_once(
+                text,
+                r'(^\s+"features": \{\n)',
+                r'\1'
+                r'                "media_proxy": True,' "\n"
+                r'                "media_transcode_mp4": True,' "\n",
+                "capabilities media proxy",
+            )
+            changes.append("capabilities media proxy")
+
+        if '"news_library": True,' not in text:
+            text, _ = _replace_regex_once(
+                text,
+                r'(^\s+"features": \{\n)',
+                r'\1'
+                r'                "news_library": True,' "\n",
+                "capabilities news library",
+            )
+            changes.append("capabilities news library")
 
     if '"max_upload_mb": int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "150")),' not in text:
         text, _ = _replace_regex_once(
@@ -834,11 +1190,33 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
             r'(^\s+"health_detailed": \{"method": "GET", "path": "/health/detailed"\},\n)',
             r'\1'
             r'                "video_library": {"method": "GET", "path": "/v1/video/library"},' "\n"
+            r'                "news_library": {"method": "GET", "path": "/v1/news/library"},' "\n"
+            r'                "media_proxy": {"method": "GET", "path": "/v1/media/{media_id}"},' "\n"
             r'                "hub_memory": {"method": "GET/PATCH", "path": "/v1/hub/memory"},' "\n"
             r'                "hub_state": {"method": "GET/POST", "path": "/v1/hub/state"},' "\n",
             "capabilities hub support endpoints",
         )
         changes.append("capabilities hub support endpoints")
+    else:
+        if '"media_proxy": {"method": "GET", "path": "/v1/media/{media_id}"}' not in text:
+            text, _ = _replace_regex_once(
+                text,
+                r'(^\s+"video_library": \{"method": "GET", "path": "/v1/video/library"\},\n)',
+                r'\1'
+                r'                "media_proxy": {"method": "GET", "path": "/v1/media/{media_id}"},' "\n",
+                "capabilities media proxy endpoint",
+            )
+            changes.append("capabilities media proxy endpoint")
+
+        if '"news_library": {"method": "GET", "path": "/v1/news/library"}' not in text:
+            text, _ = _replace_regex_once(
+                text,
+                r'(^\s+"video_library": \{"method": "GET", "path": "/v1/video/library"\},\n)',
+                r'\1'
+                r'                "news_library": {"method": "GET", "path": "/v1/news/library"},' "\n",
+                "capabilities news library endpoint",
+            )
+            changes.append("capabilities news library endpoint")
 
     if "async def _handle_hub_hardware" not in text:
         text, _ = _replace_once(
@@ -907,6 +1285,60 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
             "hub support endpoint handlers",
         )
         changes.append("hub support endpoint handlers")
+
+    if "async def _handle_news_library" not in text:
+        text, _ = _replace_once(
+            text,
+            "    async def _handle_video_library(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_video_library_payload(request))\n",
+            "    async def _handle_video_library(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_video_library_payload(request))\n"
+            "\n"
+            "    async def _handle_news_library(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_news_library_payload(request))\n",
+            "news library endpoint handler",
+        )
+        changes.append("news library endpoint handler")
+
+    if "async def _handle_hub_media" not in text:
+        text, _ = _replace_once(
+            text,
+            "    async def _handle_models(self, request: \"web.Request\") -> \"web.Response\":",
+            "    async def _handle_hub_media(self, request: \"web.Request\") -> \"web.StreamResponse\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        media_id = request.match_info.get(\"media_id\", \"\")\n"
+            "        path = _hermes_hub_resolve_media_path(media_id)\n"
+            "        if path is None:\n"
+            "            return web.json_response({\"error\": \"Media not found\"}, status=404)\n"
+            "        try:\n"
+            "            if request.query.get(\"format\", \"\").lower() == \"mp4\" or request.query.get(\"transcode\", \"\").lower() in {\"1\", \"true\", \"mp4\"}:\n"
+            "                path = _hermes_hub_transcode_mp4(path)\n"
+            "                return web.FileResponse(path, headers={\"Content-Type\": \"video/mp4\", \"Cache-Control\": \"public, max-age=3600\"})\n"
+            "            import mimetypes as _mimetypes\n"
+            "            mime = _mimetypes.guess_type(path.name)[0] or \"application/octet-stream\"\n"
+            "            return web.FileResponse(path, headers={\"Content-Type\": mime, \"Cache-Control\": \"public, max-age=3600\"})\n"
+            "        except Exception as exc:\n"
+            "            try:\n"
+            "                logger.exception(\"Hermes Hub media proxy failed for %s\", path)\n"
+            "            except Exception:\n"
+            "                pass\n"
+            "            return web.json_response({\"error\": str(exc)}, status=500)\n"
+            "\n"
+            "    async def _handle_models(self, request: \"web.Request\") -> \"web.Response\":",
+            "media proxy endpoint handler",
+        )
+        changes.append("media proxy endpoint handler")
 
     if '"hermes_native": {"method": "POST", "path": "/v1/hermes/native"}' not in text:
         text, _ = _replace_regex_once(
@@ -1180,6 +1612,8 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
             r'(^\s+self\._app\.router\.add_get\("/v1/capabilities", self\._handle_capabilities\)\n)',
             r'\1'
             r'            self._app.router.add_get("/v1/video/library", self._handle_video_library)' "\n"
+            r'            self._app.router.add_get("/v1/news/library", self._handle_news_library)' "\n"
+            r'            self._app.router.add_get("/v1/media/{media_id:.*}", self._handle_hub_media)' "\n"
             r'            self._app.router.add_get("/v1/hub/memory", self._handle_hub_memory)' "\n"
             r'            self._app.router.add_patch("/v1/hub/memory", self._handle_patch_hub_memory)' "\n"
             r'            self._app.router.add_get("/v1/hub/state", self._handle_get_hub_state)' "\n"
@@ -1188,6 +1622,26 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
             "router hub support endpoints",
         )
         changes.append("router hub support endpoints")
+    else:
+        if 'add_get("/v1/media/{media_id:.*}", self._handle_hub_media)' not in text:
+            text, _ = _replace_regex_once(
+                text,
+                r'(^\s+self\._app\.router\.add_get\("/v1/video/library", self\._handle_video_library\)\n)',
+                r'\1'
+                r'            self._app.router.add_get("/v1/media/{media_id:.*}", self._handle_hub_media)' "\n",
+                "router media proxy endpoint",
+            )
+            changes.append("router media proxy endpoint")
+
+        if 'add_get("/v1/news/library", self._handle_news_library)' not in text:
+            text, _ = _replace_regex_once(
+                text,
+                r'(^\s+self\._app\.router\.add_get\("/v1/video/library", self\._handle_video_library\)\n)',
+                r'\1'
+                r'            self._app.router.add_get("/v1/news/library", self._handle_news_library)' "\n",
+                "router news library endpoint",
+            )
+            changes.append("router news library endpoint")
 
     return text, changes
 
