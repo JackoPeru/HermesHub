@@ -128,6 +128,78 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
         )
         changes.append("hermes hub api key aliases")
 
+    if "def _hermes_hub_save_upload" not in text:
+        text, _ = _replace_once(
+            text,
+            "def _multimodal_validation_error(exc: ValueError, *, param: str) -> \"web.Response\":",
+            '''def _hermes_hub_upload_root() -> "Path":
+    from pathlib import Path as _Path
+
+    root = _Path(os.environ.get("HERMES_HUB_UPLOAD_PATH", str(_Path.home() / ".hermes" / "hub_uploads"))).expanduser()
+    root.mkdir(parents=True, exist_ok=True)
+    return root.resolve()
+
+
+def _hermes_hub_safe_upload_name(filename: str, mime_type: str) -> str:
+    import re as _re
+
+    name = _re.sub(r"[^A-Za-z0-9._-]+", "_", str(filename or "attachment")).strip("._")
+    if not name:
+        name = "attachment"
+    if "." not in name:
+        ext = {
+            "image/png": ".png",
+            "image/jpeg": ".jpg",
+            "image/webp": ".webp",
+            "image/gif": ".gif",
+            "image/bmp": ".bmp",
+        }.get(str(mime_type or "").lower(), ".bin")
+        name += ext
+    return name[:160]
+
+
+def _hermes_hub_save_upload(filename: str, mime_type: str, data_url: str) -> Dict[str, Any]:
+    import base64 as _base64
+    import hashlib as _hashlib
+    import time as _time
+    import urllib.parse as _urlparse
+
+    raw = str(data_url or "")
+    if "," not in raw or not raw.startswith("data:"):
+        raise ValueError("data_url must be a data: URL")
+    meta, encoded = raw.split(",", 1)
+    detected_mime = meta[5:].split(";", 1)[0].strip() or str(mime_type or "application/octet-stream")
+    mime = str(mime_type or detected_mime or "application/octet-stream")
+    payload = _base64.b64decode(encoded, validate=False)
+    max_bytes = int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "150")) * 1024 * 1024
+    if not payload or len(payload) > max_bytes:
+        raise ValueError("upload empty or over max size")
+
+    root = _hermes_hub_upload_root()
+    safe = _hermes_hub_safe_upload_name(filename, mime)
+    digest = _hashlib.sha256(payload).hexdigest()[:16]
+    target = root / f"{int(_time.time())}-{digest}-{safe}"
+    target.write_bytes(payload)
+    rel = target.relative_to(root).as_posix()
+    media_id = _urlparse.quote(rel, safe="")
+    return {
+        "object": "hermes.media.upload",
+        "filename": safe,
+        "mime_type": mime,
+        "size_bytes": len(payload),
+        "path": str(target),
+        "server_path": str(target),
+        "media_id": rel,
+        "media_url": f"/v1/media/{media_id}",
+        "url": f"/v1/media/{media_id}",
+    }
+
+
+def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Response":''',
+            "media upload helpers",
+        )
+        changes.append("media upload helpers")
+
     if "def _collect_hardware_snapshot" not in text:
         text, _ = _replace_once(
             text,
@@ -503,9 +575,11 @@ def _hermes_hub_media_roots() -> List["Path"]:
 
     roots: List[_Path] = []
     raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"
+    raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH") or str(_Path.home() / ".hermes" / "hub_uploads")
     for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):
         if part.strip():
             roots.append(_Path(part.strip()).expanduser())
+    roots.append(_Path(raw_upload).expanduser())
     roots.append(_Path(raw_video).expanduser())
     unique: List[_Path] = []
     seen = set()
@@ -642,9 +716,11 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
 
     roots: List[_Path] = []
     raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"
+    raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH") or str(_Path.home() / ".hermes" / "hub_uploads")
     for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):
         if part.strip():
             roots.append(_Path(part.strip()).expanduser())
+    roots.append(_Path(raw_upload).expanduser())
     roots.append(_Path(raw_video).expanduser())
     unique: List[_Path] = []
     seen = set()
@@ -871,6 +947,25 @@ def _hermes_hub_media_roots() -> List["Path"]:''',
             1,
         )
         changes.append("media roots include news library")
+
+    if 'raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH")' not in text and 'raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"' in text:
+        text = text.replace(
+            '    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"\n'
+            '    for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):\n',
+            '    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"\n'
+            '    raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH") or str(_Path.home() / ".hermes" / "hub_uploads")\n'
+            '    for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):\n',
+            1,
+        )
+        text = text.replace(
+            '    roots.append(_Path(raw_video).expanduser())\n'
+            '    unique: List[_Path] = []\n',
+            '    roots.append(_Path(raw_upload).expanduser())\n'
+            '    roots.append(_Path(raw_video).expanduser())\n'
+            '    unique: List[_Path] = []\n',
+            1,
+        )
+        changes.append("media roots include upload library")
 
     if '"-f",\n        "mp4",' not in text and '"-b:a",\n        os.environ.get("HERMES_HUB_TRANSCODE_AUDIO_BITRATE", "160k"),\n        str(tmp),' in text:
         text = text.replace(
@@ -1480,6 +1575,30 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("media proxy query token auth")
 
+    if "async def _handle_hub_media_upload" not in text:
+        text, _ = _replace_once(
+            text,
+            "    async def _handle_models(self, request: \"web.Request\") -> \"web.Response\":",
+            "    async def _handle_hub_media_upload(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        try:\n"
+            "            body = await request.json()\n"
+            "            result = _hermes_hub_save_upload(\n"
+            "                str(body.get(\"filename\") or \"attachment\"),\n"
+            "                str(body.get(\"mime_type\") or body.get(\"mimeType\") or \"application/octet-stream\"),\n"
+            "                str(body.get(\"data_url\") or body.get(\"dataUrl\") or \"\"),\n"
+            "            )\n"
+            "            return web.json_response(result)\n"
+            "        except Exception as exc:\n"
+            "            return web.json_response({\"error\": str(exc)}, status=400)\n"
+            "\n"
+            "    async def _handle_models(self, request: \"web.Request\") -> \"web.Response\":",
+            "media upload endpoint handler",
+        )
+        changes.append("media upload endpoint handler")
+
     if '"hermes_native": {"method": "POST", "path": "/v1/hermes/native"}' not in text:
         text, _ = _replace_regex_once(
             text,
@@ -1753,6 +1872,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             r'\1'
             r'            self._app.router.add_get("/v1/video/library", self._handle_video_library)' "\n"
             r'            self._app.router.add_get("/v1/news/library", self._handle_news_library)' "\n"
+            r'            self._app.router.add_post("/v1/media/upload", self._handle_hub_media_upload)' "\n"
             r'            self._app.router.add_get("/v1/media/{media_id:.*}", self._handle_hub_media)' "\n"
             r'            self._app.router.add_get("/v1/hub/memory", self._handle_hub_memory)' "\n"
             r'            self._app.router.add_patch("/v1/hub/memory", self._handle_patch_hub_memory)' "\n"
@@ -1763,6 +1883,16 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("router hub support endpoints")
     else:
+        if 'add_post("/v1/media/upload", self._handle_hub_media_upload)' not in text:
+            text, _ = _replace_regex_once(
+                text,
+                r'(^\s+self\._app\.router\.add_get\("/v1/video/library", self\._handle_video_library\)\n)',
+                r'\1'
+                r'            self._app.router.add_post("/v1/media/upload", self._handle_hub_media_upload)' "\n",
+                "router media upload endpoint",
+            )
+            changes.append("router media upload endpoint")
+
         if 'add_get("/v1/media/{media_id:.*}", self._handle_hub_media)' not in text:
             text, _ = _replace_regex_once(
                 text,

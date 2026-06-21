@@ -17,6 +17,7 @@ public sealed record ChatStreamStats(
     int? ContextPercent = null);
 
 public sealed record ChatInputAttachment(string FileName, string MimeType, string DataUrl, long SizeBytes);
+internal sealed record UploadedAttachmentRef(string FileName, string MimeType, string? Path, string? MediaUrl, string? Error);
 
 public abstract record ChatStreamEvent;
 public sealed record StreamTextDelta(string Delta) : ChatStreamEvent;
@@ -71,10 +72,15 @@ public static class ChatStreamClient
         var nativeMode = HermesHubProtocol.IsNativePreferred(settings);
         attachments ??= Array.Empty<ChatInputAttachment>();
         await GatewayService.EnsureReachableGatewayAsync(settings);
+        var (promptForModel, uploadedRefs) = await BuildPromptWithAttachmentToolRefsAsync(settings, prompt, attachments, cancellationToken);
+        if (uploadedRefs > 0)
+        {
+            yield return new StreamStatus($"Allegati caricati sul gateway per tool vision: {uploadedRefs}.");
+        }
 
         if (string.Equals(mode, "Agente", StringComparison.OrdinalIgnoreCase))
         {
-            await foreach (var ev in RunDetachedAgentAsync(settings, prompt, history, conversationId, attachments, cancellationToken))
+            await foreach (var ev in RunDetachedAgentAsync(settings, promptForModel, history, conversationId, attachments, cancellationToken))
             {
                 yield return ev;
             }
@@ -91,7 +97,7 @@ public static class ChatStreamClient
             string BuildResponsesPayload(string? candidatePreviousResponseId) => JsonSerializer.Serialize(new
             {
                 model = settings.Model,
-                input = BuildResponsesInput(prompt, attachments),
+                input = BuildResponsesInput(promptForModel, attachments),
                 instructions = nativeMode ? null : HermesHubProtocol.Instructions(settings, mode),
                 store = true,
                 stream = true,
@@ -224,7 +230,7 @@ public static class ChatStreamClient
                 chatMessages.Add(new Dictionary<string, object?>
                 {
                     ["role"] = string.Equals(m.Author, "Tu", StringComparison.OrdinalIgnoreCase) ? "user" : "assistant",
-                    ["content"] = isLastUser ? BuildChatCompletionsContent(prompt, attachments) : m.Text
+                    ["content"] = isLastUser ? BuildChatCompletionsContent(promptForModel, attachments) : m.Text
                 });
             }
             var chatPayload = JsonSerializer.Serialize(new
@@ -669,6 +675,125 @@ public static class ChatStreamClient
             }
         }
         return content;
+    }
+
+    private static async Task<(string Prompt, int UploadedCount)> BuildPromptWithAttachmentToolRefsAsync(
+        AppSettings settings,
+        string prompt,
+        IReadOnlyList<ChatInputAttachment> attachments,
+        CancellationToken cancellationToken)
+    {
+        var imageAttachments = attachments
+            .Where(attachment => attachment.MimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (imageAttachments.Length == 0)
+        {
+            return (prompt, 0);
+        }
+
+        var refs = new List<UploadedAttachmentRef>();
+        foreach (var attachment in imageAttachments)
+        {
+            refs.Add(await TryUploadAttachmentAsync(settings, attachment, cancellationToken));
+        }
+
+        var uploaded = refs.Where(item => string.IsNullOrWhiteSpace(item.Error)).ToArray();
+        if (uploaded.Length == 0)
+        {
+            return (prompt, 0);
+        }
+
+        var sb = new StringBuilder(prompt.TrimEnd());
+        sb.AppendLine();
+        sb.AppendLine();
+        sb.AppendLine("Allegati immagine disponibili per tool vision/analyze sul server Hermes:");
+        foreach (var item in uploaded)
+        {
+            sb.Append("- ");
+            sb.Append(item.FileName);
+            if (!string.IsNullOrWhiteSpace(item.Path))
+            {
+                sb.Append(" | percorso server: ");
+                sb.Append(item.Path);
+            }
+            if (!string.IsNullOrWhiteSpace(item.MediaUrl))
+            {
+                sb.Append(" | URL proxy: ");
+                sb.Append(item.MediaUrl);
+            }
+            sb.AppendLine();
+        }
+        sb.AppendLine("Quando devi vedere l'immagine, passa al tool vision_analyze il percorso server o l'URL proxy sopra; non usare None.");
+        return (sb.ToString(), uploaded.Length);
+    }
+
+    private static async Task<UploadedAttachmentRef> TryUploadAttachmentAsync(
+        AppSettings settings,
+        ChatInputAttachment attachment,
+        CancellationToken cancellationToken)
+    {
+        var endpoint = $"{settings.GatewayUrl.TrimEnd('/')}/media/upload";
+        var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["filename"] = attachment.FileName,
+            ["mime_type"] = attachment.MimeType,
+            ["data_url"] = attachment.DataUrl
+        });
+
+        foreach (var token in GatewayService.BuildHermesAuthCandidates(allowCompatAuth: true))
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            };
+            request.Headers.TryAddWithoutValidation("Accept", "application/json");
+            request.Headers.TryAddWithoutValidation("User-Agent", "HermesHub-Windows");
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {token}");
+            }
+
+            try
+            {
+                using var response = await StreamClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    if (GatewayService.ShouldRetryWithBearerAuth((int)response.StatusCode, body))
+                    {
+                        continue;
+                    }
+                    return new UploadedAttachmentRef(attachment.FileName, attachment.MimeType, null, null, $"HTTP {(int)response.StatusCode}");
+                }
+
+                using var doc = JsonDocument.Parse(body);
+                var root = doc.RootElement;
+                var path = GetString(root, "path") ?? GetString(root, "server_path");
+                var mediaUrl = GetString(root, "media_url") ?? GetString(root, "url");
+                if (!string.IsNullOrWhiteSpace(mediaUrl) && mediaUrl.StartsWith("/", StringComparison.Ordinal))
+                {
+                    mediaUrl = $"{GatewayOrigin(settings.GatewayUrl)}{mediaUrl}";
+                }
+                return new UploadedAttachmentRef(
+                    GetString(root, "filename") ?? attachment.FileName,
+                    GetString(root, "mime_type") ?? attachment.MimeType,
+                    path,
+                    mediaUrl,
+                    null);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return new UploadedAttachmentRef(attachment.FileName, attachment.MimeType, null, null, ex.Message);
+            }
+        }
+
+        return new UploadedAttachmentRef(attachment.FileName, attachment.MimeType, null, null, "auth failed");
+    }
+
+    private static string GatewayOrigin(string gatewayUrl)
+    {
+        var root = gatewayUrl.TrimEnd('/');
+        return root.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? root[..^3] : root;
     }
 
     private static object BuildChatCompletionsContent(string prompt, IReadOnlyList<ChatInputAttachment> attachments)

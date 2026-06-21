@@ -285,6 +285,14 @@ data class ChatInputAttachment(
     val sizeBytes: Long
 )
 
+private data class UploadedAttachmentRef(
+    val filename: String,
+    val mimeType: String,
+    val path: String?,
+    val mediaUrl: String?,
+    val error: String?
+)
+
 fun streamChatRequest(
     settings: AppSettings,
     mode: String,
@@ -314,6 +322,11 @@ fun streamChatRequest(
     val videoMode = isVideoRequest(prompt)
     val nativeMode = isHermesNative(settings)
     val serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
+    val promptForModelResult = buildPromptWithAttachmentToolRefs(settings, prompt, attachments, apiKey)
+    val promptForModel = promptForModelResult.first
+    if (promptForModelResult.second > 0) {
+        emit(ChatStreamEvent.Status("Allegati caricati sul gateway per tool vision: ${promptForModelResult.second}."))
+    }
     val textBatch = StringBuilder()
     val thinkingBatch = StringBuilder()
     var lastBatchFlushNs = System.nanoTime()
@@ -396,7 +409,7 @@ fun streamChatRequest(
     }
 
     if (mode.equals("Agente", ignoreCase = true)) {
-        runDetachedAgent(settings, prompt, history, conversationId, attachments, apiKey).collect { emit(it) }
+        runDetachedAgent(settings, promptForModel, history, conversationId, attachments, apiKey).collect { emit(it) }
         return@flow
     }
 
@@ -407,7 +420,7 @@ fun streamChatRequest(
         fun buildResponsePayload(candidatePreviousResponseId: String?): JSONObject {
             val payload = JSONObject()
                 .put("model", settings.model)
-                .put("input", buildMultimodalInput(prompt, attachments))
+                .put("input", buildMultimodalInput(promptForModel, attachments))
                 .put("store", true)
                 .put("stream", true)
                 .put("conversation", serverConversationId ?: JSONObject.NULL)
@@ -511,14 +524,14 @@ fun streamChatRequest(
                     put(
                         JSONObject()
                             .put("role", if (msg.fromUser) "user" else "assistant")
-                            .put("content", if (isLastUser) buildChatCompletionsContent(prompt, attachments) else msg.text)
+                            .put("content", if (isLastUser) buildChatCompletionsContent(promptForModel, attachments) else msg.text)
                     )
                 }
                 if (!includedCurrentUser) {
                     put(
                         JSONObject()
                             .put("role", "user")
-                            .put("content", buildChatCompletionsContent(prompt, attachments))
+                            .put("content", buildChatCompletionsContent(promptForModel, attachments))
                     )
                 }
         })
@@ -720,6 +733,89 @@ private fun buildChatCompletionsContent(prompt: String, attachments: List<ChatIn
         }
     }
     return content
+}
+
+private fun buildPromptWithAttachmentToolRefs(
+    settings: AppSettings,
+    prompt: String,
+    attachments: List<ChatInputAttachment>,
+    apiKey: String?
+): Pair<String, Int> {
+    val images = attachments.filter { it.mimeType.startsWith("image/", ignoreCase = true) }
+    if (images.isEmpty()) return prompt to 0
+    val refs = images.map { uploadAttachmentForTool(settings, it, apiKey) }
+    val uploaded = refs.filter { it.error.isNullOrBlank() }
+    if (uploaded.isEmpty()) return prompt to 0
+    val text = buildString {
+        append(prompt.trimEnd())
+        append("\n\n")
+        append("Allegati immagine disponibili per tool vision/analyze sul server Hermes:\n")
+        uploaded.forEach { item ->
+            append("- ")
+            append(item.filename)
+            item.path?.takeIf { it.isNotBlank() }?.let {
+                append(" | percorso server: ")
+                append(it)
+            }
+            item.mediaUrl?.takeIf { it.isNotBlank() }?.let {
+                append(" | URL proxy: ")
+                append(it)
+            }
+            append('\n')
+        }
+        append("Quando devi vedere l'immagine, passa al tool vision_analyze il percorso server o l'URL proxy sopra; non usare None.")
+    }
+    return text to uploaded.size
+}
+
+private fun uploadAttachmentForTool(settings: AppSettings, attachment: ChatInputAttachment, apiKey: String?): UploadedAttachmentRef {
+    val endpoint = "${settings.gatewayUrl.trimEnd('/')}/media/upload"
+    val payload = JSONObject()
+        .put("filename", attachment.filename)
+        .put("mime_type", attachment.mimeType)
+        .put("data_url", attachment.dataUrl)
+    val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+    val authCandidates = hermesAuthCandidates(apiKey, true)
+    for (candidateUrl in plugAndPlayStreamUrlCandidates(endpoint)) {
+        for ((index, token) in authCandidates.withIndex()) {
+            val builder = Request.Builder()
+                .url(candidateUrl)
+                .header("Accept", "application/json")
+                .header("User-Agent", "HermesHub-Android")
+                .post(body)
+            token?.let { builder.header("Authorization", "Bearer $it") }
+            try {
+                streamHttpClient.newCall(builder.build()).execute().use { response ->
+                    val responseBody = response.body.string()
+                    if (!response.isSuccessful) {
+                        if (index < authCandidates.lastIndex && shouldRetryHermesWithBearerAuth(response.code, responseBody)) {
+                            return@use
+                        }
+                        return UploadedAttachmentRef(attachment.filename, attachment.mimeType, null, null, "HTTP ${response.code}")
+                    }
+                    val root = JSONObject(responseBody)
+                    val media = root.optString("media_url", root.optString("url")).takeIf { it.isNotBlank() }?.let { value ->
+                        if (value.startsWith("/")) "${gatewayOrigin(settings.gatewayUrl)}$value" else value
+                    }
+                    return UploadedAttachmentRef(
+                        filename = root.optString("filename", attachment.filename),
+                        mimeType = root.optString("mime_type", attachment.mimeType),
+                        path = root.optString("path", root.optString("server_path")).takeIf { it.isNotBlank() },
+                        mediaUrl = media,
+                        error = null
+                    )
+                }
+            } catch (ex: Exception) {
+                return UploadedAttachmentRef(attachment.filename, attachment.mimeType, null, null, ex.message ?: ex.javaClass.simpleName)
+            }
+        }
+    }
+    return UploadedAttachmentRef(attachment.filename, attachment.mimeType, null, null, "auth failed")
+}
+
+private fun gatewayOrigin(gatewayUrl: String): String {
+    val root = gatewayUrl.trimEnd('/')
+    return if (root.endsWith("/v1", ignoreCase = true)) root.dropLast(3) else root
 }
 
 private fun runDetachedAgent(

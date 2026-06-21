@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.106 Release Hermes Hub 0.6.106 markdown vision media
+v0.6.107 Release Hermes Hub 0.6.107 vision upload bridge
 ```
 
 ## Regola Linux Gateway Update
@@ -138,12 +138,23 @@ Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
 
+Hermes Hub 0.6.107 (Vision upload bridge):
+
+Release 0.6.107:
+- Hotfix vision reale: test live 2026-06-21 mostra che `hermes-agent` dietro gateway riceve token dell'immagine ma non interpreta `input_image/image_url` come vision nativa; risponde `NO_IMAGE` o `modello non supporta vision`.
+- Windows/Android: prima dello stream, le immagini allegate vengono caricate su gateway tramite nuovo endpoint `POST /v1/media/upload`.
+- Windows/Android: il prompt inviato a Hermes contiene anche `percorso server` e `URL proxy` degli allegati caricati, cosi' tool come `vision_analyze` non ricevono piu' `None` e possono leggere file/URL reali sul server.
+- Gateway Linux: nuovo endpoint protetto `POST /v1/media/upload` accetta JSON `{filename,mime_type,data_url}`, salva in `HERMES_HUB_UPLOAD_PATH` e restituisce `path`, `server_path`, `media_url`.
+- Gateway Linux: nuova cartella default upload `~/.hermes/hub_uploads`, inclusa in `HERMES_MEDIA_ROOTS`; `hermes-hub-linux.sh` la crea/esporta.
+- Mantiene input image inline per futuri backend vision nativi, ma non dipende piu' da quello per i tool vision.
+- Release bump: Windows/AdminBridge `0.6.107`, Android `versionName 0.6.107`, `versionCode 112`.
+
 Hermes Hub 0.6.106 (Markdown, vision and media playback):
 
 Release 0.6.106:
 - Windows/Android: renderer Markdown finale allineato meglio allo streaming; aggiunto supporto esplicito a tabelle pipe Markdown e liste ordinate, cosi' risposte e tabelle non vengono compattate male a fine generazione.
 - Windows/Android: fallback Chat Completions conserva contenuti vision. Se Responses non e' disponibile, le immagini vengono inviate come `image_url` standard invece di perdere gli allegati.
-- Verifica live 2026-06-21: il gateway/model Qwen vision risponde `VISION_OK` quando riceve `input_image` data URL su `/v1/responses`; quindi i problemi vision erano nel percorso client/fallback, non nella GUI del server Ubuntu.
+- Nota post-release: il test `VISION_OK` era insufficiente per validare percezione reale; retest con immagine concreta ha mostrato che il backend non interpreta `input_image/image_url` come vision nativa. Fix completo spostato in 0.6.107 con upload server path/URL per tool vision.
 - Windows: aggiunto paste-image reale da appunti nel composer e nel menu `+`; l'immagine diventa allegato data URL vision con preview.
 - Android: aggiunto `Incolla immagine` best-effort dal clipboard Android; usa URI immagine o data URL se disponibili, altrimenti chiede di usare `Allega file`.
 - Windows Video: i link `/v1/media/...` usati dal player aggiungono `hub_token` query token, perche' `MediaPlayerElement` non puo' inviare header `Authorization` su URI diretto.
