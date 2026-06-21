@@ -594,6 +594,8 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         "aac",
         "-b:a",
         os.environ.get("HERMES_HUB_TRANSCODE_AUDIO_BITRATE", "160k"),
+        "-f",
+        "mp4",
         str(tmp),
     ]
     result = _subprocess.run(cmd, capture_output=True, text=True, timeout=int(os.environ.get("HERMES_HUB_TRANSCODE_TIMEOUT", "900")))
@@ -697,6 +699,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         "-movflags", "+faststart",
         "-c:a", "aac",
         "-b:a", os.environ.get("HERMES_HUB_TRANSCODE_AUDIO_BITRATE", "160k"),
+        "-f", "mp4",
         str(tmp),
     ]
     result = _subprocess.run(cmd, capture_output=True, text=True, timeout=int(os.environ.get("HERMES_HUB_TRANSCODE_TIMEOUT", "900")))
@@ -833,6 +836,22 @@ def _hermes_hub_media_roots() -> List["Path"]:''',
             1,
         )
         changes.append("media roots include news library")
+
+    if '"-f",\n        "mp4",' not in text and '"-b:a",\n        os.environ.get("HERMES_HUB_TRANSCODE_AUDIO_BITRATE", "160k"),\n        str(tmp),' in text:
+        text = text.replace(
+            '"-b:a",\n        os.environ.get("HERMES_HUB_TRANSCODE_AUDIO_BITRATE", "160k"),\n        str(tmp),',
+            '"-b:a",\n        os.environ.get("HERMES_HUB_TRANSCODE_AUDIO_BITRATE", "160k"),\n        "-f",\n        "mp4",\n        str(tmp),',
+            1,
+        )
+        changes.append("media transcode explicit mp4 muxer")
+
+    if '"-f", "mp4",' not in text and '"-b:a", os.environ.get("HERMES_HUB_TRANSCODE_AUDIO_BITRATE", "160k"),\n        str(tmp),' in text:
+        text = text.replace(
+            '"-b:a", os.environ.get("HERMES_HUB_TRANSCODE_AUDIO_BITRATE", "160k"),\n        str(tmp),',
+            '"-b:a", os.environ.get("HERMES_HUB_TRANSCODE_AUDIO_BITRATE", "160k"),\n        "-f", "mp4",\n        str(tmp),',
+            1,
+        )
+        changes.append("media transcode explicit mp4 muxer")
 
     if '"current_c": current_c,' not in text and '"current_c": float(current),' in text:
         text, _ = _replace_once(

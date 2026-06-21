@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.104 Release Hermes Hub 0.6.104 cron, media and news HTML
+v0.6.105 Release Hermes Hub 0.6.105 media transcode hotfix
 ```
 
 ## Regola Linux Gateway Update
@@ -137,6 +137,13 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.105 (Media transcode hotfix):
+
+Release 0.6.105:
+- Hotfix Gateway Linux: transcode `GET /v1/media/{media_id}?format=mp4` passa `-f mp4` a ffmpeg quando scrive il file temporaneo `.compat.mp4.tmp`; evita errore runtime `Unable to choose an output format`.
+- Verifica live richiesta: `/v1/media/...` originale ora risponde 200; il path compat `?format=mp4` deve rispondere 200 dopo auto-update gateway 0.6.105.
+- Release bump: Windows/AdminBridge `0.6.105`, Android `versionName 0.6.105`, `versionCode 110`.
 
 Hermes Hub 0.6.104 (Cron, media proxy and News HTML):
 
