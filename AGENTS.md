@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.113 Release Hermes Hub 0.6.113 Notifiche hotfix + Windows Smart App Control
+v0.6.115 Release Hermes Hub 0.6.115 Android notifications auth recovery
 ```
 
 ## Regola Linux Gateway Update
@@ -137,6 +137,17 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.115 (Android notifications auth recovery):
+
+Release 0.6.115:
+- Android notifiche auth: `loadGatewaySecret()` ora recupera la secret anche da `LEGACY_SETTINGS_PREFS` quando manca nel prefs corrente, evitando worker notifiche autenticati con il fallback sbagliato dopo update/migrazioni.
+- Android notifiche auth: le secret salvate in formato plaintext/legacy vengono ora lette correttamente invece di essere convertite silenziosamente in `hermes-hub`; questo copre i casi in cui la cifratura locale non era riuscita ma il valore era stato comunque persistito.
+- Android release: la telemetria di debug per questa analisi resta attiva solo in `BuildConfig.DEBUG`; la build release non prova a inviare eventi di debug.
+- Asset release inclusi: Windows MSIX `NemoclawChat.Windows_0.6.115.0_x64.msix`, Android APK `HermesHub-0.6.115-android.apk`, Linux Gateway `HermesHub-0.6.115-linux-gateway.tar.gz`.
+- Release bump: Windows/AdminBridge `0.6.115`, Android `versionName 0.6.115`, `versionCode 120`.
+
+Hermes Hub 0.6.114 (Notifiche reliability + News/Video fullscreen):
 
 Hermes Hub 0.6.113 (Notifiche hotfix + Windows Smart App Control):
 
@@ -1205,7 +1216,7 @@ Windows:
 
 - Progetto: `src/NemoclawChat.Windows`
 - Stack: WinUI 3, C#, .NET 8, Windows App SDK self-contained.
-- Versione app: `0.6.113`.
+- Versione app: `0.6.115`.
 - Brand/UI: `Hermes Hub`, logo Hermes da `logo hermeshub.png` applicato agli asset Windows e alla UI principale, dark stile ChatGPT, sidebar, composer largo, menu `+`, settings reali.
 - UI design system applicato: superfici elevation-aware `#0F1115/#14171D/#1A1E26/#232831`, accent Hermes amber `#F5A524`, hover `#FFC857`, testo muted `#A2ADBF`, bubble utente amber scuro `#7A3E00`, card/composer radius premium e bordi soft.
 - Azioni locali: file picker Windows, screen clip, camera URI, nota vocale prompt.
@@ -1244,7 +1255,7 @@ Android:
 
 - Progetto: `src/NemoclawChat.Android/app`
 - Stack: Kotlin, Jetpack Compose, Gradle.
-- Versione app: `0.6.113`, versionCode `118`.
+- Versione app: `0.6.115`, versionCode `120`.
 - Brand/UI: `Hermes Hub`, logo Hermes da `logo hermeshub.png` applicato a launcher + UI, bottom nav primaria ridotta a Chat/Runs/Voce/Video/Profilo, composer mobile compatto stile ChatGPT Android, menu `+` con Material icons, profilo locale con scorciatoie alle aree secondarie.
 - UI design system applicato: superfici elevation-aware `#0F1115/#14171D/#1A1E26/#232831`, accent Hermes amber `#F5A524`, testo muted `#A2ADBF`, bubble utente amber scuro `#7A3E00`, empty state con wash amber e logo grande.
 - Azioni locali: file picker Android, camera intent e prompt helper nel menu `+`; dettatura/mic placeholder rimossi finche' non c'e' integrazione reale.

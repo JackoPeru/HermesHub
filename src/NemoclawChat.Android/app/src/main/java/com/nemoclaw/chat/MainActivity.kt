@@ -219,6 +219,7 @@ import java.net.URI
 import java.net.URLEncoder
 import java.net.URL
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -6285,6 +6286,16 @@ private suspend fun httpGet(url: String, apiKey: String? = null): String = withC
 private suspend fun httpGetResponse(url: String, apiKey: String? = null): Pair<Int, String> = withContext(Dispatchers.IO) {
     var last: Pair<Int, String>? = null
     for (candidateUrl in plugAndPlayUrlCandidates(url)) {
+        // #region debug-point D:http-notifications-start
+        if (candidateUrl.contains("/v1/hub/notifications")) {
+            debugReport(
+                hypothesisId = "D",
+                location = "MainActivity.kt:httpGetResponse:start",
+                msg = "[DEBUG] httpGetResponse notifications request starting",
+                data = mapOf("url" to candidateUrl, "apiKeyFingerprint" to debugTokenFingerprint(apiKey))
+            )
+        }
+        // #endregion
         for (token in hermesAuthCandidates(apiKey)) {
             val response = try {
                 executeHttpGet(candidateUrl, token)
@@ -6293,6 +6304,21 @@ private suspend fun httpGetResponse(url: String, apiKey: String? = null): Pair<I
                 continue
             }
             last = response
+            // #region debug-point D:http-notifications-result
+            if (candidateUrl.contains("/v1/hub/notifications")) {
+                debugReport(
+                    hypothesisId = "D",
+                    location = "MainActivity.kt:httpGetResponse:result",
+                    msg = "[DEBUG] httpGetResponse notifications response received",
+                    data = mapOf(
+                        "url" to candidateUrl,
+                        "tokenFingerprint" to debugTokenFingerprint(token),
+                        "statusCode" to response.first,
+                        "bodySnippet" to response.second.take(160)
+                    )
+                )
+            }
+            // #endregion
             if (!shouldRetryHermesWithBearerAuth(response.first, response.second)) {
                 if (response.first != 0) return@withContext response
             }
@@ -7814,14 +7840,44 @@ private fun saveProjects(context: Context, projects: List<ProjectRecord>) {
 }
 
 private fun loadGatewaySecret(context: Context): String? {
-    val stored = context.getSharedPreferences(CURRENT_SETTINGS_PREFS, Context.MODE_PRIVATE)
-        .getString(GATEWAY_SECRET_PREF_KEY, null)
-        ?: return HERMES_FALLBACK_API_KEY
+    val prefs = migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
+    val legacyPrefs = context.applicationContext.getSharedPreferences(LEGACY_SETTINGS_PREFS, Context.MODE_PRIVATE)
+    val stored = prefs.getString(GATEWAY_SECRET_PREF_KEY, null)
+        ?: legacyPrefs.getString(GATEWAY_SECRET_PREF_KEY, null)?.also { legacyValue ->
+            prefs.edit().putString(GATEWAY_SECRET_PREF_KEY, legacyValue).apply()
+            // #region debug-point A:load-secret-legacy-migrated
+            debugReport(
+                hypothesisId = "A",
+                location = "MainActivity.kt:loadGatewaySecret:legacy-migrated",
+                msg = "[DEBUG] loadGatewaySecret migrated value from legacy prefs",
+                data = mapOf("storedLength" to legacyValue.length)
+            )
+            // #endregion
+        }
+        ?: return HERMES_FALLBACK_API_KEY.also {
+            // #region debug-point A:load-secret-missing
+            debugReport(
+                hypothesisId = "A",
+                location = "MainActivity.kt:loadGatewaySecret:missing",
+                msg = "[DEBUG] loadGatewaySecret no stored ciphertext, using fallback",
+                data = mapOf("source" to "missing", "returnedFingerprint" to debugTokenFingerprint(it))
+            )
+            // #endregion
+        }
 
     return runCatching {
         val parts = stored.split(':', limit = 2)
         if (parts.size != 2) {
-            return@runCatching HERMES_FALLBACK_API_KEY
+            val legacyPlaintext = stored.trim().ifBlank { HERMES_FALLBACK_API_KEY }
+            // #region debug-point A:load-secret-plain
+            debugReport(
+                hypothesisId = "A",
+                location = "MainActivity.kt:loadGatewaySecret:plain",
+                msg = "[DEBUG] loadGatewaySecret plaintext/legacy format detected",
+                data = mapOf("storedLength" to stored.length, "returnedFingerprint" to debugTokenFingerprint(legacyPlaintext))
+            )
+            // #endregion
+            return@runCatching legacyPlaintext
         }
 
         val iv = Base64.decode(parts[0], Base64.NO_WRAP)
@@ -7829,8 +7885,32 @@ private fun loadGatewaySecret(context: Context): String? {
         val cipher = Cipher.getInstance(GATEWAY_SECRET_TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, getOrCreateGatewaySecretKey(), GCMParameterSpec(128, iv))
         cipher.updateAAD(GATEWAY_SECRET_AAD.toByteArray(Charsets.UTF_8))
-        String(cipher.doFinal(encrypted), Charsets.UTF_8).trim().ifBlank { HERMES_FALLBACK_API_KEY }
-    }.getOrDefault(HERMES_FALLBACK_API_KEY)
+        String(cipher.doFinal(encrypted), Charsets.UTF_8).trim().ifBlank { HERMES_FALLBACK_API_KEY }.also {
+            // #region debug-point A:load-secret-ok
+            debugReport(
+                hypothesisId = "A",
+                location = "MainActivity.kt:loadGatewaySecret:ok",
+                msg = "[DEBUG] loadGatewaySecret decrypted successfully",
+                data = mapOf("storedLength" to stored.length, "returnedFingerprint" to debugTokenFingerprint(it))
+            )
+            // #endregion
+        }
+    }.getOrElse { ex ->
+        // #region debug-point A:load-secret-failed
+        debugReport(
+            hypothesisId = "A",
+            location = "MainActivity.kt:loadGatewaySecret:failed",
+            msg = "[DEBUG] loadGatewaySecret decrypt failed, using fallback",
+            data = mapOf(
+                "error" to (ex.message ?: ex.javaClass.simpleName),
+                "errorType" to ex.javaClass.simpleName,
+                "storedLength" to stored.length,
+                "returnedFingerprint" to debugTokenFingerprint(HERMES_FALLBACK_API_KEY)
+            )
+        )
+        // #endregion
+        HERMES_FALLBACK_API_KEY
+    }
 }
 
 private fun saveGatewaySecret(context: Context, secret: String?) {
@@ -7843,9 +7923,23 @@ private fun saveGatewaySecret(context: Context, secret: String?) {
         "${Base64.encodeToString(cipher.iv, Base64.NO_WRAP)}:${Base64.encodeToString(encrypted, Base64.NO_WRAP)}"
     }.getOrDefault(normalized)
 
-    context.getSharedPreferences(CURRENT_SETTINGS_PREFS, Context.MODE_PRIVATE)
+    // #region debug-point B:save-secret
+    debugReport(
+        hypothesisId = "B",
+        location = "MainActivity.kt:saveGatewaySecret",
+        msg = "[DEBUG] saveGatewaySecret persisted value",
+        data = mapOf(
+            "inputFingerprint" to debugTokenFingerprint(normalized),
+            "encodedLength" to encoded.length,
+            "encryptedFormat" to encoded.contains(':')
+        )
+    )
+    // #endregion
+
+    migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
         .edit()
         .putString(GATEWAY_SECRET_PREF_KEY, encoded)
+        .remove("gatewaySecret")
         .apply()
 }
 
@@ -8703,7 +8797,27 @@ class HermesNotificationWorker(context: Context, params: WorkerParameters) : Cor
             ensureHermesNotificationChannel(applicationContext)
             val settings = loadSettings(applicationContext)
             val apiKey = loadGatewaySecret(applicationContext)
+            // #region debug-point C:worker-start
+            debugReport(
+                hypothesisId = "C",
+                location = "MainActivity.kt:HermesNotificationWorker:start",
+                msg = "[DEBUG] HermesNotificationWorker starting poll",
+                data = mapOf(
+                    "gatewayUrl" to settings.gatewayUrl,
+                    "apiKeyFingerprint" to debugTokenFingerprint(apiKey),
+                    "hasPermission" to (Build.VERSION.SDK_INT < 33 || applicationContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+                )
+            )
+            // #endregion
             val result = loadHubNotifications(settings, apiKey, unreadOnly = true)
+            // #region debug-point C:worker-result
+            debugReport(
+                hypothesisId = "C",
+                location = "MainActivity.kt:HermesNotificationWorker:result",
+                msg = "[DEBUG] HermesNotificationWorker poll completed",
+                data = mapOf("items" to result.first.size, "status" to result.second)
+            )
+            // #endregion
             val prefs = applicationContext.getSharedPreferences(CURRENT_SETTINGS_PREFS, Context.MODE_PRIVATE)
             val seen = prefs.getStringSet("seenHubNotifications", emptySet())?.toMutableSet() ?: mutableSetOf()
             var changed = false
@@ -8829,6 +8943,52 @@ private const val CONTEXT_SYSTEM_OVERHEAD_TOKENS = 900
 private const val MESSAGE_CONTEXT_OVERHEAD_TOKENS = 6
 private const val SETTINGS_FIELD_MAX_LENGTH = 2048
 private val gatewaySecretKeyLock = Any()
+
+private const val DEBUG_SERVER_URL = "http://192.168.1.6:7777/event"
+private const val DEBUG_SESSION_ID = "android-notifications-auth"
+
+private fun debugTokenFingerprint(value: String?): String {
+    if (value.isNullOrBlank()) return "blank"
+    val bytes = MessageDigest.getInstance("SHA-256").digest(value.trim().toByteArray(Charsets.UTF_8))
+    return bytes.take(6).joinToString("") { "%02x".format(it) }
+}
+
+private fun debugReport(
+    hypothesisId: String,
+    location: String,
+    msg: String,
+    data: Map<String, Any?> = emptyMap(),
+    runId: String = "pre-fix"
+) {
+    if (!BuildConfig.DEBUG) return
+    runCatching {
+        val body = JSONObject()
+            .put("sessionId", DEBUG_SESSION_ID)
+            .put("runId", runId)
+            .put("hypothesisId", hypothesisId)
+            .put("location", location)
+            .put("msg", msg)
+            .put("ts", System.currentTimeMillis())
+            .put("data", JSONObject().apply {
+                data.forEach { (key, value) -> put(key, value) }
+            })
+            .toString()
+        Thread {
+            runCatching {
+                val connection = (URL(DEBUG_SERVER_URL).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    connectTimeout = 1500
+                    readTimeout = 1500
+                    setRequestProperty("Content-Type", "application/json")
+                }
+                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                connection.inputStream.use { it.readBytes() }
+                connection.disconnect()
+            }
+        }.start()
+    }
+}
 
 private object AppDefaults {
     const val gatewayUrl = "http://hermes:8642/v1"
