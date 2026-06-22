@@ -33,7 +33,7 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.115 Release Hermes Hub 0.6.115 Android notifications auth recovery
+v0.6.117 Release Hermes Hub 0.6.117 Windows updater senza fallback App Installer UI
 ```
 
 ## Regola Linux Gateway Update
@@ -137,6 +137,24 @@ Aggiornare questo file ogni volta che cambia qualcosa di importante nel progetto
 Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
+
+Hermes Hub 0.6.117 (Windows updater senza fallback App Installer UI):
+
+Release 0.6.117:
+- Windows updater: rimosso il fallback `Start-Process $packagePath` quando `Add-AppxPackage` fallisce. Invece di aprire l'UI di App Installer che puo' essere bloccata da Smart App Control, l'installer scrive il motivo nel log `%LOCALAPPDATA%\\ChatClaw\\updates\\install-msix-update.log` e termina pulitamente.
+- Windows updater: la pagina About mostra anche il path del log installazione MSIX oltre alla cartella update, cosi' l'errore residuo e' leggibile senza finestre di blocco del sistema.
+- Asset release inclusi: Windows MSIX `NemoclawChat.Windows_0.6.117.0_x64.msix`, Android APK `HermesHub-0.6.117-android.apk`, Linux Gateway `HermesHub-0.6.117-linux-gateway.tar.gz`.
+- Release bump: Windows/AdminBridge `0.6.117`, Android `versionName 0.6.117`, `versionCode 122`.
+
+Hermes Hub 0.6.116 (Stop stream reattivo + gateway Windows port-aware):
+
+Release 0.6.116:
+- Windows chat: il bottone composer diventa realmente `Invia/Stop` durante lo stream invece di restare disabilitato; al click rilascia subito la UI locale, cancella lo stream client e, in modalita Agente, invia anche `POST /v1/runs/{run_id}/stop` al gateway.
+- Android chat/agente: lo stop invia anche la richiesta `POST /v1/runs/{run_id}/stop` quando esiste una run server-side, oltre a cancellare immediatamente il job locale.
+- Windows gateway discovery: il failover non e' piu' fissato solo ai candidate hardcoded `:8642/v1`, ma preserva host/porta/path correnti e prova candidate plug-and-play port-aware prima del fallback standard.
+- Windows notifiche/chat: le notifiche ora usano la stessa discovery raggiungibile del resto dell'app e la chat eredita il comportamento port-aware quando il gateway configurato richiede una porta non standard o un path gia' personalizzato.
+- Asset release inclusi: Windows MSIX `NemoclawChat.Windows_0.6.116.0_x64.msix`, Android APK `HermesHub-0.6.116-android.apk`, Linux Gateway `HermesHub-0.6.116-linux-gateway.tar.gz`.
+- Release bump: Windows/AdminBridge `0.6.116`, Android `versionName 0.6.116`, `versionCode 121`.
 
 Hermes Hub 0.6.115 (Android notifications auth recovery):
 
@@ -1216,7 +1234,7 @@ Windows:
 
 - Progetto: `src/NemoclawChat.Windows`
 - Stack: WinUI 3, C#, .NET 8, Windows App SDK self-contained.
-- Versione app: `0.6.115`.
+- Versione app: `0.6.117`.
 - Brand/UI: `Hermes Hub`, logo Hermes da `logo hermeshub.png` applicato agli asset Windows e alla UI principale, dark stile ChatGPT, sidebar, composer largo, menu `+`, settings reali.
 - UI design system applicato: superfici elevation-aware `#0F1115/#14171D/#1A1E26/#232831`, accent Hermes amber `#F5A524`, hover `#FFC857`, testo muted `#A2ADBF`, bubble utente amber scuro `#7A3E00`, card/composer radius premium e bordi soft.
 - Azioni locali: file picker Windows, screen clip, camera URI, nota vocale prompt.
@@ -1255,7 +1273,7 @@ Android:
 
 - Progetto: `src/NemoclawChat.Android/app`
 - Stack: Kotlin, Jetpack Compose, Gradle.
-- Versione app: `0.6.115`, versionCode `120`.
+- Versione app: `0.6.117`, versionCode `122`.
 - Brand/UI: `Hermes Hub`, logo Hermes da `logo hermeshub.png` applicato a launcher + UI, bottom nav primaria ridotta a Chat/Runs/Voce/Video/Profilo, composer mobile compatto stile ChatGPT Android, menu `+` con Material icons, profilo locale con scorciatoie alle aree secondarie.
 - UI design system applicato: superfici elevation-aware `#0F1115/#14171D/#1A1E26/#232831`, accent Hermes amber `#F5A524`, testo muted `#A2ADBF`, bubble utente amber scuro `#7A3E00`, empty state con wash amber e logo grande.
 - Azioni locali: file picker Android, camera intent e prompt helper nel menu `+`; dettatura/mic placeholder rimossi finche' non c'e' integrazione reale.

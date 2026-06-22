@@ -43,7 +43,8 @@ public sealed partial class AboutPage : Page
         UpdateDetailText.Text =
             $"Release: {_lastUpdateResult.ReleaseUrl}\n" +
             $"Asset: {_lastUpdateResult.AssetName ?? "nessun asset selezionato"}\n" +
-            $"Cartella update: %LOCALAPPDATA%\\ChatClaw\\updates";
+            $"Cartella update: {AppUpdateService.GetUpdatesDirectoryDisplayPath()}\n" +
+            $"Log installazione MSIX: {AppUpdateService.GetUpdateInstallLogDisplayPath()}";
         if (!string.IsNullOrWhiteSpace(_lastUpdateResult.ReleaseSummary))
         {
             UpdateSummaryText.Text = $"Changelog:\n{_lastUpdateResult.ReleaseSummary}";
@@ -129,7 +130,7 @@ public sealed partial class AboutPage : Page
             return;
         }
 
-        UpdateStatusText.Text = "Update avviato. Hermes Hub si chiude e si riapre dopo l'installazione.";
+        UpdateStatusText.Text = "Update avviato. Hermes Hub si chiude e si riapre dopo l'installazione. Se fallisce, controlla il log MSIX nella cartella update.";
         await Task.Delay(900);
         Application.Current.Exit();
     }

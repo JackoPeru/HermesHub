@@ -365,9 +365,8 @@ public static class AppUpdateService
                 "    }`n" +
                 "  }`n" +
                 "  if (-not $installed) {`n" +
-                "    Write-Log \"Falling back to App Installer UI\"`n" +
-                "    Start-Process -FilePath $packagePath`n" +
-                "    exit 2`n" +
+                "    Write-Log \"Installazione MSIX fallita. Nessun fallback verso App Installer UI per evitare blocchi Smart App Control.\"`n" +
+                "    exit 3`n" +
                 "  }`n" +
                 relaunch +
                 "`n} catch {`n" +
@@ -402,6 +401,16 @@ public static class AppUpdateService
         {
             return false;
         }
+    }
+
+    public static string GetUpdatesDirectoryDisplayPath()
+    {
+        return "%LOCALAPPDATA%\\ChatClaw\\updates";
+    }
+
+    public static string GetUpdateInstallLogDisplayPath()
+    {
+        return "%LOCALAPPDATA%\\ChatClaw\\updates\\install-msix-update.log";
     }
 
     private static string? GetCurrentAppUserModelId()
