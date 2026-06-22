@@ -149,16 +149,16 @@ public sealed record HardwareSnapshot(
 public static class GatewayService
 {
     internal const string HermesFallbackApiKey = GatewayCredentialStore.DefaultApiKey;
-    private static readonly string[] PlugAndPlayGatewayUrls =
+    private static readonly string[] PlugAndPlayGatewayHosts =
     [
-        "http://hermes:8642/v1",
-        "http://100.94.223.14:8642/v1",
-        "http://hermes.local:8642/v1",
-        "http://hermes-hub:8642/v1",
-        "http://hermeshub:8642/v1",
-        "http://home-server:8642/v1",
-        "http://server:8642/v1",
-        "http://100.105.46.6:8642/v1"
+        "hermes",
+        "100.94.223.14",
+        "hermes.local",
+        "hermes-hub",
+        "hermeshub",
+        "home-server",
+        "server",
+        "100.105.46.6"
     ];
 
     private static readonly HttpClientHandler HttpHandler = new()
@@ -1032,6 +1032,7 @@ public static class GatewayService
     {
         try
         {
+            await EnsureReachableGatewayAsync(settings);
             var path = unreadOnly ? "/v1/hub/notifications?unread=1" : "/v1/hub/notifications";
             var response = await SendBufferedAsync(token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, path), token));
             if (!response.IsSuccessStatusCode)
@@ -1074,11 +1075,34 @@ public static class GatewayService
 
     public static async Task<string> MarkHubNotificationReadAsync(AppSettings settings, string id)
     {
+        await EnsureReachableGatewayAsync(settings);
         var payload = JsonSerializer.Serialize(new { read = true });
         var response = await SendBufferedAsync(token => BuildJsonRequest(HttpMethod.Patch, ResolveHermesUri(settings, $"/v1/hub/notifications/{Uri.EscapeDataString(id)}"), payload, token));
         return response.IsSuccessStatusCode
             ? "Notifica segnata come letta."
             : $"Notifica non aggiornata: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}";
+    }
+
+    public static async Task<string> TryStopRunAsync(AppSettings settings, string runId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(runId))
+        {
+            return "Run Hermes assente.";
+        }
+
+        await EnsureReachableGatewayAsync(settings);
+        var payload = JsonSerializer.Serialize(new { reason = "user_cancelled" });
+        var response = await SendBufferedAsync(
+            token => BuildJsonRequest(
+                HttpMethod.Post,
+                ResolveHermesUri(settings, $"/v1/runs/{Uri.EscapeDataString(runId)}/stop"),
+                payload,
+                token),
+            cancellationToken);
+
+        return response.IsSuccessStatusCode || response.StatusCode == 404
+            ? "Run Hermes arrestata."
+            : $"Stop run fallito: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}";
     }
 
     public static async Task<IReadOnlyList<DiagnosticCheckResult>> RunDiagnosticsAsync(AppSettings settings)
@@ -1203,7 +1227,7 @@ public static class GatewayService
             return;
         }
 
-        foreach (var candidate in PlugAndPlayGatewayUrls)
+        foreach (var candidate in BuildPlugAndPlayGatewayUrls(current))
         {
             if (string.Equals(candidate, current, StringComparison.OrdinalIgnoreCase))
             {
@@ -1221,6 +1245,53 @@ public static class GatewayService
             settings.AccessMode = "Tailscale/LAN plug-and-play";
             AppSettingsStore.Save(settings);
             return;
+        }
+    }
+
+    private static IEnumerable<string> BuildPlugAndPlayGatewayUrls(string current)
+    {
+        Uri? currentUri = null;
+        if (Uri.TryCreate(current, UriKind.Absolute, out var parsed))
+        {
+            currentUri = parsed;
+        }
+        else
+        {
+            Uri.TryCreate("http://hermes:8642/v1", UriKind.Absolute, out currentUri);
+        }
+
+        var scheme = currentUri?.Scheme?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(scheme))
+        {
+            scheme = "http";
+        }
+        var port = currentUri?.IsDefaultPort == false ? currentUri.Port : 8642;
+        var path = currentUri?.AbsolutePath?.TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(path) || path == "/")
+        {
+            path = "/v1";
+        }
+
+        var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var host in PlugAndPlayGatewayHosts)
+        {
+            var candidate = $"{scheme}://{host}:{port}{path}";
+            if (yielded.Add(candidate))
+            {
+                yield return candidate;
+            }
+        }
+
+        if (port != 8642 || !string.Equals(path, "/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var host in PlugAndPlayGatewayHosts)
+            {
+                var candidate = $"http://{host}:8642/v1";
+                if (yielded.Add(candidate))
+                {
+                    yield return candidate;
+                }
+            }
         }
     }
 

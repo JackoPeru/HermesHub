@@ -27,6 +27,7 @@ public sealed record StreamToolCallArguments(string Id, string Delta) : ChatStre
 public sealed record StreamToolCallEnd(string Id) : ChatStreamEvent;
 public sealed record StreamToolResult(string? Id, string? Name, string Output) : ChatStreamEvent;
 public sealed record StreamResponseId(string Id) : ChatStreamEvent;
+public sealed record StreamRunId(string Id) : ChatStreamEvent;
 public sealed record StreamVisualBlocks(IReadOnlyList<VisualBlockRecord> Blocks, int Version) : ChatStreamEvent;
 public sealed record StreamRawHermesEvent(string Name, string Json) : ChatStreamEvent;
 public sealed record StreamDone(ChatStreamStats Stats, string AccumulatedText, string AccumulatedThinking) : ChatStreamEvent;
@@ -557,6 +558,7 @@ public static class ChatStreamClient
             yield break;
         }
 
+        yield return new StreamRunId(runId);
         yield return new StreamStatus($"Run server-side avviata: {runId}. Se chiudi l'app, Hermes continua sul server.");
 
         string? lastOutput = null;

@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -43,6 +44,8 @@ public sealed partial class HomePage : Page
     private int? _lastServerContextPercent;
     private string? _currentComposerRunId;
     private StreamingBubble? _currentStreamingBubble;
+    private CancellationTokenSource? _activeStreamCts;
+    private string? _activeGatewayRunId;
     private readonly List<ChatInputAttachment> _pendingAttachments = [];
 
     private Popup? _slashPopup;
@@ -53,6 +56,7 @@ public sealed partial class HomePage : Page
     {
         InitializeComponent();
         _slashCommands = BuildSlashCommands();
+        UpdateSendButtonVisual(isStreaming: false);
         PromptBox.TextChanged += PromptBox_TextChanged;
         Loaded += HomePage_Loaded;
         Unloaded += HomePage_Unloaded;
@@ -62,6 +66,10 @@ public sealed partial class HomePage : Page
     {
         try
         {
+            _activeStreamCts?.Cancel();
+            _activeStreamCts?.Dispose();
+            _activeStreamCts = null;
+            _activeGatewayRunId = null;
             _currentStreamingBubble?.StopShimmer();
             _currentStreamingBubble = null;
             PromptBox.TextChanged -= PromptBox_TextChanged;
@@ -107,6 +115,12 @@ public sealed partial class HomePage : Page
 
     private async void Send_Click(object sender, RoutedEventArgs e)
     {
+        if (_currentComposerRunId is not null)
+        {
+            await RequestStopCurrentStreamAsync();
+            return;
+        }
+
         await SendCurrentPromptAsync();
     }
 
@@ -158,6 +172,12 @@ public sealed partial class HomePage : Page
         if (e.Key == VirtualKey.Enter)
         {
             e.Handled = true;
+            if (_currentComposerRunId is not null)
+            {
+                await RequestStopCurrentStreamAsync();
+                return;
+            }
+
             await SendCurrentPromptAsync();
         }
     }
@@ -340,19 +360,69 @@ public sealed partial class HomePage : Page
         }
 
         _currentComposerRunId = null;
-        SendButton.IsEnabled = true;
+        UpdateSendButtonVisual(isStreaming: false);
     }
 
     private void ReleaseCurrentComposerRun()
     {
         _currentComposerRunId = null;
-        SendButton.IsEnabled = true;
+        UpdateSendButtonVisual(isStreaming: false);
+        _activeGatewayRunId = null;
         if (ReferenceEquals(_currentStreamingBubble, null))
         {
             return;
         }
 
         _currentStreamingBubble = null;
+    }
+
+    private void UpdateSendButtonVisual(bool isStreaming)
+    {
+        SendButton.IsEnabled = true;
+        SendButton.Background = isStreaming
+            ? new SolidColorBrush(ColorHelper.FromArgb(255, 166, 37, 37))
+            : new SolidColorBrush(Colors.White);
+        SendButton.Foreground = isStreaming
+            ? new SolidColorBrush(Colors.White)
+            : new SolidColorBrush(ColorHelper.FromArgb(255, 17, 17, 17));
+        AutomationProperties.SetName(SendButton, isStreaming ? "Interrompi risposta" : "Invia messaggio");
+        if (SendButton.Content is FontIcon icon)
+        {
+            icon.Glyph = isStreaming ? "\uE71A" : "\uE724";
+        }
+    }
+
+    private async Task RequestStopCurrentStreamAsync()
+    {
+        var cts = _activeStreamCts;
+        var runId = _activeGatewayRunId;
+        _activeStreamCts = null;
+        _activeGatewayRunId = null;
+
+        _currentStreamingBubble?.SetStatus("Interruzione richiesta. Chiudo stream Hermes...");
+        _currentStreamingBubble?.StopShimmer();
+        ReleaseCurrentComposerRun();
+
+        if (cts is not null)
+        {
+            cts.Cancel();
+            cts.Dispose();
+        }
+
+        if (string.IsNullOrWhiteSpace(runId))
+        {
+            return;
+        }
+
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await GatewayService.TryStopRunAsync(AppSettingsStore.Load(), runId, timeout.Token);
+        }
+        catch
+        {
+            // Stream stop locale resta prioritario; se il gateway non conferma in tempo non bloccare la UI.
+        }
     }
 
     private async Task SendCurrentPromptAsync()
@@ -366,7 +436,7 @@ public sealed partial class HomePage : Page
         }
         var composerRunId = Guid.NewGuid().ToString("N");
         _currentComposerRunId = composerRunId;
-        SendButton.IsEnabled = false;
+        UpdateSendButtonVisual(isStreaming: true);
 
         var prompt = PromptBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(prompt) && _pendingAttachments.Count == 0)
@@ -434,6 +504,8 @@ public sealed partial class HomePage : Page
             double? uiFirstTextMs = null;
             double? uiLastTextMs = null;
             streamCts = new CancellationTokenSource();
+            _activeStreamCts = streamCts;
+            _activeGatewayRunId = null;
             var streamEvents = StartStreamProducer(settings, sendMode, prompt, localHistory.ToList(), conversationId, previousResponseId, attachments, streamCts.Token);
 
             void AddRawEventIfEnabled(string name, string json)
@@ -481,6 +553,10 @@ public sealed partial class HomePage : Page
                         break;
                     case StreamResponseId rid:
                         finalResponseId = rid.Id;
+                        break;
+                    case StreamRunId run:
+                        _activeGatewayRunId = run.Id;
+                        bubble.SetStatus($"Run Hermes attiva: {run.Id}");
                         break;
                     case StreamVisualBlocks vb:
                         finalBlocks = vb.Blocks;
@@ -644,6 +720,11 @@ public sealed partial class HomePage : Page
         }
         finally
         {
+            if (ReferenceEquals(_activeStreamCts, streamCts))
+            {
+                _activeStreamCts = null;
+            }
+            _activeGatewayRunId = null;
             streamCts?.Cancel();
             streamCts?.Dispose();
             bubble?.StopShimmer();

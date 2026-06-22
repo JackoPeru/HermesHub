@@ -5,6 +5,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -130,6 +131,7 @@ data class StreamingState(
     val visualBlocks: List<VisualBlock> = emptyList(),
     val visualBlocksVersion: Int? = null,
     val responseId: String? = null,
+    val activeRunId: String? = null,
     val stats: ChatStreamStats? = null,
     val status: String = "Invio prompt a Hermes...",
     val promptProgressPercent: Int? = null,
@@ -184,6 +186,7 @@ data class StreamingState(
             toolCalls = upsertToolResult(toolCalls, event)
         ).withActivity("Risultato tool ricevuto.")
         is ChatStreamEvent.ResponseId -> copy(responseId = event.id).withActivity("Response id: ${event.id}")
+        is ChatStreamEvent.RunId -> copy(activeRunId = event.id).withActivity("Run id: ${event.id}")
         is ChatStreamEvent.VisualBlocks -> copy(
             visualBlocks = mergeVisualBlocks(visualBlocks, event.blocks),
             visualBlocksVersion = event.version
@@ -268,6 +271,7 @@ sealed class ChatStreamEvent {
     data class ToolCallEnd(val id: String) : ChatStreamEvent()
     data class ToolResult(val id: String?, val name: String?, val output: String) : ChatStreamEvent()
     data class ResponseId(val id: String) : ChatStreamEvent()
+    data class RunId(val id: String) : ChatStreamEvent()
     data class VisualBlocks(val blocks: List<VisualBlock>, val version: Int) : ChatStreamEvent()
     data class Status(val message: String) : ChatStreamEvent()
     data class RawHermesEvent(val name: String, val json: String) : ChatStreamEvent()
@@ -858,6 +862,7 @@ private fun runDetachedAgent(
         emit(ChatStreamEvent.Error("Hermes Runs: run_id assente nella risposta."))
         return@flow
     }
+    emit(ChatStreamEvent.RunId(runId))
     emit(ChatStreamEvent.Status("Run server-side avviata: $runId. Se chiudi l'app, Hermes continua sul server."))
 
     var lastStatus = ""
@@ -936,6 +941,13 @@ private fun executeRunJsonRequest(url: String, payload: JSONObject?, apiKey: Str
         }
     }
     return last ?: (0 to "")
+}
+
+internal suspend fun stopHermesRun(settings: AppSettings, runId: String, apiKey: String?): Pair<Int, String> = withContext(Dispatchers.IO) {
+    if (runId.isBlank()) {
+        return@withContext 0 to "run_id assente"
+    }
+    executeRunJsonRequest("${settings.gatewayUrl.trimEnd('/')}/runs/$runId/stop", JSONObject().put("reason", "user_cancelled"), apiKey, "POST")
 }
 
 private fun plugAndPlayStreamUrlCandidates(url: String): List<String> {

@@ -1420,10 +1420,18 @@ private fun ChatScreen(
                 }
             },
             onStop = {
+                val activeRunId = state.streamingState?.activeRunId
                 state.streamingState = state.streamingState?.copy(
                     status = "Interruzione richiesta. Chiudo stream Hermes...",
                     error = null
                 )
+                if (!activeRunId.isNullOrBlank()) {
+                    HermesStreamRuntime.scope.launch {
+                        runCatching {
+                            stopHermesRun(settings, activeRunId, loadGatewaySecret(context))
+                        }
+                    }
+                }
                 state.activeStreamJob?.cancel()
             },
             isBusy = state.sending
