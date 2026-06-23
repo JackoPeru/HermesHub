@@ -6471,7 +6471,7 @@ private suspend fun loadHubNotifications(settings: AppSettings, apiKey: String?,
             return@withContext emptyList<HubNotification>() to "Notifiche HTTP ${response.first}: ${extractHumanError(response.second)}"
         }
         val root = JSONObject(response.second)
-        val array = root.optJSONArray("items") ?: JSONArray()
+        val array = root.optJSONArray("items") ?: root.optJSONArray("notifications") ?: JSONArray()
         val items = buildList {
             for (i in 0 until array.length()) {
                 val obj = array.optJSONObject(i) ?: continue
@@ -6483,11 +6483,11 @@ private suspend fun loadHubNotifications(settings: AppSettings, apiKey: String?,
                         title = obj.optString("title", "Hermes"),
                         message = obj.optString("message", obj.optString("body", obj.optString("text", ""))),
                         kind = obj.optString("kind", "agent_message"),
-                        severity = obj.optString("severity", "info"),
+                        severity = obj.optString("severity", obj.optString("type", "info")),
                         source = obj.optString("source", "hermes-agent"),
-                        conversationPrompt = obj.optString("conversation_prompt", obj.optString("message")),
+                        conversationPrompt = obj.optString("conversation_prompt", obj.optString("message", obj.optString("body", obj.optString("text", "")))),
                         createdAt = (obj.optDouble("created_at", 0.0) * 1000).toLong().let { if (it > 0) it else System.currentTimeMillis() },
-                        readAt = (obj.optDouble("read_at", 0.0) * 1000).toLong()
+                        readAt = (obj.optDouble("read_at", 0.0) * 1000).toLong().let { if (it == 0L && obj.optBoolean("read", false)) System.currentTimeMillis() else if (it == 0L) 0L else it }
                     )
                 )
             }

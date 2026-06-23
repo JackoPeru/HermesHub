@@ -1042,24 +1042,31 @@ public static class GatewayService
 
             using var doc = JsonDocument.Parse(response.Body);
             var items = new List<HubNotificationRecord>();
-            if (doc.RootElement.TryGetProperty("items", out var array) && array.ValueKind == JsonValueKind.Array)
+            if ((doc.RootElement.TryGetProperty("items", out var array) || doc.RootElement.TryGetProperty("notifications", out array)) && array.ValueKind == JsonValueKind.Array)
             {
                 foreach (var item in array.EnumerateArray())
                 {
                     var id = ExtractString(item, "id") ?? string.Empty;
                     if (string.IsNullOrWhiteSpace(id)) continue;
                     var created = ExtractDouble(item, "created_at");
-                    var read = ExtractDouble(item, "read_at");
+                    var readAt = ExtractDouble(item, "read_at");
+                    var read = false;
+                    if (item.TryGetProperty("read", out var r) && (r.ValueKind == JsonValueKind.True || r.ValueKind == JsonValueKind.False))
+                    {
+                        read = r.GetBoolean();
+                    }
+                    if (readAt == 0 && read) readAt = DateTimeOffset.Now.ToUnixTimeSeconds();
+                    
                     items.Add(new HubNotificationRecord(
                         id,
                         ExtractString(item, "title") ?? "Hermes",
                         ExtractString(item, "message", "body", "text") ?? string.Empty,
                         ExtractString(item, "kind") ?? "agent_message",
-                        ExtractString(item, "severity") ?? "info",
+                        ExtractString(item, "severity", "type") ?? "info",
                         ExtractString(item, "source") ?? "hermes-agent",
                         ExtractString(item, "conversation_prompt") ?? ExtractString(item, "message", "body", "text") ?? string.Empty,
                         created > 0 ? DateTimeOffset.FromUnixTimeSeconds((long)created) : DateTimeOffset.Now,
-                        read > 0 ? DateTimeOffset.FromUnixTimeSeconds((long)read) : null));
+                        readAt > 0 ? DateTimeOffset.FromUnixTimeSeconds((long)readAt) : null));
                 }
             }
 

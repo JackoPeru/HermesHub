@@ -33,10 +33,18 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.121 Release Hermes Hub 0.6.121 Android WorkManager crash fix
+v0.6.122 Release Hermes Hub 0.6.122 Notifiche invisibili fix
 ```
 
 ## Release Corrente
+
+Hermes Hub 0.6.122 (Notifiche invisibili fix):
+
+Release 0.6.122:
+- Windows/Android: fix parsing array notifiche (supporto sia per formato legacy `items` che per nativo `notifications`).
+- Windows/Android: mapping flessibile per i campi `severity`/`type` e `read_at`/`read`.
+- Asset release attesi: Android APK `HermesHub-0.6.122-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.122.0_x64.msix`, Linux Gateway `HermesHub-0.6.122-linux-gateway.tar.gz`.
+- Release bump: Windows/AdminBridge `0.6.122`, Android `versionName 0.6.122`, `versionCode 127`.
 
 Hermes Hub 0.6.121 (Android WorkManager crash fix):
 
