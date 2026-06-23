@@ -33,10 +33,17 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.120 Release Hermes Hub 0.6.120 Android crash fix
+v0.6.121 Release Hermes Hub 0.6.121 Android WorkManager crash fix
 ```
 
 ## Release Corrente
+
+Hermes Hub 0.6.121 (Android WorkManager crash fix):
+
+Release 0.6.121:
+- Android: fix crash istantaneo `IllegalArgumentException` causato dall'uso di `setExpedited()` su un `PeriodicWorkRequest` non supportato da WorkManager.
+- Asset release attesi: Android APK `HermesHub-0.6.121-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.121.0_x64.msix`, Linux Gateway `HermesHub-0.6.121-linux-gateway.tar.gz`.
+- Release bump: Windows/AdminBridge `0.6.121`, Android `versionName 0.6.121`, `versionCode 126`.
 
 Hermes Hub 0.6.120 (Android crash fix):
 

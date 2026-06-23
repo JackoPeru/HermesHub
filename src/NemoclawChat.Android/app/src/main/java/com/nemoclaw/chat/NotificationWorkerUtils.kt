@@ -27,9 +27,6 @@ fun scheduleHermesNotificationWorker(context: Context) {
             TimeUnit.MINUTES
         )
 
-    if (Build.VERSION.SDK_INT >= 31) {
-        requestBuilder.setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-    }
 
     val request = requestBuilder.build()
 
