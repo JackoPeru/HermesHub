@@ -1468,7 +1468,7 @@ private fun ChatScreen(
                 }
                 state.activeStreamJob?.cancel()
             },
-            isBusy = state.sending
+            isBusy = state.sending && state.streamingState?.status?.contains("Interruzione") != true
         )
     }
 }
