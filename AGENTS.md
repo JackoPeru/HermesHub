@@ -33,10 +33,19 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.122 Release Hermes Hub 0.6.122 Notifiche invisibili fix
+v0.6.123 Release Hermes Hub 0.6.123 Background multi-stream fix
 ```
 
 ## Release Corrente
+
+Hermes Hub 0.6.123 (Background multi-stream):
+
+Release 0.6.123:
+- Windows/Android: introdotta la generazione multi-stream in background. Ora l'utente può uscire da una chat mentre Hermes sta ancora generando; lo stream continuerà isolato in background e verrà ricollegato automaticamente alla UI quando si riapre la chat.
+- Windows/Android: rimossa l'interruzione brutale della generazione al cambio schermata. L'architettura è stata refactored per usare una mappa globale degli stream attivi (`_activeStreams` su Windows, `ChatStateHolder.activeStreams` su Android).
+- Android: la history dei messaggi in background è ora isolata dal thread UI per prevenire corruzioni del database durante i cambi di chat.
+- Asset release attesi: Android APK `HermesHub-0.6.123-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.123.0_x64.msix`, Linux Gateway `HermesHub-0.6.123-linux-gateway.tar.gz`.
+- Release bump: Windows/AdminBridge `0.6.123`, Android `versionName 0.6.123`, `versionCode 128`.
 
 Hermes Hub 0.6.122 (Notifiche invisibili fix):
 

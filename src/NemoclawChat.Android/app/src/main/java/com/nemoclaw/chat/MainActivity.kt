@@ -1088,7 +1088,12 @@ private fun ChatScreen(
                     null
                 }
                 state.messages.clear()
-                state.messages.addAll(saved.messages)
+                val loadedMessages = saved.messages.toMutableList()
+                val activeStream = state.activeStreams[saved.id]
+                if (activeStream != null && loadedMessages.isNotEmpty() && loadedMessages.last().author == "Hermes") {
+                    loadedMessages.removeLast()
+                }
+                state.messages.addAll(loadedMessages)
             }
         }
 
@@ -1279,7 +1284,9 @@ private fun ChatScreen(
                     } else {
                         "$text\n\n[Allegati: ${attachments.joinToString { it.filename }}]"
                     }
-                    state.sending = true
+                    val localHistory = state.messages.toMutableList()
+                    localHistory.add(ChatMessage("Tu", displayText, true))
+                    
                     state.messages.add(ChatMessage("Tu", displayText, true))
                     state.draft = ""
                     state.streamingState = StreamingState()
@@ -1298,14 +1305,21 @@ private fun ChatScreen(
                                 conversationId = convId,
                                 mode = mode,
                                 prompt = displayText,
-                                messages = state.messages.toList(),
+                                messages = localHistory.toList(),
                                 source = "Hermes in corso",
                                 responseId = prevId
                             )
                         }
-                        state.activeConversationId = initialConversation.id
+                        val streamCid = initialConversation.id
+                        if (state.activeConversationId == convId) {
+                            state.activeConversationId = streamCid
+                        }
+                        
+                        val initialActiveState = state.activeStreams[streamCid] ?: ActiveStreamState(null, null)
+                        state.activeStreams[streamCid] = initialActiveState.copy(streamingState = localState)
+
                         try {
-                            streamChatRequest(settings, mode, text, state.messages.takeLast(CHAT_HISTORY_MAX_MESSAGES).toList(), state.activeConversationId, prevId, attachments, loadGatewaySecret(context))
+                            streamChatRequest(settings, mode, text, localHistory.takeLast(CHAT_HISTORY_MAX_MESSAGES).toList(), streamCid, prevId, attachments, loadGatewaySecret(context))
                                 .collect { event ->
                                     if (event is ChatStreamEvent.RawHermesEvent) {
                                         rawEvents += HermesRawEvent(event.name, event.json)
@@ -1317,17 +1331,24 @@ private fun ChatScreen(
                                         }
                                     }
                                     localState = localState.applyEvent(event)
-                                    state.streamingState = localState
+                                    if (state.activeConversationId == streamCid) {
+                                        state.streamingState = localState
+                                    } else {
+                                        val existing = state.activeStreams[streamCid]
+                                        if (existing != null) {
+                                            state.activeStreams[streamCid] = existing.copy(streamingState = localState)
+                                        }
+                                    }
                                     val now = System.currentTimeMillis()
                                     if (now - lastCheckpointAt >= STREAMING_CHECKPOINT_INTERVAL_MS && (localState.text.isNotBlank() || localState.visualBlocks.isNotEmpty())) {
                                         lastCheckpointAt = now
                                         withContext(Dispatchers.IO) {
                                             saveConversationSnapshot(
                                                 context = context,
-                                                conversationId = state.activeConversationId,
+                                                conversationId = streamCid,
                                                 mode = mode,
-                                                    prompt = displayText,
-                                                messages = state.messages.toList() + ChatMessage(
+                                                prompt = displayText,
+                                                messages = localHistory.toList() + ChatMessage(
                                                     "Hermes",
                                                     localState.text.streamingCheckpointPreview().ifBlank { "Hermes sta lavorando..." },
                                                     fromUser = false,
@@ -1356,8 +1377,11 @@ private fun ChatScreen(
                                 transportDetached -> ""
                                 else -> finalState.text.ifEmpty { finalState.error ?: "" }
                             }
+                            
+                            val newMessagesToAppend = mutableListOf<ChatMessage>()
+                            
                             if (finalText.isNotEmpty() || finalState.visualBlocks.isNotEmpty()) {
-                                state.messages.add(
+                                newMessagesToAppend.add(
                                     ChatMessage(
                                         if (interrupted && partialText.isEmpty()) "Stato" else "Hermes",
                                         finalText,
@@ -1371,7 +1395,7 @@ private fun ChatScreen(
                                 )
                             }
                             if (finalState.error != null && finalText.isEmpty()) {
-                                state.messages.add(ChatMessage("Stato", finalState.error, fromUser = false, isAction = true))
+                                newMessagesToAppend.add(ChatMessage("Stato", finalState.error, fromUser = false, isAction = true))
                             }
                             val workspaceKind = if (!interrupted) detectWorkspaceIntent(text) else null
                             if (workspaceKind != null) {
@@ -1390,7 +1414,7 @@ private fun ChatScreen(
                                         downloadUrl = workspaceResult.downloadUrl
                                     )
                                 }
-                                state.messages.add(
+                                newMessagesToAppend.add(
                                     ChatMessage(
                                         "Hermes Hub",
                                         "${workspaceKind}: aggiunto alla sezione dedicata. ${workspaceResult.status}",
@@ -1399,22 +1423,31 @@ private fun ChatScreen(
                                     )
                                 )
                             }
+                            
+                            localHistory.addAll(newMessagesToAppend)
+                            if (state.activeConversationId == streamCid) {
+                                state.messages.addAll(newMessagesToAppend)
+                            }
+                            
                             val saved = withContext(NonCancellable + Dispatchers.IO) {
                                 saveConversationSnapshot(
                                     context = context,
-                                    conversationId = state.activeConversationId,
+                                    conversationId = streamCid,
                                     mode = mode,
                                     prompt = displayText,
-                                    messages = state.messages.toList(),
+                                    messages = localHistory.toList(),
                                     source = if (interrupted) "Hermes interrotto" else if (finalState.error != null) "Errore Hermes" else "Hermes",
                                     responseId = finalState.responseId ?: prevId
                                 )
                             }
-                            state.activeConversationId = saved.id
-                            state.previousResponseId = saved.previousResponseId
-                            state.streamingState = null
-                            state.sending = false
-                            state.activeStreamJob = null
+                            if (state.activeConversationId == streamCid) {
+                                state.activeConversationId = saved.id
+                                state.previousResponseId = saved.previousResponseId
+                                state.streamingState = null
+                                state.activeStreamJob = null
+                            } else {
+                                state.activeStreams.remove(streamCid)
+                            }
                         }
                     }
                     state.activeStreamJob = job

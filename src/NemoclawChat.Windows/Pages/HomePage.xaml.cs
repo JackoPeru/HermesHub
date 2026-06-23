@@ -42,6 +42,18 @@ public sealed partial class HomePage : Page
     private int _lastServerContextTokens;
     private int _lastServerContextLength;
     private int? _lastServerContextPercent;
+    
+    private sealed record ActiveStreamState(
+        string ComposerRunId,
+        StreamingBubble Bubble,
+        CancellationTokenSource Cts,
+        string? GatewayRunId
+    ) {
+        public string? GatewayRunId { get; set; } = GatewayRunId;
+    }
+
+    private readonly Dictionary<string, ActiveStreamState> _activeStreams = new();
+    
     private string? _currentComposerRunId;
     private StreamingBubble? _currentStreamingBubble;
     private CancellationTokenSource? _activeStreamCts;
@@ -396,12 +408,22 @@ public sealed partial class HomePage : Page
     {
         var cts = _activeStreamCts;
         var runId = _activeGatewayRunId;
+        var composerId = _currentComposerRunId;
         _activeStreamCts = null;
         _activeGatewayRunId = null;
 
         _currentStreamingBubble?.SetStatus("Interruzione richiesta. Chiudo stream Hermes...");
         _currentStreamingBubble?.StopShimmer();
         ReleaseCurrentComposerRun();
+
+        if (composerId is not null)
+        {
+            var kvp = _activeStreams.FirstOrDefault(x => x.Value.ComposerRunId == composerId);
+            if (kvp.Key is not null)
+            {
+                _activeStreams.Remove(kvp.Key);
+            }
+        }
 
         if (cts is not null)
         {
@@ -506,6 +528,7 @@ public sealed partial class HomePage : Page
             streamCts = new CancellationTokenSource();
             _activeStreamCts = streamCts;
             _activeGatewayRunId = null;
+            _activeStreams[conversationId] = new ActiveStreamState(composerRunId, bubble, streamCts, null);
             var streamEvents = StartStreamProducer(settings, sendMode, prompt, localHistory.ToList(), conversationId, previousResponseId, attachments, streamCts.Token);
 
             void AddRawEventIfEnabled(string name, string json)
@@ -555,7 +578,14 @@ public sealed partial class HomePage : Page
                         finalResponseId = rid.Id;
                         break;
                     case StreamRunId run:
-                        _activeGatewayRunId = run.Id;
+                        if (IsComposerRunCurrent(composerRunId))
+                        {
+                            _activeGatewayRunId = run.Id;
+                        }
+                        if (_activeStreams.TryGetValue(conversationId, out var state))
+                        {
+                            _activeStreams[conversationId] = state with { GatewayRunId = run.Id };
+                        }
                         bubble.SetStatus($"Run Hermes attiva: {run.Id}");
                         break;
                     case StreamVisualBlocks vb:
@@ -720,6 +750,12 @@ public sealed partial class HomePage : Page
         }
         finally
         {
+            var kvp = _activeStreams.FirstOrDefault(x => x.Value.ComposerRunId == composerRunId);
+            if (kvp.Key is not null)
+            {
+                _activeStreams.Remove(kvp.Key);
+            }
+
             if (ReferenceEquals(_activeStreamCts, streamCts))
             {
                 _activeStreamCts = null;
@@ -1124,7 +1160,8 @@ public sealed partial class HomePage : Page
             return;
         }
 
-        ReleaseCurrentComposerRun();
+        var isStreaming = _activeStreams.TryGetValue(conversation.Id, out var activeStream);
+
         _conversationId = conversation.Id;
         var expectedServerConversationId = HermesHubProtocol.ServerConversationId(conversation.Id) ?? string.Empty;
         _previousResponseId = string.Equals(conversation.ServerConversationId, expectedServerConversationId, StringComparison.Ordinal)
@@ -1135,8 +1172,14 @@ public sealed partial class HomePage : Page
         Messages.Clear();
         _messageHistory.Clear();
 
-        foreach (var message in conversation.Messages)
+        for (int i = 0; i < conversation.Messages.Count; i++)
         {
+            var message = conversation.Messages[i];
+            if (isStreaming && i == conversation.Messages.Count - 1 && message.Author == "Hermes")
+            {
+                // Salta il salvataggio parziale, ricollegheremo la bolla live
+                continue;
+            }
             _messageHistory.Add(message);
             AddBubble(
                 message.Author,
@@ -1147,6 +1190,25 @@ public sealed partial class HomePage : Page
                 message.Stats,
                 message.RawEvents);
         }
+        
+        if (isStreaming && activeStream is not null)
+        {
+            Messages.Add(new MessageViewModel(activeStream.Bubble.Container));
+            _currentComposerRunId = activeStream.ComposerRunId;
+            _currentStreamingBubble = activeStream.Bubble;
+            _activeStreamCts = activeStream.Cts;
+            _activeGatewayRunId = activeStream.GatewayRunId;
+            UpdateSendButtonVisual(isStreaming: true);
+        }
+        else
+        {
+            _currentComposerRunId = null;
+            _currentStreamingBubble = null;
+            _activeStreamCts = null;
+            _activeGatewayRunId = null;
+            UpdateSendButtonVisual(isStreaming: false);
+        }
+        
         UpdateContextMeter();
     }
 

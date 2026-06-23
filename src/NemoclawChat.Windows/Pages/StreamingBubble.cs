@@ -45,6 +45,8 @@ internal sealed class StreamingBubble
     private double _shimmerPhase;
     private DateTime _started = DateTime.UtcNow;
 
+    public UIElement Container { get; }
+
     public StreamingBubble(Page page, Action<UIElement> addElement, ScrollViewer scroll, bool showAdvanced, bool showTools, bool showMetrics)
     {
         _page = page;
@@ -162,6 +164,7 @@ internal sealed class StreamingBubble
             Child = _content
         };
 
+        Container = bubble;
         _addElement(bubble);
         _ = _scroll.ChangeView(null, _scroll.ScrollableHeight, null);
 
