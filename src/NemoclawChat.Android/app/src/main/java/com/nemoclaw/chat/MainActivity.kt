@@ -8798,7 +8798,11 @@ private fun ensureHermesNotificationChannel(context: Context) {
     intent.action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
     intent.data = android.net.Uri.parse("package:$packageName")
     intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-    startActivity(intent)
+    try {
+        startActivity(intent)
+    } catch (e: android.content.ActivityNotFoundException) {
+        // Ignora, il dispositivo non supporta questa intent
+    }
 }
 
 class HermesNotificationWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
