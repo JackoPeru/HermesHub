@@ -2959,7 +2959,20 @@ private fun NotificationsScreen(context: Context, settings: AppSettings, onOpenC
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(status, color = Color.White, fontWeight = FontWeight.SemiBold)
                     Text("Android controlla in background periodicamente e mostra notifiche di sistema.", color = AppColors.Muted, fontSize = 12.sp)
-                    Button(onClick = { refreshNonce++ }) { Text("Aggiorna") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = {
+                            scope.launch {
+                                val unread = items.filter { it.readAt <= 0L }
+                                if (unread.isNotEmpty()) {
+                                    status = "Segnando ${unread.size} notifiche..."
+                                    val secret = loadGatewaySecret(context)
+                                    unread.forEach { markHubNotificationRead(settings, it.id, secret) }
+                                    refreshNonce++
+                                }
+                            }
+                        }) { Text("Segna tutto") }
+                        Button(onClick = { refreshNonce++ }) { Text("Aggiorna") }
+                    }
                 }
             }
         }

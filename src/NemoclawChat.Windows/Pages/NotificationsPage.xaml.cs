@@ -101,6 +101,18 @@ public sealed partial class NotificationsPage : Page
         return button;
     }
 
+    private async void MarkAllAsRead_Click(object sender, RoutedEventArgs e)
+    {
+        var settings = AppSettingsStore.Load();
+        var unreadItems = _items.Where(i => i.ReadAt is null).ToList();
+        if (unreadItems.Count == 0) return;
+
+        StatusText.Text = $"Segnando {unreadItems.Count} notifiche come lette...";
+        var tasks = unreadItems.Select(item => GatewayService.MarkHubNotificationReadAsync(settings, item.Id));
+        await Task.WhenAll(tasks);
+        await RefreshAsync();
+    }
+
     private async void MarkRead_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { Tag: HubNotificationRecord item })

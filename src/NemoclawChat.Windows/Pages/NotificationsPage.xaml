@@ -19,7 +19,10 @@
                         <TextBlock FontSize="30" FontWeight="SemiBold" Foreground="White" Text="Notifiche" />
                         <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Messaggi autonomi che Hermes lascia quando cron o agenti devono avvisarti." TextWrapping="Wrap" />
                     </StackPanel>
-                    <Button Grid.Column="1" MinWidth="110" Click="Refresh_Click" Content="Aggiorna" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                        <Button MinWidth="110" Click="MarkAllAsRead_Click" Content="Segna tutto come letto" />
+                        <Button MinWidth="110" Click="Refresh_Click" Content="Aggiorna" />
+                    </StackPanel>
                 </Grid>
 
                 <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedTextBrush}" Text="Caricamento notifiche..." />
