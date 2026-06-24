@@ -38,6 +38,13 @@ v0.6.127 Release Hermes Hub 0.6.127 fix token finale stream e reasoning persiste
 
 ## Release Corrente
 
+Hermes Hub 0.6.128 (Windows Runtime Fix):
+
+Release 0.6.128:
+- Windows: fix crash istantaneo (`FormatException: Input string was not in a correct format` / 0xc000027b) all'avvio causato dal caricamento della chat history a causa di un formato stringa errato (`0.1` invece di `0.0`) introdotto nella formattazione del TTFT.
+- Asset release attesi: Android APK `HermesHub-0.6.128-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.128.0_x64.msix`, Linux Gateway `HermesHub-0.6.128-linux-gateway.tar.gz`.
+- Release bump: Windows/AdminBridge `0.6.128`, Android `versionName 0.6.128`, `versionCode 133`.
+
 Hermes Hub 0.6.127 (Stream finale e reasoning persistente):
 
 Release 0.6.127:

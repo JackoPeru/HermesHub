@@ -536,7 +536,7 @@ internal sealed class StreamingBubble
         var parts = new List<string>();
         if (settings.MetricTtft && stats.TimeToFirstTokenMs is { } ttft && ttft > 0)
         {
-            parts.Add($"TTFT {ttft / 1000.0:0.1}s");
+            parts.Add($"TTFT {ttft / 1000.0:0.0}s");
         }
         if (settings.MetricTokensPerSecond && stats.TokensPerSecond is { } tps && tps > 0)
         {
