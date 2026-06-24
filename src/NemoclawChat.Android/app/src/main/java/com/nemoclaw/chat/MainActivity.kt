@@ -98,6 +98,7 @@ import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.PlayCircle
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.TaskAlt
@@ -4253,32 +4254,42 @@ private fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vide
         }
 
         if (fullScreen) {
-            BackHandler { fullScreen = false }
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black)
-            ) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { viewContext ->
-                        PlayerView(viewContext).apply {
-                            useController = true
-                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                            this.player = player
-                        }
-                    },
-                    update = { view ->
-                        view.player = player
-                    }
+            androidx.compose.ui.window.Dialog(
+                onDismissRequest = { fullScreen = false },
+                properties = androidx.compose.ui.window.DialogProperties(
+                    usePlatformDefaultWidth = false,
+                    decorFitsSystemWindows = false,
+                    dismissOnBackPress = true,
+                    dismissOnClickOutside = false
                 )
-                Button(
+            ) {
+                Box(
                     modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(16.dp),
-                    onClick = { fullScreen = false }
+                        .fillMaxSize()
+                        .background(Color.Black)
                 ) {
-                    Text("Chiudi")
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { viewContext ->
+                            PlayerView(viewContext).apply {
+                                useController = true
+                                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                this.player = player
+                            }
+                        },
+                        update = { view ->
+                            view.player = player
+                        }
+                    )
+                    IconButton(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(16.dp)
+                            .background(Color.Black.copy(alpha = 0.62f), CircleShape),
+                        onClick = { fullScreen = false }
+                    ) {
+                        Icon(Icons.Rounded.Close, contentDescription = "Chiudi schermo intero", tint = Color.White)
+                    }
                 }
             }
         }

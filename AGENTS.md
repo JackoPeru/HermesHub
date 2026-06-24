@@ -38,6 +38,15 @@ v0.6.127 Release Hermes Hub 0.6.127 fix token finale stream e reasoning persiste
 
 ## Release Corrente
 
+Hermes Hub 0.6.129 (True Full Screen UX):
+
+Release 0.6.129:
+- Windows/Android: Implementato sistema video immersivo "stile YouTube" a vero schermo intero.
+- Windows: `AppWindow.SetPresenter` massimizza il video oscurando taskbar e barra laterale, senza più artefatti di layout.
+- Android: Player inserito in un `Dialog` Compose con `decorFitsSystemWindows = false`, bypassando lo Scaffold principale per eliminare le barre di navigazione residue in landscape.
+- Asset release attesi: Android APK `HermesHub-0.6.129-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.129.0_x64.msix`, Linux Gateway `HermesHub-0.6.129-linux-gateway.tar.gz`.
+- Release bump: Windows/AdminBridge `0.6.129`, Android `versionName 0.6.129`, `versionCode 134`.
+
 Hermes Hub 0.6.128 (Windows Runtime Fix):
 
 Release 0.6.128:

@@ -176,6 +176,10 @@ public sealed partial class VideoPage : Page
         VideoPlayer.MediaPlayer.Pause();
         SetFullScreenSource(_currentPlaybackUrl);
         FullScreenVideoPlayer.MediaPlayer.Play();
+        if (App.MainWindow is MainWindow mainWindow)
+        {
+            mainWindow.ToggleFullScreenVideo(true);
+        }
     }
 
     private void CloseFullScreen_Click(object sender, RoutedEventArgs e)
@@ -196,6 +200,10 @@ public sealed partial class VideoPage : Page
         if (!string.IsNullOrWhiteSpace(_currentPlaybackUrl))
         {
             VideoPlayer.MediaPlayer.Play();
+        }
+        if (App.MainWindow is MainWindow mainWindow)
+        {
+            mainWindow.ToggleFullScreenVideo(false);
         }
     }
 

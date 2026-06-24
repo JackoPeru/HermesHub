@@ -235,4 +235,27 @@ public sealed partial class MainWindow : Window
         Grid.SetRowSpan(ContentFrame, 1);
     }
 
+    public void ToggleFullScreenVideo(bool isFullScreen)
+    {
+        var hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hWnd);
+        var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId);
+
+        if (isFullScreen)
+        {
+            appWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
+            Sidebar.Visibility = Visibility.Collapsed;
+            SidebarColumn.Width = new GridLength(0);
+            DragRegion.Visibility = Visibility.Collapsed;
+            RestoreSidebarButton.Visibility = Visibility.Collapsed;
+            Grid.SetRow(ContentFrame, 0);
+            Grid.SetRowSpan(ContentFrame, 2);
+        }
+        else
+        {
+            appWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Default);
+            ApplyStandardShell();
+        }
+    }
+
 }
