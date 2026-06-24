@@ -250,7 +250,7 @@ export HERMES_WAIT_LLAMA_SLEEP_SECONDS
 export TIRITH_ENABLED=false
 
 # Fix for faster-whisper CUDA libraries installed via pip
-export LD_LIBRARY_PATH="$HOME/.local/lib/python3.12/site-packages/nvidia/cublas/lib:$HOME/.local/lib/python3.12/site-packages/nvidia/cudnn/lib:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$HOME/.local/lib/python3.12/site-packages/nvidia/cublas/lib:$HOME/.local/lib/python3.12/site-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH:-}"
 
 python3 - "$HERMES_CONFIG" "$MODEL_ID" "$HERMES_INFERENCE_PROVIDER" "$HERMES_INFERENCE_BASE_URL" "$HERMES_TERMINAL_CWD" <<'PY' || true
 import sys
