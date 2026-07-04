@@ -44,7 +44,8 @@ Release 0.6.133:
 - Windows/Android: aggiunta sincronizzazione manuale archivio chat con gateway tramite sezione `Archivio`: `Carica server` invia le chat locali a `/v1/hub/conversations/import`, `Scarica server` ripristina/merge dal gateway senza cancellare chat locali piu' recenti.
 - Gateway Linux: aggiunti endpoint persistenti `GET /v1/hub/conversations`, `POST /v1/hub/conversations/import`, `PUT /v1/hub/conversations/{id}`, `DELETE /v1/hub/conversations/{id}` con store default `~/.hermes/hub_conversations.json` (`HERMES_HUB_CONVERSATIONS_PATH` override).
 - Android: corretto `Backup locale`, ora esporta davvero `chatclaw_archive.items` oltre al campo compat `conversations`.
-- Nota migrazione firma Android: gateway non puo' estrarre direttamente chat dalla sandbox Android di una vecchia installazione firmata con key diversa. Prima di disinstallare vecchia app, salvare tramite `Archivio > Export`/backup disponibile; dalla nuova app usare `Archivio > Scarica server` se prima e' stato fatto `Carica server`.
+- Android: aggiunto import manuale da export testuale negli appunti (`Archivio > Importa appunti`) per migrazione da vecchie installazioni non aggiornabili per cambio firma.
+- Nota migrazione firma Android: gateway non puo' estrarre direttamente chat dalla sandbox Android di una vecchia installazione firmata con key diversa. Prima di disinstallare vecchia app, usare `Archivio > Export` e salvare il testo; dopo reinstall nuova app, copiare quel testo negli appunti, usare `Archivio > Importa appunti`, poi `Carica server`.
 - Asset release attesi: Android APK `HermesHub-0.6.133-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.133.0_x64.msix`, Linux Gateway `HermesHub-0.6.133-linux-gateway.tar.gz`.
 - Release bump: Windows/AdminBridge `0.6.133`, Android `versionName 0.6.133`, `versionCode 138`.
 

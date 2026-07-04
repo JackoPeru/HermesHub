@@ -2794,6 +2794,12 @@ private fun ArchiveScreen(
                             Text("Export")
                         }
                         Button(onClick = {
+                            status = importArchiveFromClipboard(context)
+                            refreshKey++
+                        }) {
+                            Text("Importa appunti")
+                        }
+                        Button(onClick = {
                             status = "Carico archivio sul gateway..."
                             scope.launch {
                                 status = syncConversationsToHub(context, loadSettings(context), loadGatewaySecret(context))
@@ -8729,6 +8735,35 @@ private fun copyArchiveToClipboard(context: Context) {
     clipboard.setPrimaryClip(ClipData.newPlainText("chatclaw-archive", exportArchiveText(context)))
 }
 
+private fun importArchiveFromClipboard(context: Context): String {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val text = clipboard.primaryClip
+        ?.takeIf { it.itemCount > 0 }
+        ?.getItemAt(0)
+        ?.coerceToText(context)
+        ?.toString()
+        ?.takeIf { it.isNotBlank() }
+        ?: return "Appunti vuoti."
+    val imported = parseArchiveExportText(text)
+    if (imported.isEmpty()) {
+        return "Nessuna chat riconosciuta negli appunti."
+    }
+    val current = loadConversations(context)
+    val seen = current.map { "${it.title}\n${it.prompt}" }.toMutableSet()
+    val merged = current.toMutableList()
+    var added = 0
+    imported.forEach { conversation ->
+        if (seen.add("${conversation.title}\n${conversation.prompt}")) {
+            merged.add(conversation)
+            added++
+        }
+    }
+    if (added > 0) {
+        saveConversations(context, merged)
+    }
+    return "Import da appunti: $added chat aggiunte."
+}
+
 private fun exportArchiveText(context: Context): String {
     val conversations = loadConversations(context)
     if (conversations.isEmpty()) {
@@ -8740,6 +8775,61 @@ private fun exportArchiveText(context: Context): String {
             "${message.author}: ${message.text}"
         }
         "## ${conversation.title}\nTipo: ${conversation.kind}\nPrompt: ${conversation.prompt}\n$messages"
+    }
+}
+
+private fun parseArchiveExportText(text: String): List<LocalConversation> {
+    val blocks = Regex("(?m)^## ").split(text).drop(1)
+    val now = System.currentTimeMillis()
+    return blocks.mapIndexedNotNull { index, block ->
+        val lines = block.lines()
+        val title = lines.firstOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: return@mapIndexedNotNull null
+        var kind = "Chat"
+        var prompt = ""
+        val messages = mutableListOf<ChatMessage>()
+        var currentAuthor: String? = null
+        val currentText = StringBuilder()
+
+        fun flushMessage() {
+            val author = currentAuthor ?: return
+            messages.add(
+                ChatMessage(
+                    author = author,
+                    text = currentText.toString().trimEnd(),
+                    fromUser = author.equals("Tu", ignoreCase = true) || author.equals("User", ignoreCase = true)
+                )
+            )
+            currentAuthor = null
+            currentText.clear()
+        }
+
+        lines.drop(1).forEach { rawLine ->
+            val line = rawLine.trimEnd()
+            when {
+                line.startsWith("Tipo: ") -> kind = line.removePrefix("Tipo: ").trim().ifBlank { "Chat" }
+                line.startsWith("Prompt: ") -> prompt = line.removePrefix("Prompt: ").trim()
+                else -> {
+                    val match = Regex("^([^:]{1,40}):\\s?(.*)$").matchEntire(line)
+                    if (match != null) {
+                        flushMessage()
+                        currentAuthor = match.groupValues[1].trim()
+                        currentText.append(match.groupValues[2])
+                    } else if (currentAuthor != null) {
+                        currentText.append('\n').append(line)
+                    }
+                }
+            }
+        }
+        flushMessage()
+        LocalConversation(
+            id = "import_${now}_$index",
+            title = title,
+            kind = kind,
+            description = "Importato da export testo.",
+            prompt = prompt,
+            updatedAt = now - index,
+            messages = messages
+        )
     }
 }
 
