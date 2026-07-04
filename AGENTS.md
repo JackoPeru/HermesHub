@@ -33,10 +33,19 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.127 Release Hermes Hub 0.6.127 fix token finale stream e reasoning persistente
+v0.6.132 Release Hermes Hub 0.6.132 fix whitespace token stream
 ```
 
 ## Release Corrente
+
+Hermes Hub 0.6.132 (Whitespace token stream fix):
+
+Release 0.6.132:
+- Windows/Android: corretto il parser SSE dello stream. Ora rimuove solo il singolo spazio opzionale dopo `data:` invece di cancellare tutti gli spazi iniziali (`TrimStart`/`trimStart`), evitando la perdita di delta composti solo da spazio o con spazio iniziale.
+- Windows/Android: i delta testuali, reasoning e tool arguments preservano stringhe whitespace-only quando arrivano dallo stream, evitando parole/articoli attaccati durante reasoning e tool call.
+- Windows/Android: fix mirato alla visualizzazione token; nessun cambio al modello o al backend Hermes.
+- Asset release attesi: Android APK `HermesHub-0.6.132-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.132.0_x64.msix`. Linux Gateway non incluso perche' invariato in questa release app-only.
+- Release bump: Windows/AdminBridge `0.6.132`, Android `versionName 0.6.132`, `versionCode 137`.
 
 Hermes Hub 0.6.131 (Chat Context Menu):
 
@@ -209,8 +218,8 @@ chmod +x install-hermes-hub-linux.sh hermes-hub-linux.sh hermes-hub-linux-update
 ~/.local/bin/hermes-hub-linux-update --restart
 ```
 
-- Regola importante: quando una release GitHub diventa latest e il server deve restare aggiornato, includere sempre anche l'asset Linux gateway. Se latest non contiene `HermesHub-X.Y.Z-linux-gateway.tar.gz`, l'auto-update server ogni 2 minuti trova la release ma non puo' installare nulla (`No linux gateway asset found in latest release`).
-- Per ogni release GitHub che deve aggiornare anche il gateway Linux, creare e caricare l'asset:
+- Regola importante: non ricreare ne' caricare l'asset Linux gateway se script/patcher/service gateway non hanno subito cambiamenti e non serve aggiornare il server. Le release app-only devono includere solo gli asset delle app modificate (Android/Windows).
+- Creare e caricare l'asset Linux gateway solo quando la release deve aggiornare anche il gateway Linux (modifiche in `scripts/hermes-hub-linux*.sh`, `scripts/patch-hermes-gateway-native.py`, unit systemd, wait scripts, power monitor o contratto server):
 
 ```powershell
 .\scripts\package-linux-gateway.ps1 -Version X.Y.Z
@@ -222,7 +231,7 @@ Asset atteso:
 artifacts\HermesHub-X.Y.Z-linux-gateway.tar.gz
 ```
 
-- Caricare `HermesHub-X.Y.Z-linux-gateway.tar.gz` nella stessa GitHub Release di Android APK e Windows MSIX. Questo evita nuovi trasferimenti manuali: il server aggiorna launcher, patcher, updater e unit systemd da GitHub Releases.
+- Quando il gateway cambia, caricare `HermesHub-X.Y.Z-linux-gateway.tar.gz` nella stessa GitHub Release degli asset app. Se il gateway non cambia, non includere questo asset nella release app-only.
 - Se Android/Windows mostrano diagnostica 404 su endpoint gateway (`/v1/video/library`, `/v1/hub/memory`, `/v1/hub/state`, `/v1/hub/hardware`), non consigliare mai downgrade o build vecchie: aggiornare il patcher gateway nella release corrente, pubblicare asset Linux gateway, poi lasciare auto-update server o eseguire `~/.local/bin/hermes-hub-linux-update --restart`.
 - Memoria Hermes = preferenze/profilo/regole persistenti lato Hermes Agent/server condivise tra app, CLI, jobs e sezioni operative. Non e' RAM del telefono o memoria hardware.
 - Non dimenticare che gli script Linux devono restare LF; `.gitattributes` forza LF per `.sh`, `.service`, `.timer`.

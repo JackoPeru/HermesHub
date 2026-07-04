@@ -661,7 +661,8 @@ private suspend fun openSseStream(
                                 }
                                 line.startsWith("data:", ignoreCase = true) -> {
                                     if (dataBuf.isNotEmpty()) dataBuf.append('\n')
-                                    dataBuf.append(line.substring(5).trimStart())
+                                    val part = line.substring(5).let { if (it.startsWith(" ")) it.drop(1) else it }
+                                    dataBuf.append(part)
                                 }
                             }
                         }
@@ -984,7 +985,7 @@ private fun plugAndPlayStreamUrlCandidates(url: String): List<String> {
 }
 
 private fun parseSseData(eventName: String?, data: String): List<ChatStreamEvent> {
-    if (data.isBlank() || data.trim() == "[DONE]") return emptyList()
+    if (data.isEmpty() || data.trim() == "[DONE]") return emptyList()
     val json = try { JSONObject(data) } catch (_: Exception) {
         return listOf(ChatStreamEvent.TextDelta(data))
     }
@@ -1045,7 +1046,7 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
         }
         t.contains("reasoning.available") -> {
             val reasoning = obj.optString("reasoning", obj.optString("summary", obj.optString("text", obj.optString("preview", ""))))
-            if (reasoning.isNotBlank()) out += ChatStreamEvent.ThinkingDelta(reasoning)
+            if (reasoning.isNotEmpty()) out += ChatStreamEvent.ThinkingDelta(reasoning)
             return out
         }
         t.contains("output_text") && t.contains("delta") -> {
@@ -1088,7 +1089,7 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
                     val name = item.optString("name", "tool")
                     out += ChatStreamEvent.ToolCallStart(id, name)
                     val args = item.optString("arguments", "")
-                    if (args.isNotBlank()) out += ChatStreamEvent.ToolCallArgs(id, args)
+                    if (args.isNotEmpty()) out += ChatStreamEvent.ToolCallArgs(id, args)
                 }
             }
             return out
@@ -1112,11 +1113,11 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
                     val name = item.optString("name", "tool")
                     if (name.isNotBlank()) out += ChatStreamEvent.ToolCallStart(id, name)
                     val args = item.optString("arguments", "")
-                    if (args.isNotBlank()) out += ChatStreamEvent.ToolCallArgs(id, args)
+                    if (args.isNotEmpty()) out += ChatStreamEvent.ToolCallArgs(id, args)
                     out += ChatStreamEvent.ToolCallEnd(id)
                 } else {
                     val text = extractTextFromAnyJson(item)
-                    if (text.isNotBlank()) out += ChatStreamEvent.TextDelta(text)
+                    if (text.isNotEmpty()) out += ChatStreamEvent.TextDelta(text)
                 }
             }
             return out
@@ -1202,7 +1203,7 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
     } else {
         if (!isToolPayload(obj, t)) {
             val text = extractTextFromAnyJson(obj)
-            if (text.isNotBlank()) {
+            if (text.isNotEmpty()) {
                 out += ChatStreamEvent.TextDelta(text)
             }
         }
@@ -1265,7 +1266,7 @@ private fun extractToolEventsFromAnyJson(obj: JSONObject): List<ChatStreamEvent>
             val name = fn?.optString("name") ?: call.optString("name", "tool")
             out += ChatStreamEvent.ToolCallStart(id, name)
             val args = fn?.optString("arguments") ?: call.optString("arguments", "")
-            if (args.isNotBlank()) out += ChatStreamEvent.ToolCallArgs(id, args)
+            if (args.isNotEmpty()) out += ChatStreamEvent.ToolCallArgs(id, args)
         }
     }
 
@@ -1289,7 +1290,7 @@ private fun extractToolEventsFromAnyJson(obj: JSONObject): List<ChatStreamEvent>
                     val name = item.optString("name", "tool")
                     out += ChatStreamEvent.ToolCallStart(id, name)
                     val args = item.optString("arguments", "")
-                    if (args.isNotBlank()) out += ChatStreamEvent.ToolCallArgs(id, args)
+                    if (args.isNotEmpty()) out += ChatStreamEvent.ToolCallArgs(id, args)
                     if (item.optString("status", "").contains("completed", ignoreCase = true)) {
                         out += ChatStreamEvent.ToolCallEnd(id)
                     }
@@ -1320,9 +1321,9 @@ private fun extractTextFromAnyJson(obj: JSONObject, depth: Int = 0): String {
     val direct = listOf("output_text", "text", "message", "reply", "result", "summary")
         .firstNotNullOfOrNull { key ->
             val value = obj.opt(key)
-            if (value is String && value.isNotBlank()) value else null
+            if (value is String && value.isNotEmpty()) value else null
         }
-    if (!direct.isNullOrBlank()) return direct
+    if (!direct.isNullOrEmpty()) return direct
 
     val content = obj.optJSONArray("content")
     if (content != null) {
@@ -1330,7 +1331,7 @@ private fun extractTextFromAnyJson(obj: JSONObject, depth: Int = 0): String {
         for (i in 0 until content.length()) {
             val part = content.optJSONObject(i) ?: continue
             val partText = part.optString("text", part.optString("output_text", ""))
-            if (partText.isNotBlank()) builder.append(partText)
+            if (partText.isNotEmpty()) builder.append(partText)
         }
         if (builder.isNotEmpty()) return builder.toString()
     }
@@ -1341,7 +1342,7 @@ private fun extractTextFromAnyJson(obj: JSONObject, depth: Int = 0): String {
         for (i in 0 until output.length()) {
             val item = output.optJSONObject(i) ?: continue
             val nested = extractTextFromAnyJson(item, depth + 1)
-            if (nested.isNotBlank()) builder.append(nested)
+            if (nested.isNotEmpty()) builder.append(nested)
         }
         if (builder.isNotEmpty()) return builder.toString()
     }
@@ -1349,13 +1350,13 @@ private fun extractTextFromAnyJson(obj: JSONObject, depth: Int = 0): String {
     val response = obj.optJSONObject("response")
     if (response != null) {
         val nested = extractTextFromAnyJson(response, depth + 1)
-        if (nested.isNotBlank()) return nested
+        if (nested.isNotEmpty()) return nested
     }
 
     val item = obj.optJSONObject("item")
     if (item != null) {
         val nested = extractTextFromAnyJson(item, depth + 1)
-        if (nested.isNotBlank()) return nested
+        if (nested.isNotEmpty()) return nested
     }
 
     return ""

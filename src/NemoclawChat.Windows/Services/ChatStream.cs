@@ -530,7 +530,11 @@ public static class ChatStreamClient
                     if (line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
                     {
                         if (eventOverflow) continue;
-                        var part = line[5..].TrimStart();
+                        var part = line[5..];
+                        if (part.StartsWith(' '))
+                        {
+                            part = part[1..];
+                        }
                         if (dataBuilder.Length + part.Length + 1 > SSE_EVENT_MAX_CHARS)
                         {
                             eventOverflow = true;
@@ -932,7 +936,7 @@ public static class ChatStreamClient
 
     private static IEnumerable<ChatStreamEvent> ParseSseEvent(string? eventName, string data)
     {
-        if (string.IsNullOrWhiteSpace(data) || data.Trim() == "[DONE]")
+        if (data.Length == 0 || data.Trim() == "[DONE]")
         {
             yield break;
         }
@@ -1024,7 +1028,7 @@ public static class ChatStreamClient
             if (t.Contains("reasoning.available"))
             {
                 var reasoning = GetString(element, "reasoning") ?? GetString(element, "summary") ?? GetString(element, "text") ?? GetString(element, "preview");
-                if (!string.IsNullOrWhiteSpace(reasoning))
+                if (!string.IsNullOrEmpty(reasoning))
                 {
                     yield return new StreamThinkingDelta(reasoning!);
                 }
@@ -1070,7 +1074,7 @@ public static class ChatStreamClient
                         var name = GetString(item, "name") ?? "tool";
                         yield return new StreamToolCallStart(id, name);
                         var args = GetString(item, "arguments");
-                        if (!string.IsNullOrWhiteSpace(args))
+                        if (!string.IsNullOrEmpty(args))
                         {
                             yield return new StreamToolCallArguments(id, args!);
                         }
@@ -1376,7 +1380,7 @@ public static class ChatStreamClient
                 if (element.TryGetProperty(key, out var prop))
                 {
                     var nested = ExtractText(prop);
-                    if (!string.IsNullOrWhiteSpace(nested))
+                    if (!string.IsNullOrEmpty(nested))
                     {
                         return nested;
                     }
@@ -1389,13 +1393,13 @@ public static class ChatStreamClient
                     if (choice.TryGetProperty("message", out var msg))
                     {
                         var nested = ExtractText(msg);
-                        if (!string.IsNullOrWhiteSpace(nested))
+                        if (!string.IsNullOrEmpty(nested))
                         {
                             return nested;
                         }
                     }
                     var nested2 = ExtractText(choice);
-                    if (!string.IsNullOrWhiteSpace(nested2))
+                    if (!string.IsNullOrEmpty(nested2))
                     {
                         return nested2;
                     }
@@ -1409,7 +1413,7 @@ public static class ChatStreamClient
             foreach (var item in element.EnumerateArray())
             {
                 var nested = ExtractText(item);
-                if (!string.IsNullOrWhiteSpace(nested))
+                if (!string.IsNullOrEmpty(nested))
                 {
                     builder.Append(nested);
                 }

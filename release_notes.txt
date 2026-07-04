@@ -1,4 +1,4 @@
-Release 0.6.131:
-- Windows: Implementato il menu contestuale al passaggio del mouse sulle chat recenti nella barra laterale (stile ChatGPT).
-- Windows: Il menu a tre puntini consente di accedere a opzioni rapide come Rinomina (tramite finestra di dialogo modale) ed Elimina.
-- Backend Windows: Introdotto il metodo Rename nel ChatArchiveStore per il salvataggio persistente dei nuovi titoli.
+Release 0.6.132:
+- Windows/Android: Corretto il parser SSE dello stream: ora rimuove solo il singolo spazio opzionale dopo data: invece di cancellare tutti gli spazi iniziali.
+- Windows/Android: I delta testuali, reasoning e tool arguments preservano token composti solo da spazio, evitando parole e articoli attaccati durante streaming, reasoning e tool call.
+- Windows/Android: Fix mirato alla visualizzazione token; nessun cambio al modello o al backend Hermes.
