@@ -38,6 +38,16 @@ v0.6.132 Release Hermes Hub 0.6.132 fix whitespace token stream
 
 ## Release Corrente
 
+Hermes Hub 0.6.133 (Server chat archive sync):
+
+Release 0.6.133:
+- Windows/Android: aggiunta sincronizzazione manuale archivio chat con gateway tramite sezione `Archivio`: `Carica server` invia le chat locali a `/v1/hub/conversations/import`, `Scarica server` ripristina/merge dal gateway senza cancellare chat locali piu' recenti.
+- Gateway Linux: aggiunti endpoint persistenti `GET /v1/hub/conversations`, `POST /v1/hub/conversations/import`, `PUT /v1/hub/conversations/{id}`, `DELETE /v1/hub/conversations/{id}` con store default `~/.hermes/hub_conversations.json` (`HERMES_HUB_CONVERSATIONS_PATH` override).
+- Android: corretto `Backup locale`, ora esporta davvero `chatclaw_archive.items` oltre al campo compat `conversations`.
+- Nota migrazione firma Android: gateway non puo' estrarre direttamente chat dalla sandbox Android di una vecchia installazione firmata con key diversa. Prima di disinstallare vecchia app, salvare tramite `Archivio > Export`/backup disponibile; dalla nuova app usare `Archivio > Scarica server` se prima e' stato fatto `Carica server`.
+- Asset release attesi: Android APK `HermesHub-0.6.133-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.133.0_x64.msix`, Linux Gateway `HermesHub-0.6.133-linux-gateway.tar.gz`.
+- Release bump: Windows/AdminBridge `0.6.133`, Android `versionName 0.6.133`, `versionCode 138`.
+
 Hermes Hub 0.6.132 (Whitespace token stream fix):
 
 Release 0.6.132:
@@ -1541,6 +1551,7 @@ Nota update:
 - Le app controllano `https://api.github.com/repos/JackoPeru/app-interazione-nemoclaw/releases/latest`.
 - Tag release atteso: `vX.Y.Z`, esempio `v0.3.2`.
 - Android richiede APK con stesso `applicationId` e stessa firma, `versionCode` maggiore.
+- Se firma Android cambia per cambio PC/debug keystore, update in-place fallisce con conflitto pacchetto. Non si puo' ricostruire private key da SHA/cert pubblico; preservare chat solo con export/sync prima della disinstallazione.
 - Android debug build non deve usare `applicationIdSuffix`: l'APK generato per release in-app deve restare `com.nemoclaw.chat`.
 - Android updater ora supporta download in-app con barra progresso e poi handoff all'installer di sistema.
 - Windows ora scarica asset release `.msix`, `.exe` o `.zip` dentro `%LOCALAPPDATA%\ChatClaw\updates\` e poi apre l'installer/asset.

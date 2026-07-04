@@ -104,6 +104,12 @@
                         Content="Elimina"
                         Foreground="White"
                         IsEnabled="False" />
+                    <Button
+                        Click="UploadServer_Click"
+                        Content="Carica server" />
+                    <Button
+                        Click="DownloadServer_Click"
+                        Content="Scarica server" />
                     <TextBlock
                         x:Name="StatusText"
                         Foreground="{StaticResource MutedTextBrush}"

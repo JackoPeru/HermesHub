@@ -2754,6 +2754,7 @@ private fun ArchiveScreen(
     var filter by remember { mutableStateOf("Tutto") }
     var status by remember { mutableStateOf("Pronto.") }
     var pendingDelete by remember { mutableStateOf<ArchiveItem?>(null) }
+    val scope = rememberCoroutineScope()
     val savedConversations = remember(refreshKey) { loadConversations(context) }
     val savedProjects = savedConversations.count { it.kind == "Progetto" }
     val savedChats = savedConversations.count { it.kind == "Chat" || it.kind == "Task" }
@@ -2791,6 +2792,23 @@ private fun ArchiveScreen(
                             status = "Archivio copiato negli appunti."
                         }) {
                             Text("Export")
+                        }
+                        Button(onClick = {
+                            status = "Carico archivio sul gateway..."
+                            scope.launch {
+                                status = syncConversationsToHub(context, loadSettings(context), loadGatewaySecret(context))
+                            }
+                        }) {
+                            Text("Carica server")
+                        }
+                        Button(onClick = {
+                            status = "Scarico archivio dal gateway..."
+                            scope.launch {
+                                status = restoreConversationsFromHub(context, loadSettings(context), loadGatewaySecret(context))
+                                refreshKey++
+                            }
+                        }) {
+                            Text("Scarica server")
                         }
                         Button(onClick = {
                             filter = "Progetto"
@@ -7122,6 +7140,45 @@ private suspend fun postHubState(settings: AppSettings, kind: String, entityId: 
     }
 }
 
+private suspend fun syncConversationsToHub(context: Context, settings: AppSettings, apiKey: String?): String = withContext(Dispatchers.IO) {
+    try {
+        val items = conversationsToJsonArray(loadConversations(context))
+        val payload = JSONObject().put("items", items)
+        val response = postJson(resolveHermesUrl(settings, "/v1/hub/conversations/import"), payload, apiKey)
+        if (response.first !in 200..299) {
+            return@withContext "Archivio server non disponibile: HTTP ${response.first} ${extractHumanError(response.second)}"
+        }
+        val merged = runCatching { JSONObject(response.second).optInt("merged", items.length()) }.getOrDefault(items.length())
+        "Archivio caricato sul gateway: $merged elementi aggiornati."
+    } catch (ex: Exception) {
+        "Archivio server non disponibile: ${ex.message ?: ex.javaClass.simpleName}"
+    }
+}
+
+private suspend fun restoreConversationsFromHub(context: Context, settings: AppSettings, apiKey: String?): String = withContext(Dispatchers.IO) {
+    try {
+        val response = httpGetResponse(resolveHermesUrl(settings, "/v1/hub/conversations"), apiKey)
+        if (response.first !in 200..299) {
+            return@withContext "Archivio server non disponibile: HTTP ${response.first} ${extractHumanError(response.second)}"
+        }
+        val remote = readConversationsFromJsonArray(JSONObject(response.second).optJSONArray("items") ?: JSONArray())
+        if (remote.isEmpty()) {
+            return@withContext "Archivio server vuoto."
+        }
+        val byId = loadConversations(context).associateBy { it.id }.toMutableMap()
+        remote.forEach { incoming ->
+            val existing = byId[incoming.id]
+            if (existing == null || incoming.updatedAt >= existing.updatedAt) {
+                byId[incoming.id] = incoming
+            }
+        }
+        saveConversations(context, byId.values.toList())
+        "Archivio scaricato dal gateway: ${remote.size} chat disponibili."
+    } catch (ex: Exception) {
+        "Archivio server non disponibile: ${ex.message ?: ex.javaClass.simpleName}"
+    }
+}
+
 private suspend fun syncRemoteTasks(settings: AppSettings, apiKey: String?): Pair<List<AgentTask>, String> = withContext(Dispatchers.IO) {
     try {
         val body = httpGet(resolveHermesUrl(settings, "/api/jobs"), apiKey)
@@ -8717,30 +8774,55 @@ private fun loadConversations(context: Context): List<LocalConversation> {
 
 private fun saveConversations(context: Context, conversations: List<LocalConversation>) {
     synchronized(localArchiveLock) {
-        val array = JSONArray()
-        conversations
-            .sortedByDescending { it.updatedAt }
-            .take(200)
-            .forEach { conversation ->
-                array.put(
-                    JSONObject()
-                        .put("id", conversation.id)
-                        .put("title", conversation.title)
-                        .put("kind", conversation.kind)
-                        .put("description", conversation.description)
-                        .put("prompt", conversation.prompt)
-                        .put("updatedAt", conversation.updatedAt)
-                        .put("previousResponseId", conversation.previousResponseId ?: JSONObject.NULL)
-                        .put("serverConversationId", conversation.serverConversationId ?: JSONObject.NULL)
-                        .put("messages", writeMessages(conversation.messages))
-                )
-            }
-
         context.getSharedPreferences(CURRENT_ARCHIVE_PREFS, Context.MODE_PRIVATE)
             .edit()
-            .putString("items", array.toString())
+            .putString("items", conversationsToJsonArray(conversations).toString())
             .commit()
     }
+}
+
+private fun conversationsToJsonArray(conversations: List<LocalConversation>): JSONArray {
+    val array = JSONArray()
+    conversations
+        .sortedByDescending { it.updatedAt }
+        .take(200)
+        .forEach { conversation ->
+            array.put(
+                JSONObject()
+                    .put("id", conversation.id)
+                    .put("title", conversation.title)
+                    .put("kind", conversation.kind)
+                    .put("description", conversation.description)
+                    .put("prompt", conversation.prompt)
+                    .put("updatedAt", conversation.updatedAt)
+                    .put("previousResponseId", conversation.previousResponseId ?: JSONObject.NULL)
+                    .put("serverConversationId", conversation.serverConversationId ?: JSONObject.NULL)
+                    .put("messages", writeMessages(conversation.messages))
+            )
+        }
+    return array
+}
+
+private fun readConversationsFromJsonArray(array: JSONArray): List<LocalConversation> {
+    return buildList {
+        for (i in 0 until array.length()) {
+            val obj = array.optJSONObject(i) ?: continue
+            val id = obj.optString("id").takeIf { it.isNotBlank() } ?: continue
+            add(
+                LocalConversation(
+                    id = id,
+                    title = obj.optString("title", "Nuova chat"),
+                    kind = obj.optString("kind", "Chat"),
+                    description = obj.optString("description"),
+                    prompt = obj.optString("prompt"),
+                    updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
+                    messages = readMessages(obj.optJSONArray("messages") ?: JSONArray()),
+                    previousResponseId = obj.optString("previousResponseId").takeIf { it.isNotBlank() },
+                    serverConversationId = obj.optString("serverConversationId").takeIf { it.isNotBlank() }
+                )
+            )
+        }
+    }.sortedByDescending { it.updatedAt }
 }
 
 private fun loadTasks(context: Context): List<AgentTask> {

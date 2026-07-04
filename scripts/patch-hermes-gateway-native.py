@@ -516,6 +516,165 @@ def _hermes_hub_delete_state(state_id: str) -> Dict[str, Any]:
     return {"object": "hermes.hub.state.delete", "deleted": before - len(current["items"]), "id": state_id}
 
 
+def _hermes_hub_conversations_payload() -> Dict[str, Any]:
+    path = _hermes_hub_storage_path("HERMES_HUB_CONVERSATIONS_PATH", "hub_conversations.json")
+    payload = _hermes_hub_read_json(path, {"items": []})
+    items = payload.get("items")
+    if not isinstance(items, list):
+        items = []
+    normalized = []
+    seen = set()
+    for item in items:
+        conv = _hermes_hub_normalize_conversation(item)
+        if not conv:
+            continue
+        cid = str(conv.get("id") or "")
+        if cid in seen:
+            continue
+        seen.add(cid)
+        normalized.append(conv)
+    normalized.sort(key=lambda x: float(x.get("updatedAt") or x.get("updated_at") or 0), reverse=True)
+    payload["items"] = normalized[:500]
+    payload["object"] = "hermes.hub.conversations"
+    payload["status"] = "ok"
+    payload["path"] = str(path)
+    payload["description"] = "Archivio chat Hermes Hub condiviso tra Windows, Android e reinstallazioni app."
+    return payload
+
+
+def _hermes_hub_number(value: Any, fallback: float = 0.0) -> float:
+    try:
+        if value is None:
+            return fallback
+        return float(value)
+    except Exception:
+        return fallback
+
+
+def _hermes_hub_normalize_message(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    text = raw.get("text")
+    if text is None:
+        text = raw.get("content") or raw.get("message") or ""
+    author = str(raw.get("author") or raw.get("role") or ("Tu" if raw.get("fromUser") else "Hermes"))
+    mid = str(raw.get("id") or f"msg_{int(time.time() * 1000)}")
+    return {
+        "id": mid,
+        "author": author,
+        "text": "" if text is None else str(text),
+        "fromUser": bool(raw.get("fromUser", author.lower() in {"tu", "user"})),
+        "isAction": bool(raw.get("isAction", False)),
+        "thinking": "" if raw.get("thinking") is None else str(raw.get("thinking")),
+        "timestamp": raw.get("timestamp") or raw.get("createdAt") or raw.get("created_at") or int(time.time() * 1000),
+        "visualBlocksVersion": raw.get("visualBlocksVersion"),
+        "visualBlocks": raw.get("visualBlocks") if isinstance(raw.get("visualBlocks"), list) else [],
+        "stats": raw.get("stats") if isinstance(raw.get("stats"), dict) else None,
+        "rawEvents": raw.get("rawEvents") if isinstance(raw.get("rawEvents"), list) else [],
+    }
+
+
+def _hermes_hub_normalize_conversation(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    cid = str(raw.get("id") or raw.get("conversationId") or raw.get("conversation_id") or "").strip()
+    if not cid:
+        cid = f"conv_{int(time.time() * 1000)}"
+    messages = []
+    raw_messages = raw.get("messages")
+    if isinstance(raw_messages, list):
+        for msg in raw_messages:
+            normalized = _hermes_hub_normalize_message(msg)
+            if normalized:
+                messages.append(normalized)
+    title = str(raw.get("title") or raw.get("name") or raw.get("prompt") or "Nuova chat")
+    prompt = "" if raw.get("prompt") is None else str(raw.get("prompt"))
+    updated = raw.get("updatedAt", raw.get("updated_at", raw.get("modified_at", 0)))
+    updated_num = _hermes_hub_number(updated, time.time() * 1000)
+    return {
+        "id": cid,
+        "title": title[:180],
+        "kind": str(raw.get("kind") or "Chat"),
+        "description": "" if raw.get("description") is None else str(raw.get("description")),
+        "prompt": prompt,
+        "updatedAt": updated_num,
+        "previousResponseId": raw.get("previousResponseId") or raw.get("previous_response_id") or None,
+        "serverConversationId": raw.get("serverConversationId") or raw.get("server_conversation_id") or None,
+        "messages": messages,
+    }
+
+
+def _hermes_hub_extract_backup_conversations(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    candidates: List[Any] = []
+    for key in ("conversations", "items"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            candidates.extend(value)
+    archive = payload.get("archive")
+    if isinstance(archive, dict):
+        for key in ("items", "conversations"):
+            value = archive.get(key)
+            if isinstance(value, list):
+                candidates.extend(value)
+    settings = payload.get("settings")
+    if isinstance(settings, dict):
+        for key in ("items", "conversations"):
+            raw = settings.get(key)
+            if isinstance(raw, str):
+                try:
+                    import json as _json
+                    parsed = _json.loads(raw)
+                    if isinstance(parsed, list):
+                        candidates.extend(parsed)
+                except Exception:
+                    pass
+    out = []
+    for item in candidates:
+        normalized = _hermes_hub_normalize_conversation(item)
+        if normalized:
+            out.append(normalized)
+    return out
+
+
+def _hermes_hub_merge_conversations(incoming: List[Dict[str, Any]]) -> Dict[str, Any]:
+    current = _hermes_hub_conversations_payload()
+    by_id: Dict[str, Dict[str, Any]] = {
+        str(item.get("id")): dict(item)
+        for item in current.get("items", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    changed = 0
+    for raw in incoming:
+        conv = _hermes_hub_normalize_conversation(raw)
+        if not conv:
+            continue
+        cid = str(conv.get("id"))
+        existing = by_id.get(cid)
+        if existing is None:
+            by_id[cid] = conv
+            changed += 1
+            continue
+        if _hermes_hub_number(conv.get("updatedAt")) >= _hermes_hub_number(existing.get("updatedAt")):
+            by_id[cid] = conv
+            changed += 1
+    items = sorted(by_id.values(), key=lambda x: float(x.get("updatedAt") or 0), reverse=True)[:500]
+    payload = {"items": items, "updated_at": time.time()}
+    _hermes_hub_write_json(_hermes_hub_storage_path("HERMES_HUB_CONVERSATIONS_PATH", "hub_conversations.json"), payload)
+    payload["object"] = "hermes.hub.conversations"
+    payload["status"] = "ok"
+    payload["merged"] = changed
+    return payload
+
+
+def _hermes_hub_delete_conversation(conversation_id: str) -> Dict[str, Any]:
+    current = _hermes_hub_conversations_payload()
+    before = len(current.get("items", []))
+    current["items"] = [item for item in current.get("items", []) if str(item.get("id", "")) != str(conversation_id)]
+    current["updated_at"] = time.time()
+    _hermes_hub_write_json(_hermes_hub_storage_path("HERMES_HUB_CONVERSATIONS_PATH", "hub_conversations.json"), current)
+    return {"object": "hermes.hub.conversations.delete", "deleted": before - len(current["items"]), "id": conversation_id}
+
+
 def _hermes_hub_notifications_payload(unread_only: bool = False) -> Dict[str, Any]:
     path = _hermes_hub_storage_path("HERMES_HUB_NOTIFICATIONS_PATH", "hub_notifications.json")
     payload = _hermes_hub_read_json(path, {"items": []})
@@ -910,6 +1069,170 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
             "media proxy helpers",
         )
         changes.append("media proxy helpers")
+
+    if "def _hermes_hub_conversations_payload" not in text and "def _hermes_hub_notifications_payload" in text:
+        text, _ = _replace_once(
+            text,
+            "def _hermes_hub_notifications_payload(unread_only: bool = False) -> Dict[str, Any]:",
+            '''def _hermes_hub_conversations_payload() -> Dict[str, Any]:
+    path = _hermes_hub_storage_path("HERMES_HUB_CONVERSATIONS_PATH", "hub_conversations.json")
+    payload = _hermes_hub_read_json(path, {"items": []})
+    items = payload.get("items")
+    if not isinstance(items, list):
+        items = []
+    normalized = []
+    seen = set()
+    for item in items:
+        conv = _hermes_hub_normalize_conversation(item)
+        if not conv:
+            continue
+        cid = str(conv.get("id") or "")
+        if cid in seen:
+            continue
+        seen.add(cid)
+        normalized.append(conv)
+    normalized.sort(key=lambda x: float(x.get("updatedAt") or x.get("updated_at") or 0), reverse=True)
+    payload["items"] = normalized[:500]
+    payload["object"] = "hermes.hub.conversations"
+    payload["status"] = "ok"
+    payload["path"] = str(path)
+    payload["description"] = "Archivio chat Hermes Hub condiviso tra Windows, Android e reinstallazioni app."
+    return payload
+
+
+def _hermes_hub_number(value: Any, fallback: float = 0.0) -> float:
+    try:
+        if value is None:
+            return fallback
+        return float(value)
+    except Exception:
+        return fallback
+
+
+def _hermes_hub_normalize_message(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    text = raw.get("text")
+    if text is None:
+        text = raw.get("content") or raw.get("message") or ""
+    author = str(raw.get("author") or raw.get("role") or ("Tu" if raw.get("fromUser") else "Hermes"))
+    mid = str(raw.get("id") or f"msg_{int(time.time() * 1000)}")
+    return {
+        "id": mid,
+        "author": author,
+        "text": "" if text is None else str(text),
+        "fromUser": bool(raw.get("fromUser", author.lower() in {"tu", "user"})),
+        "isAction": bool(raw.get("isAction", False)),
+        "thinking": "" if raw.get("thinking") is None else str(raw.get("thinking")),
+        "timestamp": raw.get("timestamp") or raw.get("createdAt") or raw.get("created_at") or int(time.time() * 1000),
+        "visualBlocksVersion": raw.get("visualBlocksVersion"),
+        "visualBlocks": raw.get("visualBlocks") if isinstance(raw.get("visualBlocks"), list) else [],
+        "stats": raw.get("stats") if isinstance(raw.get("stats"), dict) else None,
+        "rawEvents": raw.get("rawEvents") if isinstance(raw.get("rawEvents"), list) else [],
+    }
+
+
+def _hermes_hub_normalize_conversation(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    cid = str(raw.get("id") or raw.get("conversationId") or raw.get("conversation_id") or "").strip()
+    if not cid:
+        cid = f"conv_{int(time.time() * 1000)}"
+    messages = []
+    raw_messages = raw.get("messages")
+    if isinstance(raw_messages, list):
+        for msg in raw_messages:
+            normalized = _hermes_hub_normalize_message(msg)
+            if normalized:
+                messages.append(normalized)
+    title = str(raw.get("title") or raw.get("name") or raw.get("prompt") or "Nuova chat")
+    prompt = "" if raw.get("prompt") is None else str(raw.get("prompt"))
+    updated = raw.get("updatedAt", raw.get("updated_at", raw.get("modified_at", 0)))
+    updated_num = _hermes_hub_number(updated, time.time() * 1000)
+    return {
+        "id": cid,
+        "title": title[:180],
+        "kind": str(raw.get("kind") or "Chat"),
+        "description": "" if raw.get("description") is None else str(raw.get("description")),
+        "prompt": prompt,
+        "updatedAt": updated_num,
+        "previousResponseId": raw.get("previousResponseId") or raw.get("previous_response_id") or None,
+        "serverConversationId": raw.get("serverConversationId") or raw.get("server_conversation_id") or None,
+        "messages": messages,
+    }
+
+
+def _hermes_hub_extract_backup_conversations(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    candidates: List[Any] = []
+    for key in ("conversations", "items"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            candidates.extend(value)
+    archive = payload.get("archive")
+    if isinstance(archive, dict):
+        for key in ("items", "conversations"):
+            value = archive.get(key)
+            if isinstance(value, list):
+                candidates.extend(value)
+            elif isinstance(value, str):
+                try:
+                    import json as _json
+                    parsed = _json.loads(value)
+                    if isinstance(parsed, list):
+                        candidates.extend(parsed)
+                except Exception:
+                    pass
+    out = []
+    for item in candidates:
+        normalized = _hermes_hub_normalize_conversation(item)
+        if normalized:
+            out.append(normalized)
+    return out
+
+
+def _hermes_hub_merge_conversations(incoming: List[Dict[str, Any]]) -> Dict[str, Any]:
+    current = _hermes_hub_conversations_payload()
+    by_id: Dict[str, Dict[str, Any]] = {
+        str(item.get("id")): dict(item)
+        for item in current.get("items", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    changed = 0
+    for raw in incoming:
+        conv = _hermes_hub_normalize_conversation(raw)
+        if not conv:
+            continue
+        cid = str(conv.get("id"))
+        existing = by_id.get(cid)
+        if existing is None:
+            by_id[cid] = conv
+            changed += 1
+            continue
+        if _hermes_hub_number(conv.get("updatedAt")) >= _hermes_hub_number(existing.get("updatedAt")):
+            by_id[cid] = conv
+            changed += 1
+    items = sorted(by_id.values(), key=lambda x: float(x.get("updatedAt") or 0), reverse=True)[:500]
+    payload = {"items": items, "updated_at": time.time()}
+    _hermes_hub_write_json(_hermes_hub_storage_path("HERMES_HUB_CONVERSATIONS_PATH", "hub_conversations.json"), payload)
+    payload["object"] = "hermes.hub.conversations"
+    payload["status"] = "ok"
+    payload["merged"] = changed
+    return payload
+
+
+def _hermes_hub_delete_conversation(conversation_id: str) -> Dict[str, Any]:
+    current = _hermes_hub_conversations_payload()
+    before = len(current.get("items", []))
+    current["items"] = [item for item in current.get("items", []) if str(item.get("id", "")) != str(conversation_id)]
+    current["updated_at"] = time.time()
+    _hermes_hub_write_json(_hermes_hub_storage_path("HERMES_HUB_CONVERSATIONS_PATH", "hub_conversations.json"), current)
+    return {"object": "hermes.hub.conversations.delete", "deleted": before - len(current["items"]), "id": conversation_id}
+
+
+def _hermes_hub_notifications_payload(unread_only: bool = False) -> Dict[str, Any]:''',
+            "hub conversations storage helpers",
+        )
+        changes.append("hub conversations storage helpers")
 
     if 'def _hermes_hub_resolve_media_path(media_id: str) -> Optional["Path"]:' in text:
         text = text.replace(
@@ -1587,6 +1910,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             r'                "media_proxy": {"method": "GET", "path": "/v1/media/{media_id}"},' "\n"
             r'                "hub_memory": {"method": "GET/PATCH", "path": "/v1/hub/memory"},' "\n"
             r'                "hub_state": {"method": "GET/POST", "path": "/v1/hub/state"},' "\n"
+            r'                "hub_conversations": {"method": "GET/PUT/POST/DELETE", "path": "/v1/hub/conversations"},' "\n"
             r'                "hub_notifications": {"method": "GET/POST/PATCH", "path": "/v1/hub/notifications"},' "\n"
             r'                "audio_transcriptions": {"method": "POST", "path": "/v1/audio/transcriptions"},' "\n",
             "capabilities hub support endpoints",
@@ -1622,6 +1946,16 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
                 "capabilities hub notifications endpoint",
             )
             changes.append("capabilities hub notifications endpoint")
+
+        if '"hub_conversations": {"method": "GET/PUT/POST/DELETE", "path": "/v1/hub/conversations"}' not in text:
+            text, _ = _replace_regex_once(
+                text,
+                r'(^\s+"hub_state": \{"method": "GET/POST", "path": "/v1/hub/state"\},\n)',
+                r'\1'
+                r'                "hub_conversations": {"method": "GET/PUT/POST/DELETE", "path": "/v1/hub/conversations"},' "\n",
+                "capabilities hub conversations endpoint",
+            )
+            changes.append("capabilities hub conversations endpoint")
 
         if '"audio_transcriptions": {"method": "POST", "path": "/v1/audio/transcriptions"}' not in text:
             text, _ = _replace_regex_once(
@@ -1738,6 +2072,47 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "            return auth_error\n"
             "        return web.json_response(_hermes_hub_delete_state(request.match_info.get(\"state_id\", \"\")))\n"
             "\n"
+            "    async def _handle_get_hub_conversations(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_conversations_payload())\n"
+            "\n"
+            "    async def _handle_put_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        try:\n"
+            "            body = await request.json()\n"
+            "        except Exception:\n"
+            "            body = {}\n"
+            "        if not isinstance(body, dict):\n"
+            "            body = {}\n"
+            "        body[\"id\"] = request.match_info.get(\"conversation_id\", body.get(\"id\", \"\"))\n"
+            "        return web.json_response(_hermes_hub_merge_conversations([body]))\n"
+            "\n"
+            "    async def _handle_post_hub_conversations_import(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        try:\n"
+            "            body = await request.json()\n"
+            "        except Exception:\n"
+            "            body = {}\n"
+            "        if not isinstance(body, dict):\n"
+            "            body = {}\n"
+            "        incoming = body.get(\"items\") if isinstance(body.get(\"items\"), list) else None\n"
+            "        if incoming is None:\n"
+            "            incoming = _hermes_hub_extract_backup_conversations(body)\n"
+            "        merged = _hermes_hub_merge_conversations(incoming if isinstance(incoming, list) else [])\n"
+            "        return web.json_response(merged)\n"
+            "\n"
+            "    async def _handle_delete_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_delete_conversation(request.match_info.get(\"conversation_id\", \"\")))\n"
+            "\n"
             "    async def _handle_get_hub_notifications(self, request: \"web.Request\") -> \"web.Response\":\n"
             "        auth_error = self._check_auth(request)\n"
             "        if auth_error is not None:\n"
@@ -1771,6 +2146,56 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "hub support endpoint handlers",
         )
         changes.append("hub support endpoint handlers")
+
+    if "async def _handle_get_hub_conversations" not in text and "async def _handle_get_hub_notifications" in text:
+        text, _ = _replace_once(
+            text,
+            "    async def _handle_get_hub_notifications(self, request: \"web.Request\") -> \"web.Response\":",
+            "    async def _handle_get_hub_conversations(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_conversations_payload())\n"
+            "\n"
+            "    async def _handle_put_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        try:\n"
+            "            body = await request.json()\n"
+            "        except Exception:\n"
+            "            body = {}\n"
+            "        if not isinstance(body, dict):\n"
+            "            body = {}\n"
+            "        body[\"id\"] = request.match_info.get(\"conversation_id\", body.get(\"id\", \"\"))\n"
+            "        return web.json_response(_hermes_hub_merge_conversations([body]))\n"
+            "\n"
+            "    async def _handle_post_hub_conversations_import(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        try:\n"
+            "            body = await request.json()\n"
+            "        except Exception:\n"
+            "            body = {}\n"
+            "        if not isinstance(body, dict):\n"
+            "            body = {}\n"
+            "        incoming = body.get(\"items\") if isinstance(body.get(\"items\"), list) else None\n"
+            "        if incoming is None:\n"
+            "            incoming = _hermes_hub_extract_backup_conversations(body)\n"
+            "        merged = _hermes_hub_merge_conversations(incoming if isinstance(incoming, list) else [])\n"
+            "        return web.json_response(merged)\n"
+            "\n"
+            "    async def _handle_delete_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_delete_conversation(request.match_info.get(\"conversation_id\", \"\")))\n"
+            "\n"
+            "    async def _handle_get_hub_notifications(self, request: \"web.Request\") -> \"web.Response\":",
+            "hub conversations endpoint handlers",
+        )
+        changes.append("hub conversations endpoint handlers")
 
     if "async def _handle_get_hub_notifications" not in text:
         text, _ = _replace_once(
@@ -1809,6 +2234,56 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "hub notifications endpoint handlers",
         )
         changes.append("hub notifications endpoint handlers")
+
+    if "async def _handle_get_hub_conversations" not in text and "async def _handle_get_hub_notifications" in text:
+        text, _ = _replace_once(
+            text,
+            "    async def _handle_get_hub_notifications(self, request: \"web.Request\") -> \"web.Response\":",
+            "    async def _handle_get_hub_conversations(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_conversations_payload())\n"
+            "\n"
+            "    async def _handle_put_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        try:\n"
+            "            body = await request.json()\n"
+            "        except Exception:\n"
+            "            body = {}\n"
+            "        if not isinstance(body, dict):\n"
+            "            body = {}\n"
+            "        body[\"id\"] = request.match_info.get(\"conversation_id\", body.get(\"id\", \"\"))\n"
+            "        return web.json_response(_hermes_hub_merge_conversations([body]))\n"
+            "\n"
+            "    async def _handle_post_hub_conversations_import(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        try:\n"
+            "            body = await request.json()\n"
+            "        except Exception:\n"
+            "            body = {}\n"
+            "        if not isinstance(body, dict):\n"
+            "            body = {}\n"
+            "        incoming = body.get(\"items\") if isinstance(body.get(\"items\"), list) else None\n"
+            "        if incoming is None:\n"
+            "            incoming = _hermes_hub_extract_backup_conversations(body)\n"
+            "        merged = _hermes_hub_merge_conversations(incoming if isinstance(incoming, list) else [])\n"
+            "        return web.json_response(merged)\n"
+            "\n"
+            "    async def _handle_delete_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_delete_conversation(request.match_info.get(\"conversation_id\", \"\")))\n"
+            "\n"
+            "    async def _handle_get_hub_notifications(self, request: \"web.Request\") -> \"web.Response\":",
+            "hub conversations endpoint handlers",
+        )
+        changes.append("hub conversations endpoint handlers")
 
     if "async def _handle_news_library" not in text:
         text, _ = _replace_once(
@@ -2235,6 +2710,19 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
                 "router news library endpoint",
             )
             changes.append("router news library endpoint")
+
+    if 'add_get("/v1/hub/conversations", self._handle_get_hub_conversations)' not in text:
+        text, _ = _replace_regex_once(
+            text,
+            r'(^\s+self\._app\.router\.add_get\("/v1/hub/state", self\._handle_get_hub_state\)\n)',
+            r'\1'
+            r'            self._app.router.add_get("/v1/hub/conversations", self._handle_get_hub_conversations)' "\n"
+            r'            self._app.router.add_post("/v1/hub/conversations/import", self._handle_post_hub_conversations_import)' "\n"
+            r'            self._app.router.add_put("/v1/hub/conversations/{conversation_id}", self._handle_put_hub_conversation)' "\n"
+            r'            self._app.router.add_delete("/v1/hub/conversations/{conversation_id}", self._handle_delete_hub_conversation)' "\n",
+            "router hub conversations endpoints",
+        )
+        changes.append("router hub conversations endpoints")
 
     if 'add_get("/v1/hub/notifications", self._handle_get_hub_notifications)' not in text:
         text, _ = _replace_regex_once(

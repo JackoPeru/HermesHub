@@ -34,6 +34,29 @@ public sealed partial class ArchivePage : Page
         Frame.Navigate(typeof(HomePage), new HomeNavigationRequest());
     }
 
+    private async void UploadServer_Click(object sender, RoutedEventArgs e)
+    {
+        StatusText.Text = "Carico archivio sul gateway...";
+        var result = await GatewayService.SaveHubConversationsAsync(AppSettingsStore.Load(), ChatArchiveStore.Load());
+        StatusText.Text = result;
+    }
+
+    private async void DownloadServer_Click(object sender, RoutedEventArgs e)
+    {
+        StatusText.Text = "Scarico archivio dal gateway...";
+        var result = await GatewayService.LoadHubConversationsAsync(AppSettingsStore.Load());
+        if (result.Items.Count == 0)
+        {
+            StatusText.Text = result.Status;
+            return;
+        }
+
+        var changed = ChatArchiveStore.Merge(result.Items);
+        ReloadItems();
+        RenderResults();
+        StatusText.Text = $"{result.Status} Import locale: {changed} aggiornati.";
+    }
+
     private void OpenSelected_Click(object sender, RoutedEventArgs e)
     {
         if (_selected is null)

@@ -88,6 +88,10 @@ public sealed record HubNotificationsResult(
     IReadOnlyList<HubNotificationRecord> Items,
     string Status);
 
+public sealed record HubConversationsResult(
+    IReadOnlyList<ConversationRecord> Items,
+    string Status);
+
 public sealed record HardwareDiskRecord(
     string Device,
     string Mountpoint,
@@ -1026,6 +1030,101 @@ public static class GatewayService
         return response.IsSuccessStatusCode
             ? "Sincronizzato con Hub State."
             : $"Hub State non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}";
+    }
+
+    public static async Task<string> SaveHubConversationsAsync(AppSettings settings, IEnumerable<ConversationRecord> conversations)
+    {
+        await EnsureReachableGatewayAsync(settings);
+        var payload = JsonSerializer.Serialize(new
+        {
+            items = conversations
+                .OrderByDescending(item => item.UpdatedAt)
+                .Take(200)
+                .Select(item => new
+                {
+                    id = item.Id,
+                    title = item.Title,
+                    kind = item.Kind,
+                    description = item.Description,
+                    prompt = item.Prompt,
+                    updatedAt = item.UpdatedAt.ToUnixTimeMilliseconds(),
+                    previousResponseId = string.IsNullOrWhiteSpace(item.PreviousResponseId) ? null : item.PreviousResponseId,
+                    serverConversationId = string.IsNullOrWhiteSpace(item.ServerConversationId) ? null : item.ServerConversationId,
+                    messages = item.Messages.Select(message => new
+                    {
+                        id = Guid.NewGuid().ToString("N"),
+                        author = message.Author,
+                        text = message.Text,
+                        fromUser = string.Equals(message.Author, "Tu", StringComparison.OrdinalIgnoreCase) ||
+                                   string.Equals(message.Author, "User", StringComparison.OrdinalIgnoreCase),
+                        timestamp = message.Timestamp.ToUnixTimeMilliseconds(),
+                        visualBlocksVersion = message.VisualBlocksVersion,
+                        visualBlocks = message.VisualBlocks ?? [],
+                        stats = message.Stats,
+                        rawEvents = message.RawEvents ?? []
+                    })
+                })
+        });
+        var response = await SendBufferedAsync(token => BuildJsonRequest(HttpMethod.Post, ResolveHermesUri(settings, "/v1/hub/conversations/import"), payload, token));
+        return response.IsSuccessStatusCode
+            ? "Archivio caricato sul gateway."
+            : $"Archivio server non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}";
+    }
+
+    public static async Task<HubConversationsResult> LoadHubConversationsAsync(AppSettings settings)
+    {
+        try
+        {
+            await EnsureReachableGatewayAsync(settings);
+            var response = await SendBufferedAsync(token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, "/v1/hub/conversations"), token));
+            if (!response.IsSuccessStatusCode)
+            {
+                return new HubConversationsResult([], $"Archivio server non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}");
+            }
+
+            using var doc = JsonDocument.Parse(response.Body);
+            var items = new List<ConversationRecord>();
+            if (doc.RootElement.TryGetProperty("items", out var array) && array.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in array.EnumerateArray())
+                {
+                    var id = ExtractString(item, "id", "conversationId", "conversation_id");
+                    if (string.IsNullOrWhiteSpace(id)) continue;
+                    var updated = ExtractDouble(item, "updatedAt");
+                    var messages = new List<ChatMessageRecord>();
+                    if (item.TryGetProperty("messages", out var messageArray) && messageArray.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var message in messageArray.EnumerateArray())
+                        {
+                            var timestamp = ExtractDouble(message, "timestamp");
+                            messages.Add(new ChatMessageRecord(
+                                ExtractString(message, "author", "role") ?? "Hermes",
+                                ExtractString(message, "text", "content", "message") ?? string.Empty,
+                                timestamp > 0 ? DateTimeOffset.FromUnixTimeMilliseconds((long)timestamp) : DateTimeOffset.Now));
+                        }
+                    }
+
+                    items.Add(new ConversationRecord
+                    {
+                        Id = id,
+                        Title = ExtractString(item, "title", "name") ?? "Nuova chat",
+                        Kind = ExtractString(item, "kind") ?? "Chat",
+                        Description = ExtractString(item, "description") ?? string.Empty,
+                        Prompt = ExtractString(item, "prompt") ?? string.Empty,
+                        UpdatedAt = updated > 0 ? DateTimeOffset.FromUnixTimeMilliseconds((long)updated) : DateTimeOffset.Now,
+                        PreviousResponseId = ExtractString(item, "previousResponseId", "previous_response_id") ?? string.Empty,
+                        ServerConversationId = ExtractString(item, "serverConversationId", "server_conversation_id") ?? string.Empty,
+                        Messages = messages
+                    });
+                }
+            }
+
+            return new HubConversationsResult(items.OrderByDescending(item => item.UpdatedAt).ToArray(), $"Archivio server: {items.Count} chat.");
+        }
+        catch (Exception ex)
+        {
+            return new HubConversationsResult([], $"Archivio server non disponibile: {ex.Message}");
+        }
     }
 
     public static async Task<HubNotificationsResult> LoadHubNotificationsAsync(AppSettings settings, bool unreadOnly = false)

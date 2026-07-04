@@ -11,12 +11,16 @@ import java.util.Locale
 
 internal fun exportLocalBackup(context: Context, apiKey: String?): String {
     val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+    val archivePrefs = sharedPreferencesJson(context, "chatclaw_archive")
+    val conversations = archiveJsonArray(archivePrefs)
     val backup = JSONObject()
         .put("schema", "hermes-hub.local-backup.v1")
         .put("exportedAt", System.currentTimeMillis())
         .put("packageName", context.packageName)
         .put("settings", sharedPreferencesJson(context, "chatclaw_settings"))
-        .put("conversations", parseJsonArray(sharedPreferencesJson(context, "chatclaw_archive").optString("conversations", "[]")))
+        .put("archive", archivePrefs)
+        .put("items", conversations)
+        .put("conversations", conversations)
         .put("tasks", parseJsonArray(sharedPreferencesJson(context, "chatclaw_tasks").optString("tasks", "[]")))
         .put("workspace", sharedPreferencesJson(context, "chatclaw_workspace_requests"))
 
@@ -41,6 +45,14 @@ internal fun exportLocalBackup(context: Context, apiKey: String?): String {
 
 private fun parseJsonArray(raw: String): Any {
     return runCatching { org.json.JSONArray(raw) }.getOrElse { raw }
+}
+
+private fun archiveJsonArray(archivePrefs: JSONObject): Any {
+    val rawItems = archivePrefs.optString("items", "")
+    if (rawItems.isNotBlank()) {
+        return parseJsonArray(rawItems)
+    }
+    return parseJsonArray(archivePrefs.optString("conversations", "[]"))
 }
 
 private fun sharedPreferencesJson(context: Context, name: String): JSONObject {

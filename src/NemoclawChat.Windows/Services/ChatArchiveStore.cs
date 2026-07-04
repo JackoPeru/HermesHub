@@ -282,6 +282,54 @@ public static class ChatArchiveStore
         }
     }
 
+    public static int Merge(IEnumerable<ConversationRecord> incoming)
+    {
+        lock (_cacheLock)
+        {
+            var items = Load();
+            var byId = items
+                .Where(item => !string.IsNullOrWhiteSpace(item.Id))
+                .ToDictionary(item => item.Id, item => item, StringComparer.OrdinalIgnoreCase);
+            var changed = 0;
+
+            foreach (var conversation in incoming)
+            {
+                if (string.IsNullOrWhiteSpace(conversation.Id))
+                {
+                    continue;
+                }
+
+                if (!byId.TryGetValue(conversation.Id, out var existing))
+                {
+                    items.Add(conversation);
+                    byId[conversation.Id] = conversation;
+                    changed++;
+                    continue;
+                }
+
+                if (conversation.UpdatedAt >= existing.UpdatedAt)
+                {
+                    existing.Title = conversation.Title;
+                    existing.Kind = conversation.Kind;
+                    existing.Description = conversation.Description;
+                    existing.Prompt = conversation.Prompt;
+                    existing.PreviousResponseId = conversation.PreviousResponseId;
+                    existing.ServerConversationId = conversation.ServerConversationId;
+                    existing.UpdatedAt = conversation.UpdatedAt;
+                    existing.Messages = conversation.Messages.ToList();
+                    changed++;
+                }
+            }
+
+            if (changed > 0)
+            {
+                SaveAll(items);
+            }
+
+            return changed;
+        }
+    }
+
     private static void SaveAll(List<ConversationRecord> items)
     {
         var ordered = items
