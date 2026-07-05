@@ -16,6 +16,7 @@ public sealed partial class MainWindow : Window
     private bool _sidebarCollapsed;
     private bool _closing;
     private readonly HubNotificationPoller _notificationPoller;
+    private readonly ChatArchiveSyncService _archiveSyncService;
 
     public MainWindow()
     {
@@ -33,6 +34,8 @@ public sealed partial class MainWindow : Window
         Closed += MainWindow_Closed;
         _notificationPoller = new HubNotificationPoller(DispatcherQueue);
         _notificationPoller.Start();
+        _archiveSyncService = new ChatArchiveSyncService();
+        _archiveSyncService.Start();
         RefreshRecentChats();
     }
 
@@ -45,6 +48,7 @@ public sealed partial class MainWindow : Window
             ChatArchiveStore.Changed -= RefreshRecentChats;
             ContentFrame.Navigated -= ContentFrame_Navigated;
             _notificationPoller.Stop();
+            _archiveSyncService.Stop();
             SaveWindowState();
             Closed -= MainWindow_Closed;
         }

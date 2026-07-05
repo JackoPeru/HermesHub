@@ -210,6 +210,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -224,6 +225,7 @@ import java.net.URLEncoder
 import java.net.URL
 import java.security.KeyStore
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -291,6 +293,49 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 
 private object HermesStreamRuntime {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+}
+
+private object ConversationArchiveAutoSync {
+    private val applyingRemote = AtomicBoolean(false)
+    private val uploadQueued = AtomicBoolean(false)
+    private val syncActive = AtomicBoolean(false)
+
+    fun scheduleUpload(context: Context) {
+        if (applyingRemote.get()) return
+        val appContext = context.applicationContext
+        if (uploadQueued.getAndSet(true)) return
+        HermesStreamRuntime.scope.launch {
+            delay(2_000)
+            uploadQueued.set(false)
+            pushToHub(appContext)
+        }
+    }
+
+    suspend fun pullFromHub(context: Context): String? {
+        if (!syncActive.compareAndSet(false, true)) return null
+        val appContext = context.applicationContext
+        return try {
+            applyingRemote.set(true)
+            restoreConversationsFromHub(
+                appContext,
+                loadSettings(appContext),
+                loadGatewaySecret(appContext),
+                syncAfterSave = false
+            )
+        } finally {
+            applyingRemote.set(false)
+            syncActive.set(false)
+        }
+    }
+
+    private suspend fun pushToHub(context: Context) {
+        if (!syncActive.compareAndSet(false, true)) return
+        try {
+            syncConversationsToHub(context, loadSettings(context), loadGatewaySecret(context))
+        } finally {
+            syncActive.set(false)
+        }
+    }
 }
 
 @androidx.compose.runtime.Immutable
@@ -755,6 +800,13 @@ private fun ChatApp() {
     LaunchedEffect(chatState.draft) {
         if (chatState.draft != savedDraft) {
             savedDraft = chatState.draft
+        }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            ConversationArchiveAutoSync.pullFromHub(context)
+            ConversationArchiveAutoSync.scheduleUpload(context)
+            delay(120_000)
         }
     }
     val chatScope = rememberCoroutineScope()
@@ -2758,6 +2810,13 @@ private fun ArchiveScreen(
     val savedConversations = remember(refreshKey) { loadConversations(context) }
     val savedProjects = savedConversations.count { it.kind == "Progetto" }
     val savedChats = savedConversations.count { it.kind == "Chat" || it.kind == "Task" }
+    LaunchedEffect(Unit) {
+        val syncStatus = ConversationArchiveAutoSync.pullFromHub(context)
+        if (syncStatus != null && !syncStatus.contains("vuoto", ignoreCase = true)) {
+            status = syncStatus
+            refreshKey++
+        }
+    }
     val results = archive.filter { item ->
         (filter == "Tutto" || item.kind == filter) &&
             (query.isBlank() ||
@@ -7161,7 +7220,12 @@ private suspend fun syncConversationsToHub(context: Context, settings: AppSettin
     }
 }
 
-private suspend fun restoreConversationsFromHub(context: Context, settings: AppSettings, apiKey: String?): String = withContext(Dispatchers.IO) {
+private suspend fun restoreConversationsFromHub(
+    context: Context,
+    settings: AppSettings,
+    apiKey: String?,
+    syncAfterSave: Boolean = true
+): String = withContext(Dispatchers.IO) {
     try {
         val response = httpGetResponse(resolveHermesUrl(settings, "/v1/hub/conversations"), apiKey)
         if (response.first !in 200..299) {
@@ -7178,7 +7242,7 @@ private suspend fun restoreConversationsFromHub(context: Context, settings: AppS
                 byId[incoming.id] = incoming
             }
         }
-        saveConversations(context, byId.values.toList())
+        saveConversations(context, byId.values.toList(), syncAfterSave)
         "Archivio scaricato dal gateway: ${remote.size} chat disponibili."
     } catch (ex: Exception) {
         "Archivio server non disponibile: ${ex.message ?: ex.javaClass.simpleName}"
@@ -8862,12 +8926,15 @@ private fun loadConversations(context: Context): List<LocalConversation> {
     }
 }
 
-private fun saveConversations(context: Context, conversations: List<LocalConversation>) {
+private fun saveConversations(context: Context, conversations: List<LocalConversation>, syncAfterSave: Boolean = true) {
     synchronized(localArchiveLock) {
         context.getSharedPreferences(CURRENT_ARCHIVE_PREFS, Context.MODE_PRIVATE)
             .edit()
             .putString("items", conversationsToJsonArray(conversations).toString())
             .commit()
+    }
+    if (syncAfterSave) {
+        ConversationArchiveAutoSync.scheduleUpload(context)
     }
 }
 

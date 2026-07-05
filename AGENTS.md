@@ -33,10 +33,20 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.133 Release Hermes Hub 0.6.133 chat archive sync
+v0.6.134 Release Hermes Hub 0.6.134 automatic chat archive sync
 ```
 
 ## Release Corrente
+
+Hermes Hub 0.6.134 (Automatic chat archive sync):
+
+Release 0.6.134:
+- Windows/Android: sincronizzazione archivio chat automatica. Ogni salvataggio locale programma upload debounce verso `/v1/hub/conversations/import`; all'avvio e periodicamente l'app scarica/merge dal gateway.
+- Windows: aggiunto `ChatArchiveSyncService`, avviato con la finestra principale, con pull+push automatico ogni circa 2 minuti e upload debounce dopo `ChatArchiveStore.Changed`.
+- Android: aggiunto `ConversationArchiveAutoSync`, con pull+upload automatico ogni circa 2 minuti mentre l'app e' aperta, upload debounce dopo `saveConversations` e refresh automatico quando si apre `Archivio`.
+- I bottoni manuali `Carica server` / `Scarica server` restano come fallback diagnostico.
+- Asset release attesi: Android APK `HermesHub-0.6.134-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.134.0_x64.msix`. Linux Gateway non incluso perche' invariato rispetto all'hotfix gateway 0.6.133.
+- Release bump: Windows/AdminBridge `0.6.134`, Android `versionName 0.6.134`, `versionCode 139`.
 
 Hermes Hub 0.6.133 (Server chat archive sync):
 
