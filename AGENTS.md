@@ -43,6 +43,8 @@ Hermes Hub 0.6.133 (Server chat archive sync):
 Release 0.6.133:
 - Windows/Android: aggiunta sincronizzazione manuale archivio chat con gateway tramite sezione `Archivio`: `Carica server` invia le chat locali a `/v1/hub/conversations/import`, `Scarica server` ripristina/merge dal gateway senza cancellare chat locali piu' recenti.
 - Gateway Linux: aggiunti endpoint persistenti `GET /v1/hub/conversations`, `POST /v1/hub/conversations/import`, `PUT /v1/hub/conversations/{id}`, `DELETE /v1/hub/conversations/{id}` con store default `~/.hermes/hub_conversations.json` (`HERMES_HUB_CONVERSATIONS_PATH` override).
+- Gateway Linux hotfix 2026-07-05: patcher reso compatibile con upstream Hermes che usa `gw_state` in `/health/detailed` e startup guard `_api_key_passes_startup_guard`; corretto anche argomento errato in `capabilities hub support features`.
+- Gateway Linux: launcher genera/riusa una chiave forte `~/.hermes/api_server.key` per `API_SERVER_KEY` quando il default `hermes-hub` e' troppo corto per i nuovi controlli upstream; `hermes-hub` resta alias compat per le app tramite patcher.
 - Android: corretto `Backup locale`, ora esporta davvero `chatclaw_archive.items` oltre al campo compat `conversations`.
 - Android: aggiunto import manuale da export testuale negli appunti (`Archivio > Importa appunti`) per migrazione da vecchie installazioni non aggiornabili per cambio firma.
 - Nota migrazione firma Android: gateway non puo' estrarre direttamente chat dalla sandbox Android di una vecchia installazione firmata con key diversa. Prima di disinstallare vecchia app, usare `Archivio > Export` e salvare il testo; dopo reinstall nuova app, copiare quel testo negli appunti, usare `Archivio > Importa appunti`, poi `Carica server`.

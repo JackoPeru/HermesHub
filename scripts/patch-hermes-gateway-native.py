@@ -1710,17 +1710,21 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         changes.append("auth accept hermes hub key aliases")
 
     if "if not _hermes_hub_api_keys(self._api_key):" not in text:
-        text, _ = _replace_once(
-            text,
+        startup_anchor = (
             '            if not self._api_key:\n'
             '                logger.error(\n'
-            '                    "[%s] Refusing to start: API_SERVER_KEY is required for the API server, "',
-            '            if not _hermes_hub_api_keys(self._api_key):\n'
-            '                logger.error(\n'
-            '                    "[%s] Refusing to start: API_SERVER_KEY is required for the API server, "',
-            "startup auth accepts hermes hub key aliases",
+            '                    "[%s] Refusing to start: API_SERVER_KEY is required for the API server, "'
         )
-        changes.append("startup auth accepts hermes hub key aliases")
+        if startup_anchor in text:
+            text, _ = _replace_once(
+                text,
+                startup_anchor,
+                '            if not _hermes_hub_api_keys(self._api_key):\n'
+                '                logger.error(\n'
+                '                    "[%s] Refusing to start: API_SERVER_KEY is required for the API server, "',
+                "startup auth accepts hermes hub key aliases",
+            )
+            changes.append("startup auth accepts hermes hub key aliases")
 
     if 'system_prompt = None if _is_hermes_hub_request(request, body) else (body.get("system_message") or body.get("instructions"))' not in text:
         text = text.replace(
@@ -1762,9 +1766,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         changes.append("responses ignore hermes hub instructions")
 
     if '"native_protocol": {' not in text:
-        text, _ = _replace_regex_once(
-            text,
-            r'(^\s+"version": _hermes_version\(\),\n)(^\s+"gateway_state": runtime\.get\("gateway_state"\),)',
+        native_protocol_block = (
             r'\1'
             r'            "native_protocol": {' "\n"
             r'                "name": "hermes-native",' "\n"
@@ -1774,10 +1776,18 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             r'                "context_owner": "hermes-agent",' "\n"
             r'                "raw_event_passthrough": True,' "\n"
             r'            },' "\n"
-            r'\2',
-            "health_detailed native_protocol",
+            r'\2'
         )
-        changes.append("health_detailed native_protocol")
+        patched, count = re.subn(
+            r'(^\s+"version": _hermes_version\(\),\n)(^\s+"gateway_state": (?:runtime\.get\("gateway_state"\)|gw_state),)',
+            native_protocol_block,
+            text,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if count == 1:
+            text = patched
+            changes.append("health_detailed native_protocol")
 
     if '"hermes_native": True,' not in text:
         text, _ = _replace_regex_once(
@@ -1820,7 +1830,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             r'                "media_proxy": True,' "\n"
             r'                "media_transcode_mp4": True,' "\n"
             r'                "hub_memory": True,' "\n"
-            r'                "hub_state": True,' "\n",
+            r'                "hub_state": True,' "\n"
             r'                "hub_notifications": True,' "\n",
             "capabilities hub support features",
         )
