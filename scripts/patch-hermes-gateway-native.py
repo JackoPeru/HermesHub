@@ -1322,6 +1322,140 @@ def _hermes_hub_notifications_payload(unread_only: bool = False) -> Dict[str, An
         )
         changes.append("hub conversations storage helpers")
 
+    if 'def _hermes_hub_normalize_conversation' in text and '"deletedAt": deleted_num if deleted_num > 0 else None' not in text:
+        text, _ = _replace_regex_once(
+            text,
+            r'def _hermes_hub_normalize_conversation\(raw: Any\) -> Optional\[Dict\[str, Any\]\]:[\s\S]*?(?=\n\ndef _hermes_hub_extract_backup_conversations)',
+            '''def _hermes_hub_normalize_conversation(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    cid = str(raw.get("id") or raw.get("conversationId") or raw.get("conversation_id") or "").strip()
+    if not cid:
+        cid = f"conv_{int(time.time() * 1000)}"
+    messages = []
+    raw_messages = raw.get("messages")
+    if isinstance(raw_messages, list):
+        for msg in raw_messages:
+            normalized = _hermes_hub_normalize_message(msg)
+            if normalized:
+                messages.append(normalized)
+    title = str(raw.get("title") or raw.get("name") or raw.get("prompt") or "Nuova chat")
+    prompt = "" if raw.get("prompt") is None else str(raw.get("prompt"))
+    updated = raw.get("updatedAt", raw.get("updated_at", raw.get("modified_at", 0)))
+    updated_num = _hermes_hub_number(updated, time.time() * 1000)
+    deleted = raw.get("deletedAt", raw.get("deleted_at", None))
+    deleted_num = _hermes_hub_number(deleted, 0.0)
+    return {
+        "id": cid,
+        "title": title[:180],
+        "kind": str(raw.get("kind") or "Chat"),
+        "description": "" if raw.get("description") is None else str(raw.get("description")),
+        "prompt": prompt,
+        "updatedAt": updated_num,
+        "deletedAt": deleted_num if deleted_num > 0 else None,
+        "previousResponseId": raw.get("previousResponseId") or raw.get("previous_response_id") or None,
+        "serverConversationId": raw.get("serverConversationId") or raw.get("server_conversation_id") or None,
+        "messages": [] if deleted_num > 0 else messages,
+    }
+''',
+            "hub conversations tombstone normalize upgrade",
+        )
+        changes.append("hub conversations tombstone normalize upgrade")
+
+    if 'def _hermes_hub_merge_conversations' in text and 'active = [item for item in by_id.values() if not item.get("deletedAt")]' not in text:
+        text, _ = _replace_regex_once(
+            text,
+            r'def _hermes_hub_merge_conversations\(incoming: List\[Dict\[str, Any\]\]\) -> Dict\[str, Any\]:[\s\S]*?(?=\n\ndef _hermes_hub_delete_conversation)',
+            '''def _hermes_hub_merge_conversations(incoming: List[Dict[str, Any]]) -> Dict[str, Any]:
+    current = _hermes_hub_conversations_payload()
+    by_id: Dict[str, Dict[str, Any]] = {
+        str(item.get("id")): dict(item)
+        for item in current.get("items", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    changed = 0
+    for raw in incoming:
+        conv = _hermes_hub_normalize_conversation(raw)
+        if not conv:
+            continue
+        cid = str(conv.get("id"))
+        existing = by_id.get(cid)
+        if existing is None:
+            by_id[cid] = conv
+            changed += 1
+            continue
+        if _hermes_hub_number(conv.get("updatedAt")) >= _hermes_hub_number(existing.get("updatedAt")):
+            by_id[cid] = conv
+            changed += 1
+    active = [item for item in by_id.values() if not item.get("deletedAt")]
+    deleted = [item for item in by_id.values() if item.get("deletedAt")]
+    items = (
+        sorted(active, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)[:200] +
+        sorted(deleted, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)[:300]
+    )
+    items = sorted(items, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)
+    payload = {"items": items, "updated_at": time.time()}
+    _hermes_hub_write_json(_hermes_hub_storage_path("HERMES_HUB_CONVERSATIONS_PATH", "hub_conversations.json"), payload)
+    payload["object"] = "hermes.hub.conversations"
+    payload["status"] = "ok"
+    payload["merged"] = changed
+    return payload
+''',
+            "hub conversations tombstone merge upgrade",
+        )
+        changes.append("hub conversations tombstone merge upgrade")
+
+    if 'def _hermes_hub_delete_conversation' in text and '"tombstone": True' not in text:
+        text, _ = _replace_regex_once(
+            text,
+            r'def _hermes_hub_delete_conversation\(conversation_id: str\) -> Dict\[str, Any\]:[\s\S]*?(?=\n\ndef _hermes_hub_notifications_payload)',
+            '''def _hermes_hub_delete_conversation(conversation_id: str) -> Dict[str, Any]:
+    current = _hermes_hub_conversations_payload()
+    items = current.get("items", [])
+    if not isinstance(items, list):
+        items = []
+    now_ms = int(time.time() * 1000)
+    found = False
+    out = []
+    for item in items:
+        if isinstance(item, dict) and str(item.get("id", "")) == str(conversation_id):
+            found = True
+            out.append({
+                "id": str(conversation_id),
+                "title": "Chat eliminata",
+                "kind": "Deleted",
+                "description": "",
+                "prompt": "",
+                "updatedAt": now_ms,
+                "deletedAt": now_ms,
+                "previousResponseId": None,
+                "serverConversationId": None,
+                "messages": [],
+            })
+        else:
+            out.append(item)
+    if not found:
+        out.append({
+            "id": str(conversation_id),
+            "title": "Chat eliminata",
+            "kind": "Deleted",
+            "description": "",
+            "prompt": "",
+            "updatedAt": now_ms,
+            "deletedAt": now_ms,
+            "previousResponseId": None,
+            "serverConversationId": None,
+            "messages": [],
+        })
+    current["items"] = sorted(out, key=lambda x: float(x.get("updatedAt") or 0) if isinstance(x, dict) else 0, reverse=True)[:500]
+    current["updated_at"] = time.time()
+    _hermes_hub_write_json(_hermes_hub_storage_path("HERMES_HUB_CONVERSATIONS_PATH", "hub_conversations.json"), current)
+    return {"object": "hermes.hub.conversations.delete", "deleted": 1 if found else 0, "id": conversation_id, "tombstone": True}
+''',
+            "hub conversations tombstone delete upgrade",
+        )
+        changes.append("hub conversations tombstone delete upgrade")
+
     if 'def _hermes_hub_resolve_media_path(media_id: str) -> Optional["Path"]:' in text:
         text = text.replace(
             'def _hermes_hub_resolve_media_path(media_id: str) -> Optional["Path"]:',

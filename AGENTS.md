@@ -33,10 +33,18 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.135 Release Hermes Hub 0.6.135 synced chat deletion
+v0.6.136 Release Hermes Hub 0.6.136 tombstone patcher hotfix
 ```
 
 ## Release Corrente
+
+Hermes Hub 0.6.136 (Tombstone patcher hotfix):
+
+Release 0.6.136:
+- Gateway Linux: hotfix patcher idempotente. Se il gateway era gia' stato patchato da release precedenti, ora le funzioni esistenti `_hermes_hub_normalize_conversation`, `_hermes_hub_merge_conversations` e `_hermes_hub_delete_conversation` vengono aggiornate per supportare davvero `deletedAt`, invece di saltare il blocco perche' gia' presente.
+- Windows/Android: stesso sync cancellazione chat della 0.6.135, con bump app per mantenere updater app allineato alla latest release.
+- Asset release attesi: Android APK `HermesHub-0.6.136-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.136.0_x64.msix`, Linux Gateway `HermesHub-0.6.136-linux-gateway.tar.gz`.
+- Release bump: Windows/AdminBridge `0.6.136`, Android `versionName 0.6.136`, `versionCode 141`.
 
 Hermes Hub 0.6.135 (Synced chat deletion):
 
