@@ -33,10 +33,21 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.140 Release Hermes Hub 0.6.140 Android file download hotfix
+v0.6.141 Release Hermes Hub 0.6.141 reasoning and media proxy hotfix
 ```
 
 ## Release Corrente
+
+Hermes Hub 0.6.141 (Reasoning and media proxy hotfix):
+
+Release 0.6.141:
+- Android: il pannello `Ragionamento/Sto pensando` mantiene stato espanso stabile durante arrivo testo e tool call; quando arrivano token di reasoning viene aperto automaticamente e resta consultabile.
+- Windows: il reasoning non viene piu' nascosto al completamento quando `Dettagli tecnici chat` e' disattivato; la tendina resta visibile se il server ha inviato thinking.
+- Gateway Linux: hotfix `/v1/media/...` per crash `NameError: raw_news is not defined` nella funzione `_hermes_hub_media_roots`; il patcher ora ripara anche installazioni gia' entrate in quello stato parziale.
+- Server live: applicata patch manuale su `/home/matteo/.hermes/hermes-agent/gateway/platforms/api_server.py` e riavviato `hermes-hub.service`; verificati `GET /v1/capabilities` e `GET /v1/media/autonomous-business-research-full.md` HTTP 200.
+- Stato manutenzione server 2026-07-06: reboot richiesto da `linux-image-6.8.0-134-generic`/`linux-base`; 4 update normali disponibili (`iproute2`, `kpartx`, `multipath-tools`, `tailscale`); 17 update security ESM Apps richiedono Ubuntu Pro attach; firmware Secure Boot dbx update high urgency via `fwupdmgr update`, richiede reboot. Non riavviare senza finestra concordata.
+- Asset release attesi: Android APK `HermesHub-0.6.141-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.141.0_x64.msix`, Linux Gateway `HermesHub-0.6.141-linux-gateway.tar.gz`.
+- Release bump: Windows/AdminBridge `0.6.141`, Android `versionName 0.6.141`, `versionCode 146`.
 
 Hermes Hub 0.6.140 (Android file download hotfix):
 

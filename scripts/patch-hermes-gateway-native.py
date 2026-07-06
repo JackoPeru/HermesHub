@@ -894,11 +894,13 @@ def _hermes_hub_media_roots() -> List["Path"]:
     roots: List[_Path] = []
     raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"
     raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH") or str(_Path.home() / ".hermes" / "hub_uploads")
+    raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"
     for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):
         if part.strip():
             roots.append(_Path(part.strip()).expanduser())
     roots.append(_Path(raw_upload).expanduser())
     roots.append(_Path(raw_video).expanduser())
+    roots.append(_Path(raw_news).expanduser())
     unique: List[_Path] = []
     seen = set()
     for root in roots:
@@ -1038,11 +1040,13 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
     roots: List[_Path] = []
     raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"
     raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH") or str(_Path.home() / ".hermes" / "hub_uploads")
+    raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"
     for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):
         if part.strip():
             roots.append(_Path(part.strip()).expanduser())
     roots.append(_Path(raw_upload).expanduser())
     roots.append(_Path(raw_video).expanduser())
+    roots.append(_Path(raw_news).expanduser())
     unique: List[_Path] = []
     seen = set()
     for root in roots:
@@ -1698,6 +1702,29 @@ def _hermes_hub_media_roots() -> List["Path"]:''',
             1,
         )
         changes.append("media roots include news library")
+
+    media_roots_match = re.search(
+        r'def _hermes_hub_media_roots\(\) -> List\["Path"\]:(?P<body>.*?)(?=\n\ndef _hermes_hub_resolve_media_path)',
+        text,
+        re.S,
+    )
+    if media_roots_match:
+        media_roots_body = media_roots_match.group("body")
+        if (
+            'roots.append(_Path(raw_news).expanduser())' in media_roots_body
+            and 'raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"' not in media_roots_body
+            and 'raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH")' in media_roots_body
+        ):
+            start, end = media_roots_match.span("body")
+            fixed_body = media_roots_body.replace(
+                '    raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH") or str(_Path.home() / ".hermes" / "hub_uploads")\n',
+                '    raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH") or str(_Path.home() / ".hermes" / "hub_uploads")\n'
+                '    raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"\n',
+                1,
+            )
+            if fixed_body != media_roots_body:
+                text = text[:start] + fixed_body + text[end:]
+                changes.append("media roots raw_news repair")
 
     if 'raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH")' not in text and 'raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"' in text:
         text = text.replace(

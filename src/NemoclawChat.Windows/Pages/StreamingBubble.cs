@@ -523,7 +523,7 @@ internal sealed class StreamingBubble
         FlushTextPreview();
         _renderTimer.Stop();
         _statusText.Visibility = Visibility.Collapsed;
-        if (!_showAdvanced)
+        if (!_showAdvanced && !_hasThinking)
         {
             _thinkingExpander.Visibility = Visibility.Collapsed;
             _shimmerTimer.Stop();

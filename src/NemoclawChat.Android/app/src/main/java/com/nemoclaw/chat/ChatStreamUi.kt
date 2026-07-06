@@ -38,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -167,13 +168,21 @@ internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolea
     }
     val active = !state.isDone
     val elapsedSec = ((if (active) nowNs else System.nanoTime()) - state.startedAtNs) / 1_000_000_000.0
+    var thinkingExpanded by rememberSaveable(state.startedAtNs) { mutableStateOf(false) }
+    LaunchedEffect(state.thinking.isNotBlank()) {
+        if (state.thinking.isNotBlank()) {
+            thinkingExpanded = true
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if ((active && state.text.isBlank()) || state.hasThinking || state.thinking.isNotBlank()) {
             ThinkingExpander(
                 thinking = state.thinking,
-                active = active && state.text.isBlank(),
-                elapsedSec = if (state.thinkingElapsedSec > 0) state.thinkingElapsedSec else elapsedSec
+                active = active && state.hasThinking && !state.thinkingFrozen,
+                elapsedSec = if (state.thinkingElapsedSec > 0) state.thinkingElapsedSec else elapsedSec,
+                expanded = thinkingExpanded,
+                onExpandedChange = { thinkingExpanded = it }
             )
         }
 
@@ -288,14 +297,22 @@ internal fun activityIndicator(state: StreamingState): String {
 }
 
 @Composable
-internal fun ThinkingExpander(thinking: String, active: Boolean, elapsedSec: Double) {
-    var expanded by remember { mutableStateOf(false) }
+internal fun ThinkingExpander(
+    thinking: String,
+    active: Boolean,
+    elapsedSec: Double,
+    expanded: Boolean? = null,
+    onExpandedChange: ((Boolean) -> Unit)? = null
+) {
+    var localExpanded by rememberSaveable(thinking.take(96)) { mutableStateOf(false) }
+    val isExpanded = expanded ?: localExpanded
+    val setExpanded = onExpandedChange ?: { value: Boolean -> localExpanded = value }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
-                .clickable { expanded = !expanded },
+                .clickable { setExpanded(!isExpanded) },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -309,13 +326,13 @@ internal fun ThinkingExpander(thinking: String, active: Boolean, elapsedSec: Dou
                 Spacer(modifier = Modifier.weight(1f))
             }
             Icon(
-                imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                contentDescription = if (expanded) "Chiudi ragionamento" else "Mostra ragionamento",
+                imageVector = if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = if (isExpanded) "Chiudi ragionamento" else "Mostra ragionamento",
                 tint = AppColors.Muted,
                 modifier = Modifier.size(16.dp)
             )
         }
-        if (expanded) {
+        if (isExpanded) {
             Text(
                 modifier = Modifier
                     .heightIn(max = 220.dp)
