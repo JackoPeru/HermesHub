@@ -33,10 +33,22 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.138 Release Hermes Hub 0.6.138 practical unlimited gateway uploads
+v0.6.139 Release Hermes Hub 0.6.139 chat file cards
 ```
 
 ## Release Corrente
+
+Hermes Hub 0.6.139 (Chat file cards):
+
+Release 0.6.139:
+- Android: le risposte Hermes che contengono `Media proxy URL: /v1/media/...`, `Download URL`, `File URL` o link proxy `/v1/media/...` vengono convertite automaticamente in `visual_blocks media_file`, invece di restare testo tecnico nella bubble.
+- Android: la card `media_file` ora include anche `Scarica`, con `DownloadManager` e header `Authorization` per i proxy Hermes protetti; `Apri` e `Copia link` restano disponibili.
+- Windows: fallback finale dello stream converte link proxy `/v1/media/...` e righe `Media proxy URL` in card `media_file`, poi ripulisce il testo finale dal link tecnico.
+- Windows/Android: istruzioni e trigger visual blocks aggiornati per richieste tipo `condividimi/inviami/scaricami un file`, cosi Hermes deve produrre una card file scaricabile stile chat e non solo path o URL nel testo.
+- Windows/Android: fix separazione reasoning/risposta nello stream chat. Gli item `reasoning` e i payload tool non vengono piu' riciclati come testo risposta; il reasoning va nella tendina dedicata, con merge anti-duplicato per evitare spezzoni ripetuti dopo tool call o riepiloghi finali.
+- Windows/Android: la UI mostra sempre la tendina `Sto pensando` durante la fase pre-risposta; il reasoning resta disponibile dopo la risposta finale e non dipende dai dettagli avanzati Windows.
+- Asset release attesi: Android APK `HermesHub-0.6.139-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.139.0_x64.msix`. Linux Gateway non incluso perche' invariato in questa release app-only.
+- Release bump: Windows/AdminBridge `0.6.139`, Android `versionName 0.6.139`, `versionCode 144`.
 
 Hermes Hub 0.6.138 (Practical unlimited gateway uploads):
 

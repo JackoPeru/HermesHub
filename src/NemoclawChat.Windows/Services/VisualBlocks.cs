@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace NemoclawChat_Windows.Services;
 
@@ -161,6 +162,10 @@ public sealed record VisualGalleryImage
 
 public static class VisualBlockParser
 {
+    private static readonly Regex InlineMediaRegex = new("""MEDIA\s*:\s*\[([^\]]{1,500})]\(([^)\s]{1,1200})\)|!\[([^\]]{1,500})]\(([^)\s]{1,1200})\)""", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex MediaProxyLineRegex = new("""^\s*(?:Media\s+proxy\s+URL|Media\s+URL|Download\s+URL|File\s+URL|URL\s+media|Link\s+download)\s*:\s*([^\s<>"'`]{1,1200})\s*$""", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
+    private static readonly Regex RawMediaProxyUrlRegex = new("""(?:https?://[^\s<>)"']+/v1/media/[^\s<>)"']{1,1200}|/v1/media/[^\s<>)"']{1,1200})""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -240,6 +245,165 @@ public static class VisualBlockParser
         }
 
         return [];
+    }
+
+    public static IReadOnlyList<VisualBlockRecord> ExtractInlineMediaBlocks(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        var blocks = new List<VisualBlockRecord>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var match in InlineMediaRegex.Matches(text).Cast<Match>().Take(12))
+        {
+            var label = FirstNonBlank(match.Groups[1].Value, match.Groups[3].Value, "Media Hermes");
+            var url = FirstNonBlank(match.Groups[2].Value, match.Groups[4].Value).TrimEnd('.', ',', ';', ':');
+            AddInlineMedia(blocks, seen, label, url);
+        }
+
+        foreach (var url in MediaProxyLineRegex.Matches(text).Cast<Match>()
+                     .Select(match => match.Groups[1].Value)
+                     .Concat(RawMediaProxyUrlRegex.Matches(text).Cast<Match>().Select(match => match.Value))
+                     .Select(value => value.TrimEnd('.', ',', ';', ':'))
+                     .Where(IsSafeInlineMediaUrl)
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .Take(12 - blocks.Count))
+        {
+            AddInlineMedia(blocks, seen, InferMediaFilename("File Hermes", url), url);
+        }
+
+        return blocks;
+    }
+
+    public static string StripInlineMediaMarkup(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return text;
+        }
+
+        var cleaned = InlineMediaRegex.Replace(text, string.Empty);
+        cleaned = MediaProxyLineRegex.Replace(cleaned, string.Empty);
+        cleaned = RawMediaProxyUrlRegex.Replace(cleaned, string.Empty);
+        return Regex.Replace(cleaned, @"\n{3,}", "\n\n").Trim();
+    }
+
+    private static void AddInlineMedia(List<VisualBlockRecord> blocks, HashSet<string> seen, string label, string url)
+    {
+        if (blocks.Count >= 12 || string.IsNullOrWhiteSpace(url) || !seen.Add(url))
+        {
+            return;
+        }
+
+        var filename = InferMediaFilename(label, url);
+        blocks.Add(new VisualBlockRecord
+        {
+            Id = $"inline-media-{StableInlineId(url, blocks.Count)}",
+            Type = "media_file",
+            Title = string.IsNullOrWhiteSpace(filename) ? "File Hermes" : filename,
+            MediaUrl = url,
+            MediaKind = InferMediaKind(filename, url),
+            MimeType = InferMimeType(filename, url),
+            Filename = filename,
+            Alt = string.IsNullOrWhiteSpace(label) ? filename : label,
+            Caption = "File rilevato dal testo Hermes."
+        });
+    }
+
+    private static string InferMediaFilename(string label, string url)
+    {
+        var candidate = label.Contains('.', StringComparison.Ordinal) ? label : url.Split('/', '\\').LastOrDefault() ?? string.Empty;
+        return candidate.Split('?', '#')[0].Trim();
+    }
+
+    private static string InferMediaKind(string filename, string url)
+    {
+        var value = $"{filename} {url}".ToLowerInvariant();
+        if (new[] { ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp" }.Any(value.Contains))
+        {
+            return "image";
+        }
+        if (new[] { ".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi", ".wmv", ".flv", ".mpg", ".mpeg", ".ts", ".m2ts", ".3gp", ".ogv" }.Any(value.Contains))
+        {
+            return "video";
+        }
+        if (new[] { ".mp3", ".wav", ".m4a", ".flac", ".ogg" }.Any(value.Contains))
+        {
+            return "audio";
+        }
+        return "document";
+    }
+
+    private static string InferMimeType(string filename, string url)
+    {
+        var value = $"{filename} {url}".ToLowerInvariant();
+        return value switch
+        {
+            var v when v.Contains(".png") => "image/png",
+            var v when v.Contains(".jpg") || v.Contains(".jpeg") => "image/jpeg",
+            var v when v.Contains(".webp") => "image/webp",
+            var v when v.Contains(".gif") => "image/gif",
+            var v when v.Contains(".mp4") || v.Contains(".m4v") => "video/mp4",
+            var v when v.Contains(".mov") => "video/quicktime",
+            var v when v.Contains(".webm") => "video/webm",
+            var v when v.Contains(".mkv") => "video/x-matroska",
+            var v when v.Contains(".avi") => "video/x-msvideo",
+            var v when v.Contains(".wmv") => "video/x-ms-wmv",
+            var v when v.Contains(".flv") => "video/x-flv",
+            var v when v.Contains(".mpg") || v.Contains(".mpeg") => "video/mpeg",
+            var v when v.Contains(".ts") || v.Contains(".m2ts") => "video/mp2t",
+            var v when v.Contains(".3gp") => "video/3gpp",
+            var v when v.Contains(".ogv") => "video/ogg",
+            var v when v.Contains(".mp3") => "audio/mpeg",
+            var v when v.Contains(".wav") => "audio/wav",
+            var v when v.Contains(".m4a") => "audio/mp4",
+            var v when v.Contains(".flac") => "audio/flac",
+            var v when v.Contains(".ogg") => "audio/ogg",
+            var v when v.Contains(".pdf") => "application/pdf",
+            var v when v.Contains(".md") || v.Contains(".markdown") => "text/markdown",
+            var v when v.Contains(".txt") => "text/plain",
+            var v when v.Contains(".csv") => "text/csv",
+            var v when v.Contains(".json") => "application/json",
+            var v when v.Contains(".html") || v.Contains(".htm") => "text/html",
+            var v when v.Contains(".zip") => "application/zip",
+            _ => string.Empty
+        };
+    }
+
+    private static bool IsSafeInlineMediaUrl(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+        if (value.StartsWith("/v1/media/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+               uri.Scheme is "http" or "https" &&
+               uri.AbsolutePath.StartsWith("/v1/media/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string StableInlineId(string value, int index)
+    {
+        unchecked
+        {
+            var hash = 17;
+            foreach (var ch in value)
+            {
+                hash = hash * 31 + ch;
+            }
+            return $"{index}-{(uint)hash:x8}";
+        }
+    }
+
+    private static string FirstNonBlank(params string?[] values)
+    {
+        return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
     }
 
     public static bool IsValid(VisualBlockRecord block)
@@ -376,6 +540,10 @@ public static class VisualBlockFixtures
         }
 
         return prompt.Contains("visual", StringComparison.OrdinalIgnoreCase) ||
+               prompt.Contains("file", StringComparison.OrdinalIgnoreCase) ||
+               prompt.Contains("condivid", StringComparison.OrdinalIgnoreCase) ||
+               prompt.Contains("scaric", StringComparison.OrdinalIgnoreCase) ||
+               prompt.Contains("inviami", StringComparison.OrdinalIgnoreCase) ||
                prompt.Contains("diagram", StringComparison.OrdinalIgnoreCase) ||
                prompt.Contains("grafico", StringComparison.OrdinalIgnoreCase) ||
                prompt.Contains("tabella", StringComparison.OrdinalIgnoreCase) ||

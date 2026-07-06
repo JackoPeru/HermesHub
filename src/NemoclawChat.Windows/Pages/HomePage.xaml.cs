@@ -726,8 +726,18 @@ public sealed partial class HomePage : Page
                             finalThinkingBuilder.Clear();
                             AppendBounded(finalThinkingBuilder, done.AccumulatedThinking);
                         }
+                        var inlineBlocks = VisualBlockParser.ExtractInlineMediaBlocks(finalTextBuilder.ToString());
+                        if (inlineBlocks.Count > 0)
+                        {
+                            finalBlocks = MergeVisualBlocks(finalBlocks, inlineBlocks);
+                            finalBlocksVersion = VisualBlocksContract.Version;
+                            bubble.SetVisualBlocks(inlineBlocks, RenderVisualBlock);
+                            var cleanedFinalText = VisualBlockParser.StripInlineMediaMarkup(finalTextBuilder.ToString());
+                            finalTextBuilder.Clear();
+                            AppendBounded(finalTextBuilder, cleanedFinalText);
+                        }
                         bubble.SynchronizeFinalContent(
-                            string.IsNullOrEmpty(done.AccumulatedText) ? null : done.AccumulatedText,
+                            finalTextBuilder.Length == 0 ? null : finalTextBuilder.ToString(),
                             string.IsNullOrEmpty(done.AccumulatedThinking) ? null : done.AccumulatedThinking);
                         bubble.Complete(done.Stats);
                         if (IsComposerRunCurrent(composerRunId))
@@ -1019,6 +1029,30 @@ public sealed partial class HomePage : Page
 
         builder.Append(text, 0, remaining);
         builder.Append("\n\n[…troncato: limite 2000000 caratteri raggiunto.]");
+    }
+
+    private static IReadOnlyList<VisualBlockRecord> MergeVisualBlocks(IReadOnlyList<VisualBlockRecord>? current, IReadOnlyList<VisualBlockRecord> incoming)
+    {
+        if (incoming.Count == 0)
+        {
+            return current ?? [];
+        }
+
+        var merged = new List<VisualBlockRecord>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var block in (current ?? []).Concat(incoming))
+        {
+            var key = !string.IsNullOrWhiteSpace(block.MediaUrl)
+                ? $"{block.Type}:media:{block.MediaUrl}"
+                : !string.IsNullOrWhiteSpace(block.Id)
+                    ? block.Id
+                    : $"{block.Type}:{block.Title}";
+            if (seen.Add(key))
+            {
+                merged.Add(block);
+            }
+        }
+        return merged;
     }
 
     private static async Task<ChatInputAttachment?> TryCreateAttachmentAsync(StorageFile file, int maxAttachmentMb)

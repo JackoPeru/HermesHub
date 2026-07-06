@@ -167,20 +167,9 @@ internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolea
     }
     val active = !state.isDone
     val elapsedSec = ((if (active) nowNs else System.nanoTime()) - state.startedAtNs) / 1_000_000_000.0
-    val generationStarted = state.text.isNotBlank() || state.hasThinking || state.toolCalls.isNotEmpty()
-    val processingPercent = state.promptProgressPercent
-    val preGenerationStatus = preGenerationStatusLabel(state.status, processingPercent, elapsedSec)
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (active && !generationStarted) {
-            FlagRow(
-                title = preGenerationStatus,
-                value = processingPercent?.let { "$it%" } ?: String.format(java.util.Locale.US, "%.1fs", elapsedSec),
-                shimmer = true
-            )
-        }
-
-        if (state.hasThinking || state.thinking.isNotBlank()) {
+        if ((active && state.text.isBlank()) || state.hasThinking || state.thinking.isNotBlank()) {
             ThinkingExpander(
                 thinking = state.thinking,
                 active = active && state.text.isBlank(),

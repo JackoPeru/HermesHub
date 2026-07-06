@@ -1088,6 +1088,17 @@ public static class ChatStreamClient
                 if (element.TryGetProperty("item", out var item) && item.ValueKind == JsonValueKind.Object)
                 {
                     var itemType = GetString(item, "type") ?? string.Empty;
+                    if (itemType.Contains("reasoning", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var reasoning = ExtractReasoningText(item);
+                        if (!string.IsNullOrEmpty(reasoning))
+                        {
+                            yield return new StreamThinkingDelta(reasoning);
+                        }
+
+                        yield break;
+                    }
+
                     if (itemType.Contains("message", StringComparison.OrdinalIgnoreCase))
                     {
                         var blocks = ExtractVisualBlocksFromElement(item);
@@ -1152,6 +1163,12 @@ public static class ChatStreamClient
                     if (blocks is { Count: > 0 })
                     {
                         yield return new StreamVisualBlocks(blocks, VisualBlocksContract.Version);
+                    }
+
+                    var reasoning = ExtractReasoningText(resp);
+                    if (!string.IsNullOrEmpty(reasoning))
+                    {
+                        yield return new StreamThinkingDelta(reasoning);
                     }
                 }
                 yield break;
@@ -1234,12 +1251,14 @@ public static class ChatStreamClient
         }
 
         string text = string.Empty;
+        string reasoning = string.Empty;
         IReadOnlyList<VisualBlockRecord>? blocks = null;
         string? responseId = null;
         try
         {
             using var doc = JsonDocument.Parse(body.Trim());
             text = ExtractText(doc.RootElement);
+            reasoning = ExtractReasoningText(doc.RootElement);
             blocks = VisualBlockParser.ExtractFromResponse(body);
             responseId = TryGetString(doc.RootElement, "id", "response_id", "responseId");
         }
@@ -1256,6 +1275,11 @@ public static class ChatStreamClient
         if (!string.IsNullOrEmpty(text))
         {
             yield return new StreamTextDelta(text);
+        }
+
+        if (!string.IsNullOrEmpty(reasoning))
+        {
+            yield return new StreamThinkingDelta(reasoning);
         }
 
         if (blocks is { Count: > 0 })
@@ -1375,6 +1399,11 @@ public static class ChatStreamClient
 
         if (element.ValueKind == JsonValueKind.Object)
         {
+            if (IsNonAssistantTextPayload(element))
+            {
+                return string.Empty;
+            }
+
             foreach (var key in new[] { "output_text", "text", "content", "message", "reply" })
             {
                 if (element.TryGetProperty(key, out var prop))
@@ -1422,6 +1451,68 @@ public static class ChatStreamClient
         }
 
         return string.Empty;
+    }
+
+    private static bool IsNonAssistantTextPayload(JsonElement element)
+    {
+        var type = GetString(element, "type") ?? string.Empty;
+        if (type.Contains("reasoning", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains("function_call", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains("tool", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return element.TryGetProperty("tool_call_id", out _) ||
+               element.TryGetProperty("toolCallId", out _) ||
+               element.TryGetProperty("call_id", out _) ||
+               element.TryGetProperty("is_error", out _);
+    }
+
+    private static string ExtractReasoningText(JsonElement element, bool insideReasoning = false)
+    {
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            return insideReasoning ? element.GetString() ?? string.Empty : string.Empty;
+        }
+
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            var builder = new StringBuilder();
+            foreach (var item in element.EnumerateArray())
+            {
+                builder.Append(ExtractReasoningText(item, insideReasoning));
+            }
+            return builder.ToString();
+        }
+
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return string.Empty;
+        }
+
+        var type = GetString(element, "type") ?? string.Empty;
+        var nowInsideReasoning = insideReasoning || type.Contains("reasoning", StringComparison.OrdinalIgnoreCase);
+        var output = new StringBuilder();
+
+        foreach (var property in element.EnumerateObject())
+        {
+            var name = property.Name;
+            var value = property.Value;
+            var childInsideReasoning = nowInsideReasoning || name.Contains("reasoning", StringComparison.OrdinalIgnoreCase);
+            if (!childInsideReasoning && IsNonAssistantTextPayload(element))
+            {
+                continue;
+            }
+
+            if (childInsideReasoning ||
+                name is "output" or "item" or "response" or "content" or "summary")
+            {
+                output.Append(ExtractReasoningText(value, childInsideReasoning));
+            }
+        }
+
+        return output.ToString();
     }
 
     private static int EstimateTokens(string text)

@@ -110,10 +110,7 @@ internal sealed class StreamingBubble
             Visibility = Visibility.Visible
         };
 
-        if (_showAdvanced)
-        {
-            _content.Children.Add(_thinkingExpander);
-        }
+        _content.Children.Add(_thinkingExpander);
 
         _toolCallsPanel = new StackPanel { Spacing = 8 };
         _content.Children.Add(_toolCallsPanel);
@@ -257,15 +254,11 @@ internal sealed class StreamingBubble
 
     public void AppendThinking(string delta)
     {
-        if (!_showAdvanced)
-        {
-            return;
-        }
         if (string.IsNullOrEmpty(delta))
         {
             return;
         }
-        _thinkingBuilder.Append(delta);
+        AppendDeduped(_thinkingBuilder, delta);
         _thinkingText.Text = _thinkingBuilder.ToString();
         _hasThinking = true;
         SetStatus("Ragionamento in corso...");
@@ -612,7 +605,7 @@ internal sealed class StreamingBubble
             _renderPending = true;
         }
 
-        if (_showAdvanced && !string.IsNullOrEmpty(finalThinking) && !string.Equals(_thinkingBuilder.ToString(), finalThinking, StringComparison.Ordinal))
+        if (!string.IsNullOrEmpty(finalThinking) && !string.Equals(_thinkingBuilder.ToString(), finalThinking, StringComparison.Ordinal))
         {
             _thinkingBuilder.Clear();
             _thinkingBuilder.Append(finalThinking);
@@ -690,6 +683,35 @@ internal sealed class StreamingBubble
 
         return builder.ToString(0, MaxLivePreviewChars) +
                "\n\n[anteprima live limitata per stabilita UI; risposta completa salvata nella chat]";
+    }
+
+    private static void AppendDeduped(StringBuilder builder, string delta)
+    {
+        if (delta.Length == 0)
+        {
+            return;
+        }
+
+        if (builder.Length == 0)
+        {
+            builder.Append(delta);
+            return;
+        }
+
+        var current = builder.ToString();
+        if (delta == current || current.EndsWith(delta, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (delta.StartsWith(current, StringComparison.Ordinal))
+        {
+            builder.Clear();
+            builder.Append(delta);
+            return;
+        }
+
+        builder.Append(delta);
     }
 
     private static string PrettifyJson(string raw)

@@ -159,7 +159,7 @@ data class StreamingState(
             ).withActivity(if (text.isEmpty()) "Primo testo ricevuto." else null)
         }
         is ChatStreamEvent.ThinkingDelta -> copy(
-            thinking = thinking + event.delta,
+            thinking = mergeTextDelta(thinking, event.delta),
             hasThinking = true,
             thinkingFrozen = false,
             status = "Hermes sta ragionando..."
@@ -245,8 +245,10 @@ private fun upsertToolResult(tools: List<ToolCallState>, event: ChatStreamEvent.
 
 private fun mergeVisualBlocks(current: List<VisualBlock>, incoming: List<VisualBlock>): List<VisualBlock> {
     if (incoming.isEmpty()) return current
-    val seen = current.map { it.id }.toMutableSet()
-    return current + incoming.filter { seen.add(it.id) }
+    val seen = current.map { if (it.mediaUrl.isNotBlank()) "${it.type}:media:${it.mediaUrl}" else it.id }.toMutableSet()
+    return current + incoming.filter {
+        seen.add(if (it.mediaUrl.isNotBlank()) "${it.type}:media:${it.mediaUrl}" else it.id)
+    }
 }
 
 private fun mergeTextDelta(current: String, delta: String): String {
@@ -1098,7 +1100,10 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
             val item = obj.optJSONObject("item")
             if (item != null) {
                 val itemType = item.optString("type", "")
-                if (itemType.contains("message", ignoreCase = true)) {
+                if (itemType.contains("reasoning", ignoreCase = true)) {
+                    val reasoning = extractReasoningText(item)
+                    if (reasoning.isNotEmpty()) out += ChatStreamEvent.ThinkingDelta(reasoning)
+                } else if (itemType.contains("message", ignoreCase = true)) {
                     val blocks = extractVisualBlocksFromJson(item.toString())
                     if (blocks.isNotEmpty()) {
                         out += ChatStreamEvent.VisualBlocks(blocks, VISUAL_BLOCKS_VERSION)
@@ -1115,9 +1120,6 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
                     val args = item.optString("arguments", "")
                     if (args.isNotEmpty()) out += ChatStreamEvent.ToolCallArgs(id, args)
                     out += ChatStreamEvent.ToolCallEnd(id)
-                } else {
-                    val text = extractTextFromAnyJson(item)
-                    if (text.isNotEmpty()) out += ChatStreamEvent.TextDelta(text)
                 }
             }
             return out
@@ -1147,6 +1149,10 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
                 val blocks = extractVisualBlocksFromJson(resp.toString())
                 if (blocks.isNotEmpty()) {
                     out += ChatStreamEvent.VisualBlocks(blocks, VISUAL_BLOCKS_VERSION)
+                }
+                val reasoning = extractReasoningText(resp)
+                if (reasoning.isNotEmpty()) {
+                    out += ChatStreamEvent.ThinkingDelta(reasoning)
                 }
             }
             return out
@@ -1317,8 +1323,9 @@ private const val JSON_EXTRACT_MAX_DEPTH = 10
 
 private fun extractTextFromAnyJson(obj: JSONObject, depth: Int = 0): String {
     if (depth >= JSON_EXTRACT_MAX_DEPTH) return ""
+    if (isNonAssistantTextPayload(obj)) return ""
 
-    val direct = listOf("output_text", "text", "message", "reply", "result", "summary")
+    val direct = listOf("output_text", "text", "message", "reply")
         .firstNotNullOfOrNull { key ->
             val value = obj.opt(key)
             if (value is String && value.isNotEmpty()) value else null
@@ -1330,6 +1337,7 @@ private fun extractTextFromAnyJson(obj: JSONObject, depth: Int = 0): String {
         val builder = StringBuilder()
         for (i in 0 until content.length()) {
             val part = content.optJSONObject(i) ?: continue
+            if (isNonAssistantTextPayload(part)) continue
             val partText = part.optString("text", part.optString("output_text", ""))
             if (partText.isNotEmpty()) builder.append(partText)
         }
@@ -1362,6 +1370,53 @@ private fun extractTextFromAnyJson(obj: JSONObject, depth: Int = 0): String {
     return ""
 }
 
+private fun isNonAssistantTextPayload(obj: JSONObject): Boolean {
+    val type = obj.optString("type", "").lowercase()
+    if (type.contains("reasoning") ||
+        type.contains("function_call") ||
+        type.contains("tool")
+    ) {
+        return true
+    }
+    return obj.has("tool_call_id") ||
+        obj.has("toolCallId") ||
+        obj.has("call_id") ||
+        obj.has("is_error")
+}
+
+private fun extractReasoningText(value: Any?, insideReasoning: Boolean = false): String {
+    return when (value) {
+        null, JSONObject.NULL -> ""
+        is String -> if (insideReasoning) value else ""
+        is JSONArray -> buildString {
+            for (i in 0 until value.length()) {
+                append(extractReasoningText(value.opt(i), insideReasoning))
+            }
+        }
+        is JSONObject -> {
+            val type = value.optString("type", "")
+            val nowInsideReasoning = insideReasoning || type.contains("reasoning", ignoreCase = true)
+            buildString {
+                val keys = value.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val childInsideReasoning = nowInsideReasoning || key.contains("reasoning", ignoreCase = true)
+                    if ((!childInsideReasoning && isNonAssistantTextPayload(value)).not() && (childInsideReasoning ||
+                        key == "output" ||
+                        key == "item" ||
+                        key == "response" ||
+                        key == "content" ||
+                        key == "summary"
+                    )) {
+                        append(extractReasoningText(value.opt(key), childInsideReasoning))
+                    }
+                }
+            }
+        }
+        else -> ""
+    }
+}
+
 private fun parseFullBody(body: String): List<ChatStreamEvent> {
     if (body.isBlank()) return emptyList()
     val out = mutableListOf<ChatStreamEvent>()
@@ -1369,6 +1424,12 @@ private fun parseFullBody(body: String): List<ChatStreamEvent> {
     val rid = extractResponseId(body)
     if (rid != null) out += ChatStreamEvent.ResponseId(rid)
     if (text.isNotEmpty()) out += ChatStreamEvent.TextDelta(text)
+    try {
+        val reasoning = extractReasoningText(JSONObject(body))
+        if (reasoning.isNotEmpty()) out += ChatStreamEvent.ThinkingDelta(reasoning)
+    } catch (_: Exception) {
+        // Body may be plain text.
+    }
     try {
         out += extractToolEventsFromAnyJson(JSONObject(body))
     } catch (_: Exception) {
@@ -1380,6 +1441,8 @@ private fun parseFullBody(body: String): List<ChatStreamEvent> {
 }
 
 private val INLINE_MEDIA_REGEX = Regex("""(?is)MEDIA\s*:\s*\[([^\]]{1,500})]\(([^)\s]{1,1200})\)|!\[([^\]]{1,500})]\(([^)\s]{1,1200})\)""")
+private val MEDIA_PROXY_LINE_REGEX = Regex("""(?im)^\s*(?:Media\s+proxy\s+URL|Media\s+URL|Download\s+URL|File\s+URL|URL\s+media|Link\s+download)\s*:\s*([^\s<>"'`]{1,1200})\s*$""")
+private val RAW_MEDIA_PROXY_URL_REGEX = Regex("""(?i)(?:https?://[^\s<>)"']+/v1/media/[^\s<>)"']{1,1200}|/v1/media/[^\s<>)"']{1,1200})""")
 private val RAW_IMAGE_URL_REGEX = Regex("""(?i)\bhttps://[^\s<>)"']{6,1200}""")
 
 private fun extractInlineMediaBlocks(text: String): List<VisualBlock> {
@@ -1390,16 +1453,32 @@ private fun extractInlineMediaBlocks(text: String): List<VisualBlock> {
     }.toList()
 
     val seen = explicit.map { it.mediaUrl }.toMutableSet()
-    val raw = RAW_IMAGE_URL_REGEX.findAll(text)
-        .map { it.value.trimEnd('.', ',', ';', ':') }
-        .filter { it !in seen && isLikelyRemoteImageUrl(it) }
+    val proxy = MEDIA_PROXY_LINE_REGEX.findAll(text)
+        .map { it.groups[1]?.value.orEmpty().trimEnd('.', ',', ';', ':') }
+        .plus(RAW_MEDIA_PROXY_URL_REGEX.findAll(text).map { it.value.trimEnd('.', ',', ';', ':') })
+        .filter { it.isNotBlank() && it !in seen && isSafeInlineMediaUrl(it) }
+        .distinct()
         .take(12 - explicit.size)
         .mapIndexed { index, url ->
             seen += url
-            createInlineMediaBlock(index + explicit.size, inferMediaFilename("immagine", url).ifBlank { "Immagine" }, url, explicit = false)
+            createInlineMediaBlock(
+                index + explicit.size,
+                inferMediaFilename("file-hermes", url).ifBlank { "File Hermes" },
+                url,
+                explicit = true
+            )
         }
         .toList()
-    return explicit + raw
+    val raw = RAW_IMAGE_URL_REGEX.findAll(text)
+        .map { it.value.trimEnd('.', ',', ';', ':') }
+        .filter { it !in seen && isLikelyRemoteImageUrl(it) }
+        .take(12 - explicit.size - proxy.size)
+        .mapIndexed { index, url ->
+            seen += url
+            createInlineMediaBlock(index + explicit.size + proxy.size, inferMediaFilename("immagine", url).ifBlank { "Immagine" }, url, explicit = false)
+        }
+        .toList()
+    return explicit + proxy + raw
 }
 
 private fun createInlineMediaBlock(index: Int, label: String, url: String, explicit: Boolean): VisualBlock {
@@ -1426,7 +1505,12 @@ private fun createInlineMediaBlock(index: Int, label: String, url: String, expli
 }
 
 private fun stripInlineMediaMarkup(text: String): String {
-    return INLINE_MEDIA_REGEX.replace(text, "").replace(Regex("""\n{3,}"""), "\n\n").trim()
+    return INLINE_MEDIA_REGEX
+        .replace(text, "")
+        .let { MEDIA_PROXY_LINE_REGEX.replace(it, "") }
+        .let { RAW_MEDIA_PROXY_URL_REGEX.replace(it, "") }
+        .replace(Regex("""\n{3,}"""), "\n\n")
+        .trim()
 }
 
 private fun stableInlineId(value: String, index: Int): String {
@@ -1471,7 +1555,16 @@ private fun inferMimeType(filename: String, url: String): String {
         value.contains(".ogv") -> "video/ogg"
         value.contains(".mp3") -> "audio/mpeg"
         value.contains(".wav") -> "audio/wav"
+        value.contains(".m4a") -> "audio/mp4"
+        value.contains(".flac") -> "audio/flac"
+        value.contains(".ogg") -> "audio/ogg"
         value.contains(".pdf") -> "application/pdf"
+        value.contains(".md") || value.contains(".markdown") -> "text/markdown"
+        value.contains(".txt") -> "text/plain"
+        value.contains(".csv") -> "text/csv"
+        value.contains(".json") -> "application/json"
+        value.contains(".html") || value.contains(".htm") -> "text/html"
+        value.contains(".zip") -> "application/zip"
         else -> ""
     }
 }
@@ -1481,6 +1574,17 @@ private fun isLikelyRemoteImageUrl(url: String): Boolean {
     if (!value.startsWith("https://")) return false
     return listOf(".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp").any { value.substringBefore('?').substringBefore('#').endsWith(it) } ||
         listOf("picsum.photos", "images.unsplash.com", "unsplash.com", "pexels.com", "pixabay.com", "cloudinary.com", "image", "photo").any { value.contains(it) }
+}
+
+private fun isSafeInlineMediaUrl(value: String): Boolean {
+    if (value.isBlank()) return false
+    if (value.startsWith("/v1/media/", ignoreCase = true)) return true
+    return try {
+        val uri = URI(value)
+        (uri.scheme == "http" || uri.scheme == "https") && uri.path.startsWith("/v1/media/")
+    } catch (_: Exception) {
+        false
+    }
 }
 
 private fun extractVisualBlocksFromJson(json: String): List<VisualBlock> {

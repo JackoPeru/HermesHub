@@ -2,6 +2,7 @@ package com.nemoclaw.chat
 
 import android.Manifest
 import android.app.Activity
+import android.app.DownloadManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -17,6 +18,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
+import android.os.Environment
 import android.os.StrictMode
 import android.provider.MediaStore
 import android.provider.OpenableColumns
@@ -2186,6 +2188,7 @@ private fun MediaFileBlock(block: VisualBlock) {
         else -> ""
     }
     val clipboard = remember(context) { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
+    val apiKey = remember { loadGatewaySecret(context) }
     val canOpen = resolvedMediaUrl != null
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2240,6 +2243,19 @@ private fun MediaFileBlock(block: VisualBlock) {
                         enabled = canOpen,
                         onClick = {
                             val url = resolvedMediaUrl ?: return@Button
+                            enqueueHermesMediaDownload(
+                                context = context,
+                                url = url,
+                                filename = block.filename.ifBlank { block.title.ifBlank { "hermes-file" } },
+                                mimeType = block.mimeType,
+                                apiKey = apiKey
+                            )
+                        }
+                    ) { Text("Scarica") }
+                    Button(
+                        enabled = canOpen,
+                        onClick = {
+                            val url = resolvedMediaUrl ?: return@Button
                             clipboard.setPrimaryClip(ClipData.newPlainText("hermes-media-url", url))
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = AppColors.Elevated)
@@ -2248,6 +2264,42 @@ private fun MediaFileBlock(block: VisualBlock) {
             }
         }
     }
+}
+
+private fun enqueueHermesMediaDownload(context: Context, url: String, filename: String, mimeType: String, apiKey: String?) {
+    val safeName = sanitizeDownloadFilename(filename.ifBlank {
+        runCatching { Uri.parse(url).lastPathSegment.orEmpty() }.getOrDefault("").ifBlank { "hermes-file" }
+    })
+    try {
+        val uri = Uri.parse(url)
+        val request = DownloadManager.Request(uri)
+            .setTitle(safeName)
+            .setDescription("File condiviso da Hermes Hub")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName)
+        if (mimeType.isNotBlank()) {
+            request.setMimeType(mimeType)
+        }
+        request.addRequestHeader("User-Agent", "HermesHub-Android")
+        if (uri.path.orEmpty().startsWith("/v1/media/", ignoreCase = true)) {
+            val token = apiKey?.trim()?.takeIf { it.isNotBlank() } ?: HERMES_FALLBACK_API_KEY
+            request.addRequestHeader("Authorization", "Bearer $token")
+        }
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        manager.enqueue(request)
+        android.widget.Toast.makeText(context, "Download avviato: $safeName", android.widget.Toast.LENGTH_SHORT).show()
+    } catch (_: Exception) {
+        android.widget.Toast.makeText(context, "Download non avviato. Apro il file.", android.widget.Toast.LENGTH_SHORT).show()
+        openAndroidIntent(context, Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+}
+
+private fun sanitizeDownloadFilename(value: String): String {
+    val cleaned = value.substringBefore('?').substringBefore('#')
+        .replace(Regex("""[\\/:*?"<>|]"""), "_")
+        .trim()
+        .take(180)
+    return cleaned.ifBlank { "hermes-file" }
 }
 
 private fun formatMediaBytes(value: Long?): String {
@@ -5781,7 +5833,7 @@ internal fun hermesHubSharedContext(): String {
         - Notifiche: inbox persistente per messaggi autonomi da cron/agenti. Quando un cron deve avvisare Matteo, pubblica un item con POST /v1/hub/notifications includendo title, message, severity, source e conversation_prompt.
         - Archivio: storico locale dell'app, non memoria agente principale.
         Video Library: non ignorare la sezione Video. Ogni output video finale destinato all'utente deve finire in video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni file video comune (.mp4/.m4v/.mov/.mkv/.webm/.avi/.wmv/.flv/.mpg/.mpeg/.ts/.m2ts/.3gp/.ogv) in quella cartella appare tramite /v1/video/library. Se lo mostri in chat, usa anche visual_blocks media_file con media_url proxy /v1/media/...; il gateway puo' esporre playback compat MP4 con ?format=mp4.
-        File multimediali in chat: usa visual_blocks image_gallery per piu' immagini o media_file per singoli asset image/video/audio/document.
+        File multimediali in chat: usa visual_blocks image_gallery per piu' immagini o media_file per singoli asset image/video/audio/document. Quando l'utente chiede "condividimi/inviami/scaricami un file", la risposta deve includere una card media_file scaricabile stile chat, non solo path o URL nel testo.
         media_url e thumbnail_url devono puntare a proxy Hermes/same-host tipo /v1/media/...; vietati file://, data: e path locali diretti.
         Non scrivere mai markdown `MEDIA:[path](file://...)` o path Windows/Linux nel testo finale. Se un tool produce un file locale, pubblicalo prima tramite proxy Hermes e restituisci solo `/v1/media/...` dentro visual_blocks. Se non puoi pubblicarlo, dillo esplicitamente invece di inviare path locali.
         Durante lavori agente lunghi, inoltra eventi realtime per reasoning, tool call, argomenti tool, risultati tool e chiamate modello intermedie quando il gateway li supporta: Hermes Hub deve mostrare all'utente cosa stai facendo.
@@ -7581,6 +7633,10 @@ private fun shouldAttachVisualBlocks(settings: AppSettings, prompt: String): Boo
         prompt.contains("immagini", ignoreCase = true) ||
         prompt.contains("image", ignoreCase = true) ||
         prompt.contains("foto", ignoreCase = true) ||
+        prompt.contains("file", ignoreCase = true) ||
+        prompt.contains("condivid", ignoreCase = true) ||
+        prompt.contains("scaric", ignoreCase = true) ||
+        prompt.contains("inviami", ignoreCase = true) ||
         prompt.contains("diagram", ignoreCase = true) ||
         prompt.contains("grafico", ignoreCase = true) ||
         prompt.contains("tabella", ignoreCase = true) ||
