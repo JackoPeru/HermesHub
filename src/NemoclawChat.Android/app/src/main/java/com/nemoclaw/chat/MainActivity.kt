@@ -301,6 +301,23 @@ private object ConversationArchiveAutoSync {
     private val applyingRemote = AtomicBoolean(false)
     private val uploadQueued = AtomicBoolean(false)
     private val syncActive = AtomicBoolean(false)
+    private val eventsActive = AtomicBoolean(false)
+
+    fun startEventListener(context: Context) {
+        if (!eventsActive.compareAndSet(false, true)) return
+        val appContext = context.applicationContext
+        HermesStreamRuntime.scope.launch {
+            while (true) {
+                try {
+                    listenToHubEvents(appContext)
+                } catch (ex: CancellationException) {
+                    throw ex
+                } catch (_: Exception) {
+                    delay(5_000)
+                }
+            }
+        }
+    }
 
     fun scheduleUpload(context: Context) {
         if (applyingRemote.get()) return
@@ -337,6 +354,57 @@ private object ConversationArchiveAutoSync {
         } finally {
             syncActive.set(false)
         }
+    }
+
+    private suspend fun listenToHubEvents(context: Context) = withContext(Dispatchers.IO) {
+        val settings = loadSettings(context)
+        val apiKey = loadGatewaySecret(context)
+        var lastError: Exception? = null
+        for (candidateUrl in plugAndPlayUrlCandidates(resolveHermesUrl(settings, "/v1/hub/conversations/events"))) {
+            for (token in hermesAuthCandidates(apiKey)) {
+                val request = Request.Builder()
+                    .url(candidateUrl)
+                    .header("Accept", "text/event-stream")
+                    .header("User-Agent", "HermesHub-Android")
+                    .apply { token?.let { header("Authorization", "Bearer $it") } }
+                    .get()
+                    .build()
+                try {
+                    val response = archiveEventsHttpClient.newCall(request).execute()
+                    try {
+                        if (!response.isSuccessful) {
+                            val body = runCatching { response.body.string() }.getOrDefault("")
+                            if (shouldRetryHermesWithBearerAuth(response.code, body)) continue
+                            throw IllegalStateException("Archivio events HTTP ${response.code}: ${extractHumanError(body)}")
+                        }
+                        val reader = response.body.charStream().buffered()
+                        reader.useLines { lines ->
+                            for (line in lines) {
+                                if (line.startsWith("data:", ignoreCase = true)) {
+                                    applyingRemote.set(true)
+                                    try {
+                                        restoreConversationsFromHub(
+                                            context,
+                                            loadSettings(context),
+                                            loadGatewaySecret(context),
+                                            syncAfterSave = false
+                                        )
+                                    } finally {
+                                        applyingRemote.set(false)
+                                    }
+                                }
+                            }
+                        }
+                    } finally {
+                        response.close()
+                    }
+                    return@withContext
+                } catch (ex: Exception) {
+                    lastError = ex
+                }
+            }
+        }
+        throw lastError ?: IllegalStateException("Archivio events non disponibile.")
     }
 }
 
@@ -806,6 +874,7 @@ private fun ChatApp() {
         }
     }
     LaunchedEffect(Unit) {
+        ConversationArchiveAutoSync.startEventListener(context)
         while (true) {
             ConversationArchiveAutoSync.pullFromHub(context)
             ConversationArchiveAutoSync.scheduleUpload(context)
@@ -7100,6 +7169,16 @@ private val apiHttpClient: OkHttpClient by lazy {
         .build()
 }
 
+private val archiveEventsHttpClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(0, TimeUnit.MILLISECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
+}
+
 private suspend fun postJson(
     url: String,
     payload: JSONObject,
@@ -9112,11 +9191,12 @@ private fun saveConversations(context: Context, conversations: List<LocalConvers
 
 private fun conversationsToJsonArray(conversations: List<LocalConversation>): JSONArray {
     val array = JSONArray()
+    val deletedCutoff = System.currentTimeMillis() - DELETED_CONVERSATION_RETENTION_MS
     conversations
         .sortedByDescending { it.updatedAt }
         .let { items ->
-            items.filter { it.deletedAt == null }.take(200) +
-                items.filter { it.deletedAt != null }.take(300)
+            items.filter { it.deletedAt == null } +
+                items.filter { it.deletedAt != null && it.deletedAt >= deletedCutoff }
         }
         .forEach { conversation ->
             array.put(
@@ -9650,6 +9730,7 @@ private const val SHOW_RAW_HERMES_EVENTS_IN_CHAT = false
 private const val CHAT_HISTORY_MAX_MESSAGES = 30
 private const val STREAMING_CHECKPOINT_INTERVAL_MS = 5000L
 private const val STREAMING_CHECKPOINT_MAX_CHARS = 50_000
+private const val DELETED_CONVERSATION_RETENTION_MS = 30L * 24L * 60L * 60L * 1000L
 private const val DEFAULT_CONTEXT_WINDOW_TOKENS = 90000
 private const val CONTEXT_SYSTEM_OVERHEAD_TOKENS = 900
 private const val MESSAGE_CONTEXT_OVERHEAD_TOKENS = 6

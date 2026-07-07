@@ -109,6 +109,16 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
             text = "import asyncio\n" + text
         changes.append("asyncio import for hub events")
 
+    limit_replacements = {
+        'payload["items"] = normalized[:500]': 'payload["items"] = normalized',
+        'sorted(active, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)[:200] +\n        sorted(deleted, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)[:300]': 'sorted(active, key=lambda x: float(x.get("updatedAt") or 0), reverse=True) +\n        sorted(deleted, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)',
+        'current["items"] = sorted(out, key=lambda x: float(x.get("updatedAt") or 0) if isinstance(x, dict) else 0, reverse=True)[:500]': 'current["items"] = sorted(out, key=lambda x: float(x.get("updatedAt") or 0) if isinstance(x, dict) else 0, reverse=True)',
+    }
+    for old, new in limit_replacements.items():
+        if old in text:
+            text = text.replace(old, new)
+            changes.append("unlimited hub conversation archive")
+
     if "HERMES_GATEWAY_MAX_REQUEST_MB" not in text:
         text, _ = _replace_regex_once(
             text,
@@ -1285,10 +1295,22 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
         items = []
     normalized = []
     seen = set()
+    try:
+        retention_days = float(os.environ.get("HERMES_HUB_DELETED_CONVERSATION_RETENTION_DAYS", "30"))
+    except Exception:
+        retention_days = 30.0
+    deleted_cutoff = time.time() * 1000 - max(retention_days, 0.0) * 86400000
     for item in items:
         conv = _hermes_hub_normalize_conversation(item)
         if not conv:
             continue
+        if conv.get("deletedAt"):
+            try:
+                deleted_at = float(conv.get("deletedAt") or 0)
+            except Exception:
+                deleted_at = 0
+            if deleted_at > 0 and deleted_at < deleted_cutoff:
+                continue
         cid = str(conv.get("id") or "")
         if cid in seen:
             continue
@@ -1301,6 +1323,35 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
     payload["path"] = str(path)
     payload["description"] = "Archivio chat Hermes Hub condiviso tra Windows, Android e reinstallazioni app."
     return payload
+
+
+_hermes_hub_conversation_event_subscribers = set()
+
+
+def _hermes_hub_conversation_event_payload(reason: str, result: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    current = _hermes_hub_conversations_payload()
+    return {
+        "object": "hermes.hub.conversations.event",
+        "reason": reason,
+        "updated_at": time.time(),
+        "count": len(current.get("items", [])) if isinstance(current.get("items"), list) else 0,
+        "merged": result.get("merged") if isinstance(result, dict) else None,
+        "id": result.get("id") if isinstance(result, dict) else None,
+    }
+
+
+def _hermes_hub_publish_conversation_event(reason: str, result: Optional[Dict[str, Any]] = None) -> None:
+    if not _hermes_hub_conversation_event_subscribers:
+        return
+    payload = _hermes_hub_conversation_event_payload(reason, result)
+    dead = []
+    for queue in list(_hermes_hub_conversation_event_subscribers):
+        try:
+            queue.put_nowait(payload)
+        except Exception:
+            dead.append(queue)
+    for queue in dead:
+        _hermes_hub_conversation_event_subscribers.discard(queue)
 
 
 def _hermes_hub_number(value: Any, fallback: float = 0.0) -> float:
@@ -1481,6 +1532,75 @@ def _hermes_hub_notifications_payload(unread_only: bool = False) -> Dict[str, An
         )
         changes.append("hub conversations storage helpers")
 
+    if "HERMES_HUB_DELETED_CONVERSATION_RETENTION_DAYS" not in text and "def _hermes_hub_conversations_payload" in text:
+        text, _ = _replace_once(
+            text,
+            "    normalized = []\n    seen = set()\n    for item in items:\n",
+            "    normalized = []\n"
+            "    seen = set()\n"
+            "    try:\n"
+            "        retention_days = float(os.environ.get(\"HERMES_HUB_DELETED_CONVERSATION_RETENTION_DAYS\", \"30\"))\n"
+            "    except Exception:\n"
+            "        retention_days = 30.0\n"
+            "    deleted_cutoff = time.time() * 1000 - max(retention_days, 0.0) * 86400000\n"
+            "    for item in items:\n",
+            "hub conversation tombstone retention",
+        )
+        text, _ = _replace_once(
+            text,
+            "        if not conv:\n            continue\n        cid = str(conv.get(\"id\") or \"\")\n",
+            "        if not conv:\n"
+            "            continue\n"
+            "        if conv.get(\"deletedAt\"):\n"
+            "            try:\n"
+            "                deleted_at = float(conv.get(\"deletedAt\") or 0)\n"
+            "            except Exception:\n"
+            "                deleted_at = 0\n"
+            "            if deleted_at > 0 and deleted_at < deleted_cutoff:\n"
+            "                continue\n"
+            "        cid = str(conv.get(\"id\") or \"\")\n",
+            "hub conversation tombstone retention filter",
+        )
+        changes.append("hub conversation tombstone retention")
+
+    if "_hermes_hub_conversation_event_subscribers" not in text and "def _hermes_hub_number" in text:
+        text, _ = _replace_once(
+            text,
+            "\n\ndef _hermes_hub_number(value: Any, fallback: float = 0.0) -> float:",
+            '''\n\n_hermes_hub_conversation_event_subscribers = set()
+
+
+def _hermes_hub_conversation_event_payload(reason: str, result: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    current = _hermes_hub_conversations_payload()
+    return {
+        "object": "hermes.hub.conversations.event",
+        "reason": reason,
+        "updated_at": time.time(),
+        "count": len(current.get("items", [])) if isinstance(current.get("items"), list) else 0,
+        "merged": result.get("merged") if isinstance(result, dict) else None,
+        "id": result.get("id") if isinstance(result, dict) else None,
+    }
+
+
+def _hermes_hub_publish_conversation_event(reason: str, result: Optional[Dict[str, Any]] = None) -> None:
+    if not _hermes_hub_conversation_event_subscribers:
+        return
+    payload = _hermes_hub_conversation_event_payload(reason, result)
+    dead = []
+    for queue in list(_hermes_hub_conversation_event_subscribers):
+        try:
+            queue.put_nowait(payload)
+        except Exception:
+            dead.append(queue)
+    for queue in dead:
+        _hermes_hub_conversation_event_subscribers.discard(queue)
+
+
+def _hermes_hub_number(value: Any, fallback: float = 0.0) -> float:''',
+            "hub conversation event helpers",
+        )
+        changes.append("hub conversation event helpers")
+
     if 'def _hermes_hub_normalize_conversation' in text and '"deletedAt": deleted_num if deleted_num > 0 else None' not in text:
         text, _ = _replace_regex_once(
             text,
@@ -1549,8 +1669,8 @@ def _hermes_hub_notifications_payload(unread_only: bool = False) -> Dict[str, An
     active = [item for item in by_id.values() if not item.get("deletedAt")]
     deleted = [item for item in by_id.values() if item.get("deletedAt")]
     items = (
-        sorted(active, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)[:200] +
-        sorted(deleted, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)[:300]
+        sorted(active, key=lambda x: float(x.get("updatedAt") or 0), reverse=True) +
+        sorted(deleted, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)
     )
     items = sorted(items, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)
     payload = {"items": items, "updated_at": time.time()}
@@ -1606,7 +1726,7 @@ def _hermes_hub_notifications_payload(unread_only: bool = False) -> Dict[str, An
             "serverConversationId": None,
             "messages": [],
         })
-    current["items"] = sorted(out, key=lambda x: float(x.get("updatedAt") or 0) if isinstance(x, dict) else 0, reverse=True)[:500]
+    current["items"] = sorted(out, key=lambda x: float(x.get("updatedAt") or 0) if isinstance(x, dict) else 0, reverse=True)
     current["updated_at"] = time.time()
     _hermes_hub_write_json(_hermes_hub_storage_path("HERMES_HUB_CONVERSATIONS_PATH", "hub_conversations.json"), current)
     return {"object": "hermes.hub.conversations.delete", "deleted": 1 if found else 0, "id": conversation_id, "tombstone": True}
@@ -2591,6 +2711,34 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "            return auth_error\n"
             "        return web.json_response(_hermes_hub_conversations_payload())\n"
             "\n"
+            "    async def _handle_get_hub_conversations_events(self, request: \"web.Request\") -> \"web.StreamResponse\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        import json as _json\n"
+            "        queue = asyncio.Queue()\n"
+            "        _hermes_hub_conversation_event_subscribers.add(queue)\n"
+            "        response = web.StreamResponse(status=200, headers={\"Content-Type\": \"text/event-stream\", \"Cache-Control\": \"no-cache\", \"Connection\": \"keep-alive\"})\n"
+            "        await response.prepare(request)\n"
+            "        try:\n"
+            "            await response.write(b\": connected\\n\\n\")\n"
+            "            await queue.put(_hermes_hub_conversation_event_payload(\"snapshot\"))\n"
+            "            while True:\n"
+            "                try:\n"
+            "                    payload = await asyncio.wait_for(queue.get(), timeout=25)\n"
+            "                except asyncio.TimeoutError:\n"
+            "                    await response.write(b\": keepalive\\n\\n\")\n"
+            "                    continue\n"
+            "                data = _json.dumps(payload, ensure_ascii=False)\n"
+            "                await response.write(f\"event: conversations.updated\\ndata: {data}\\n\\n\".encode(\"utf-8\"))\n"
+            "        except asyncio.CancelledError:\n"
+            "            raise\n"
+            "        except Exception:\n"
+            "            pass\n"
+            "        finally:\n"
+            "            _hermes_hub_conversation_event_subscribers.discard(queue)\n"
+            "        return response\n"
+            "\n"
             "    async def _handle_put_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":\n"
             "        auth_error = self._check_auth(request)\n"
             "        if auth_error is not None:\n"
@@ -2602,7 +2750,9 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "        if not isinstance(body, dict):\n"
             "            body = {}\n"
             "        body[\"id\"] = request.match_info.get(\"conversation_id\", body.get(\"id\", \"\"))\n"
-            "        return web.json_response(_hermes_hub_merge_conversations([body]))\n"
+            "        merged = _hermes_hub_merge_conversations([body])\n"
+            "        _hermes_hub_publish_conversation_event(\"put\", merged)\n"
+            "        return web.json_response(merged)\n"
             "\n"
             "    async def _handle_post_hub_conversations_import(self, request: \"web.Request\") -> \"web.Response\":\n"
             "        auth_error = self._check_auth(request)\n"
@@ -2618,13 +2768,16 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "        if incoming is None:\n"
             "            incoming = _hermes_hub_extract_backup_conversations(body)\n"
             "        merged = _hermes_hub_merge_conversations(incoming if isinstance(incoming, list) else [])\n"
+            "        _hermes_hub_publish_conversation_event(\"import\", merged)\n"
             "        return web.json_response(merged)\n"
             "\n"
             "    async def _handle_delete_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":\n"
             "        auth_error = self._check_auth(request)\n"
             "        if auth_error is not None:\n"
             "            return auth_error\n"
-            "        return web.json_response(_hermes_hub_delete_conversation(request.match_info.get(\"conversation_id\", \"\")))\n"
+            "        deleted = _hermes_hub_delete_conversation(request.match_info.get(\"conversation_id\", \"\"))\n"
+            "        _hermes_hub_publish_conversation_event(\"delete\", deleted)\n"
+            "        return web.json_response(deleted)\n"
             "\n"
             "    async def _handle_get_hub_notifications(self, request: \"web.Request\") -> \"web.Response\":\n"
             "        auth_error = self._check_auth(request)\n"
@@ -2670,6 +2823,34 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "            return auth_error\n"
             "        return web.json_response(_hermes_hub_conversations_payload())\n"
             "\n"
+            "    async def _handle_get_hub_conversations_events(self, request: \"web.Request\") -> \"web.StreamResponse\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        import json as _json\n"
+            "        queue = asyncio.Queue()\n"
+            "        _hermes_hub_conversation_event_subscribers.add(queue)\n"
+            "        response = web.StreamResponse(status=200, headers={\"Content-Type\": \"text/event-stream\", \"Cache-Control\": \"no-cache\", \"Connection\": \"keep-alive\"})\n"
+            "        await response.prepare(request)\n"
+            "        try:\n"
+            "            await response.write(b\": connected\\n\\n\")\n"
+            "            await queue.put(_hermes_hub_conversation_event_payload(\"snapshot\"))\n"
+            "            while True:\n"
+            "                try:\n"
+            "                    payload = await asyncio.wait_for(queue.get(), timeout=25)\n"
+            "                except asyncio.TimeoutError:\n"
+            "                    await response.write(b\": keepalive\\n\\n\")\n"
+            "                    continue\n"
+            "                data = _json.dumps(payload, ensure_ascii=False)\n"
+            "                await response.write(f\"event: conversations.updated\\ndata: {data}\\n\\n\".encode(\"utf-8\"))\n"
+            "        except asyncio.CancelledError:\n"
+            "            raise\n"
+            "        except Exception:\n"
+            "            pass\n"
+            "        finally:\n"
+            "            _hermes_hub_conversation_event_subscribers.discard(queue)\n"
+            "        return response\n"
+            "\n"
             "    async def _handle_put_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":\n"
             "        auth_error = self._check_auth(request)\n"
             "        if auth_error is not None:\n"
@@ -2681,7 +2862,9 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "        if not isinstance(body, dict):\n"
             "            body = {}\n"
             "        body[\"id\"] = request.match_info.get(\"conversation_id\", body.get(\"id\", \"\"))\n"
-            "        return web.json_response(_hermes_hub_merge_conversations([body]))\n"
+            "        merged = _hermes_hub_merge_conversations([body])\n"
+            "        _hermes_hub_publish_conversation_event(\"put\", merged)\n"
+            "        return web.json_response(merged)\n"
             "\n"
             "    async def _handle_post_hub_conversations_import(self, request: \"web.Request\") -> \"web.Response\":\n"
             "        auth_error = self._check_auth(request)\n"
@@ -2697,13 +2880,16 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "        if incoming is None:\n"
             "            incoming = _hermes_hub_extract_backup_conversations(body)\n"
             "        merged = _hermes_hub_merge_conversations(incoming if isinstance(incoming, list) else [])\n"
+            "        _hermes_hub_publish_conversation_event(\"import\", merged)\n"
             "        return web.json_response(merged)\n"
             "\n"
             "    async def _handle_delete_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":\n"
             "        auth_error = self._check_auth(request)\n"
             "        if auth_error is not None:\n"
             "            return auth_error\n"
-            "        return web.json_response(_hermes_hub_delete_conversation(request.match_info.get(\"conversation_id\", \"\")))\n"
+            "        deleted = _hermes_hub_delete_conversation(request.match_info.get(\"conversation_id\", \"\"))\n"
+            "        _hermes_hub_publish_conversation_event(\"delete\", deleted)\n"
+            "        return web.json_response(deleted)\n"
             "\n"
             "    async def _handle_get_hub_notifications(self, request: \"web.Request\") -> \"web.Response\":",
             "hub conversations endpoint handlers",
@@ -2748,6 +2934,53 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("hub notifications endpoint handlers")
 
+    if "async def _handle_get_hub_conversations_events" not in text and "    async def _handle_put_hub_conversation" in text:
+        text, _ = _replace_once(
+            text,
+            "    async def _handle_put_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":",
+            '''    async def _handle_get_hub_conversations_events(self, request: "web.Request") -> "web.StreamResponse":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        import json as _json
+        queue = asyncio.Queue()
+        _hermes_hub_conversation_event_subscribers.add(queue)
+        response = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive"})
+        await response.prepare(request)
+        try:
+            await response.write(b": connected\\n\\n")
+            await queue.put(_hermes_hub_conversation_event_payload("snapshot"))
+            while True:
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=25)
+                except asyncio.TimeoutError:
+                    await response.write(b": keepalive\\n\\n")
+                    continue
+                data = _json.dumps(payload, ensure_ascii=False)
+                await response.write(f"event: conversations.updated\\ndata: {data}\\n\\n".encode("utf-8"))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        finally:
+            _hermes_hub_conversation_event_subscribers.discard(queue)
+        return response
+
+    async def _handle_put_hub_conversation(self, request: "web.Request") -> "web.Response":''',
+            "hub conversations events handler",
+        )
+        changes.append("hub conversations events handler")
+
+    handler_replacements = {
+        "        body[\"id\"] = request.match_info.get(\"conversation_id\", body.get(\"id\", \"\"))\n        return web.json_response(_hermes_hub_merge_conversations([body]))\n": "        body[\"id\"] = request.match_info.get(\"conversation_id\", body.get(\"id\", \"\"))\n        merged = _hermes_hub_merge_conversations([body])\n        _hermes_hub_publish_conversation_event(\"put\", merged)\n        return web.json_response(merged)\n",
+        "        merged = _hermes_hub_merge_conversations(incoming if isinstance(incoming, list) else [])\n        return web.json_response(merged)\n": "        merged = _hermes_hub_merge_conversations(incoming if isinstance(incoming, list) else [])\n        _hermes_hub_publish_conversation_event(\"import\", merged)\n        return web.json_response(merged)\n",
+        "        return web.json_response(_hermes_hub_delete_conversation(request.match_info.get(\"conversation_id\", \"\")))\n": "        deleted = _hermes_hub_delete_conversation(request.match_info.get(\"conversation_id\", \"\"))\n        _hermes_hub_publish_conversation_event(\"delete\", deleted)\n        return web.json_response(deleted)\n",
+    }
+    for old, new in handler_replacements.items():
+        if old in text:
+            text = text.replace(old, new)
+            changes.append("hub conversations event publish")
+
     if "async def _handle_get_hub_conversations" not in text and "async def _handle_get_hub_notifications" in text:
         text, _ = _replace_once(
             text,
@@ -2757,6 +2990,34 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "        if auth_error is not None:\n"
             "            return auth_error\n"
             "        return web.json_response(_hermes_hub_conversations_payload())\n"
+            "\n"
+            "    async def _handle_get_hub_conversations_events(self, request: \"web.Request\") -> \"web.StreamResponse\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        import json as _json\n"
+            "        queue = asyncio.Queue()\n"
+            "        _hermes_hub_conversation_event_subscribers.add(queue)\n"
+            "        response = web.StreamResponse(status=200, headers={\"Content-Type\": \"text/event-stream\", \"Cache-Control\": \"no-cache\", \"Connection\": \"keep-alive\"})\n"
+            "        await response.prepare(request)\n"
+            "        try:\n"
+            "            await response.write(b\": connected\\n\\n\")\n"
+            "            await queue.put(_hermes_hub_conversation_event_payload(\"snapshot\"))\n"
+            "            while True:\n"
+            "                try:\n"
+            "                    payload = await asyncio.wait_for(queue.get(), timeout=25)\n"
+            "                except asyncio.TimeoutError:\n"
+            "                    await response.write(b\": keepalive\\n\\n\")\n"
+            "                    continue\n"
+            "                data = _json.dumps(payload, ensure_ascii=False)\n"
+            "                await response.write(f\"event: conversations.updated\\ndata: {data}\\n\\n\".encode(\"utf-8\"))\n"
+            "        except asyncio.CancelledError:\n"
+            "            raise\n"
+            "        except Exception:\n"
+            "            pass\n"
+            "        finally:\n"
+            "            _hermes_hub_conversation_event_subscribers.discard(queue)\n"
+            "        return response\n"
             "\n"
             "    async def _handle_put_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":\n"
             "        auth_error = self._check_auth(request)\n"
@@ -2769,7 +3030,9 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "        if not isinstance(body, dict):\n"
             "            body = {}\n"
             "        body[\"id\"] = request.match_info.get(\"conversation_id\", body.get(\"id\", \"\"))\n"
-            "        return web.json_response(_hermes_hub_merge_conversations([body]))\n"
+            "        merged = _hermes_hub_merge_conversations([body])\n"
+            "        _hermes_hub_publish_conversation_event(\"put\", merged)\n"
+            "        return web.json_response(merged)\n"
             "\n"
             "    async def _handle_post_hub_conversations_import(self, request: \"web.Request\") -> \"web.Response\":\n"
             "        auth_error = self._check_auth(request)\n"
@@ -2785,13 +3048,16 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "        if incoming is None:\n"
             "            incoming = _hermes_hub_extract_backup_conversations(body)\n"
             "        merged = _hermes_hub_merge_conversations(incoming if isinstance(incoming, list) else [])\n"
+            "        _hermes_hub_publish_conversation_event(\"import\", merged)\n"
             "        return web.json_response(merged)\n"
             "\n"
             "    async def _handle_delete_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":\n"
             "        auth_error = self._check_auth(request)\n"
             "        if auth_error is not None:\n"
             "            return auth_error\n"
-            "        return web.json_response(_hermes_hub_delete_conversation(request.match_info.get(\"conversation_id\", \"\")))\n"
+            "        deleted = _hermes_hub_delete_conversation(request.match_info.get(\"conversation_id\", \"\"))\n"
+            "        _hermes_hub_publish_conversation_event(\"delete\", deleted)\n"
+            "        return web.json_response(deleted)\n"
             "\n"
             "    async def _handle_get_hub_notifications(self, request: \"web.Request\") -> \"web.Response\":",
             "hub conversations endpoint handlers",
@@ -3356,12 +3622,22 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             r'(^\s+self\._app\.router\.add_get\("/v1/hub/state", self\._handle_get_hub_state\)\n)',
             r'\1'
             r'            self._app.router.add_get("/v1/hub/conversations", self._handle_get_hub_conversations)' "\n"
+            r'            self._app.router.add_get("/v1/hub/conversations/events", self._handle_get_hub_conversations_events)' "\n"
             r'            self._app.router.add_post("/v1/hub/conversations/import", self._handle_post_hub_conversations_import)' "\n"
             r'            self._app.router.add_put("/v1/hub/conversations/{conversation_id}", self._handle_put_hub_conversation)' "\n"
             r'            self._app.router.add_delete("/v1/hub/conversations/{conversation_id}", self._handle_delete_hub_conversation)' "\n",
             "router hub conversations endpoints",
         )
         changes.append("router hub conversations endpoints")
+    elif 'add_get("/v1/hub/conversations/events", self._handle_get_hub_conversations_events)' not in text:
+        text, _ = _replace_once(
+            text,
+            '            self._app.router.add_get("/v1/hub/conversations", self._handle_get_hub_conversations)\n',
+            '            self._app.router.add_get("/v1/hub/conversations", self._handle_get_hub_conversations)\n'
+            '            self._app.router.add_get("/v1/hub/conversations/events", self._handle_get_hub_conversations_events)\n',
+            "router hub conversations events endpoint",
+        )
+        changes.append("router hub conversations events endpoint")
 
     if 'add_get("/v1/hub/notifications", self._handle_get_hub_notifications)' not in text:
         text, _ = _replace_regex_once(

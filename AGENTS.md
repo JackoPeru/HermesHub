@@ -33,10 +33,21 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.143 Release Hermes Hub 0.6.143 gateway tailnet media access fix
+v0.6.144 Release Hermes Hub 0.6.144 realtime chat archive sync
 ```
 
 ## Release Corrente
+
+Hermes Hub 0.6.144 (Realtime chat archive sync):
+
+Release 0.6.144:
+- Windows/Android/Gateway: sync archivio chat multidispositivo portato da solo polling/debounce a modello push-assisted. Il gateway espone `/v1/hub/conversations/events` come SSE autenticato e pubblica evento leggero dopo `PUT`, `POST /import` e `DELETE`.
+- Windows/Android: mantengono polling periodico come fallback, ma aprono anche lo stream eventi e fanno pull immediato da `/v1/hub/conversations` quando un altro dispositivo aggiorna l'archivio.
+- Windows/Android/Gateway: rimosso il limite rigido di 200 chat attive nell'archivio locale/gateway. Le chat attive non vengono piu' tagliate artificialmente.
+- Windows/Android/Gateway: i tombstone `deletedAt` restano solo come finestra di propagazione per dispositivi offline e vengono compattati dopo 30 giorni di default (`HERMES_HUB_DELETED_CONVERSATION_RETENTION_DAYS` lato gateway).
+- Nota tecnica: il gateway invia un segnale di aggiornamento, non tutto l'archivio nello stream; ogni client fa pull autorevole dal server. Questo evita payload SSE enormi e mantiene compatibilita' con il merge `updatedAt`.
+- Asset release attesi: Android APK `HermesHub-0.6.144-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.144.0_x64.msix`, Linux Gateway `HermesHub-0.6.144-linux-gateway.tar.gz`.
+- Release bump: Windows/AdminBridge `0.6.144`, Android `versionName 0.6.144`, `versionCode 148`.
 
 Hermes Hub 0.6.143 (Gateway tailnet media access fix):
 

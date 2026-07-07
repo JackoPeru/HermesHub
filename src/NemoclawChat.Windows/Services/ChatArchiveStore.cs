@@ -32,6 +32,7 @@ public sealed record HomeNavigationRequest(string? ConversationId = null, string
 public static class ChatArchiveStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly TimeSpan DeletedRetention = TimeSpan.FromDays(30);
     private static event Action? _changed;
     public static event Action? Changed
     {
@@ -349,14 +350,13 @@ public static class ChatArchiveStore
 
     private static void SaveAll(List<ConversationRecord> items)
     {
+        var deleteCutoff = DateTimeOffset.Now - DeletedRetention;
         var active = items
             .Where(item => item.DeletedAt is null)
-            .OrderByDescending(item => item.UpdatedAt)
-            .Take(200);
+            .OrderByDescending(item => item.UpdatedAt);
         var deleted = items
-            .Where(item => item.DeletedAt is not null)
-            .OrderByDescending(item => item.UpdatedAt)
-            .Take(300);
+            .Where(item => item.DeletedAt is not null && item.DeletedAt >= deleteCutoff)
+            .OrderByDescending(item => item.UpdatedAt);
         var ordered = active
             .Concat(deleted)
             .OrderByDescending(item => item.UpdatedAt)

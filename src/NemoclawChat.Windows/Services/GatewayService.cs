@@ -178,6 +178,11 @@ public static class GatewayService
         MaxResponseContentBufferSize = 10L * 1024 * 1024
     };
 
+    private static readonly HttpClient HubEventsHttpClient = new(HttpHandler, disposeHandler: false)
+    {
+        Timeout = Timeout.InfiniteTimeSpan
+    };
+
     private sealed record BufferedHermesResponse(int StatusCode, string? ReasonPhrase, string Body, string? MediaType)
     {
         public bool IsSuccessStatusCode => StatusCode is >= 200 and <= 299;
@@ -1039,7 +1044,6 @@ public static class GatewayService
         {
             items = conversations
                 .OrderByDescending(item => item.UpdatedAt)
-                .Take(200)
                 .Select(item => new
                 {
                     id = item.Id,
@@ -1132,6 +1136,60 @@ public static class GatewayService
         {
             return new HubConversationsResult([], $"Archivio server non disponibile: {ex.Message}");
         }
+    }
+
+    public static async Task StreamHubConversationEventsAsync(AppSettings settings, Func<CancellationToken, Task> onChanged, CancellationToken cancellationToken)
+    {
+        await EnsureReachableGatewayAsync(settings);
+        var endpoint = ResolveHermesUri(settings, "/v1/hub/conversations/events");
+        var candidates = BuildHermesAuthCandidates().ToArray();
+        Exception? lastError = null;
+
+        for (var i = 0; i < candidates.Length; i++)
+        {
+            try
+            {
+                using var request = BuildRequest(HttpMethod.Get, endpoint, candidates[i]);
+                request.Headers.TryAddWithoutValidation("Accept", "text/event-stream");
+                using var response = await HubEventsHttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                    var buffered = new BufferedHermesResponse((int)response.StatusCode, response.ReasonPhrase, body, response.Content.Headers.ContentType?.MediaType);
+                    if (ShouldRetryWithBearerAuth(buffered.StatusCode, buffered.Body) && i < candidates.Length - 1)
+                    {
+                        continue;
+                    }
+                    throw new HttpRequestException($"Archivio events HTTP {buffered.StatusCode}: {ExtractHumanError(buffered.Body)}");
+                }
+
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                using var reader = new StreamReader(stream, Encoding.UTF8);
+                while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+                {
+                    var line = await reader.ReadLineAsync(cancellationToken);
+                    if (line is null)
+                    {
+                        break;
+                    }
+                    if (line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await onChanged(cancellationToken);
+                    }
+                }
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+            }
+        }
+
+        throw lastError ?? new HttpRequestException("Archivio events non disponibile.");
     }
 
     public static async Task<HubNotificationsResult> LoadHubNotificationsAsync(AppSettings settings, bool unreadOnly = false)

@@ -6,6 +6,7 @@ public sealed class ChatArchiveSyncService : IDisposable
     private readonly TimeSpan _pollInterval = TimeSpan.FromMinutes(2);
     private readonly SemaphoreSlim _syncLock = new(1, 1);
     private CancellationTokenSource? _uploadDebounceCts;
+    private CancellationTokenSource? _eventsCts;
     private Timer? _pullTimer;
     private bool _applyingRemote;
     private bool _disposed;
@@ -14,6 +15,8 @@ public sealed class ChatArchiveSyncService : IDisposable
     {
         ChatArchiveStore.Changed += ChatArchiveStore_Changed;
         _pullTimer = new Timer(_ => _ = PullThenPushAsync(), null, TimeSpan.FromSeconds(3), _pollInterval);
+        _eventsCts = new CancellationTokenSource();
+        _ = Task.Run(() => ListenForRemoteChangesAsync(_eventsCts.Token));
     }
 
     public void Stop()
@@ -23,6 +26,8 @@ public sealed class ChatArchiveSyncService : IDisposable
         ChatArchiveStore.Changed -= ChatArchiveStore_Changed;
         _uploadDebounceCts?.Cancel();
         _uploadDebounceCts?.Dispose();
+        _eventsCts?.Cancel();
+        _eventsCts?.Dispose();
         _pullTimer?.Dispose();
         _syncLock.Dispose();
     }
@@ -115,6 +120,36 @@ public sealed class ChatArchiveSyncService : IDisposable
         finally
         {
             _syncLock.Release();
+        }
+    }
+
+    private async Task ListenForRemoteChangesAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await GatewayService.StreamHubConversationEventsAsync(
+                    AppSettingsStore.Load(),
+                    token => PullAsync(token),
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ChatArchiveSync] events failed: {ex.Message}");
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
         }
     }
 }

@@ -1,4 +1,7 @@
-Release 0.6.132:
-- Windows/Android: Corretto il parser SSE dello stream: ora rimuove solo il singolo spazio opzionale dopo data: invece di cancellare tutti gli spazi iniziali.
-- Windows/Android: I delta testuali, reasoning e tool arguments preservano token composti solo da spazio, evitando parole e articoli attaccati durante streaming, reasoning e tool call.
-- Windows/Android: Fix mirato alla visualizzazione token; nessun cambio al modello o al backend Hermes.
+Release 0.6.144:
+- Windows/Android/Gateway: sync archivio chat multidispositivo push-assisted con nuovo endpoint SSE autenticato `/v1/hub/conversations/events`.
+- Gateway: dopo `PUT`, `POST /v1/hub/conversations/import` e `DELETE` pubblica un evento leggero agli altri dispositivi connessi.
+- Windows/Android: ricevono l'evento e fanno subito pull autorevole da `/v1/hub/conversations`; il polling periodico resta solo fallback.
+- Windows/Android/Gateway: rimosso il limite rigido di 200 chat attive; l'archivio non taglia piu' conversazioni attive.
+- Windows/Android/Gateway: tombstone `deletedAt` compattati dopo 30 giorni di default, con override gateway `HERMES_HUB_DELETED_CONVERSATION_RETENTION_DAYS`.
+- Asset inclusi: Android APK, Windows MSIX, Linux Gateway.
