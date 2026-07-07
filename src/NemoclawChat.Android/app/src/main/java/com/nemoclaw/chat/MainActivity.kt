@@ -2188,7 +2188,6 @@ private fun MediaFileBlock(block: VisualBlock) {
         else -> ""
     }
     val clipboard = remember(context) { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
-    val apiKey = remember { loadGatewaySecret(context) }
     val scope = rememberCoroutineScope()
     var isDownloading by remember(block.mediaUrl) { mutableStateOf(false) }
     val canOpen = resolvedMediaUrl != null
@@ -2234,9 +2233,10 @@ private fun MediaFileBlock(block: VisualBlock) {
                         enabled = canOpen,
                         onClick = {
                             val url = resolvedMediaUrl ?: return@Button
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            val viewUrl = withHermesMediaQueryToken(url, loadGatewaySecret(context))
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(viewUrl))
                             if (block.mimeType.isNotBlank()) {
-                                intent.setDataAndType(Uri.parse(url), block.mimeType)
+                                intent.setDataAndType(Uri.parse(viewUrl), block.mimeType)
                             }
                             openAndroidIntent(context, intent)
                         }
@@ -2249,13 +2249,14 @@ private fun MediaFileBlock(block: VisualBlock) {
                             isDownloading = true
                             android.widget.Toast.makeText(context, "Scaricamento: ${sanitizeDownloadFilename(filename)}", android.widget.Toast.LENGTH_SHORT).show()
                             scope.launch {
+                                val currentApiKey = loadGatewaySecret(context)
                                 val message = runCatching {
                                     downloadHermesMediaFile(
                                         context = context,
                                         url = url,
                                         filename = filename,
                                         mimeType = block.mimeType,
-                                        apiKey = apiKey
+                                        apiKey = currentApiKey
                                     )
                                 }.getOrElse { "Download fallito: ${it.message ?: "errore sconosciuto"}" }
                                 isDownloading = false
@@ -2286,28 +2287,54 @@ suspend fun downloadHermesMediaFile(context: Context, url: String, filename: Str
     val candidates = if (needsHermesAuth) hermesAuthCandidates(apiKey) else listOf<String?>(null)
     var lastError = "nessuna risposta"
     for (token in candidates) {
-        val request = Request.Builder()
-            .url(url)
-            .get()
-            .header("Accept", "*/*")
-            .header("User-Agent", "HermesHub-Android")
-            .apply {
-                if (!token.isNullOrBlank()) {
-                    header("Authorization", "Bearer $token")
+        val urls = if (needsHermesAuth && !token.isNullOrBlank()) {
+            listOf(url, withHermesMediaQueryToken(url, token))
+        } else {
+            listOf(url)
+        }
+        for ((index, attemptUrl) in urls.distinct().withIndex()) {
+            val request = Request.Builder()
+                .url(attemptUrl)
+                .get()
+                .header("Accept", "*/*")
+                .header("User-Agent", "HermesHub-Android")
+                .apply {
+                    if (!token.isNullOrBlank() && index == 0) {
+                        header("Authorization", "Bearer $token")
+                    }
                 }
+                .build()
+            apiHttpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    lastError = "HTTP ${response.code}"
+                    return@use
+                }
+                val body = response.body
+                saveDownloadBytes(context, safeName, mimeType.ifBlank { body.contentType()?.toString().orEmpty() }, body.byteStream())
+                return@withContext "File salvato in Download: $safeName"
             }
-            .build()
-        apiHttpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                lastError = "HTTP ${response.code}"
-                return@use
-            }
-            val body = response.body
-            saveDownloadBytes(context, safeName, mimeType.ifBlank { body.contentType()?.toString().orEmpty() }, body.byteStream())
-            return@withContext "File salvato in Download: $safeName"
         }
     }
     throw IllegalStateException(lastError)
+}
+
+private fun withHermesMediaQueryToken(url: String, apiKey: String?): String {
+    val token = apiKey?.trim()?.takeIf { it.isNotBlank() } ?: HERMES_FALLBACK_API_KEY
+    return try {
+        val parsed = Uri.parse(url)
+        if (!parsed.path.orEmpty().startsWith("/v1/media/", ignoreCase = true)) {
+            return url
+        }
+        if (!parsed.getQueryParameter("hub_token").isNullOrBlank() ||
+            !parsed.getQueryParameter("api_key").isNullOrBlank() ||
+            !parsed.getQueryParameter("token").isNullOrBlank()
+        ) {
+            return url
+        }
+        parsed.buildUpon().appendQueryParameter("hub_token", token).build().toString()
+    } catch (_: Exception) {
+        url
+    }
 }
 
 private fun saveDownloadBytes(context: Context, filename: String, mimeType: String, input: java.io.InputStream) {
@@ -2453,14 +2480,16 @@ private fun decodeAttachmentPreview(dataUrl: String): Bitmap? {
 
 @Composable
 private fun RemoteGalleryImage(settings: AppSettings, image: VisualGalleryImage, allowExternalImage: Boolean = true) {
+    val context = LocalContext.current
     val resolved = remember(settings.gatewayUrl, image.mediaUrl, allowExternalImage) { resolveMediaUrl(settings, image.mediaUrl, allowExternalImage) }
     if (resolved == null) {
         Text("${image.alt}: media non proxy rifiutato.", color = AppColors.Muted, fontSize = 13.sp)
         return
     }
+    val apiKey = remember { loadGatewaySecret(context) }
 
     val bitmap by produceState<Bitmap?>(initialValue = null, resolved) {
-        value = withContext(Dispatchers.IO) { loadRemoteBitmap(resolved) }
+        value = withContext(Dispatchers.IO) { loadRemoteBitmap(resolved, apiKey) }
     }
     val loaded = bitmap
     if (loaded == null) {
@@ -2515,7 +2544,25 @@ private fun resolveMediaUrl(settings: AppSettings, value: String, allowExternalI
 private const val REMOTE_BITMAP_MAX_BYTES = 10L * 1024 * 1024
 private const val REMOTE_BITMAP_MAX_DIMENSION = 2048
 
-private fun loadRemoteBitmap(url: String): Bitmap? {
+private fun loadRemoteBitmap(url: String, apiKey: String?): Bitmap? {
+    val parsed = runCatching { Uri.parse(url) }.getOrNull()
+    val needsHermesAuth = parsed?.path.orEmpty().startsWith("/v1/media/", ignoreCase = true)
+    val candidates = if (needsHermesAuth) hermesAuthCandidates(apiKey) else listOf<String?>(null)
+    for (token in candidates) {
+        val urls = if (needsHermesAuth && !token.isNullOrBlank()) {
+            listOf(url, withHermesMediaQueryToken(url, token))
+        } else {
+            listOf(url)
+        }
+        for ((index, attemptUrl) in urls.distinct().withIndex()) {
+            val loaded = loadRemoteBitmapAttempt(attemptUrl, token.takeIf { index == 0 })
+            if (loaded != null) return loaded
+        }
+    }
+    return null
+}
+
+private fun loadRemoteBitmapAttempt(url: String, bearerToken: String?): Bitmap? {
     var connection: HttpURLConnection? = null
     return try {
         connection = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -2525,6 +2572,9 @@ private fun loadRemoteBitmap(url: String): Bitmap? {
             instanceFollowRedirects = true
             setRequestProperty("Accept", "image/*")
             setRequestProperty("User-Agent", "HermesHub-Android")
+            if (!bearerToken.isNullOrBlank()) {
+                setRequestProperty("Authorization", "Bearer $bearerToken")
+            }
         }
         if (connection.responseCode !in 200..299) return null
         val advertised = connection.contentLengthLong
@@ -4382,7 +4432,7 @@ private fun VideoThumbnail(settings: AppSettings, item: VideoLibraryItem, apiKey
     }
     val bitmap by produceState<Bitmap?>(initialValue = null, videoUrl, thumbUrl, apiKey) {
         value = withContext(Dispatchers.IO) {
-            thumbUrl?.let { loadRemoteBitmap(it) } ?: loadVideoThumbnail(videoUrl, apiKey)
+            thumbUrl?.let { loadRemoteBitmap(it, apiKey) } ?: loadVideoThumbnail(videoUrl, apiKey)
         }
     }
     Box(

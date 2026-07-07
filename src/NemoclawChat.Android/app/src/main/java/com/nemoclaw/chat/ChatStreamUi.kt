@@ -169,11 +169,6 @@ internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolea
     val active = !state.isDone
     val elapsedSec = ((if (active) nowNs else System.nanoTime()) - state.startedAtNs) / 1_000_000_000.0
     var thinkingExpanded by rememberSaveable(state.startedAtNs) { mutableStateOf(false) }
-    LaunchedEffect(state.thinking.isNotBlank()) {
-        if (state.thinking.isNotBlank()) {
-            thinkingExpanded = true
-        }
-    }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if ((active && state.text.isBlank()) || state.hasThinking || state.thinking.isNotBlank()) {
@@ -333,15 +328,22 @@ internal fun ThinkingExpander(
             )
         }
         if (isExpanded) {
-            Text(
-                modifier = Modifier
-                    .heightIn(max = 220.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(start = 2.dp, end = 8.dp, bottom = 4.dp),
-                text = thinking.ifBlank { "Hermes non ha ancora inviato token di reasoning. Se il modello/server li manda, appariranno qui in tempo reale." },
-                color = AppColors.Muted,
-                fontSize = 12.sp
-            )
+            Surface(
+                color = AppColors.Composer.copy(alpha = 0.78f),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    modifier = Modifier
+                        .heightIn(max = 180.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    text = thinking.ifBlank { "Hermes non ha ancora inviato token di reasoning. Se il modello/server li manda, appariranno qui in tempo reale." },
+                    color = AppColors.Muted,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp
+                )
+            }
         }
     }
 }

@@ -33,10 +33,20 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.141 Release Hermes Hub 0.6.141 reasoning and media proxy hotfix
+v0.6.142 Release Hermes Hub 0.6.142 Android media auth and reasoning drawer fix
 ```
 
 ## Release Corrente
+
+Hermes Hub 0.6.142 (Android media auth and reasoning drawer fix):
+
+Release 0.6.142:
+- Android: fix download card `media_file` quando il gateway risponde `401`; il download ricarica la secret Hermes aggiornata e prova sia header `Authorization: Bearer ...` sia fallback query `hub_token` supportato dal gateway media proxy.
+- Android: le anteprime immagini proxy `/v1/media/...` usano la stessa autenticazione del download, evitando card vuote quando il proxy richiede Bearer token.
+- Android: `Apri` per file proxy usa URL temporaneo con `hub_token`, necessario per intent Android esterni che non possono inviare header Authorization.
+- Android: la tendina `Ragionamento/Sto pensando` non si apre piu' automaticamente sopra la risposta; il reasoning resta consultabile nella sua tendina e, quando aperto, resta confinato in box scrollabile.
+- Asset release attesi: Android APK `HermesHub-0.6.142-android.apk`. Windows MSIX e Linux Gateway non inclusi perche' invariati in questa release Android-only.
+- Release bump: Android `versionName 0.6.142`, `versionCode 147`.
 
 Hermes Hub 0.6.141 (Reasoning and media proxy hotfix):
 
