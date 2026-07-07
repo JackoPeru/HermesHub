@@ -100,6 +100,15 @@ def _replace_regex_once(text: str, pattern: str, repl: str, label: str) -> tuple
 def _patch_text(text: str) -> tuple[str, list[str]]:
     changes: list[str] = []
 
+    if "import asyncio" not in text:
+        if "import json\n" in text:
+            text = text.replace("import json\n", "import asyncio\nimport json\n", 1)
+        elif "import os\n" in text:
+            text = text.replace("import os\n", "import asyncio\nimport os\n", 1)
+        else:
+            text = "import asyncio\n" + text
+        changes.append("asyncio import for hub events")
+
     if "HERMES_GATEWAY_MAX_REQUEST_MB" not in text:
         text, _ = _replace_regex_once(
             text,
@@ -563,22 +572,63 @@ def _hermes_hub_conversations_payload() -> Dict[str, Any]:
         items = []
     normalized = []
     seen = set()
+    try:
+        retention_days = float(os.environ.get("HERMES_HUB_DELETED_CONVERSATION_RETENTION_DAYS", "30"))
+    except Exception:
+        retention_days = 30.0
+    deleted_cutoff = time.time() * 1000 - max(retention_days, 0.0) * 86400000
     for item in items:
         conv = _hermes_hub_normalize_conversation(item)
         if not conv:
             continue
+        if conv.get("deletedAt"):
+            try:
+                deleted_at = float(conv.get("deletedAt") or 0)
+            except Exception:
+                deleted_at = 0
+            if deleted_at > 0 and deleted_at < deleted_cutoff:
+                continue
         cid = str(conv.get("id") or "")
         if cid in seen:
             continue
         seen.add(cid)
         normalized.append(conv)
     normalized.sort(key=lambda x: float(x.get("updatedAt") or x.get("updated_at") or 0), reverse=True)
-    payload["items"] = normalized[:500]
+    payload["items"] = normalized
     payload["object"] = "hermes.hub.conversations"
     payload["status"] = "ok"
     payload["path"] = str(path)
     payload["description"] = "Archivio chat Hermes Hub condiviso tra Windows, Android e reinstallazioni app."
     return payload
+
+
+_hermes_hub_conversation_event_subscribers = set()
+
+
+def _hermes_hub_conversation_event_payload(reason: str, result: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    current = _hermes_hub_conversations_payload()
+    return {
+        "object": "hermes.hub.conversations.event",
+        "reason": reason,
+        "updated_at": time.time(),
+        "count": len(current.get("items", [])) if isinstance(current.get("items"), list) else 0,
+        "merged": result.get("merged") if isinstance(result, dict) else None,
+        "id": result.get("id") if isinstance(result, dict) else None,
+    }
+
+
+def _hermes_hub_publish_conversation_event(reason: str, result: Optional[Dict[str, Any]] = None) -> None:
+    if not _hermes_hub_conversation_event_subscribers:
+        return
+    payload = _hermes_hub_conversation_event_payload(reason, result)
+    dead = []
+    for queue in list(_hermes_hub_conversation_event_subscribers):
+        try:
+            queue.put_nowait(payload)
+        except Exception:
+            dead.append(queue)
+    for queue in dead:
+        _hermes_hub_conversation_event_subscribers.discard(queue)
 
 
 def _hermes_hub_number(value: Any, fallback: float = 0.0) -> float:
@@ -702,8 +752,8 @@ def _hermes_hub_merge_conversations(incoming: List[Dict[str, Any]]) -> Dict[str,
     active = [item for item in by_id.values() if not item.get("deletedAt")]
     deleted = [item for item in by_id.values() if item.get("deletedAt")]
     items = (
-        sorted(active, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)[:200] +
-        sorted(deleted, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)[:300]
+        sorted(active, key=lambda x: float(x.get("updatedAt") or 0), reverse=True) +
+        sorted(deleted, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)
     )
     items = sorted(items, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)
     payload = {"items": items, "updated_at": time.time()}
@@ -752,7 +802,7 @@ def _hermes_hub_delete_conversation(conversation_id: str) -> Dict[str, Any]:
             "serverConversationId": None,
             "messages": [],
         })
-    current["items"] = sorted(out, key=lambda x: float(x.get("updatedAt") or 0) if isinstance(x, dict) else 0, reverse=True)[:500]
+    current["items"] = sorted(out, key=lambda x: float(x.get("updatedAt") or 0) if isinstance(x, dict) else 0, reverse=True)
     current["updated_at"] = time.time()
     _hermes_hub_write_json(_hermes_hub_storage_path("HERMES_HUB_CONVERSATIONS_PATH", "hub_conversations.json"), current)
     return {"object": "hermes.hub.conversations.delete", "deleted": 1 if found else 0, "id": conversation_id, "tombstone": True}
@@ -945,7 +995,40 @@ def _hermes_hub_resolve_media_path(media_id: str, extra_root: Optional[str] = No
                         return candidate.resolve()
             except Exception:
                 continue
+
+        if len(basename) >= 4:
+            upload_root = _Path(os.environ.get("HERMES_HUB_UPLOAD_PATH", str(_Path.home() / ".hermes" / "hub_uploads"))).expanduser()
+            try:
+                upload_matches = [candidate.resolve() for candidate in upload_root.rglob(f"{basename}*") if candidate.is_file()]
+                upload_unique = {str(candidate): candidate for candidate in upload_matches}
+                if len(upload_unique) == 1:
+                    return next(iter(upload_unique.values()))
+            except Exception:
+                pass
+
+            matches: List[_Path] = []
+            for root in roots:
+                if root == upload_root:
+                    continue
+                try:
+                    matches.extend(candidate.resolve() for candidate in root.rglob(f"{basename}*") if candidate.is_file())
+                except Exception:
+                    continue
+            unique = {str(candidate): candidate for candidate in matches}
+            if len(unique) == 1:
+                return next(iter(unique.values()))
     return None
+
+
+def _hermes_hub_is_tailnet_peer(request: "web.Request") -> bool:
+    import ipaddress as _ipaddress
+
+    raw = (request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip() or request.remote or "")
+    try:
+        ip = _ipaddress.ip_address(raw)
+    except Exception:
+        return False
+    return ip.is_loopback or ip in _ipaddress.ip_network("100.64.0.0/10")
 
 
 def _hermes_hub_media_cache_path(source: "Path") -> "Path":
@@ -1090,7 +1173,40 @@ def _hermes_hub_resolve_media_path(media_id: str, extra_root: Optional[str] = No
                         return candidate.resolve()
             except Exception:
                 continue
+
+        if len(basename) >= 4:
+            upload_root = _Path(os.environ.get("HERMES_HUB_UPLOAD_PATH", str(_Path.home() / ".hermes" / "hub_uploads"))).expanduser()
+            try:
+                upload_matches = [candidate.resolve() for candidate in upload_root.rglob(f"{basename}*") if candidate.is_file()]
+                upload_unique = {str(candidate): candidate for candidate in upload_matches}
+                if len(upload_unique) == 1:
+                    return next(iter(upload_unique.values()))
+            except Exception:
+                pass
+
+            matches: List[_Path] = []
+            for root in roots:
+                if root == upload_root:
+                    continue
+                try:
+                    matches.extend(candidate.resolve() for candidate in root.rglob(f"{basename}*") if candidate.is_file())
+                except Exception:
+                    continue
+            unique = {str(candidate): candidate for candidate in matches}
+            if len(unique) == 1:
+                return next(iter(unique.values()))
     return None
+
+
+def _hermes_hub_is_tailnet_peer(request: "web.Request") -> bool:
+    import ipaddress as _ipaddress
+
+    raw = (request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip() or request.remote or "")
+    try:
+        ip = _ipaddress.ip_address(raw)
+    except Exception:
+        return False
+    return ip.is_loopback or ip in _ipaddress.ip_network("100.64.0.0/10")
 
 
 def _hermes_hub_media_cache_path(source: "Path") -> "Path":
@@ -1179,7 +1295,7 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
         seen.add(cid)
         normalized.append(conv)
     normalized.sort(key=lambda x: float(x.get("updatedAt") or x.get("updated_at") or 0), reverse=True)
-    payload["items"] = normalized[:500]
+    payload["items"] = normalized
     payload["object"] = "hermes.hub.conversations"
     payload["status"] = "ok"
     payload["path"] = str(path)
@@ -1304,8 +1420,8 @@ def _hermes_hub_merge_conversations(incoming: List[Dict[str, Any]]) -> Dict[str,
     active = [item for item in by_id.values() if not item.get("deletedAt")]
     deleted = [item for item in by_id.values() if item.get("deletedAt")]
     items = (
-        sorted(active, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)[:200] +
-        sorted(deleted, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)[:300]
+        sorted(active, key=lambda x: float(x.get("updatedAt") or 0), reverse=True) +
+        sorted(deleted, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)
     )
     items = sorted(items, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)
     payload = {"items": items, "updated_at": time.time()}
@@ -1354,7 +1470,7 @@ def _hermes_hub_delete_conversation(conversation_id: str) -> Dict[str, Any]:
             "serverConversationId": None,
             "messages": [],
         })
-    current["items"] = sorted(out, key=lambda x: float(x.get("updatedAt") or 0) if isinstance(x, dict) else 0, reverse=True)[:500]
+    current["items"] = sorted(out, key=lambda x: float(x.get("updatedAt") or 0) if isinstance(x, dict) else 0, reverse=True)
     current["updated_at"] = time.time()
     _hermes_hub_write_json(_hermes_hub_storage_path("HERMES_HUB_CONVERSATIONS_PATH", "hub_conversations.json"), current)
     return {"object": "hermes.hub.conversations.delete", "deleted": 1 if found else 0, "id": conversation_id, "tombstone": True}
@@ -1725,6 +1841,97 @@ def _hermes_hub_media_roots() -> List["Path"]:''',
             if fixed_body != media_roots_body:
                 text = text[:start] + fixed_body + text[end:]
                 changes.append("media roots raw_news repair")
+
+    if 'def _hermes_hub_is_tailnet_peer(request: "web.Request") -> bool:' not in text and 'def _hermes_hub_media_cache_path(source: "Path") -> "Path":' in text:
+        text = text.replace(
+            '\n\ndef _hermes_hub_media_cache_path(source: "Path") -> "Path":\n',
+            '\n\n'
+            'def _hermes_hub_is_tailnet_peer(request: "web.Request") -> bool:\n'
+            '    import ipaddress as _ipaddress\n'
+            '\n'
+            '    raw = (request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip() or request.remote or "")\n'
+            '    try:\n'
+            '        ip = _ipaddress.ip_address(raw)\n'
+            '    except Exception:\n'
+            '        return False\n'
+            '    return ip.is_loopback or ip in _ipaddress.ip_network("100.64.0.0/10")\n'
+            '\n\n'
+            'def _hermes_hub_media_cache_path(source: "Path") -> "Path":\n',
+            1,
+        )
+        changes.append("media proxy tailnet helper")
+
+    if 'root.rglob(f"{basename}*")' not in text and 'def _hermes_hub_resolve_media_path' in text:
+        text = text.replace(
+            '    if basename and basename == decoded:\n'
+            '        for root in roots:\n'
+            '            try:\n'
+            '                for candidate in root.rglob(basename):\n'
+            '                    if candidate.is_file():\n'
+            '                        return candidate.resolve()\n'
+            '            except Exception:\n'
+            '                continue\n'
+            '    return None\n',
+            '    if basename and basename == decoded:\n'
+            '        for root in roots:\n'
+            '            try:\n'
+            '                for candidate in root.rglob(basename):\n'
+            '                    if candidate.is_file():\n'
+            '                        return candidate.resolve()\n'
+            '            except Exception:\n'
+            '                continue\n'
+            '\n'
+            '        if len(basename) >= 4:\n'
+            '            matches: List[_Path] = []\n'
+            '            for root in roots:\n'
+            '                try:\n'
+            '                    matches.extend(candidate.resolve() for candidate in root.rglob(f"{basename}*") if candidate.is_file())\n'
+            '                except Exception:\n'
+            '                    continue\n'
+            '            unique = {str(candidate): candidate for candidate in matches}\n'
+            '            if len(unique) == 1:\n'
+            '                return next(iter(unique.values()))\n'
+            '    return None\n',
+            1,
+        )
+        changes.append("media proxy basename prefix fallback")
+
+    if 'upload_matches = [candidate.resolve() for candidate in upload_root.rglob(f"{basename}*")' not in text and 'root.rglob(f"{basename}*")' in text:
+        text = text.replace(
+            '        if len(basename) >= 4:\n'
+            '            matches: List[_Path] = []\n'
+            '            for root in roots:\n'
+            '                try:\n'
+            '                    matches.extend(candidate.resolve() for candidate in root.rglob(f"{basename}*") if candidate.is_file())\n'
+            '                except Exception:\n'
+            '                    continue\n'
+            '            unique = {str(candidate): candidate for candidate in matches}\n'
+            '            if len(unique) == 1:\n'
+            '                return next(iter(unique.values()))\n',
+            '        if len(basename) >= 4:\n'
+            '            upload_root = _Path(os.environ.get("HERMES_HUB_UPLOAD_PATH", str(_Path.home() / ".hermes" / "hub_uploads"))).expanduser()\n'
+            '            try:\n'
+            '                upload_matches = [candidate.resolve() for candidate in upload_root.rglob(f"{basename}*") if candidate.is_file()]\n'
+            '                upload_unique = {str(candidate): candidate for candidate in upload_matches}\n'
+            '                if len(upload_unique) == 1:\n'
+            '                    return next(iter(upload_unique.values()))\n'
+            '            except Exception:\n'
+            '                pass\n'
+            '\n'
+            '            matches: List[_Path] = []\n'
+            '            for root in roots:\n'
+            '                if root == upload_root:\n'
+            '                    continue\n'
+            '                try:\n'
+            '                    matches.extend(candidate.resolve() for candidate in root.rglob(f"{basename}*") if candidate.is_file())\n'
+            '                except Exception:\n'
+            '                    continue\n'
+            '            unique = {str(candidate): candidate for candidate in matches}\n'
+            '            if len(unique) == 1:\n'
+            '                return next(iter(unique.values()))\n',
+            1,
+        )
+        changes.append("media proxy upload prefix priority")
 
     if 'raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH")' not in text and 'raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"' in text:
         text = text.replace(
@@ -2621,12 +2828,40 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "    async def _handle_hub_media(self, request: \"web.Request\") -> \"web.StreamResponse\":\n"
             "        auth_error = self._check_auth(request)\n"
             "        if auth_error is not None:\n"
-            "            media_token = request.query.get(\"hub_token\") or request.query.get(\"api_key\") or request.query.get(\"token\")\n"
-            "            accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n"
-            "            if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):\n"
-            "                return auth_error\n"
+            "            if _hermes_hub_is_tailnet_peer(request):\n"
+            "                auth_error = None\n"
+            "            else:\n"
+            "                media_token = request.query.get(\"hub_token\") or request.query.get(\"api_key\") or request.query.get(\"token\")\n"
+            "                accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n"
+            "                if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):\n"
+            "                    return auth_error\n"
             "        media_id = request.match_info.get(\"media_id\", \"\")\n"
             "        path = _hermes_hub_resolve_media_path(media_id, request.query.get(\"root\"))\n"
+            "        if path is None:\n"
+            "            from pathlib import Path as _Path\n"
+            "            short_id = str(media_id or \"\").strip().strip(\"/\")\n"
+            "            if 4 <= len(short_id) <= 64 and \"/\" not in short_id:\n"
+            "                upload_root = _Path(os.environ.get(\"HERMES_HUB_UPLOAD_PATH\", str(_Path.home() / \".hermes\" / \"hub_uploads\"))).expanduser()\n"
+            "                matches = []\n"
+            "                try:\n"
+            "                    matches = [candidate.resolve() for candidate in upload_root.rglob(f\"{short_id}*\") if candidate.is_file()]\n"
+            "                except Exception:\n"
+            "                    matches = []\n"
+            "                unique = {str(candidate): candidate for candidate in matches}\n"
+            "                if len(unique) == 1:\n"
+            "                    path = next(iter(unique.values()))\n"
+            "                if path is None:\n"
+            "                    matches = []\n"
+            "                    for root in _hermes_hub_media_roots():\n"
+            "                        if root == upload_root:\n"
+            "                            continue\n"
+            "                        try:\n"
+            "                            matches.extend(candidate.resolve() for candidate in root.rglob(f\"{short_id}*\") if candidate.is_file())\n"
+            "                        except Exception:\n"
+            "                            continue\n"
+            "                    unique = {str(candidate): candidate for candidate in matches}\n"
+            "                    if len(unique) == 1:\n"
+            "                        path = next(iter(unique.values()))\n"
             "        if path is None:\n"
             "            return web.json_response({\"error\": \"Media not found\"}, status=404)\n"
             "        try:\n"
@@ -2671,13 +2906,111 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             '    async def _handle_hub_media(self, request: "web.Request") -> "web.StreamResponse":\n'
             '        auth_error = self._check_auth(request)\n'
             '        if auth_error is not None:\n'
-            '            media_token = request.query.get("hub_token") or request.query.get("api_key") or request.query.get("token")\n'
-            '            accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n'
-            '            if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):\n'
-            '                return auth_error\n',
+            '            if _hermes_hub_is_tailnet_peer(request):\n'
+            '                auth_error = None\n'
+            '            else:\n'
+            '                media_token = request.query.get("hub_token") or request.query.get("api_key") or request.query.get("token")\n'
+            '                accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n'
+            '                if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):\n'
+            '                    return auth_error\n',
             1,
         )
         changes.append("media proxy query token auth")
+
+    if 'if _hermes_hub_is_tailnet_peer(request):' not in text and 'media_token = request.query.get("hub_token")' in text:
+        text = text.replace(
+            '        if auth_error is not None:\n'
+            '            media_token = request.query.get("hub_token") or request.query.get("api_key") or request.query.get("token")\n'
+            '            accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n'
+            '            if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):\n'
+            '                return auth_error\n'
+            '        media_id = request.match_info.get("media_id", "")\n',
+            '        if auth_error is not None:\n'
+            '            if _hermes_hub_is_tailnet_peer(request):\n'
+            '                auth_error = None\n'
+            '            else:\n'
+            '                media_token = request.query.get("hub_token") or request.query.get("api_key") or request.query.get("token")\n'
+            '                accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n'
+            '                if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):\n'
+            '                    return auth_error\n'
+            '        media_id = request.match_info.get("media_id", "")\n',
+            1,
+        )
+        changes.append("media proxy tailnet auth")
+
+    if 'short_id = str(media_id or "").strip().strip("/")' not in text and 'path = _hermes_hub_resolve_media_path(media_id, request.query.get("root"))' in text:
+        text = text.replace(
+            '        path = _hermes_hub_resolve_media_path(media_id, request.query.get("root"))\n'
+            '        if path is None:\n'
+            '            return web.json_response({"error": "Media not found"}, status=404)\n',
+            '        path = _hermes_hub_resolve_media_path(media_id, request.query.get("root"))\n'
+            '        if path is None:\n'
+            '            from pathlib import Path as _Path\n'
+            '            short_id = str(media_id or "").strip().strip("/")\n'
+            '            if 4 <= len(short_id) <= 64 and "/" not in short_id:\n'
+            '                upload_root = _Path(os.environ.get("HERMES_HUB_UPLOAD_PATH", str(_Path.home() / ".hermes" / "hub_uploads"))).expanduser()\n'
+            '                matches = []\n'
+            '                try:\n'
+            '                    matches = [candidate.resolve() for candidate in upload_root.rglob(f"{short_id}*") if candidate.is_file()]\n'
+            '                except Exception:\n'
+            '                    matches = []\n'
+            '                unique = {str(candidate): candidate for candidate in matches}\n'
+            '                if len(unique) == 1:\n'
+            '                    path = next(iter(unique.values()))\n'
+            '                if path is None:\n'
+            '                    matches = []\n'
+            '                    for root in _hermes_hub_media_roots():\n'
+            '                        if root == upload_root:\n'
+            '                            continue\n'
+            '                        try:\n'
+            '                            matches.extend(candidate.resolve() for candidate in root.rglob(f"{short_id}*") if candidate.is_file())\n'
+            '                        except Exception:\n'
+            '                            continue\n'
+            '                    unique = {str(candidate): candidate for candidate in matches}\n'
+            '                    if len(unique) == 1:\n'
+            '                        path = next(iter(unique.values()))\n'
+            '        if path is None:\n'
+            '            return web.json_response({"error": "Media not found"}, status=404)\n',
+            1,
+        )
+        changes.append("media proxy short id fallback")
+
+    if 'roots = [_Path(os.environ.get("HERMES_HUB_UPLOAD_PATH", str(_Path.home() / ".hermes" / "hub_uploads"))).expanduser()] + _hermes_hub_media_roots()' in text:
+        text = text.replace(
+            '                roots = [_Path(os.environ.get("HERMES_HUB_UPLOAD_PATH", str(_Path.home() / ".hermes" / "hub_uploads"))).expanduser()] + _hermes_hub_media_roots()\n'
+            '                matches = []\n'
+            '                for root in roots:\n'
+            '                    try:\n'
+            '                        matches.extend(candidate.resolve() for candidate in root.rglob(f"{short_id}*") if candidate.is_file())\n'
+            '                    except Exception:\n'
+            '                        continue\n'
+            '                unique = {str(candidate): candidate for candidate in matches}\n'
+            '                if len(unique) == 1:\n'
+            '                    path = next(iter(unique.values()))\n',
+            '                upload_root = _Path(os.environ.get("HERMES_HUB_UPLOAD_PATH", str(_Path.home() / ".hermes" / "hub_uploads"))).expanduser()\n'
+            '                matches = []\n'
+            '                try:\n'
+            '                    matches = [candidate.resolve() for candidate in upload_root.rglob(f"{short_id}*") if candidate.is_file()]\n'
+            '                except Exception:\n'
+            '                    matches = []\n'
+            '                unique = {str(candidate): candidate for candidate in matches}\n'
+            '                if len(unique) == 1:\n'
+            '                    path = next(iter(unique.values()))\n'
+            '                if path is None:\n'
+            '                    matches = []\n'
+            '                    for root in _hermes_hub_media_roots():\n'
+            '                        if root == upload_root:\n'
+            '                            continue\n'
+            '                        try:\n'
+            '                            matches.extend(candidate.resolve() for candidate in root.rglob(f"{short_id}*") if candidate.is_file())\n'
+            '                        except Exception:\n'
+            '                            continue\n'
+            '                    unique = {str(candidate): candidate for candidate in matches}\n'
+            '                    if len(unique) == 1:\n'
+            '                        path = next(iter(unique.values()))\n',
+            1,
+        )
+        changes.append("media proxy upload short id priority")
 
     if "async def _handle_hub_media_upload" not in text:
         text, _ = _replace_once(

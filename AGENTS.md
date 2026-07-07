@@ -33,10 +33,18 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.142 Release Hermes Hub 0.6.142 Android media auth and reasoning drawer fix
+v0.6.143 Release Hermes Hub 0.6.143 gateway tailnet media access fix
 ```
 
 ## Release Corrente
+
+Hermes Hub 0.6.143 (Gateway tailnet media access fix):
+
+Release 0.6.143:
+- Gateway Linux: `/v1/media/...` ora consente download senza header Authorization quando la richiesta arriva da Tailnet Tailscale (`100.64.0.0/10`) o loopback. Questo evita `HTTP 401` quando Android/intent/browser non possono propagare header Bearer, mantenendo accesso limitato alla rete privata Tailscale.
+- Gateway Linux: fix per media id troncati nelle vecchie card, es. `/v1/media/auto`; se non trova un file esatto, cerca prima un prefisso univoco in `HERMES_HUB_UPLOAD_PATH`/`~/.hermes/hub_uploads`, poi solo come fallback nelle root media. Evita ambiguita' causate da `HERMES_MEDIA_ROOTS=%h` con molti file `auto*`.
+- Server live: patch applicata a `/home/matteo/.hermes/hermes-agent/gateway/platforms/api_server.py`, riavviato `hermes-hub.service`; verificati da Tailscale `GET /v1/media/auto` 200, `GET /v1/media/auto?hub_token=hermes-hub` 200, `GET /v1/media/autonomous-business-research-full.md` 200, `POST /v1/chat/completions` 200.
+- Asset release attesi: Linux Gateway `HermesHub-0.6.143-linux-gateway.tar.gz`. Android APK e Windows MSIX non inclusi perche' invariati in questa release gateway-only.
 
 Hermes Hub 0.6.142 (Android media auth and reasoning drawer fix):
 
