@@ -103,6 +103,12 @@
                             <TextBlock Text="Prestazioni" />
                         </StackPanel>
                     </Button>
+                    <Button Click="Voice_Click" Style="{StaticResource SidebarButtonStyle}" ToolTipService.ToolTip="Voce" AutomationProperties.Name="Voce">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <FontIcon FontSize="15" Glyph="&#xE720;" />
+                            <TextBlock Text="Voce" />
+                        </StackPanel>
+                    </Button>
                     <Button Click="Video_Click" Style="{StaticResource SidebarButtonStyle}" ToolTipService.ToolTip="Video" AutomationProperties.Name="Video">
                         <StackPanel Orientation="Horizontal" Spacing="10">
                             <FontIcon FontSize="15" Glyph="&#xE714;" />

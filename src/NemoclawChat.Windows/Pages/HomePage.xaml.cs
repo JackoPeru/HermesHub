@@ -349,45 +349,14 @@ public sealed partial class HomePage : Page
         try
         {
             var settings = AppSettingsStore.Load();
-            var gatewayBaseUrl = settings.GatewayUrl;
-            var secret = GatewayCredentialStore.LoadSecret();
-
-            using var httpClient = new System.Net.Http.HttpClient();
-            if (!string.IsNullOrEmpty(secret))
+            var transcribedText = await SpeechGatewayService.TranscribeFileAsync(settings, filePath);
+            if (!string.IsNullOrWhiteSpace(transcribedText))
             {
-                httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", secret);
-            }
-
-            using var form = new System.Net.Http.MultipartFormDataContent();
-            using var fs = System.IO.File.OpenRead(filePath);
-            using var streamContent = new System.Net.Http.StreamContent(fs);
-            streamContent.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse("audio/mp4");
-            form.Add(streamContent, "file", "voice_note.m4a");
-
-            var url = $"{gatewayBaseUrl}/audio/transcriptions";
-            var response = await httpClient.PostAsync(url, form);
-            
-            if (response.IsSuccessStatusCode)
-            {
-                var responseString = await response.Content.ReadAsStringAsync();
-                var json = JsonDocument.Parse(responseString);
-                if (json.RootElement.TryGetProperty("text", out var textProp))
-                {
-                    var transcribedText = textProp.GetString();
-                    if (!string.IsNullOrWhiteSpace(transcribedText))
-                    {
-                        var currentText = PromptBox.Text;
-                        if (!string.IsNullOrEmpty(currentText) && !currentText.EndsWith(" "))
-                            currentText += " ";
-                        PromptBox.Text = currentText + transcribedText;
-                        PromptBox.SelectionStart = PromptBox.Text.Length;
-                    }
-                }
-            }
-            else
-            {
-                var responseString = await response.Content.ReadAsStringAsync();
-                AddAction("Errore Voce", $"Errore trascrizione: {response.StatusCode} {responseString}");
+                var currentText = PromptBox.Text;
+                if (!string.IsNullOrEmpty(currentText) && !currentText.EndsWith(" "))
+                    currentText += " ";
+                PromptBox.Text = currentText + transcribedText;
+                PromptBox.SelectionStart = PromptBox.Text.Length;
             }
         }
         catch (Exception ex)
@@ -1508,60 +1477,8 @@ public sealed partial class HomePage : Page
         try
         {
             var settings = AppSettingsStore.Load();
-            var speechUrl = BuildTtsSpeechUrl(settings.GatewayUrl);
-            var payload = JsonSerializer.Serialize(new
-            {
-                input = text,
-                voice = "if_sara",
-                lang = "it",
-                speed = 1.0,
-                response_format = "wav"
-            });
-
-            using var httpClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(2) };
-            byte[]? audioBytes = null;
-            string? lastError = null;
-            foreach (var token in BuildTtsAuthCandidates())
-            {
-                using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, speechUrl);
-                request.Headers.TryAddWithoutValidation("Accept", "audio/wav");
-                request.Headers.TryAddWithoutValidation("User-Agent", "HermesHub-Windows");
-                if (!string.IsNullOrWhiteSpace(token))
-                {
-                    request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {token}");
-                }
-                request.Content = new System.Net.Http.StringContent(payload, Encoding.UTF8, "application/json");
-                using var response = await httpClient.SendAsync(request, System.Net.Http.HttpCompletionOption.ResponseHeadersRead);
-                if (response.IsSuccessStatusCode)
-                {
-                    audioBytes = await response.Content.ReadAsByteArrayAsync();
-                    break;
-                }
-
-                lastError = $"{(int)response.StatusCode} {response.ReasonPhrase}";
-                if (response.StatusCode != System.Net.HttpStatusCode.Unauthorized)
-                {
-                    break;
-                }
-            }
-
-            if (audioBytes is null || audioBytes.Length == 0)
-            {
-                ShowError($"TTS Kokoro non disponibile: {lastError ?? "risposta vuota"}");
-                return;
-            }
-
-            var temp = await ApplicationData.Current.TemporaryFolder.CreateFileAsync(
-                $"hermes-tts-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.wav",
-                CreationCollisionOption.GenerateUniqueName);
-            await FileIO.WriteBytesAsync(temp, audioBytes);
-
-            _ttsPlayer?.Dispose();
-            _ttsPlayer = new MediaPlayer
-            {
-                Source = MediaSource.CreateFromStorageFile(temp)
-            };
-            _ttsPlayer.Play();
+            var audioPath = await SpeechGatewayService.SynthesizeToFileAsync(settings, text);
+            await PlayTtsFileAsync(audioPath);
         }
         catch (Exception ex)
         {
@@ -1577,29 +1494,18 @@ public sealed partial class HomePage : Page
         }
     }
 
-    private static IEnumerable<string?> BuildTtsAuthCandidates()
+    private Task PlayTtsFileAsync(string filePath)
     {
-        var saved = GatewayCredentialStore.LoadSecret();
-        if (!string.IsNullOrWhiteSpace(saved))
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _ttsPlayer?.Dispose();
+        _ttsPlayer = new MediaPlayer
         {
-            yield return saved.Trim();
-        }
-
-        if (!string.Equals(saved, GatewayCredentialStore.DefaultApiKey, StringComparison.Ordinal))
-        {
-            yield return GatewayCredentialStore.DefaultApiKey;
-        }
-    }
-
-    private static string BuildTtsSpeechUrl(string gatewayUrl)
-    {
-        if (Uri.TryCreate(gatewayUrl, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.Host))
-        {
-            var builder = new UriBuilder(uri.Scheme, uri.Host, uri.IsDefaultPort ? 8642 : uri.Port, "/v1/audio/speech");
-            return builder.Uri.ToString();
-        }
-
-        return "http://100.94.223.14:8642/v1/audio/speech";
+            Source = MediaSource.CreateFromUri(new Uri(filePath))
+        };
+        _ttsPlayer.MediaEnded += (_, _) => completion.TrySetResult();
+        _ttsPlayer.MediaFailed += (_, args) => completion.TrySetException(new InvalidOperationException(args.ErrorMessage));
+        _ttsPlayer.Play();
+        return completion.Task;
     }
 
     private static UIElement RenderRawHermesEvent(HermesRawEventRecord raw)

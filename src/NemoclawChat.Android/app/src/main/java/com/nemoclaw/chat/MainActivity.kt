@@ -284,6 +284,7 @@ class MainActivity : ComponentActivity() {
 
 private enum class Tab(val label: String, val icon: ImageVector) {
     Chat("Chat", Icons.Rounded.ChatBubbleOutline),
+    Voice("Voce", Icons.Rounded.Mic),
     Archive("Archivio", Icons.Rounded.FolderOpen),
     Cron("Cron", Icons.Rounded.TaskAlt),
     Notifications("Notifiche", Icons.Rounded.Notifications),
@@ -922,7 +923,7 @@ private fun ChatApp() {
             containerColor = AppColors.Background,
             bottomBar = {
                 val bottomTabs = remember {
-                    listOf(Tab.Chat, Tab.Hardware, Tab.Video, Tab.Profile)
+                    listOf(Tab.Chat, Tab.Voice, Tab.Hardware, Tab.Profile)
                 }
                 NavigationBar(containerColor = AppColors.Sidebar) {
                     bottomTabs.forEach { tab ->
@@ -964,6 +965,7 @@ private fun ChatApp() {
                         onOpenSidebar = { sidebarOpen = true },
                         onSwitchTab = { tab -> setSelectedTab(tab) }
                     )
+                    Tab.Voice -> VoiceModeScreen(settings, loadGatewaySecret(context))
                     Tab.Archive -> ArchiveScreen(
                         context = context,
                         onOpenConversation = { id, _ ->
@@ -7238,7 +7240,7 @@ private val archiveEventsHttpClient: OkHttpClient by lazy {
 @Volatile
 private var activeTtsMediaPlayer: MediaPlayer? = null
 
-private suspend fun speakChatMessage(context: Context, settings: AppSettings, text: String, apiKey: String?): Unit = withContext(Dispatchers.IO) {
+internal suspend fun speakChatMessage(context: Context, settings: AppSettings, text: String, apiKey: String?): Unit = withContext(Dispatchers.IO) {
     val cleanText = text.trim()
     if (cleanText.isBlank()) return@withContext
     val payload = JSONObject()
@@ -8683,7 +8685,7 @@ private fun saveProjects(context: Context, projects: List<ProjectRecord>) {
         .apply()
 }
 
-private fun loadGatewaySecret(context: Context): String? {
+internal fun loadGatewaySecret(context: Context): String? {
     val prefs = migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
     val legacyPrefs = context.applicationContext.getSharedPreferences(LEGACY_SETTINGS_PREFS, Context.MODE_PRIVATE)
     val stored = prefs.getString(GATEWAY_SECRET_PREF_KEY, null)

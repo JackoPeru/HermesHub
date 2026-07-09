@@ -33,10 +33,23 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.149 Release Hermes Hub 0.6.149 gateway Kokoro TTS hardening
+v0.6.150 Release Hermes Hub 0.6.150 voice call mode and Windows TTS hardening
 ```
 
 ## Release Corrente
+
+Hermes Hub 0.6.150 (Voice call mode and Windows TTS hardening):
+
+Release 0.6.150:
+- Windows: fix freeze del pulsante `Leggi messaggio`. TTS/STT passano da `SpeechGatewayService`, con download WAV in streaming su file temporaneo e riproduzione non bloccante, evitando buffering pesante e scritture UI-thread.
+- Windows: aggiunta sezione `Voce` nella sidebar. La pagina e' full-screen nera con stelle 3D native; premi il microfono, parli, Hermes trascrive via STT, risponde in streaming e il TTS parte a segmenti mentre arrivano frasi.
+- Windows: durante la voce di Hermes le stelle si assemblano in una sfera 3D rotante; quando Hermes smette di parlare tornano a muoversi libere nello spazio.
+- Android: aggiunto tab `Voce` nella bottom bar. Usa scena Three.js offline con stelle nello spazio e sfera durante la voce; flusso STT -> stream Hermes -> TTS a segmenti come su Windows.
+- Android: sostituita la vecchia scena voice WebView/editor con scena pulita stelle/sfera, controllata da `window.setHermesSpeaking(...)`.
+- Gateway: nessun cambio richiesto; la release usa gli endpoint gia' pubblicati in 0.6.149 (`/v1/audio/transcriptions`, `/v1/audio/speech`, stream chat).
+- Verifiche pre-release: Windows build Debug 0 errori, Android `assembleDebug` OK, Android `assembleRelease` OK, MSIX firmato OK.
+- Asset release attesi: Android APK `HermesHub-0.6.150-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.150.0_x64.msix`. Linux Gateway non incluso perche' invariato.
+- Release bump: Windows/AdminBridge `0.6.150`, Android `versionName 0.6.150`, `versionCode 154`.
 
 Hermes Hub 0.6.149 (Gateway Kokoro TTS hardening):
 

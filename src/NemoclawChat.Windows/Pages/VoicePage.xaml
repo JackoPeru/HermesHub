@@ -9,13 +9,56 @@
     <Grid
         x:Name="Root"
         Background="Black"
-        DoubleTapped="Root_DoubleTapped"
         IsTabStop="True"
-        KeyDown="Root_KeyDown"
-        Tapped="Root_Tapped">
+        KeyDown="Root_KeyDown">
         <Canvas
             x:Name="ParticleCanvas"
             Background="Black"
             SizeChanged="ParticleCanvas_SizeChanged" />
+
+        <StackPanel
+            HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            Margin="0,0,0,36"
+            Spacing="12">
+            <Button
+                x:Name="CallButton"
+                Width="76"
+                Height="76"
+                Padding="0"
+                Click="CallButton_Click"
+                CornerRadius="38"
+                HorizontalAlignment="Center"
+                Background="#22FFFFFF"
+                BorderBrush="#55FFFFFF"
+                BorderThickness="1"
+                ToolTipService.ToolTip="Parla con Hermes"
+                AutomationProperties.Name="Parla con Hermes">
+                <FontIcon x:Name="CallIcon" Glyph="&#xE720;" FontSize="28" Foreground="White" />
+            </Button>
+            <TextBlock
+                x:Name="StatusText"
+                Width="520"
+                Text="Premi il microfono e parla."
+                TextAlignment="Center"
+                TextTrimming="CharacterEllipsis"
+                Foreground="#B8FFFFFF"
+                FontSize="13" />
+        </StackPanel>
+
+        <Button
+            Width="40"
+            Height="40"
+            Margin="20"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            Click="Back_Click"
+            Background="#18000000"
+            BorderBrush="#35FFFFFF"
+            BorderThickness="1"
+            ToolTipService.ToolTip="Torna alla chat"
+            AutomationProperties.Name="Torna alla chat">
+            <FontIcon Glyph="&#xE72B;" FontSize="16" Foreground="#DDFFFFFF" />
+        </Button>
     </Grid>
 </Page>
