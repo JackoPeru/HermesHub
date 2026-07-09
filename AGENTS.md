@@ -33,10 +33,20 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.147 Release Hermes Hub 0.6.147 processing progress and reasoning separation
+v0.6.148 Release Hermes Hub 0.6.148 Kokoro TTS test controls
 ```
 
 ## Release Corrente
+
+Hermes Hub 0.6.148 (Kokoro TTS test controls):
+
+Release 0.6.148:
+- Windows/Android: ogni messaggio in chat ora ha un pulsante `Leggi messaggio` accanto a `Copia`. Il pulsante invia il testo al servizio Kokoro TTS e riproduce il WAV restituito, cosi si puo' testare il modello direttamente dalla chat.
+- Windows/Android: il TTS usa il backend personale via Tailnet su porta `8020`, derivando host/scheme dal gateway configurato e usando la stessa API key Hermes (`hermes-hub` come fallback compatibile).
+- Server live: installato Kokoro TTS CPU come servizio separato `hermes-kokoro-tts.service` in `/home/matteo/.hermes/kokoro-tts`, con `kokoro-onnx`, modello ONNX quantizzato, voci italiane `if_sara`/`im_nicola`, endpoint `POST /v1/audio/speech` e health `GET /health`.
+- Verifiche pre-release: servizio Tailnet `http://100.94.223.14:8020/health` HTTP 200, POST TTS genera WAV mono 24 kHz, Windows build Debug 0 errori, Android `assembleDebug` OK.
+- Asset release attesi: Android APK `HermesHub-0.6.148-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.148.0_x64.msix`. Linux Gateway non incluso perche' il gateway e' in modifica da un altro agente e questa integrazione usa un servizio TTS separato.
+- Release bump: Windows/AdminBridge `0.6.148`, Android `versionName 0.6.148`, `versionCode 152`.
 
 Hermes Hub 0.6.147 (Processing progress and reasoning separation):
 

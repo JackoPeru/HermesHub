@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
@@ -69,7 +70,9 @@ internal fun StreamingBubbleView(
     state: StreamingState,
     showToolCalls: Boolean,
     showMessageMetrics: Boolean,
-    metricFilter: MetricDisplayFilter
+    metricFilter: MetricDisplayFilter,
+    uiTickNs: Long = System.nanoTime(),
+    onSpeakMessage: (String) -> Unit = {}
 ) {
     androidx.compose.foundation.text.selection.SelectionContainer {
         Column(
@@ -84,7 +87,7 @@ internal fun StreamingBubbleView(
         ) {
             val showActivity = !state.isDone || state.hasThinking || (showToolCalls && state.toolCalls.isNotEmpty())
             if (showActivity) {
-                HermesActivityExpander(state, showToolCalls)
+                HermesActivityExpander(state, showToolCalls, uiTickNs)
             }
 
             if (state.text.isNotEmpty()) {
@@ -130,6 +133,19 @@ internal fun StreamingBubbleView(
                     }
                     
                     androidx.compose.material3.IconButton(
+                        onClick = { onSpeakMessage(state.text) },
+                        modifier = Modifier.size(24.dp),
+                        enabled = state.text.isNotBlank()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayCircle,
+                            contentDescription = "Leggi messaggio",
+                            tint = AppColors.Muted,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    androidx.compose.material3.IconButton(
                         onClick = { clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(state.text)) },
                         modifier = Modifier.size(24.dp)
                     ) {
@@ -158,7 +174,7 @@ internal fun StreamingBubbleView(
 }
 
 @Composable
-internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolean) {
+internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolean, uiTickNs: Long = System.nanoTime()) {
     var nowNs by remember(state.startedAtNs) { mutableStateOf(System.nanoTime()) }
     LaunchedEffect(state.startedAtNs, state.isDone) {
         while (!state.isDone) {
@@ -167,14 +183,15 @@ internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolea
         }
     }
     val active = !state.isDone
-    val elapsedSec = ((if (active) nowNs else System.nanoTime()) - state.startedAtNs) / 1_000_000_000.0
+    val elapsedNowNs = if (active) maxOf(nowNs, uiTickNs) else System.nanoTime()
+    val elapsedSec = (elapsedNowNs - state.startedAtNs) / 1_000_000_000.0
     var thinkingExpanded by rememberSaveable(state.startedAtNs) { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (active && state.text.isBlank()) {
             FlagRow(
                 title = preGenerationStatusLabel(state.status, state.promptProgressPercent, elapsedSec),
-                value = state.promptProgressPercent?.let { "${if (state.promptProgressEstimated) "~" else ""}${it.coerceIn(0, 100)}%" }
+                value = promptProgressIndicator(state)
                     ?: "${String.format(java.util.Locale.US, "%.1f", elapsedSec)}s",
                 shimmer = true
             )
@@ -288,7 +305,7 @@ private fun FlagRow(title: String, value: String, shimmer: Boolean) {
 internal fun activityIndicator(state: StreamingState): String {
     if (state.isDone) return "Completato"
     val pendingTool = state.toolCalls.any { inferToolOutcome(it) == ToolOutcome.Pending }
-    state.promptProgressPercent?.let { return "${if (state.promptProgressEstimated) "~" else ""}${it.coerceIn(0, 100)}%" }
+    promptProgressIndicator(state)?.let { return it }
     if (pendingTool) return "tool…"
     if (state.text.isNotEmpty()) {
         val toks = state.text.length / 4
@@ -299,6 +316,27 @@ internal fun activityIndicator(state: StreamingState): String {
         return if (toks > 0) "reasoning $toks tok" else "reasoning…"
     }
     return "prompt…"
+}
+
+private fun promptProgressIndicator(state: StreamingState): String? {
+    if (state.promptProgressEstimated) return null
+    val percent = state.promptProgressPercent ?: return null
+    val details = buildList {
+        val processed = state.promptProgressProcessedTokens
+        val total = state.promptProgressTotalTokens
+        if (processed != null && total != null && total > 0) add("$processed/$total tok")
+        val cached = state.promptProgressCachedTokens
+        if (cached != null && cached > 0) add("cache $cached")
+        val timeMs = state.promptProgressTimeMs
+        if (timeMs != null && timeMs >= 0.0) {
+            add("${String.format(java.util.Locale.US, "%.1f", timeMs / 1000.0)}s")
+        }
+    }
+    return if (details.isEmpty()) {
+        "${percent.coerceIn(0, 100)}%"
+    } else {
+        "${percent.coerceIn(0, 100)}% (${details.joinToString(", ")})"
+    }
 }
 
 @Composable

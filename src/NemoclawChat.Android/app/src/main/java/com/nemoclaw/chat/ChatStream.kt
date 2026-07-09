@@ -77,17 +77,6 @@ private fun StringBuilder.appendBounded(text: String): Boolean {
     return true
 }
 
-private fun calculateStableTokensPerSecond(tokensOut: Int, firstTokenNs: Long?, lastTokenNs: Long?, totalMs: Double): Double? {
-    if (tokensOut < 2) return null
-    val durationMs = if (firstTokenNs != null && lastTokenNs != null) {
-        ((lastTokenNs - firstTokenNs).coerceAtLeast(0L)) / 1_000_000.0
-    } else {
-        totalMs
-    }
-    if (durationMs < 200.0) return null
-    return validateTokensPerSecond((tokensOut - 1).coerceAtLeast(1) / (durationMs / 1000.0))
-}
-
 private fun validateTokensPerSecond(value: Double?): Double? {
     val v = value ?: return null
     return if (v.isFinite() && v > 0.0 && v <= 70.0) v else null
@@ -137,6 +126,10 @@ data class StreamingState(
     val status: String = "Invio prompt a Hermes...",
     val promptProgressPercent: Int? = null,
     val promptProgressEstimated: Boolean = false,
+    val promptProgressProcessedTokens: Int? = null,
+    val promptProgressTotalTokens: Int? = null,
+    val promptProgressCachedTokens: Int? = null,
+    val promptProgressTimeMs: Double? = null,
     val activityLog: List<String> = listOf("0.0s  Invio prompt a Hermes..."),
     val error: String? = null,
     val source: String = "Hermes",
@@ -155,6 +148,10 @@ data class StreamingState(
                 visualBlocks = nextBlocks,
                 promptProgressPercent = null,
                 promptProgressEstimated = false,
+                promptProgressProcessedTokens = null,
+                promptProgressTotalTokens = null,
+                promptProgressCachedTokens = null,
+                promptProgressTimeMs = null,
                 status = if (toolCalls.any { inferToolPendingStatus(it) }) status else "Hermes sta scrivendo la risposta...",
                 thinkingFrozen = thinkingFrozen || hasThinking,
                 thinkingElapsedSec = if (!thinkingFrozen && hasThinking) {
@@ -168,6 +165,10 @@ data class StreamingState(
             thinkingFrozen = false,
             promptProgressPercent = null,
             promptProgressEstimated = false,
+            promptProgressProcessedTokens = null,
+            promptProgressTotalTokens = null,
+            promptProgressCachedTokens = null,
+            promptProgressTimeMs = null,
             status = "Hermes sta ragionando..."
         ).withActivity(if (!hasThinking) "Reasoning ricevuto." else null)
         is ChatStreamEvent.ToolCallStart -> copy(
@@ -203,6 +204,10 @@ data class StreamingState(
         is ChatStreamEvent.PromptProgress -> copy(
             promptProgressPercent = event.percent.coerceIn(0, 100),
             promptProgressEstimated = event.estimated,
+            promptProgressProcessedTokens = event.processedTokens,
+            promptProgressTotalTokens = event.totalTokens,
+            promptProgressCachedTokens = event.cachedTokens,
+            promptProgressTimeMs = event.timeMs,
             status = event.label.ifBlank { "llama.cpp: prefill prompt" }
         ).withActivity("Prefill prompt ${event.percent}%")
         is ChatStreamEvent.Done -> copy(
@@ -212,6 +217,10 @@ data class StreamingState(
             status = "Risposta completata.",
             promptProgressPercent = 100,
             promptProgressEstimated = false,
+            promptProgressProcessedTokens = null,
+            promptProgressTotalTokens = null,
+            promptProgressCachedTokens = null,
+            promptProgressTimeMs = null,
             thinkingFrozen = true,
             thinkingElapsedSec = if (thinkingElapsedSec > 0) thinkingElapsedSec
                 else (System.nanoTime() - startedAtNs) / 1_000_000_000.0
@@ -288,7 +297,15 @@ sealed class ChatStreamEvent {
     data class RawHermesEvent(val name: String, val json: String) : ChatStreamEvent()
     data class Usage(val promptTokens: Int?, val completionTokens: Int?, val tokensPerSecond: Double? = null) : ChatStreamEvent()
     data class ContextUsage(val tokens: Int?, val length: Int?, val percent: Int?) : ChatStreamEvent()
-    data class PromptProgress(val percent: Int, val label: String = "llama.cpp: prefill prompt", val estimated: Boolean = false) : ChatStreamEvent()
+    data class PromptProgress(
+        val percent: Int,
+        val label: String = "llama.cpp: prefill prompt",
+        val estimated: Boolean = false,
+        val processedTokens: Int? = null,
+        val totalTokens: Int? = null,
+        val cachedTokens: Int? = null,
+        val timeMs: Double? = null
+    ) : ChatStreamEvent()
     data class Done(val stats: ChatStreamStats) : ChatStreamEvent()
     data class Error(val message: String) : ChatStreamEvent()
 }
@@ -324,8 +341,6 @@ fun streamChatRequest(
     var promptTokens: Int? = null
     var completionTokens: Int? = null
     var serverTokensPerSecond: Double? = null
-    var firstOutputTokenNs: Long? = null
-    var lastOutputTokenNs: Long? = null
     var contextTokens: Int? = null
     var contextLength: Int? = null
     var contextPercent: Int? = null
@@ -368,8 +383,6 @@ fun streamChatRequest(
         when (ev) {
             is ChatStreamEvent.TextDelta -> {
                 val tokenAt = System.nanoTime()
-                if (firstOutputTokenNs == null) firstOutputTokenNs = tokenAt
-                lastOutputTokenNs = tokenAt
                 if (!sawDelta) {
                     ttftMs = (tokenAt - start) / 1_000_000.0
                     sawDelta = true
@@ -402,11 +415,7 @@ fun streamChatRequest(
             is ChatStreamEvent.Usage -> {
                 promptTokens = ev.promptTokens ?: promptTokens
                 completionTokens = ev.completionTokens ?: completionTokens
-                serverTokensPerSecond = if ((ev.completionTokens ?: 0) >= 8) {
-                    validateTokensPerSecond(ev.tokensPerSecond) ?: serverTokensPerSecond
-                } else {
-                    serverTokensPerSecond
-                }
+                serverTokensPerSecond = validateTokensPerSecond(ev.tokensPerSecond) ?: serverTokensPerSecond
                 return false
             }
             is ChatStreamEvent.ContextUsage -> {
@@ -455,6 +464,8 @@ fun streamChatRequest(
                 .put("input", buildMultimodalInput(promptForModel, payloadAttachments))
                 .put("store", true)
                 .put("stream", true)
+                .put("return_progress", true)
+                .put("timings_per_token", true)
                 .put("conversation", serverConversationId ?: JSONObject.NULL)
                 .put("previous_response_id", if (serverConversationId == null) candidatePreviousResponseId ?: JSONObject.NULL else JSONObject.NULL)
                 .put("metadata", visualBlocksMetadataJson(settings, conversationId))
@@ -529,6 +540,8 @@ fun streamChatRequest(
         val payload = JSONObject()
             .put("model", settings.model)
             .put("stream", true)
+            .put("return_progress", true)
+            .put("timings_per_token", true)
             .put("session_id", serverConversationId ?: JSONObject.NULL)
             .put("metadata", visualBlocksMetadataJson(settings, conversationId))
             .put("messages", JSONArray().apply {
@@ -587,7 +600,7 @@ fun streamChatRequest(
     }
     flushDeltaBatches()
     val tokensOut = completionTokens ?: max(1, accumText.length / 4)
-    val tps = serverTokensPerSecond ?: calculateStableTokensPerSecond(tokensOut, firstOutputTokenNs, lastOutputTokenNs, totalMs)
+    val tps = serverTokensPerSecond
     if (retriedWithoutPreviousResponseId && emittedResponseId.isNullOrBlank()) {
         emit(ChatStreamEvent.ResponseId(""))
     }
@@ -1010,6 +1023,8 @@ private fun parseSseData(eventName: String?, data: String): List<ChatStreamEvent
 
 private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStreamEvent> {
     val out = mutableListOf<ChatStreamEvent>()
+    obj.promptProgressEventOrNull()?.let { out += it }
+    obj.tokensPerSecondOrNull()?.let { out += ChatStreamEvent.Usage(null, null, it) }
     val type = eventName ?: obj.optString("type", "")
     val t = type.lowercase()
 
@@ -1023,6 +1038,9 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
             return out
         }
         t.contains("prompt.progress") || t.contains("processing.progress") -> {
+            if (obj.optBoolean("estimated", false)) {
+                return out
+            }
             val percent = obj.optProgressPercent()
             if (percent != null) {
                 val rawLabel = obj.optString("label", "")
@@ -1031,7 +1049,7 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
                 } else {
                     rawLabel
                 }
-                out += ChatStreamEvent.PromptProgress(percent, label, obj.optBoolean("estimated", false))
+                out += ChatStreamEvent.PromptProgress(percent, label)
             }
             return out
         }
@@ -1615,6 +1633,24 @@ private fun JSONObject.optProgressPercent(): Int? {
     val progress = optDoubleOrNull("progress") ?: return null
     val value = if (progress <= 1.0) progress * 100.0 else progress
     return value.roundToInt().coerceIn(0, 100)
+}
+
+private fun JSONObject.promptProgressEventOrNull(): ChatStreamEvent.PromptProgress? {
+    val progress = optJSONObject("prompt_progress") ?: return null
+    val total = progress.optIntOrNull("total")?.takeIf { it > 0 } ?: return null
+    val processed = progress.optIntOrNull("processed") ?: return null
+    val cache = progress.optIntOrNull("cache")
+    val timeMs = progress.optDoubleOrNull("time_ms")
+    val percent = ((processed.toDouble() / total.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
+    return ChatStreamEvent.PromptProgress(
+        percent = percent,
+        label = "llama.cpp: prefill prompt",
+        estimated = false,
+        processedTokens = processed,
+        totalTokens = total,
+        cachedTokens = cache,
+        timeMs = timeMs
+    )
 }
 
 private fun JSONObject.tokensPerSecondOrNull(): Double? {

@@ -18,6 +18,8 @@ using System.Threading.Channels;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
 using Windows.Media.Capture;
+using Windows.Media.Core;
+using Windows.Media.Playback;
 using Windows.Media.MediaProperties;
 using Windows.Storage.Pickers;
 using Windows.Storage;
@@ -67,12 +69,14 @@ public sealed partial class HomePage : Page
     private readonly List<SlashCommand> _slashCommands;
 
     private MediaCapture? _mediaCapture;
+    private MediaPlayer? _ttsPlayer;
     private bool _isRecordingVoiceNote;
     private StorageFile? _tempVoiceNoteFile;
 
     public HomePage()
     {
         InitializeComponent();
+        NavigationCacheMode = NavigationCacheMode.Required;
         _slashCommands = BuildSlashCommands();
         UpdateSendButtonVisual(isStreaming: false);
         PromptBox.TextChanged += PromptBox_TextChanged;
@@ -84,15 +88,6 @@ public sealed partial class HomePage : Page
     {
         try
         {
-            _activeStreamCts?.Cancel();
-            _activeStreamCts?.Dispose();
-            _activeStreamCts = null;
-            _activeGatewayRunId = null;
-            _currentStreamingBubble?.StopShimmer();
-            _currentStreamingBubble = null;
-            PromptBox.TextChanged -= PromptBox_TextChanged;
-            Loaded -= HomePage_Loaded;
-            Unloaded -= HomePage_Unloaded;
             if (_slashPopup is not null) _slashPopup.IsOpen = false;
         }
         catch (Exception ex)
@@ -128,6 +123,7 @@ public sealed partial class HomePage : Page
     private void HomePage_Loaded(object sender, RoutedEventArgs e)
     {
         BuildSlashPopup();
+        _currentStreamingBubble?.ResumeLiveIndicators();
         UpdateContextMeter();
     }
 
@@ -710,7 +706,7 @@ public sealed partial class HomePage : Page
                         }
                         break;
                     case StreamPromptProgress progress:
-                        bubble.SetPromptProgress(progress.Percent, progress.Label, progress.Estimated);
+                        bubble.SetPromptProgress(progress);
                         break;
                     case StreamRawHermesEvent raw:
                         AddRawEventIfEnabled(raw.Name, raw.Json);
@@ -1434,7 +1430,7 @@ public sealed partial class HomePage : Page
         UpdateContextMeter();
     }
 
-    private static void AddFooter(StackPanel content, ChatStreamStats? stats, string copyText)
+    private void AddFooter(StackPanel content, ChatStreamStats? stats, string copyText)
     {
         var settings = AppSettingsStore.Load();
         var line = FormatChatStats(stats, settings);
@@ -1442,6 +1438,7 @@ public sealed partial class HomePage : Page
 
         var footerGrid = new Grid { Margin = new Thickness(0, 4, 0, 0) };
         footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         if (showStats)
@@ -1459,6 +1456,19 @@ public sealed partial class HomePage : Page
             footerGrid.Children.Add(statsText);
         }
 
+        var speakBtn = new Button
+        {
+            Content = new FontIcon { Glyph = "\uE768", FontSize = 12 },
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0)),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(6),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        ToolTipService.SetToolTip(speakBtn, "Leggi messaggio");
+        speakBtn.Click += async (s, e) => await SpeakMessageAsync(copyText, speakBtn);
+        Grid.SetColumn(speakBtn, 1);
+        footerGrid.Children.Add(speakBtn);
+
         var copyBtn = new Button
         {
             Content = new FontIcon { Glyph = "\uE8C8", FontSize = 12 },
@@ -1475,10 +1485,121 @@ public sealed partial class HomePage : Page
             Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dp);
             copyBtn.Content = new FontIcon { Glyph = "\uE8FB", FontSize = 12 };
         };
-        Grid.SetColumn(copyBtn, 1);
+        Grid.SetColumn(copyBtn, 2);
         footerGrid.Children.Add(copyBtn);
 
         content.Children.Add(footerGrid);
+    }
+
+    private async Task SpeakMessageAsync(string text, Button? sourceButton = null)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        object? originalContent = sourceButton?.Content;
+        if (sourceButton is not null)
+        {
+            sourceButton.IsEnabled = false;
+            sourceButton.Content = new ProgressRing { Width = 14, Height = 14, IsActive = true };
+        }
+
+        try
+        {
+            var settings = AppSettingsStore.Load();
+            var speechUrl = BuildTtsSpeechUrl(settings.GatewayUrl);
+            var payload = JsonSerializer.Serialize(new
+            {
+                input = text,
+                voice = "if_sara",
+                lang = "it",
+                speed = 1.0,
+                response_format = "wav"
+            });
+
+            using var httpClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+            byte[]? audioBytes = null;
+            string? lastError = null;
+            foreach (var token in BuildTtsAuthCandidates())
+            {
+                using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, speechUrl);
+                request.Headers.TryAddWithoutValidation("Accept", "audio/wav");
+                request.Headers.TryAddWithoutValidation("User-Agent", "HermesHub-Windows");
+                if (!string.IsNullOrWhiteSpace(token))
+                {
+                    request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {token}");
+                }
+                request.Content = new System.Net.Http.StringContent(payload, Encoding.UTF8, "application/json");
+                using var response = await httpClient.SendAsync(request);
+                if (response.IsSuccessStatusCode)
+                {
+                    audioBytes = await response.Content.ReadAsByteArrayAsync();
+                    break;
+                }
+
+                lastError = $"{(int)response.StatusCode} {response.ReasonPhrase}";
+                if (response.StatusCode != System.Net.HttpStatusCode.Unauthorized)
+                {
+                    break;
+                }
+            }
+
+            if (audioBytes is null || audioBytes.Length == 0)
+            {
+                ShowError($"TTS Kokoro non disponibile: {lastError ?? "risposta vuota"}");
+                return;
+            }
+
+            var temp = await ApplicationData.Current.TemporaryFolder.CreateFileAsync(
+                $"hermes-tts-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.wav",
+                CreationCollisionOption.GenerateUniqueName);
+            await FileIO.WriteBytesAsync(temp, audioBytes);
+
+            _ttsPlayer?.Dispose();
+            _ttsPlayer = new MediaPlayer
+            {
+                Source = MediaSource.CreateFromStorageFile(temp)
+            };
+            _ttsPlayer.Play();
+        }
+        catch (Exception ex)
+        {
+            ShowError($"Errore TTS Kokoro: {ex.Message}");
+        }
+        finally
+        {
+            if (sourceButton is not null)
+            {
+                sourceButton.IsEnabled = true;
+                sourceButton.Content = originalContent ?? new FontIcon { Glyph = "\uE768", FontSize = 12 };
+            }
+        }
+    }
+
+    private static IEnumerable<string?> BuildTtsAuthCandidates()
+    {
+        var saved = GatewayCredentialStore.LoadSecret();
+        if (!string.IsNullOrWhiteSpace(saved))
+        {
+            yield return saved.Trim();
+        }
+
+        if (!string.Equals(saved, GatewayCredentialStore.DefaultApiKey, StringComparison.Ordinal))
+        {
+            yield return GatewayCredentialStore.DefaultApiKey;
+        }
+    }
+
+    private static string BuildTtsSpeechUrl(string gatewayUrl)
+    {
+        if (Uri.TryCreate(gatewayUrl, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.Host))
+        {
+            var builder = new UriBuilder(uri.Scheme, uri.Host, 8020, "/v1/audio/speech");
+            return builder.Uri.ToString();
+        }
+
+        return "http://100.94.223.14:8020/v1/audio/speech";
     }
 
     private static UIElement RenderRawHermesEvent(HermesRawEventRecord raw)
@@ -1556,7 +1677,8 @@ public sealed partial class HomePage : Page
             MessagesScroll,
             settings.AdvancedChatDetails,
             settings.ShowToolCalls,
-            settings.ShowMessageMetrics);
+            settings.ShowMessageMetrics,
+            SpeakMessageAsync);
         return bubble;
     }
 

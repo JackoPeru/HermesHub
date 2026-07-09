@@ -31,7 +31,9 @@ internal sealed class StreamingBubble
     private readonly ProgressBar _promptProgressBar;
     private readonly TextBlock _statsText;
     private readonly Grid _footerGrid;
+    private readonly Button _speakButton;
     private readonly Button _copyButton;
+    private readonly Func<string, Button?, Task> _speakMessageAsync;
     private readonly bool _showAdvanced;
     private readonly bool _showTools;
     private readonly bool _showMetrics;
@@ -51,7 +53,7 @@ internal sealed class StreamingBubble
 
     public UIElement Container { get; }
 
-    public StreamingBubble(Page page, Action<UIElement> addElement, ScrollViewer scroll, bool showAdvanced, bool showTools, bool showMetrics)
+    public StreamingBubble(Page page, Action<UIElement> addElement, ScrollViewer scroll, bool showAdvanced, bool showTools, bool showMetrics, Func<string, Button?, Task> speakMessageAsync)
     {
         _page = page;
         _addElement = addElement;
@@ -59,6 +61,7 @@ internal sealed class StreamingBubble
         _showAdvanced = showAdvanced;
         _showTools = showTools;
         _showMetrics = showMetrics;
+        _speakMessageAsync = speakMessageAsync;
         _content = new StackPanel { Spacing = 10 };
 
         if (_showAdvanced)
@@ -157,6 +160,7 @@ internal sealed class StreamingBubble
         _footerGrid = new Grid { Margin = new Thickness(0, 4, 0, 0), Visibility = Visibility.Collapsed };
         _footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         _footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         _statsText = new TextBlock
         {
@@ -167,6 +171,19 @@ internal sealed class StreamingBubble
         };
         Grid.SetColumn(_statsText, 0);
         _footerGrid.Children.Add(_statsText);
+
+        _speakButton = new Button
+        {
+            Content = new FontIcon { Glyph = "\uE768", FontSize = 12 },
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0)),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(6),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        ToolTipService.SetToolTip(_speakButton, "Leggi messaggio");
+        _speakButton.Click += async (s, e) => await _speakMessageAsync(_textBuilder.ToString(), _speakButton);
+        Grid.SetColumn(_speakButton, 1);
+        _footerGrid.Children.Add(_speakButton);
 
         _copyButton = new Button
         {
@@ -184,7 +201,7 @@ internal sealed class StreamingBubble
             Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dp);
             _copyButton.Content = new FontIcon { Glyph = "\uE8FB", FontSize = 12 };
         };
-        Grid.SetColumn(_copyButton, 1);
+        Grid.SetColumn(_copyButton, 2);
         _footerGrid.Children.Add(_copyButton);
 
         _content.Children.Add(_footerGrid);
@@ -271,13 +288,44 @@ internal sealed class StreamingBubble
         _statusText.Visibility = Visibility.Visible;
     }
 
-    public void SetPromptProgress(int percent, string? label, bool estimated = false)
+    public void SetPromptProgress(StreamPromptProgress progress)
     {
-        var clamped = Math.Clamp(percent, 0, 100);
-        var status = string.IsNullOrWhiteSpace(label) ? "llama.cpp: prefill prompt" : label.Trim();
-        SetStatus($"{status}: {(estimated ? "~" : string.Empty)}{clamped}%");
+        if (progress.Estimated)
+        {
+            return;
+        }
+
+        var clamped = Math.Clamp(progress.Percent, 0, 100);
+        var status = string.IsNullOrWhiteSpace(progress.Label) ? "llama.cpp: prefill prompt" : progress.Label.Trim();
+        var details = new List<string>();
+        if (progress.ProcessedTokens is { } processed && progress.TotalTokens is { } total && total > 0)
+        {
+            details.Add($"{processed}/{total} tok");
+        }
+        if (progress.CachedTokens is { } cached && cached > 0)
+        {
+            details.Add($"cache {cached}");
+        }
+        if (progress.TimeMs is { } timeMs && timeMs >= 0)
+        {
+            details.Add($"{timeMs / 1000.0:0.0}s");
+        }
+        var suffix = details.Count > 0 ? $" ({string.Join(", ", details)})" : string.Empty;
+        SetStatus($"{status}: {clamped}%{suffix}");
         _promptProgressBar.Value = clamped;
         _promptProgressBar.Visibility = Visibility.Visible;
+    }
+
+    public void ResumeLiveIndicators()
+    {
+        if (!_hasText || _hasThinking)
+        {
+            _shimmerTimer.Start();
+        }
+        if (_renderPending)
+        {
+            _renderTimer.Start();
+        }
     }
 
     public void AppendThinking(string delta)

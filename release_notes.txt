@@ -1,6 +1,8 @@
-Release 0.6.147:
-- Windows/Android: la chat separa le fasi `elaborazione prompt`, `ragionamento` e `generazione risposta`; `Sto pensando` appare solo quando arrivano token di reasoning veri.
-- Windows/Android: parser `<think>` piu' robusto e pulizia finale prima del salvataggio, cosi' il ragionamento non finisce nella risposta archiviata.
-- Windows/Android: supporto a eventi gateway `prompt.progress`/`processing.progress`, con indicatore percentuale e marker `~` quando il gateway dichiara progresso stimato.
-- Gateway Linux: il patcher emette eventi SSE `hermes.processing.progress` / `processing.progress` durante l'avvio stream e l'attesa Hermes, compatibili con Windows e Android.
-- Asset inclusi: Android APK, Windows MSIX, Linux Gateway.
+Hermes Hub 0.6.148 (Kokoro TTS test controls)
+
+- Windows/Android: ogni messaggio in chat ora ha un pulsante `Leggi messaggio` accanto a `Copia`. Il pulsante invia il testo al servizio Kokoro TTS e riproduce il WAV restituito, cosi si puo' testare il modello direttamente dalla chat.
+- Windows/Android: il TTS usa il backend personale via Tailnet su porta `8020`, derivando host/scheme dal gateway configurato e usando la stessa API key Hermes (`hermes-hub` come fallback compatibile).
+- Server live: installato Kokoro TTS CPU come servizio separato `hermes-kokoro-tts.service` in `/home/matteo/.hermes/kokoro-tts`, con `kokoro-onnx`, modello ONNX quantizzato, voci italiane `if_sara`/`im_nicola`, endpoint `POST /v1/audio/speech` e health `GET /health`.
+- Verifiche pre-release: servizio Tailnet `http://100.94.223.14:8020/health` HTTP 200, POST TTS genera WAV mono 24 kHz, Windows build Debug 0 errori, Android `assembleDebug` OK.
+- Asset release attesi: Android APK `HermesHub-0.6.148-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.148.0_x64.msix`. Linux Gateway non incluso perche' il gateway e' in modifica da un altro agente e questa integrazione usa un servizio TTS separato.
+- Release bump: Windows/AdminBridge `0.6.148`, Android `versionName 0.6.148`, `versionCode 152`.

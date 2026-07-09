@@ -34,7 +34,14 @@ public sealed record StreamRawHermesEvent(string Name, string Json) : ChatStream
 public sealed record StreamDone(ChatStreamStats Stats, string AccumulatedText, string AccumulatedThinking) : ChatStreamEvent;
 public sealed record StreamError(string Message) : ChatStreamEvent;
 public sealed record StreamStatus(string Message) : ChatStreamEvent;
-public sealed record StreamPromptProgress(int Percent, string Label = "llama.cpp: prefill prompt", bool Estimated = false) : ChatStreamEvent;
+public sealed record StreamPromptProgress(
+    int Percent,
+    string Label = "llama.cpp: prefill prompt",
+    bool Estimated = false,
+    int? ProcessedTokens = null,
+    int? TotalTokens = null,
+    int? CachedTokens = null,
+    double? TimeMs = null) : ChatStreamEvent;
 
 public static class ChatStreamClient
 {
@@ -71,8 +78,6 @@ public static class ChatStreamClient
         int? contextLength = null;
         int? contextPercent = null;
         double? serverTokensPerSecond = null;
-        double? firstOutputTokenMs = null;
-        double? lastOutputTokenMs = null;
         bool sawAnyDelta = false;
         bool retriedWithoutPreviousResponseId = false;
         string? lastError = null;
@@ -111,6 +116,8 @@ public static class ChatStreamClient
                 instructions = nativeMode ? null : HermesHubProtocol.Instructions(settings, mode),
                 store = true,
                 stream = true,
+                return_progress = true,
+                timings_per_token = true,
                 conversation = serverConversationId,
                 previous_response_id = string.IsNullOrWhiteSpace(serverConversationId) && !string.IsNullOrWhiteSpace(candidatePreviousResponseId) ? candidatePreviousResponseId : null,
                 metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId)
@@ -145,8 +152,6 @@ public static class ChatStreamClient
                     if (ev is StreamTextDelta td)
                     {
                         var tokenAt = stopwatch.Elapsed.TotalMilliseconds;
-                        firstOutputTokenMs ??= tokenAt;
-                        lastOutputTokenMs = tokenAt;
                         if (!sawAnyDelta)
                         {
                             ttft = tokenAt;
@@ -189,9 +194,7 @@ public static class ChatStreamClient
                     {
                         promptTokens = u.PromptTokens;
                         completionTokens = u.CompletionTokens;
-                        serverTokensPerSecond = u.CompletionTokens is >= 8
-                            ? ValidateTokensPerSecond(u.TokensPerSecond) ?? serverTokensPerSecond
-                            : serverTokensPerSecond;
+                        serverTokensPerSecond = ValidateTokensPerSecond(u.TokensPerSecond) ?? serverTokensPerSecond;
                     }
                     else if (ev is StreamContextUsage cu)
                     {
@@ -275,6 +278,8 @@ public static class ChatStreamClient
             {
                 model = settings.Model,
                 stream = true,
+                return_progress = true,
+                timings_per_token = true,
                 session_id = serverConversationId,
                 metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId),
                 messages = chatMessages
@@ -298,8 +303,6 @@ public static class ChatStreamClient
                 if (ev is StreamTextDelta td)
                 {
                     var tokenAt = stopwatch.Elapsed.TotalMilliseconds;
-                    firstOutputTokenMs ??= tokenAt;
-                    lastOutputTokenMs = tokenAt;
                     if (!sawAnyDelta)
                     {
                         ttft = tokenAt;
@@ -342,9 +345,7 @@ public static class ChatStreamClient
                 {
                     promptTokens = u.PromptTokens;
                     completionTokens = u.CompletionTokens;
-                    serverTokensPerSecond = u.CompletionTokens is >= 8
-                        ? ValidateTokensPerSecond(u.TokensPerSecond) ?? serverTokensPerSecond
-                        : serverTokensPerSecond;
+                    serverTokensPerSecond = ValidateTokensPerSecond(u.TokensPerSecond) ?? serverTokensPerSecond;
                 }
                 else if (ev is StreamContextUsage cu)
                 {
@@ -381,7 +382,7 @@ public static class ChatStreamClient
 
         var totalMs = stopwatch.Elapsed.TotalMilliseconds;
         var tokensOut = completionTokens ?? EstimateTokens(accumulatedText.ToString());
-        var tps = serverTokensPerSecond ?? CalculateStableTokensPerSecond(tokensOut, firstOutputTokenMs, lastOutputTokenMs, totalMs);
+        var tps = serverTokensPerSecond;
 
         if (responseId is not null)
         {
@@ -979,6 +980,17 @@ public static class ChatStreamClient
 
     private static IEnumerable<ChatStreamEvent> ParseEventElement(string? eventName, JsonElement element)
     {
+        var realPromptProgress = ExtractPromptProgress(element);
+        if (realPromptProgress is not null)
+        {
+            yield return realPromptProgress;
+        }
+        var realTimingUsage = ExtractUsage(element, element);
+        if (realTimingUsage.TokensPerSecond is not null)
+        {
+            yield return realTimingUsage;
+        }
+
         var type = eventName;
         if (type is null && element.ValueKind == JsonValueKind.Object && element.TryGetProperty("type", out var typeProp) && typeProp.ValueKind == JsonValueKind.String)
         {
@@ -999,6 +1011,11 @@ public static class ChatStreamClient
 
             if (t.Contains("prompt.progress") || t.Contains("processing.progress"))
             {
+                if (GetBool(element, "estimated") == true)
+                {
+                    yield break;
+                }
+
                 var percent = GetProgressPercent(element);
                 if (percent is >= 0 and <= 100)
                 {
@@ -1007,7 +1024,7 @@ public static class ChatStreamClient
                                 rawLabel.Contains("processing prompt", StringComparison.OrdinalIgnoreCase)
                         ? "llama.cpp: prefill prompt"
                         : rawLabel;
-                    yield return new StreamPromptProgress(percent.Value, label, GetBool(element, "estimated") ?? false);
+                    yield return new StreamPromptProgress(percent.Value, label);
                 }
                 yield break;
             }
@@ -1373,6 +1390,35 @@ public static class ChatStreamClient
         return (int)Math.Round(Math.Clamp(value, 0.0, 100.0));
     }
 
+    private static StreamPromptProgress? ExtractPromptProgress(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty("prompt_progress", out var progress) ||
+            progress.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var total = GetInt(progress, "total");
+        var processed = GetInt(progress, "processed");
+        var cache = GetInt(progress, "cache");
+        var timeMs = GetDouble(progress, "time_ms");
+        if (total is null || total <= 0 || processed is null)
+        {
+            return null;
+        }
+
+        var percent = (int)Math.Round(Math.Clamp((processed.Value / (double)total.Value) * 100.0, 0.0, 100.0));
+        return new StreamPromptProgress(
+            percent,
+            "llama.cpp: prefill prompt",
+            Estimated: false,
+            ProcessedTokens: processed,
+            TotalTokens: total,
+            CachedTokens: cache,
+            TimeMs: timeMs);
+    }
+
     private static bool? GetBool(JsonElement element, string key)
     {
         if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(key, out var prop))
@@ -1595,24 +1641,6 @@ public static class ChatStreamClient
 
         builder.Append(text, 0, remaining);
         builder.Append("\n\n[…troncato: limite 2000000 caratteri raggiunto.]");
-    }
-
-    private static double? CalculateStableTokensPerSecond(int tokensOut, double? firstTokenMs, double? lastTokenMs, double totalMs)
-    {
-        if (tokensOut < 2)
-        {
-            return null;
-        }
-
-        var durationMs = firstTokenMs.HasValue && lastTokenMs.HasValue
-            ? Math.Max(0, lastTokenMs.Value - firstTokenMs.Value)
-            : totalMs;
-        if (durationMs < 200)
-        {
-            return null;
-        }
-
-        return ValidateTokensPerSecond(Math.Max(1, tokensOut - 1) / (durationMs / 1000.0));
     }
 
     private static double? ValidateTokensPerSecond(double? value)

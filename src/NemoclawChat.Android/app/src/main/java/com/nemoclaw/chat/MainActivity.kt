@@ -15,6 +15,7 @@ import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
@@ -30,6 +31,7 @@ import android.view.WindowManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -871,6 +873,12 @@ private fun ChatApp() {
     var sidebarOpen by rememberSaveable { mutableStateOf(false) }
     var savedDraft by rememberSaveable { mutableStateOf("") }
     val chatState = remember { ChatStateHolder().apply { draft = savedDraft } }
+    LaunchedEffect(chatState.activeStreams.size) {
+        while (chatState.activeStreams.isNotEmpty()) {
+            chatState.streamUiTickNs = System.nanoTime()
+            delay(500L)
+        }
+    }
     LaunchedEffect(chatState.draft) {
         if (chatState.draft != savedDraft) {
             savedDraft = chatState.draft
@@ -1334,7 +1342,21 @@ private fun ChatScreen(
                     MessageBubble(message, settings)
                 }
                 state.streamingState?.let { streaming ->
-                    item(key = "streaming") { StreamingBubbleView(streaming, settings.showToolCalls, settings.showMessageMetrics, settings.metricFilter()) }
+                    item(key = "streaming") {
+                        StreamingBubbleView(
+                            streaming,
+                            settings.showToolCalls,
+                            settings.showMessageMetrics,
+                            settings.metricFilter(),
+                            state.streamUiTickNs,
+                            onSpeakMessage = { text ->
+                                scope.launch {
+                                    runCatching { speakChatMessage(context, settings, text, loadGatewaySecret(context)) }
+                                        .onFailure { Toast.makeText(context, "TTS Kokoro non disponibile: ${it.message}", Toast.LENGTH_SHORT).show() }
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -1980,7 +2002,7 @@ private fun MessageBubble(message: ChatMessage, settings: AppSettings) {
                     }
                 }
                 RawHermesEventsView(message.rawEvents)
-                MessageFooter(message.text, message.stats, settings.showMessageMetrics, settings.metricFilter())
+                MessageFooter(message.text, message.stats, settings, settings.showMessageMetrics, settings.metricFilter())
             }
             return@SelectionContainer
         }
@@ -2023,7 +2045,7 @@ private fun MessageBubble(message: ChatMessage, settings: AppSettings) {
                         }
                     }
                     RawHermesEventsView(message.rawEvents)
-                    MessageFooter(message.text, message.stats, settings.showMessageMetrics, settings.metricFilter())
+                    MessageFooter(message.text, message.stats, settings, settings.showMessageMetrics, settings.metricFilter())
                 }
             }
         }
@@ -2054,8 +2076,11 @@ private fun RawHermesEventsView(events: List<HermesRawEvent>) {
 }
 
 @Composable
-private fun MessageFooter(text: String, stats: ChatStreamStats?, showMetrics: Boolean, filter: MetricDisplayFilter) {
+private fun MessageFooter(text: String, stats: ChatStreamStats?, settings: AppSettings, showMetrics: Boolean, filter: MetricDisplayFilter) {
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var speaking by remember { mutableStateOf(false) }
     val line = remember(stats, filter, showMetrics) { 
         if (showMetrics) formatChatStatsLine(stats, filter) else "" 
     }
@@ -2078,6 +2103,27 @@ private fun MessageFooter(text: String, stats: ChatStreamStats?, showMetrics: Bo
             Spacer(modifier = Modifier.weight(1f))
         }
         
+        androidx.compose.material3.IconButton(
+            onClick = {
+                if (text.isBlank()) return@IconButton
+                scope.launch {
+                    speaking = true
+                    runCatching { speakChatMessage(context, settings, text, loadGatewaySecret(context)) }
+                        .onFailure { Toast.makeText(context, "TTS Kokoro non disponibile: ${it.message}", Toast.LENGTH_SHORT).show() }
+                    speaking = false
+                }
+            },
+            modifier = Modifier.size(24.dp),
+            enabled = text.isNotBlank() && !speaking
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.PlayCircle,
+                contentDescription = "Leggi messaggio",
+                tint = AppColors.Muted,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+
         androidx.compose.material3.IconButton(
             onClick = { clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(text)) },
             modifier = Modifier.size(24.dp)
@@ -7187,6 +7233,106 @@ private val archiveEventsHttpClient: OkHttpClient by lazy {
         .callTimeout(0, TimeUnit.MILLISECONDS)
         .retryOnConnectionFailure(true)
         .build()
+}
+
+@Volatile
+private var activeTtsMediaPlayer: MediaPlayer? = null
+
+private suspend fun speakChatMessage(context: Context, settings: AppSettings, text: String, apiKey: String?): Unit = withContext(Dispatchers.IO) {
+    val cleanText = text.trim()
+    if (cleanText.isBlank()) return@withContext
+    val payload = JSONObject()
+        .put("input", cleanText)
+        .put("voice", "if_sara")
+        .put("lang", "it")
+        .put("speed", 1.0)
+        .put("response_format", "wav")
+    var lastError = "nessuna risposta"
+    for (candidateUrl in ttsUrlCandidates(resolveTtsSpeechUrl(settings))) {
+        for (token in hermesAuthCandidates(apiKey)) {
+            val response = try {
+                executeTtsRequest(candidateUrl, payload, token)
+            } catch (ex: Exception) {
+                lastError = ex.message ?: ex.javaClass.simpleName
+                continue
+            }
+            if (response.first in 200..299 && response.second.isNotEmpty()) {
+                val dir = File(context.cacheDir, "tts").apply { mkdirs() }
+                val file = File(dir, "hermes-tts-${System.currentTimeMillis()}.wav")
+                file.writeBytes(response.second)
+                withContext(Dispatchers.Main) {
+                    activeTtsMediaPlayer?.release()
+                    val player = MediaPlayer()
+                    activeTtsMediaPlayer = player
+                    player.setOnCompletionListener {
+                        it.release()
+                        if (activeTtsMediaPlayer === it) activeTtsMediaPlayer = null
+                    }
+                    player.setOnErrorListener { mp, _, _ ->
+                        mp.release()
+                        if (activeTtsMediaPlayer === mp) activeTtsMediaPlayer = null
+                        true
+                    }
+                    player.setDataSource(file.absolutePath)
+                    player.prepare()
+                    player.start()
+                }
+                return@withContext
+            }
+            lastError = "HTTP ${response.first}"
+            if (response.first != 401) break
+        }
+    }
+    throw java.io.IOException(lastError)
+}
+
+private fun executeTtsRequest(url: String, payload: JSONObject, bearerToken: String?): Pair<Int, ByteArray> {
+    val builder = Request.Builder()
+        .url(url)
+        .header("Accept", "audio/wav")
+        .header("User-Agent", "HermesHub-Android")
+    bearerToken?.let { builder.header("Authorization", "Bearer $it") }
+    val request = builder
+        .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+        .build()
+    return apiHttpClient.newCall(request).execute().use { response ->
+        response.code to response.body.bytes()
+    }
+}
+
+private fun resolveTtsSpeechUrl(settings: AppSettings): String {
+    return try {
+        val uri = URI(settings.gatewayUrl.trim())
+        val scheme = uri.scheme ?: "http"
+        val host = uri.host?.takeIf { it.isNotBlank() } ?: "100.94.223.14"
+        URI(scheme, null, host, 8020, "/v1/audio/speech", null, null).toString()
+    } catch (_: Exception) {
+        "http://100.94.223.14:8020/v1/audio/speech"
+    }
+}
+
+private fun ttsUrlCandidates(url: String): List<String> {
+    return try {
+        val uri = URI(url)
+        val suffix = buildString {
+            append(uri.rawPath.orEmpty())
+            if (!uri.rawQuery.isNullOrBlank()) append("?").append(uri.rawQuery)
+        }
+        val currentRoot = "${uri.scheme}://${uri.host}:8020"
+        val roots = listOf(
+            currentRoot,
+            "http://hermes:8020",
+            "http://100.94.223.14:8020",
+            "http://hermes.local:8020",
+            "http://hermes-hub:8020",
+            "http://hermeshub:8020",
+            "http://home-server:8020",
+            "http://server:8020"
+        )
+        roots.distinctBy { it.lowercase() }.map { it.trimEnd('/') + suffix }
+    } catch (_: Exception) {
+        listOf(url)
+    }
 }
 
 private suspend fun postJson(
