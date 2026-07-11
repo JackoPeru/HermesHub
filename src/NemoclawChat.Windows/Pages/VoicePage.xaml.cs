@@ -1,3 +1,5 @@
+using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Effects;
 using Microsoft.Graphics.Canvas.UI;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Xaml;
@@ -15,6 +17,7 @@ namespace NemoclawChat_Windows.Pages;
 public sealed partial class VoicePage : Page
 {
     private readonly List<VoiceParticle> _particles = BuildParticles();
+    private readonly ProjectedParticle[] _projectedParticles = new ProjectedParticle[520];
     private readonly List<ChatMessageRecord> _history = [];
     private readonly VoiceActivityRecorder _recorder = new();
     private CancellationTokenSource? _callCts;
@@ -359,39 +362,55 @@ public sealed partial class VoicePage : Page
         var camera = 4.1;
         var spin = _time * (0.17 + eased * 0.38);
         var tilt = Math.Sin(_time * 0.31) * 0.16;
+        using var glowLayer = new CanvasCommandList(sender.Device);
+        using (var glowSession = glowLayer.CreateDrawingSession())
+        {
+            for (var index = 0; index < _particles.Count; index++)
+            {
+                var particle = _particles[index];
+                var idleX = particle.IdleX + Math.Sin(_time * particle.Speed + particle.Phase) * 0.14;
+                var idleY = particle.IdleY + Math.Cos(_time * particle.Speed * 0.73 + particle.Phase) * 0.11;
+                var idleZ = particle.IdleZ + Math.Sin(_time * particle.Speed * 0.41 + particle.Phase) * 0.19;
+                var gatherArc = Math.Sin(Math.PI * eased) * 0.24;
+                var x = Lerp(idleX, particle.SphereX, eased) + Math.Sin(particle.Phase + eased * Math.PI * 2) * gatherArc;
+                var y = Lerp(idleY, particle.SphereY, eased) + Math.Cos(particle.Phase * 0.73 + eased * Math.PI * 2) * gatherArc * 0.65;
+                var z = Lerp(idleZ, particle.SphereZ, eased);
+
+                var cosSpin = Math.Cos(spin);
+                var sinSpin = Math.Sin(spin);
+                var spunX = x * cosSpin - z * sinSpin;
+                var spunZ = x * sinSpin + z * cosSpin;
+                var cosTilt = Math.Cos(tilt);
+                var sinTilt = Math.Sin(tilt);
+                var rotatedY = y * cosTilt - spunZ * sinTilt;
+                var rotatedZ = y * sinTilt + spunZ * cosTilt;
+                var perspective = camera / Math.Max(0.65, camera + rotatedZ);
+                var screenX = width * 0.5 + spunX * scale * perspective;
+                var screenY = height * 0.46 + rotatedY * scale * perspective;
+                var dotSize = Math.Clamp(particle.Size * (0.7 + perspective * 0.55 + eased * 0.35), 1.1, 6.2);
+                var alpha = Math.Clamp(0.3 + perspective * 0.22 + eased * 0.28, 0.28, 0.98);
+                _projectedParticles[index] = new ProjectedParticle(screenX, screenY, dotSize, alpha, particle.Hot);
+
+                var glowAlpha = Math.Clamp(0.16 + eased * 0.12 + (primary + secondary) * 1.35, 0.14, 0.48);
+                var glowColor = Microsoft.UI.ColorHelper.FromArgb((byte)(glowAlpha * 255), 255, particle.Hot ? (byte)154 : (byte)96, 18);
+                glowSession.FillCircle((float)screenX, (float)screenY, (float)(dotSize * 1.65), glowColor);
+            }
+        }
+
+        using var blurredGlow = new GaussianBlurEffect
+        {
+            Source = glowLayer,
+            BlurAmount = (float)(5.5 + (primary + secondary) * 24)
+        };
+        args.DrawingSession.DrawImage(blurredGlow);
 
         for (var index = 0; index < _particles.Count; index++)
         {
-            var particle = _particles[index];
-            var idleX = particle.IdleX + Math.Sin(_time * particle.Speed + particle.Phase) * 0.14;
-            var idleY = particle.IdleY + Math.Cos(_time * particle.Speed * 0.73 + particle.Phase) * 0.11;
-            var idleZ = particle.IdleZ + Math.Sin(_time * particle.Speed * 0.41 + particle.Phase) * 0.19;
-            var gatherArc = Math.Sin(Math.PI * eased) * 0.24;
-            var x = Lerp(idleX, particle.SphereX, eased) + Math.Sin(particle.Phase + eased * Math.PI * 2) * gatherArc;
-            var y = Lerp(idleY, particle.SphereY, eased) + Math.Cos(particle.Phase * 0.73 + eased * Math.PI * 2) * gatherArc * 0.65;
-            var z = Lerp(idleZ, particle.SphereZ, eased);
-
-            var cosSpin = Math.Cos(spin);
-            var sinSpin = Math.Sin(spin);
-            var spunX = x * cosSpin - z * sinSpin;
-            var spunZ = x * sinSpin + z * cosSpin;
-            var cosTilt = Math.Cos(tilt);
-            var sinTilt = Math.Sin(tilt);
-            var rotatedY = y * cosTilt - spunZ * sinTilt;
-            var rotatedZ = y * sinTilt + spunZ * cosTilt;
-            var perspective = camera / Math.Max(0.65, camera + rotatedZ);
-            var screenX = width * 0.5 + spunX * scale * perspective;
-            var screenY = height * 0.46 + rotatedY * scale * perspective;
-            var dotSize = Math.Clamp(particle.Size * (0.7 + perspective * 0.55 + eased * 0.35), 1.1, 6.2);
-            var alpha = Math.Clamp(0.3 + perspective * 0.22 + eased * 0.28, 0.28, 0.98);
-            var glowAlpha = Math.Clamp(0.05 + eased * 0.09 + (primary + secondary) * 0.75, 0.04, 0.28);
-            var glowSize = dotSize * (4.8 + (primary + secondary) * 18);
-            var glowColor = Microsoft.UI.ColorHelper.FromArgb((byte)(glowAlpha * 255), 255, 105, 16);
-            var coreColor = particle.Hot
-                ? Microsoft.UI.ColorHelper.FromArgb((byte)(alpha * 255), 255, 218, 98)
-                : Microsoft.UI.ColorHelper.FromArgb((byte)(alpha * 255), 255, 128, 24);
-            args.DrawingSession.FillCircle((float)screenX, (float)screenY, (float)glowSize, glowColor);
-            args.DrawingSession.FillCircle((float)screenX, (float)screenY, (float)dotSize, coreColor);
+            var projected = _projectedParticles[index];
+            var coreColor = projected.Hot
+                ? Microsoft.UI.ColorHelper.FromArgb((byte)(projected.Alpha * 255), 255, 226, 118)
+                : Microsoft.UI.ColorHelper.FromArgb((byte)(projected.Alpha * 255), 255, 132, 32);
+            args.DrawingSession.FillCircle((float)projected.X, (float)projected.Y, (float)projected.Size, coreColor);
         }
     }
 
@@ -633,4 +652,6 @@ public sealed partial class VoicePage : Page
         double Phase,
         double Size,
         bool Hot);
+
+    private readonly record struct ProjectedParticle(double X, double Y, double Size, double Alpha, bool Hot);
 }

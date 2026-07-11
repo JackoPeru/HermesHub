@@ -33,10 +33,22 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.153 Release Hermes Hub 0.6.153 fluid voice particles and waiting tone
+v0.6.154 Release Hermes Hub 0.6.154 refined voice visuals and Android waiting tone
 ```
 
 ## Release Corrente
+
+Hermes Hub 0.6.154 (Refined voice visuals and Android waiting tone):
+
+Release 0.6.154:
+- Windows: bagliore particelle separato dai nuclei e sfocato via GPU con Win2D `GaussianBlurEffect`; eliminata fascia luminosa netta mantenendo punti nitidi e animazione fluida.
+- Android: assemblaggio sfera ora usa progresso esplicito aggiornato a ogni frame per 2,8 secondi, con fase iniziale di vortice e traiettoria piu ampia; non dipende piu da `Animatable`.
+- Android: suono d'attesa spostato da `AudioTrack` sonification a WAV locale riprodotto in loop con `MediaPlayer` e `USAGE_MEDIA`, usando stessa uscita volume del TTS.
+- Windows/Android: chiamata, VAD, STT, chat stream e Kokoro TTS invariati.
+- Gateway Linux invariato rispetto alla 0.6.152.
+- Verifiche pre-release: Windows Debug x64 0 errori/0 avvisi e Android `assembleDebug` OK; build Release, lint, firme e pacchetti verificati durante pubblicazione.
+- Asset release: Android APK `HermesHub-0.6.154-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.154.0_x64.msix`.
+- Release bump: Windows/AdminBridge `0.6.154`, Android `versionName 0.6.154`, `versionCode 158`.
 
 Hermes Hub 0.6.153 (Fluid voice particles and waiting tone):
 

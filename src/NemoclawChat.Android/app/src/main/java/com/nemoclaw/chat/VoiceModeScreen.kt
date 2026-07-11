@@ -7,7 +7,6 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioAttributes
-import android.media.AudioTrack
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.Handler
@@ -15,9 +14,6 @@ import android.os.Looper
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -40,6 +36,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -138,7 +135,7 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?) {
     var status by remember { mutableStateOf("Hermes voce pronto.") }
     var callJob by remember { mutableStateOf<Job?>(null) }
     var startRequested by remember { mutableStateOf(false) }
-    val waitingTone = remember { WaitingTonePlayer() }
+    val waitingTone = remember(context) { WaitingTonePlayer(context.applicationContext) }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
@@ -265,15 +262,18 @@ private fun VoiceParticleField(
     modifier: Modifier = Modifier
 ) {
     val particles = remember { buildVoiceParticles() }
-    val assembly = remember { Animatable(if (assembled) 1f else 0f) }
+    var assembly by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(assembled) {
-        assembly.animateTo(
-            targetValue = if (assembled) 1f else 0f,
-            animationSpec = tween(
-                durationMillis = if (assembled) 2_200 else 1_200,
-                easing = FastOutSlowInEasing
-            )
-        )
+        val target = if (assembled) 1f else 0f
+        val duration = if (assembled) 2.8f else 1.2f
+        var previousFrame = withFrameNanos { it }
+        while (abs(assembly - target) > 0.001f) {
+            val frame = withFrameNanos { it }
+            val step = ((frame - previousFrame) / 1_000_000_000f) / duration
+            previousFrame = frame
+            assembly = if (target > assembly) min(target, assembly + step) else max(target, assembly - step)
+        }
+        assembly = target
     }
     var time by remember { mutableStateOf(0f) }
     LaunchedEffect(Unit) {
@@ -283,7 +283,8 @@ private fun VoiceParticleField(
 
     Canvas(modifier = modifier.background(Color.Black)) {
         drawRect(Color.Black)
-        val eased = assembly.value
+        val gatherProgress = ((assembly - 0.08f) / 0.92f).coerceIn(0f, 1f)
+        val eased = gatherProgress * gatherProgress * (3f - 2f * gatherProgress)
         val speechBeat = if (speaking) {
             val primary = max(0f, sin(time * 10.8f))
             val secondary = max(0f, sin(time * 17.1f + 0.8f))
@@ -300,7 +301,7 @@ private fun VoiceParticleField(
             val idleX = particle.idleX + sin(time * particle.speed + particle.phase) * 0.14f
             val idleY = particle.idleY + cos(time * particle.speed * 0.73f + particle.phase) * 0.11f
             val idleZ = particle.idleZ + sin(time * particle.speed * 0.41f + particle.phase) * 0.19f
-            val gatherArc = sin(PI.toFloat() * eased) * 0.24f
+            val gatherArc = sin(PI.toFloat() * eased) * 0.46f
             val x = lerpFloat(idleX, particle.sphereX, eased) + sin(particle.phase + eased * PI.toFloat() * 2f) * gatherArc
             val y = lerpFloat(idleY, particle.sphereY, eased) + cos(particle.phase * 0.73f + eased * PI.toFloat() * 2f) * gatherArc * 0.65f
             val z = lerpFloat(idleZ, particle.sphereZ, eased)
@@ -749,56 +750,43 @@ private fun pcmPeak(bytes: ByteArray): Double {
     return peak.toDouble()
 }
 
-private class WaitingTonePlayer {
-    private var track: AudioTrack? = null
+private class WaitingTonePlayer(context: Context) {
+    private val toneFile = File(context.cacheDir, "hermes-waiting-tone.wav")
+    private var player: MediaPlayer? = null
 
     fun start() {
-        if (track?.playState == AudioTrack.PLAYSTATE_PLAYING) return
+        if (player?.isPlaying == true) return
+        stop()
         runCatching {
-            val player = track ?: createTrack().also { track = it }
-            player.setPlaybackHeadPosition(0)
-            player.play()
+            if (!toneFile.exists()) writeWaitingToneWav(toneFile)
+            val next = MediaPlayer()
+            player = next
+            next.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+            )
+            next.setDataSource(toneFile.absolutePath)
+            next.isLooping = true
+            next.setVolume(0.25f, 0.25f)
+            next.prepare()
+            next.start()
         }.onFailure {
-            release()
+            stop()
         }
     }
 
     fun stop() {
-        val player = track ?: return
-        runCatching { player.pause() }
-        runCatching { player.setPlaybackHeadPosition(0) }
+        val active = player ?: return
+        player = null
+        runCatching { active.stop() }
+        active.release()
     }
 
     fun release() {
-        val player = track ?: return
-        track = null
-        runCatching { player.stop() }
-        player.release()
-    }
-
-    private fun createTrack(): AudioTrack {
-        val samples = buildWaitingToneSamples()
-        val player = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(VoiceWaitingToneSampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-            )
-            .setTransferMode(AudioTrack.MODE_STATIC)
-            .setBufferSizeInBytes(samples.size * 2)
-            .build()
-        check(player.write(samples, 0, samples.size) == samples.size) { "Suono di attesa non disponibile." }
-        check(player.setLoopPoints(0, samples.size, -1) == AudioTrack.SUCCESS) { "Loop audio non disponibile." }
-        player.setVolume(0.25f)
-        return player
+        stop()
+        toneFile.delete()
     }
 }
 
@@ -812,6 +800,13 @@ private fun buildWaitingToneSamples(): ShortArray {
         samples[index] = (sample * Short.MAX_VALUE * 0.78).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
     }
     return samples
+}
+
+private fun writeWaitingToneWav(file: File) {
+    val samples = buildWaitingToneSamples()
+    val pcm = ByteBuffer.allocate(samples.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+    samples.forEach { pcm.putShort(it) }
+    writePcmWav(file, pcm.array(), VoiceWaitingToneSampleRate)
 }
 
 private fun waitingNote(time: Double, start: Double, duration: Double, frequency: Double): Double {

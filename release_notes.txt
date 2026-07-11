@@ -1,11 +1,10 @@
-Hermes Hub 0.6.153 (Fluid voice particles and waiting tone)
+Hermes Hub 0.6.154 (Refined voice visuals and Android waiting tone)
 
-- Windows: rendering particelle `Voce` migrato a Win2D `CanvasAnimatedControl`. Eliminati oltre mille aggiornamenti layout XAML per frame che rendevano scena e assemblaggio scattosi.
-- Android: rilevamento parlato corretto con `AudioSource.MIC`, calibrazione iniziale e VAD adattivo basato su RMS e picco. Rimossi effetti audio che su alcuni dispositivi sopprimevano il segnale.
-- Windows/Android: assemblaggio particelle reso chiaramente visibile in 2,2 secondi, con traiettorie curve verso la sfera invece del cambio istantaneo.
-- Windows/Android: aggiunto chime d'attesa originale a due note mentre Hermes pensa o genera testo. Parte solo dopo trascrizione e si ferma esattamente quando inizia la prima riproduzione TTS.
-- Windows/Android: suono d'attesa sintetizzato localmente, a volume basso, senza asset di rete; chiusura chiamata, errore e cambio stato lo interrompono subito.
-- Gateway Linux invariato: continuano a essere usati STT, chat stream e Kokoro GPU gia pubblicati con la 0.6.152.
-- Verifiche pre-release: Windows Debug x64 0 errori/0 avvisi e Android `assembleDebug` OK; build Release, firme e pacchetti verificati durante pubblicazione.
-- Asset: Android APK `HermesHub-0.6.153-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.153.0_x64.msix`.
-- Release bump: Windows/AdminBridge `0.6.153`, Android `versionName 0.6.153`, `versionCode 157`.
+- Windows: bagliore particelle separato dai nuclei e sfocato via GPU con Win2D `GaussianBlurEffect`; eliminata fascia luminosa netta mantenendo punti nitidi e animazione fluida.
+- Android: assemblaggio sfera ora usa progresso esplicito aggiornato a ogni frame per 2,8 secondi, con fase iniziale di vortice e traiettoria piu ampia; non dipende piu da `Animatable`.
+- Android: suono d'attesa spostato da `AudioTrack` sonification a WAV locale riprodotto in loop con `MediaPlayer` e `USAGE_MEDIA`, usando stessa uscita volume del TTS.
+- Windows/Android: chiamata, VAD, STT, chat stream e Kokoro TTS invariati.
+- Gateway Linux invariato rispetto alla 0.6.152.
+- Verifiche pre-release: Windows Debug x64 0 errori/0 avvisi e Android `assembleDebug` OK; build Release, lint, firme e pacchetti verificati durante pubblicazione.
+- Asset: Android APK `HermesHub-0.6.154-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.154.0_x64.msix`.
+- Release bump: Windows/AdminBridge `0.6.154`, Android `versionName 0.6.154`, `versionCode 158`.
