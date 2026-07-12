@@ -464,6 +464,7 @@ data class VisualBlock(
     val durationMs: Long? = null,
     val thumbnailUrl: String = "",
     val alt: String = "",
+    val localDataUrl: String = "",
     val layout: String = "",
     val images: List<VisualGalleryImage> = emptyList(),
     val variant: String = "",
@@ -1435,12 +1436,12 @@ private fun ChatScreen(
                     val displayText = if (attachments.isEmpty()) {
                         text
                     } else {
-                        "$text\n\n[Allegati: ${attachments.joinToString { it.filename }}]"
+                        text.ifBlank { "Media condiviso." }
                     }
                     val localHistory = state.messages.toMutableList()
                     localHistory.add(ChatMessage("Tu", displayText, true))
                     
-                    state.messages.add(ChatMessage("Tu", displayText, true))
+                    state.messages.add(ChatMessage("Tu", displayText, true, visualBlocks = createLocalAttachmentBlocks(attachments)))
                     state.draft = ""
                     state.streamingState = StreamingState()
 
@@ -2300,9 +2301,11 @@ private fun MediaFileBlock(block: VisualBlock) {
     val context = LocalContext.current
     val settings = remember { loadSettings(context) }
     val allowExternalImage = block.mediaKind == "image"
+    val isLocalAttachment = block.localDataUrl.isNotBlank()
     val resolvedMediaUrl = remember(settings.gatewayUrl, block.mediaUrl, allowExternalImage) { resolveMediaUrl(settings, block.mediaUrl, allowExternalImage, allowExternalMedia = true) }
     val previewUrl = remember(settings.gatewayUrl, block.thumbnailUrl, allowExternalImage) { resolveMediaUrl(settings, block.thumbnailUrl, allowExternalImage) }
     val previewSource = when {
+        isLocalAttachment -> ""
         block.mediaKind == "image" && resolvedMediaUrl != null -> block.mediaUrl
         previewUrl != null -> block.thumbnailUrl
         else -> ""
@@ -2313,7 +2316,16 @@ private fun MediaFileBlock(block: VisualBlock) {
     val canOpen = resolvedMediaUrl != null
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (previewSource.isNotBlank()) {
+        if (isLocalAttachment && block.mediaKind == "image") {
+            decodeAttachmentPreview(block.localDataUrl)?.let { bitmap ->
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = block.alt.ifBlank { block.filename },
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+                    contentScale = ContentScale.Fit
+                )
+            }
+        } else if (previewSource.isNotBlank()) {
             RemoteGalleryImage(
                 settings,
                 VisualGalleryImage(
@@ -2345,10 +2357,12 @@ private fun MediaFileBlock(block: VisualBlock) {
                     color = AppColors.Muted,
                     fontSize = 12.sp
                 )
-                if (!canOpen) {
+                if (isLocalAttachment) {
+                    Text("Condiviso con Hermes.", color = AppColors.Muted, fontSize = 12.sp)
+                } else if (!canOpen) {
                     Text("media non proxy rifiutato.", color = AppColors.Muted, fontSize = 12.sp)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (canOpen) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         enabled = canOpen,
                         onClick = {
@@ -6063,12 +6077,13 @@ internal fun hermesHubSharedContext(): String {
         File multimediali in chat: usa visual_blocks image_gallery per piu' immagini o media_file per singoli asset image/video/audio/document. Quando l'utente chiede "condividimi/inviami/scaricami un file", la risposta deve includere una card media_file scaricabile stile chat, non solo path o URL nel testo.
         media_url e thumbnail_url devono puntare a proxy Hermes/same-host tipo /v1/media/...; vietati file://, data: e path locali diretti.
         Non scrivere mai markdown `MEDIA:[path](file://...)` o path Windows/Linux nel testo finale. Se un tool produce un file locale, pubblicalo prima tramite proxy Hermes e restituisci solo `/v1/media/...` dentro visual_blocks. Se non puoi pubblicarlo, dillo esplicitamente invece di inviare path locali.
+        Screenshot browser: quando Matteo chiede uno screen o una foto di cio' che stai facendo, cattura davvero lo screenshot, copialo prima in HERMES_HUB_UPLOAD_PATH (default ~/.hermes/hub_uploads), poi rispondi con un visual_blocks media_file di tipo image e media_url /v1/media/<nome-file>. La chat deve mostrare immagine dentro canvas; risposta testuale puo' descrivere contenuto ma non deve contenere path o URL. Non dichiarare screen inviato senza una card immagine valida.
         Durante lavori agente lunghi, inoltra eventi realtime per reasoning, tool call, argomenti tool, risultati tool e chiamate modello intermedie quando il gateway li supporta: Hermes Hub deve mostrare all'utente cosa stai facendo.
     """.trimIndent()
 }
 
 internal fun hermesNativeInstructions(mode: String): String {
-    return ""
+    return "Hermes Hub media contract: never answer with a local filesystem path, file:// URL, or bracketed media address. For each file requested by Matteo return a visual_blocks media_file card using /v1/media/...; use image_gallery for multiple images. For a browser screenshot, capture it, copy it to HERMES_HUB_UPLOAD_PATH (default ~/.hermes/hub_uploads), and return a media_file image card with media_url /v1/media/<filename>. Do not claim a screenshot was shared unless that image card is present."
 }
 
 private suspend fun sendChatRequest(
@@ -6092,16 +6107,14 @@ private suspend fun sendChatRequest(
                 .put("conversation", serverConversationId ?: JSONObject.NULL)
                 .put("previous_response_id", if (serverConversationId == null) previousResponseId ?: JSONObject.NULL else JSONObject.NULL)
                 .put("metadata", visualBlocksMetadata(settings, conversationId))
-            if (!isHermesNative(settings)) {
-                payload.put(
-                    "instructions",
-                    if (mode.equals("Agente", ignoreCase = true)) {
-                        hermesHubAgentInstructions()
-                    } else {
-                        hermesHubChatInstructions()
-                    }
-                )
-            }
+            payload.put(
+                "instructions",
+                if (isHermesNative(settings)) hermesNativeInstructions(mode) else if (mode.equals("Agente", ignoreCase = true)) {
+                    hermesHubAgentInstructions()
+                } else {
+                    hermesHubChatInstructions()
+                }
+            )
             val response = postJson("${settings.gatewayUrl.trimEnd('/')}/responses", payload, apiKey, allowCompatAuth = !(isHermesNative(settings) && settings.strictNativeMode))
             if (response.first in 200..299) {
                 val text = extractAssistantText(response.second)
@@ -6292,6 +6305,7 @@ private fun visualBlocksMetadata(settings: AppSettings, conversationId: String?)
                 .put("mode", settings.visualBlocksMode)
                 .put("image_gallery", "supported via /v1/media proxy URLs only")
                 .put("media_file", "supported for image/video/audio/document via safe proxy URLs; include media_kind, mime_type, filename, size_bytes, duration_ms, thumbnail_url when known")
+                .put("screenshot_contract", "For browser screenshots: capture real image, copy to HERMES_HUB_UPLOAD_PATH (~/.hermes/hub_uploads by default), then emit media_file image with media_url /v1/media/<filename>. Never return a local path or URL as chat text.")
         )
 }
 
@@ -7413,6 +7427,22 @@ private fun createAttachmentFromUri(context: Context, uri: Uri, maxAttachmentMb:
         sizeBytes = bytes.size.toLong()
     )
 }
+
+private fun createLocalAttachmentBlocks(attachments: List<ChatInputAttachment>): List<VisualBlock> =
+    attachments.take(12).mapIndexed { index, attachment ->
+        VisualBlock(
+            id = "local-media-$index-${java.util.UUID.randomUUID()}",
+            type = "media_file",
+            title = attachment.filename,
+            filename = attachment.filename,
+            mediaKind = inferVisualBlockMediaKind(attachment.filename, attachment.dataUrl),
+            mimeType = attachment.mimeType,
+            sizeBytes = attachment.sizeBytes,
+            alt = attachment.filename,
+            caption = "Condiviso con Hermes.",
+            localDataUrl = attachment.dataUrl
+        )
+    }
 
 private fun createAttachmentFromClipboard(context: Context, maxAttachmentMb: Int): ChatInputAttachment? {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager

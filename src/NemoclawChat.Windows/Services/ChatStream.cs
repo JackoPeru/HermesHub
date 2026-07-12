@@ -113,7 +113,7 @@ public static class ChatStreamClient
             {
                 model = settings.Model,
                 input = BuildResponsesInput(promptForModel, payloadAttachments),
-                instructions = nativeMode ? null : HermesHubProtocol.Instructions(settings, mode),
+                instructions = HermesHubProtocol.Instructions(settings, mode),
                 store = true,
                 stream = true,
                 return_progress = true,
@@ -587,6 +587,7 @@ public static class ChatStreamClient
         {
             model = settings.Model,
             input = BuildResponsesInput(prompt, attachments),
+            instructions = HermesHubProtocol.Instructions(settings, "Agente"),
             session_id = serverConversationId,
             metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId),
             conversation_history = history
@@ -670,6 +671,11 @@ public static class ChatStreamClient
 
             if (state is "completed" or "failed" or "cancelled")
             {
+                var blocks = VisualBlockParser.ExtractFromResponse(root.GetRawText());
+                if (blocks.Count > 0)
+                {
+                    yield return new StreamVisualBlocks(blocks, VisualBlocksContract.Version);
+                }
                 if (!string.IsNullOrWhiteSpace(lastOutput))
                 {
                     yield return new StreamTextDelta(lastOutput);

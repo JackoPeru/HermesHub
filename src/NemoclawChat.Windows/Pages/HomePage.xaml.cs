@@ -558,8 +558,8 @@ public sealed partial class HomePage : Page
             RenderAttachmentPreviews();
             var displayPrompt = attachments.Count == 0
                 ? prompt
-                : $"{prompt}\n\n[Allegati: {string.Join(", ", attachments.Select(a => a.FileName))}]";
-            AddBubble("Tu", displayPrompt, "UserBubbleBrush", HorizontalAlignment.Right);
+                : string.IsNullOrWhiteSpace(prompt) ? "Media condiviso." : prompt;
+            AddBubble("Tu", displayPrompt, "UserBubbleBrush", HorizontalAlignment.Right, VisualBlockParser.CreateLocalAttachmentBlocks(attachments));
             _messageHistory.Add(new ChatMessageRecord("Tu", displayPrompt, DateTimeOffset.Now));
             localHistory.Add(new ChatMessageRecord("Tu", displayPrompt, DateTimeOffset.Now));
             PromptBox.Text = string.Empty;
@@ -2371,13 +2371,24 @@ public sealed partial class HomePage : Page
     private static UIElement RenderMediaFile(VisualBlockRecord block)
     {
         var panel = new StackPanel { Spacing = 10 };
+        var isLocalAttachment = !string.IsNullOrWhiteSpace(block.LocalDataUrl);
         var allowExternalImage = block.MediaKind == "image";
         var safeMedia = IsSafeMediaUrl(block.MediaUrl, allowExternalImage, allowExternalMedia: true);
-        var previewUrl = block.MediaKind == "image" && safeMedia
+        var previewUrl = !isLocalAttachment && block.MediaKind == "image" && safeMedia
             ? block.MediaUrl
-            : IsSafeMediaUrl(block.ThumbnailUrl, allowExternalImage) ? block.ThumbnailUrl : null;
+            : !isLocalAttachment && IsSafeMediaUrl(block.ThumbnailUrl, allowExternalImage) ? block.ThumbnailUrl : null;
 
-        if (!string.IsNullOrWhiteSpace(previewUrl))
+        if (isLocalAttachment && block.MediaKind == "image" && BitmapFromDataUrl(block.LocalDataUrl!) is { } localBitmap)
+        {
+            panel.Children.Add(new Image
+            {
+                Source = localBitmap,
+                MaxHeight = 360,
+                MaxWidth = 720,
+                Stretch = Stretch.Uniform
+            });
+        }
+        else if (!string.IsNullOrWhiteSpace(previewUrl))
         {
             panel.Children.Add(new Image
             {
@@ -2410,7 +2421,16 @@ public sealed partial class HomePage : Page
             TextWrapping = TextWrapping.WrapWholeWords
         });
 
-        if (!safeMedia)
+        if (isLocalAttachment)
+        {
+            meta.Children.Add(new TextBlock
+            {
+                Text = "Condiviso con Hermes.",
+                Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
+                FontSize = 12
+            });
+        }
+        else if (!safeMedia)
         {
             meta.Children.Add(new TextBlock
             {
@@ -2540,7 +2560,10 @@ public sealed partial class HomePage : Page
             Clipboard.SetContent(package);
         };
         actions.Children.Add(copy);
-        meta.Children.Add(actions);
+        if (safeMedia)
+        {
+            meta.Children.Add(actions);
+        }
 
         panel.Children.Add(new Border
         {

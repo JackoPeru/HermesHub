@@ -125,6 +125,10 @@ public sealed record VisualBlockRecord
 
     [JsonPropertyName("raw_json")]
     public string? RawJson { get; init; }
+
+    // Ephemeral preview for an attachment the user has just sent. Never archive raw bytes.
+    [JsonIgnore]
+    public string? LocalDataUrl { get; init; }
 }
 
 public sealed record VisualTableColumn
@@ -337,6 +341,23 @@ public static class VisualBlockParser
         return blocks;
     }
 
+    public static IReadOnlyList<VisualBlockRecord> CreateLocalAttachmentBlocks(IEnumerable<ChatInputAttachment> attachments)
+    {
+        return attachments.Take(12).Select((attachment, index) => new VisualBlockRecord
+        {
+            Id = $"local-media-{index}-{StableInlineId(attachment.FileName, index)}",
+            Type = "media_file",
+            Title = attachment.FileName,
+            Filename = attachment.FileName,
+            MediaKind = InferMediaKind(attachment.FileName, attachment.DataUrl),
+            MimeType = attachment.MimeType,
+            SizeBytes = attachment.SizeBytes,
+            Alt = attachment.FileName,
+            Caption = "Condiviso con Hermes.",
+            LocalDataUrl = attachment.DataUrl
+        }).ToArray();
+    }
+
     public static string StripInlineMediaMarkup(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -490,7 +511,7 @@ public static class VisualBlockParser
             "image_gallery" => block.Images.Count is > 0 and <= 12 &&
                                block.Images.All(image => !string.IsNullOrWhiteSpace(image.MediaUrl) && !string.IsNullOrWhiteSpace(image.Alt)),
             "media_file" => block.MediaKind is "image" or "video" or "audio" or "document" &&
-                            !string.IsNullOrWhiteSpace(block.MediaUrl) &&
+                            (!string.IsNullOrWhiteSpace(block.MediaUrl) || !string.IsNullOrWhiteSpace(block.LocalDataUrl)) &&
                             !string.IsNullOrWhiteSpace(block.Alt),
             "callout" => block.Variant is "info" or "warning" or "error" or "success" &&
                          !string.IsNullOrWhiteSpace(block.Text),

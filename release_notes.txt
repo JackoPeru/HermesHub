@@ -1,3 +1,12 @@
+Hermes Hub 0.6.155 (Windows collapsible tools)
+
+- Windows: Le chiamate ai tool durante lo streaming in StreamingBubble sono state raggruppate all'interno di un unico Expander chiamato "Azioni", che parte collassato per non ingombrare la vista della chat.
+- Windows/Android: mantenuta compatibilita' tool calls.
+- Gateway Linux invariato.
+- Verifiche pre-release: Windows build x64 0 errori.
+- Asset: Android APK `HermesHub-0.6.155-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.155.0_x64.msix`.
+- Release bump: Windows/AdminBridge `0.6.155`, Android `versionName 0.6.155`, `versionCode 159`.
+
 Hermes Hub 0.6.154 (Refined voice visuals and Android waiting tone)
 
 - Windows: bagliore particelle separato dai nuclei e sfocato via GPU con Win2D `GaussianBlurEffect`; eliminata fascia luminosa netta mantenendo punti nitidi e animazione fluida.
@@ -8,3 +17,4 @@ Hermes Hub 0.6.154 (Refined voice visuals and Android waiting tone)
 - Verifiche pre-release: Windows Debug x64 0 errori/0 avvisi e Android `assembleDebug` OK; build Release, lint, firme e pacchetti verificati durante pubblicazione.
 - Asset: Android APK `HermesHub-0.6.154-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.154.0_x64.msix`.
 - Release bump: Windows/AdminBridge `0.6.154`, Android `versionName 0.6.154`, `versionCode 158`.
+

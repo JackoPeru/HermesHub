@@ -33,11 +33,20 @@ main
 Ultimo push release fatto su richiesta utente:
 
 ```text
-v0.6.154 Release Hermes Hub 0.6.154 refined voice visuals and Android waiting tone
+v0.6.155 Release Hermes Hub 0.6.155 Windows collapsible tools
 ```
 
 ## Release Corrente
 
+Hermes Hub 0.6.155 (Windows collapsible tools):
+
+Release 0.6.155:
+- Windows: Le chiamate ai tool durante lo streaming in StreamingBubble sono state raggruppate all'interno di un unico Expander chiamato "Azioni", che parte collassato per non ingombrare la vista della chat.
+- Windows/Android: mantenuta compatibilita' tool calls.
+- Gateway Linux invariato.
+- Verifiche pre-release: Windows build x64 0 errori.
+- Asset release: Android APK `HermesHub-0.6.155-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.155.0_x64.msix`. Linux Gateway invariato.
+- Release bump: Windows/AdminBridge `0.6.155`, Android `versionName 0.6.155`, `versionCode 159`.
 Hermes Hub 0.6.154 (Refined voice visuals and Android waiting tone):
 
 Release 0.6.154:
@@ -510,6 +519,15 @@ Non lasciare `AGENTS.md` obsoleto dopo modifiche rilevanti.
 
 ## Release Corrente
 
+Hermes Hub 0.6.155 (Windows collapsible tools):
+
+Release 0.6.155:
+- Windows: Le chiamate ai tool durante lo streaming in StreamingBubble sono state raggruppate all'interno di un unico Expander chiamato "Azioni", che parte collassato per non ingombrare la vista della chat.
+- Windows/Android: mantenuta compatibilita' tool calls.
+- Gateway Linux invariato.
+- Verifiche pre-release: Windows build x64 0 errori.
+- Asset release: Android APK `HermesHub-0.6.155-android.apk`, Windows MSIX `NemoclawChat.Windows_0.6.155.0_x64.msix`. Linux Gateway invariato.
+- Release bump: Windows/AdminBridge `0.6.155`, Android `versionName 0.6.155`, `versionCode 159`.
 Hermes Hub 0.6.119 (Android notifications background reliability):
 - Vedi sezione "Release Corrente" all'inizio di questo file per i dettagli completi.
 
@@ -1830,3 +1848,4 @@ src/NemoclawChat.Android/app/build/
 Utente ha attivato `caveman`: risposte brevi, tecniche, senza filler.
 
 Usare italiano.
+

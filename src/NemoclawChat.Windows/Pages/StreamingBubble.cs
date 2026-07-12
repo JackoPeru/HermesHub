@@ -24,6 +24,8 @@ internal sealed class StreamingBubble
     private readonly Expander _thinkingExpander;
     private readonly TextBlock _thinkingText;
     private readonly StackPanel _toolCallsPanel;
+    private readonly Expander _toolsExpander;
+    private readonly TextBlock _toolsLabel;
     private readonly StackPanel _rawEventsPanel;
     private readonly ContentControl _assistantContainer;
     private readonly TextBlock _assistantTextPreview;
@@ -117,8 +119,32 @@ internal sealed class StreamingBubble
 
         _content.Children.Add(_thinkingExpander);
 
+        _toolsLabel = new TextBlock
+        {
+            Text = "Azioni",
+            FontSize = 14,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = (Brush)Application.Current.Resources["MutedTextBrush"]
+        };
+
         _toolCallsPanel = new StackPanel { Spacing = 8 };
-        _content.Children.Add(_toolCallsPanel);
+
+        _toolsExpander = new Expander
+        {
+            Header = _toolsLabel,
+            Content = new ScrollViewer
+            {
+                MaxHeight = 350,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = _toolCallsPanel
+            },
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Visibility = Visibility.Collapsed
+        };
+
+        _content.Children.Add(_toolsExpander);
 
         _rawEventsPanel = new StackPanel { Spacing = 8 };
         _content.Children.Add(_rawEventsPanel);
@@ -363,6 +389,12 @@ internal sealed class StreamingBubble
         {
             return;
         }
+
+        if (_toolsExpander.Visibility == Visibility.Collapsed)
+        {
+            _toolsExpander.Visibility = Visibility.Visible;
+        }
+        _toolsLabel.Text = $"Azioni ({_toolViews.Count + 1})";
 
         var statusIcon = new FontIcon
         {

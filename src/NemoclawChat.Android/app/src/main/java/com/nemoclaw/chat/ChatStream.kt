@@ -469,15 +469,14 @@ fun streamChatRequest(
                 .put("conversation", serverConversationId ?: JSONObject.NULL)
                 .put("previous_response_id", if (serverConversationId == null) candidatePreviousResponseId ?: JSONObject.NULL else JSONObject.NULL)
                 .put("metadata", visualBlocksMetadataJson(settings, conversationId))
-            if (!nativeMode) {
-                payload.put(
-                    "instructions",
+            payload.put(
+                "instructions",
+                if (nativeMode) hermesNativeInstructions(mode) else
                     (if (mode.equals("Agente", ignoreCase = true))
                         hermesHubAgentInstructions()
                     else
                         hermesHubChatInstructions()) + if (videoMode) "\n\n" + hermesHubVideoInstructions(settings) else ""
-                )
-            }
+            )
             return payload
         }
 
@@ -881,6 +880,7 @@ private fun runDetachedAgent(
     val payload = JSONObject()
         .put("model", settings.model)
         .put("input", buildMultimodalInput(prompt, attachments))
+        .put("instructions", hermesHubAgentInstructions())
         .put("session_id", hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId) ?: JSONObject.NULL)
         .put("metadata", visualBlocksMetadataJson(settings, conversationId))
         .put("conversation_history", JSONArray(history.takeLast(30).mapNotNull { msg ->
@@ -937,6 +937,9 @@ private fun runDetachedAgent(
         }
         finalText = root.optString("output", finalText)
         if (state == "completed" || state == "failed" || state == "cancelled") {
+            extractVisualBlocks(statusResponse.second).takeIf { it.isNotEmpty() }?.let {
+                emit(ChatStreamEvent.VisualBlocks(it, VISUAL_BLOCKS_VERSION))
+            }
             if (finalText.isNotBlank()) {
                 emit(ChatStreamEvent.TextDelta(finalText))
             } else if (state != "completed") {
