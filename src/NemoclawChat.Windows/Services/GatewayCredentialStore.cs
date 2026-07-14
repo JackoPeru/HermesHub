@@ -12,6 +12,7 @@ public static class GatewayCredentialStore
 
     // PasswordVault e' wrapper COM thread-safe: cachiamo singleton invece di allocare per call.
     private static readonly Lazy<PasswordVault> SharedVault = new(() => new PasswordVault());
+    private static readonly object MutationLock = new();
 
     public static bool HasSecret()
     {
@@ -35,24 +36,48 @@ public static class GatewayCredentialStore
         return DefaultApiKey;
     }
 
-    public static void SaveSecret(string secret)
+    public static bool SaveSecret(string secret)
     {
-        DeleteSecret();
-        var normalized = string.IsNullOrWhiteSpace(secret) ? DefaultApiKey : secret.Trim();
-        try
+        lock (MutationLock)
         {
-            SharedVault.Value.Add(new PasswordCredential(Resource, UserName, normalized));
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[GatewayCredentialStore] SaveSecret: {ex.GetType().Name}: {ex.Message}");
+            try
+            {
+                var normalized = string.IsNullOrWhiteSpace(secret) ? DefaultApiKey : secret.Trim();
+                var hadPrevious = TryLoadSecret(Resource, UserName, out var previous) ||
+                                  TryLoadSecret(LegacyResource, LegacyUserName, out previous);
+                var vault = SharedVault.Value;
+                vault.Add(new PasswordCredential(Resource, UserName, normalized));
+                if (!TryLoadSecret(Resource, UserName, out var saved) || !string.Equals(saved, normalized, StringComparison.Ordinal))
+                {
+                    if (hadPrevious)
+                    {
+                        vault.Add(new PasswordCredential(Resource, UserName, previous));
+                    }
+                    else
+                    {
+                        RemoveSecret(Resource, UserName);
+                    }
+                    throw new InvalidOperationException("Verifica credenziale salvata non riuscita.");
+                }
+
+                RemoveSecret(LegacyResource, LegacyUserName);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.WriteLine($"[GatewayCredentialStore] SaveSecret: {ex.GetType().Name}: {ex.Message}");
+                return false;
+            }
         }
     }
 
     public static void DeleteSecret()
     {
-        RemoveSecret(Resource, UserName);
-        RemoveSecret(LegacyResource, LegacyUserName);
+        lock (MutationLock)
+        {
+            RemoveSecret(Resource, UserName);
+            RemoveSecret(LegacyResource, LegacyUserName);
+        }
     }
 
     private static void RemoveSecret(string resource, string userName)
@@ -62,9 +87,12 @@ public static class GatewayCredentialStore
             var vault = SharedVault.Value;
             vault.Remove(vault.Retrieve(resource, userName));
         }
+        catch (Exception ex) when (IsCredentialNotFound(ex))
+        {
+        }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[GatewayCredentialStore] DeleteSecret: {ex.GetType().Name}: {ex.Message}");
+            System.Diagnostics.Trace.WriteLine($"[GatewayCredentialStore] DeleteSecret: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
@@ -78,10 +106,17 @@ public static class GatewayCredentialStore
             secret = credential.Password ?? string.Empty;
             return !string.IsNullOrWhiteSpace(secret);
         }
+        catch (Exception ex) when (IsCredentialNotFound(ex))
+        {
+            return false;
+        }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[GatewayCredentialStore] LoadSecret: {ex.GetType().Name}: {ex.Message}");
+            System.Diagnostics.Trace.WriteLine($"[GatewayCredentialStore] LoadSecret: {ex.GetType().Name}: {ex.Message}");
             return false;
         }
     }
+
+    private static bool IsCredentialNotFound(Exception exception) =>
+        exception.HResult == unchecked((int)0x80070490);
 }

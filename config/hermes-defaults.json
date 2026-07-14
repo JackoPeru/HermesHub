@@ -1,8 +1,8 @@
 {
   "hermes": {
-    "apiUrl": "http://hermes.local:8642/v1",
-    "healthUrl": "http://hermes.local:8642/health",
-    "detailedHealthUrl": "http://hermes.local:8642/health/detailed",
+    "apiUrl": "http://hermes:8642/v1",
+    "healthUrl": "http://hermes:8642/health",
+    "detailedHealthUrl": "http://hermes:8642/health/detailed",
     "capabilitiesPath": "/v1/capabilities",
     "modelsPath": "/v1/models",
     "responsesPath": "/v1/responses",
@@ -13,17 +13,15 @@
     "preferredApi": "hermes-native",
     "strictNativeMode": false,
     "autoDiscoveryUrls": [
-      "http://hermes.local:8642/v1",
       "http://hermes:8642/v1",
-      "http://hermes-hub:8642/v1",
-      "http://hermeshub:8642/v1",
-      "http://home-server:8642/v1",
-      "http://server:8642/v1"
+      "http://100.94.223.14:8642/v1",
+      "http://hermes.local:8642/v1"
     ]
   },
   "security": {
     "recommendedAccess": "Tailscale/LAN",
-    "authHeader": "Authorization: Bearer hermes-hub, then no-auth fallback",
+    "authHeader": "Authorization: Bearer <configured Hermes API key>",
+    "compatAuthFallback": false,
     "releaseCleartextTraffic": true,
     "storeProviderSecretsInClient": false
   }

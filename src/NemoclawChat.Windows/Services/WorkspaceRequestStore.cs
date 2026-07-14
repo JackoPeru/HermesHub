@@ -12,7 +12,7 @@ public sealed class WorkspaceRequestRecord
     public string Source { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public string Feedback { get; set; } = string.Empty;
-    public bool IsRead { get; set; } = false;
+    public bool IsRead { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
 }
 

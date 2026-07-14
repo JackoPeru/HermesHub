@@ -1,6 +1,6 @@
 param(
     [string]$SchemaPath = "config/visual-blocks.schema.json",
-    [string]$FixturePath = "tests/golden/visual-blocks-fixture.json",
+    [string]$FixturePath = "tests/contracts/visual-blocks-fixture.json",
     [string]$WindowsTypesPath = "src/NemoclawChat.Windows/Services/VisualBlocks.cs",
     [string]$AndroidTypesPath = "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
 )
@@ -21,6 +21,11 @@ function Read-Json($Path) {
 $schema = Read-Json $SchemaPath
 $fixture = Read-Json $FixturePath
 
+& python (Join-Path $PSScriptRoot "validate-visual-blocks-contract.py") --schema $SchemaPath --fixture $FixturePath
+if ($LASTEXITCODE -ne 0) {
+    throw "Visual Blocks JSON Schema validation failed with exit code $LASTEXITCODE."
+}
+
 $expectedTypes = @("markdown", "code", "table", "chart", "diagram", "image_gallery", "media_file", "callout", "unknown_block")
 $expectedChartTypes = @("bar", "line")
 $expectedCallouts = @("info", "warning", "error", "success")
@@ -32,9 +37,7 @@ Assert-True ($fixture.visual_blocks_version -eq 1) "Fixture visual_blocks_versio
 
 $fixtureTypes = @($fixture.visual_blocks | ForEach-Object { $_.type })
 foreach ($type in $expectedTypes) {
-    if ($type -ne "unknown_block") {
-        Assert-True ($fixtureTypes -contains $type) "Fixture missing block type '$type'."
-    }
+    Assert-True ($fixtureTypes -contains $type) "Fixture missing block type '$type'."
 }
 
 $schemaText = Get-Content $SchemaPath -Raw
@@ -57,4 +60,4 @@ foreach ($type in $expectedTypes + $expectedChartTypes + $expectedCallouts + $ex
 Assert-True ($windowsText.Contains('"type"') -or $windowsText.Contains("Type")) "Windows code missing discriminator handling."
 Assert-True ($androidText.Contains('"type"') -or $androidText.Contains(".type")) "Android code missing discriminator handling."
 
-Write-Host "Visual Blocks contract OK."
+Write-Output "Visual Blocks contract OK."

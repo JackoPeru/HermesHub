@@ -123,10 +123,12 @@ public sealed partial class AboutPage : Page
             return;
         }
 
+        InstallUpdateButton.IsEnabled = false;
         var launched = await AppUpdateService.LaunchDownloadedAssetAsync(_downloadedAssetPath);
         if (!launched)
         {
             UpdateStatusText.Text = "Impossibile aprire l'asset scaricato.";
+            InstallUpdateButton.IsEnabled = true;
             return;
         }
 

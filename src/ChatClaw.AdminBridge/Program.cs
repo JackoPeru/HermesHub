@@ -37,7 +37,7 @@ builder.Services.AddRateLimiter(options =>
 var config = BridgeConfig.Load();
 if (string.IsNullOrWhiteSpace(config.Token))
 {
-    Console.Error.WriteLine("[admin-bridge] FATAL: variabile CHATCLAW_ADMIN_TOKEN non impostata. Impossibile avviare senza auth.");
+    await Console.Error.WriteLineAsync("[admin-bridge] FATAL: variabile CHATCLAW_ADMIN_TOKEN non impostata. Impossibile avviare senza auth.").ConfigureAwait(false);
     return 1;
 }
 
@@ -48,6 +48,7 @@ builder.WebHost.ConfigureKestrel(options =>
 
 var app = builder.Build();
 var audit = new AuditLog(config.AuditPath);
+var appVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "unknown";
 app.UseCors("default");
 app.UseRateLimiter();
 
@@ -55,7 +56,7 @@ app.Use(async (context, next) =>
 {
     if (context.Request.Path == "/v1/health")
     {
-        await next();
+        await next().ConfigureAwait(false);
         return;
     }
 
@@ -68,18 +69,18 @@ app.Use(async (context, next) =>
     if (presented.Length == 0 || !CryptographicEquals(presented, expected))
     {
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-        await context.Response.WriteAsJsonAsync(new { status = "unauthorized", message = "Bearer token obbligatorio." });
+        await context.Response.WriteAsJsonAsync(new { status = "unauthorized", message = "Bearer token obbligatorio." }).ConfigureAwait(false);
         return;
     }
 
-    await next();
+    await next().ConfigureAwait(false);
 });
 
-app.MapGet("/v1/health", () => Results.Json(new { status = "ok", app = "ChatClaw Admin Bridge", version = "0.1.0" }));
+app.MapGet("/v1/health", () => Results.Json(new { status = "ok", app = "Hermes Hub Admin Bridge", version = appVersion }));
 
 app.MapPost("/v1/reload", () =>
 {
-    var reloaded = BridgeConfig.Load();
+    var reloaded = BridgeConfig.Load(config.MaxRequestBytes);
     if (string.IsNullOrWhiteSpace(reloaded.Token))
     {
         audit.Write("config.reload", "denied:missing-token");
@@ -121,7 +122,7 @@ app.MapGet("/v1/status", () =>
     });
 });
 
-app.MapPost("/v1/actions/{action}", async (string action) =>
+app.MapPost("/v1/actions/{action}", async (string action, HttpContext context) =>
 {
     var command = config.ResolveAction(action);
     if (command is null)
@@ -131,18 +132,31 @@ app.MapPost("/v1/actions/{action}", async (string action) =>
     }
 
     audit.Write(action, "run");
-    var result = await CommandRunner.RunAsync(command.Value.FileName, command.Value.Arguments, config.CommandTimeoutSeconds);
-    return Results.Json(new
+    try
     {
-        status = result.ExitCode == 0 ? "ok" : "error",
-        action,
-        result.ExitCode,
-        result.Stdout,
-        result.Stderr
-    });
+        var result = await CommandRunner.RunAsync(
+            command.Value.FileName,
+            command.Value.Arguments,
+            config.CommandTimeoutSeconds,
+            context.RequestAborted).ConfigureAwait(false);
+        audit.Write(action, $"exit:{result.ExitCode}");
+        return Results.Json(new
+        {
+            status = result.ExitCode == 0 ? "ok" : "error",
+            action,
+            result.ExitCode,
+            result.Stdout,
+            result.Stderr
+        });
+    }
+    catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
+    {
+        audit.Write(action, $"start-failed:{ex.GetType().Name}");
+        return Results.Problem($"Avvio azione fallito: {ex.Message}", statusCode: 500);
+    }
 });
 
-app.MapPost("/v1/logs/tail", async (TailRequest request) =>
+app.MapPost("/v1/logs/tail", async (TailRequest request, HttpContext context) =>
 {
     var path = config.ResolveSafePath(request.Path);
     if (path is null || !File.Exists(path))
@@ -160,7 +174,7 @@ app.MapPost("/v1/logs/tail", async (TailRequest request) =>
 
     audit.Write("logs.tail", path);
     var requested = Math.Clamp(request.Lines <= 0 ? 200 : request.Lines, 1, 2000);
-    var lines = await ReadLastLinesAsync(path, requested);
+    var lines = await ReadLastLinesAsync(path, requested, config.MaxReadBytes, context.RequestAborted).ConfigureAwait(false);
     return Results.Json(new
     {
         status = "ok",
@@ -179,20 +193,29 @@ app.MapPost("/v1/files/list", (FileListRequest request) =>
     }
 
     audit.Write("files.list", path);
-    var entries = Directory.EnumerateFileSystemEntries(path)
-        .Take(500)
-        .Select(entry => new
-        {
-            path = entry,
-            name = Path.GetFileName(entry),
-            type = Directory.Exists(entry) ? "directory" : "file",
-            bytes = File.Exists(entry) ? new FileInfo(entry).Length : 0
-        });
+    try
+    {
+        var entries = Directory.EnumerateFileSystemEntries(path)
+            .Take(500)
+            .Select(entry => new
+            {
+                path = entry,
+                name = Path.GetFileName(entry),
+                type = Directory.Exists(entry) ? "directory" : "file",
+                bytes = File.Exists(entry) ? new FileInfo(entry).Length : 0
+            })
+            .ToArray();
 
-    return Results.Json(new { status = "ok", path, entries });
+        return Results.Json(new { status = "ok", path, entries });
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    {
+        audit.Write("files.list", $"failed:{ex.GetType().Name}");
+        return Results.Problem($"Lettura directory fallita: {ex.Message}", statusCode: 500);
+    }
 });
 
-app.MapPost("/v1/files/read", async (FileReadRequest request) =>
+app.MapPost("/v1/files/read", async (FileReadRequest request, HttpContext context) =>
 {
     var path = config.ResolveSafePath(request.Path);
     if (path is null || !File.Exists(path))
@@ -207,11 +230,20 @@ app.MapPost("/v1/files/read", async (FileReadRequest request) =>
         return Results.BadRequest(new { status = "denied", message = $"File troppo grande. Limite {config.MaxReadBytes} bytes." });
     }
 
-    audit.Write("files.read", path);
-    return Results.Json(new { status = "ok", path, text = await File.ReadAllTextAsync(path) });
+    try
+    {
+        var text = await ReadTextBoundedAsync(path, config.MaxReadBytes, context.RequestAborted).ConfigureAwait(false);
+        audit.Write("files.read", path);
+        return Results.Json(new { status = "ok", path, text });
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    {
+        audit.Write("files.read", $"failed:{ex.GetType().Name}");
+        return Results.Problem($"Lettura file fallita: {ex.Message}", statusCode: 500);
+    }
 });
 
-app.MapPost("/v1/files/write", async (FileWriteRequest request) =>
+app.MapPost("/v1/files/write", async (FileWriteRequest request, HttpContext context) =>
 {
     var path = config.ResolveSafePath(request.Path);
     if (path is null)
@@ -227,44 +259,16 @@ app.MapPost("/v1/files/write", async (FileWriteRequest request) =>
         return Results.BadRequest(new { status = "denied", message = $"Payload troppo grande. Limite {config.MaxWriteChars} caratteri." });
     }
 
-    var writeLock = PathWriteLocks.Get(path);
-    await writeLock.WaitAsync();
+    using var writeLease = await PathWriteLocks.AcquireAsync(path, context.RequestAborted).ConfigureAwait(false);
     string? backupPath = null;
     try
     {
-        if (File.Exists(path))
-        {
-            backupPath = $"{path}.{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.bak";
-            try
-            {
-                File.Copy(path, backupPath);
-            }
-            catch (IOException ex)
-            {
-                audit.Write("files.write", $"backup-failed:{ex.GetType().Name}");
-                return Results.Problem($"Backup non riuscito: {ex.Message}", statusCode: 503);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                audit.Write("files.write", $"backup-denied:{ex.GetType().Name}");
-                return Results.Problem($"Backup negato: {ex.Message}", statusCode: 503);
-            }
-        }
-
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            await File.WriteAllTextAsync(path, payload);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            audit.Write("files.write", $"failed:{ex.GetType().Name}");
-            return Results.Problem($"Scrittura fallita: {ex.Message}", statusCode: 500);
-        }
+        backupPath = await WriteTextAtomicallyAsync(path, payload, context.RequestAborted).ConfigureAwait(false);
     }
-    finally
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
     {
-        writeLock.Release();
+        audit.Write("files.write", $"failed:{ex.GetType().Name}");
+        return Results.Problem($"Scrittura fallita: {ex.Message}", statusCode: 500);
     }
 
     audit.Write("files.write", path);
@@ -277,54 +281,135 @@ lifetime.ApplicationStopping.Register(() =>
     Console.WriteLine("[admin-bridge] shutdown gracefully...");
 });
 
-await app.RunAsync();
+await app.RunAsync().ConfigureAwait(false);
 return 0;
 
-static async Task<IReadOnlyList<string>> ReadLastLinesAsync(string path, int count)
+static async Task<IReadOnlyList<string>> ReadLastLinesAsync(
+    string path,
+    int count,
+    long maxBytes,
+    CancellationToken cancellationToken)
 {
-    const int chunkSize = 8192;
-    using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-    var length = stream.Length;
-    var buffer = new byte[chunkSize];
-    var collected = new List<string>(count + 1);
-    var tail = new System.Text.StringBuilder();
-    long position = length;
-    while (position > 0 && collected.Count <= count)
+    var text = await ReadTextBoundedAsync(path, maxBytes, cancellationToken).ConfigureAwait(false);
+    var lines = text
+        .Replace("\r\n", "\n", StringComparison.Ordinal)
+        .Replace('\r', '\n')
+        .Split('\n');
+    var available = lines.Length > 0 && lines[^1].Length == 0 ? lines[..^1] : lines;
+    return available
+        .TakeLast(count)
+        .ToArray();
+}
+
+static async Task<string> ReadTextBoundedAsync(string path, long maxBytes, CancellationToken cancellationToken)
+{
+    using var stream = new FileStream(
+        path,
+        FileMode.Open,
+        FileAccess.Read,
+        FileShare.ReadWrite,
+        64 * 1024,
+        FileOptions.Asynchronous | FileOptions.SequentialScan);
+    var snapshotLength = stream.Length;
+    if (snapshotLength > maxBytes || snapshotLength > int.MaxValue)
     {
-        var read = (int)Math.Min(chunkSize, position);
-        position -= read;
-        stream.Seek(position, SeekOrigin.Begin);
-        var got = await stream.ReadAsync(buffer.AsMemory(0, read));
-        if (got <= 0) break;
-        var chunk = System.Text.Encoding.UTF8.GetString(buffer, 0, got);
-        tail.Insert(0, chunk);
-        var text = tail.ToString();
-        var nl = text.LastIndexOf('\n');
-        while (nl >= 0 && collected.Count <= count)
+        throw new IOException($"File oltre il limite di {maxBytes} bytes.");
+    }
+
+    var bytes = new byte[(int)snapshotLength];
+    var offset = 0;
+    while (offset < bytes.Length)
+    {
+        var read = await stream.ReadAsync(bytes.AsMemory(offset), cancellationToken).ConfigureAwait(false);
+        if (read == 0)
         {
-            var line = text[(nl + 1)..];
-            if (line.EndsWith('\r')) line = line[..^1];
-            if (line.Length > 0 || collected.Count > 0)
-            {
-                collected.Insert(0, line);
-            }
-            text = text[..nl];
-            nl = text.LastIndexOf('\n');
+            break;
         }
-        tail.Clear();
-        tail.Append(text);
+        offset += read;
     }
-    if (tail.Length > 0 && collected.Count <= count)
+    return System.Text.Encoding.UTF8.GetString(bytes, 0, offset);
+}
+
+static async Task<string?> WriteTextAtomicallyAsync(string path, string text, CancellationToken cancellationToken)
+{
+    var directory = Path.GetDirectoryName(path) ?? throw new IOException("Directory destinazione non valida.");
+    Directory.CreateDirectory(directory);
+    var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+    var backupPath = File.Exists(path)
+        ? $"{path}.{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}.bak"
+        : null;
+
+    try
     {
-        var line = tail.ToString();
-        if (line.EndsWith('\r')) line = line[..^1];
-        if (line.Length > 0) collected.Insert(0, line);
+        var stream = new FileStream(
+                         temporaryPath,
+                         FileMode.CreateNew,
+                         FileAccess.Write,
+                         FileShare.None,
+                         64 * 1024,
+                         FileOptions.Asynchronous | FileOptions.WriteThrough);
+        await using (stream.ConfigureAwait(false))
+        {
+            var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            await using (writer.ConfigureAwait(false))
+            {
+                await writer.WriteAsync(text.AsMemory(), cancellationToken).ConfigureAwait(false);
+                await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        if (backupPath is not null)
+        {
+            try
+            {
+                File.Replace(temporaryPath, path, backupPath, ignoreMetadataErrors: true);
+            }
+            catch (PlatformNotSupportedException)
+            {
+                File.Copy(path, backupPath, overwrite: false);
+                File.Move(temporaryPath, path, overwrite: true);
+            }
+        }
+        else
+        {
+            File.Move(temporaryPath, path);
+        }
+        PruneWriteBackups(path, keep: 5);
+        return backupPath;
     }
-    if (collected.Count > count)
+    finally
     {
-        collected.RemoveRange(0, collected.Count - count);
+        try { File.Delete(temporaryPath); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            await Console.Error.WriteLineAsync($"[admin-bridge] temp cleanup failed: {ex.Message}").ConfigureAwait(false);
+        }
     }
-    return collected;
+}
+
+static void PruneWriteBackups(string path, int keep)
+{
+    try
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return;
+        }
+
+        var pattern = $"{Path.GetFileName(path)}.*.bak";
+        foreach (var backup in new DirectoryInfo(directory)
+                     .EnumerateFiles(pattern, SearchOption.TopDirectoryOnly)
+                     .OrderByDescending(file => file.LastWriteTimeUtc)
+                     .Skip(Math.Max(0, keep)))
+        {
+            backup.Delete();
+        }
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    {
+        Console.Error.WriteLine($"[admin-bridge] backup pruning failed: {ex.Message}");
+    }
 }
 
 static bool CryptographicEquals(string left, string right)
@@ -336,16 +421,80 @@ static bool CryptographicEquals(string left, string right)
 
 static class PathWriteLocks
 {
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _locks =
-        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object Gate = new();
+    private static readonly Dictionary<string, LockEntry> Locks = new(
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
-    public static SemaphoreSlim Get(string path) =>
-        _locks.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
+    public static async Task<IDisposable> AcquireAsync(string path, CancellationToken cancellationToken)
+    {
+        LockEntry entry;
+        lock (Gate)
+        {
+            if (!Locks.TryGetValue(path, out entry!))
+            {
+                entry = new LockEntry();
+                Locks[path] = entry;
+            }
+            entry.References++;
+        }
+
+        try
+        {
+            await entry.Semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return new Lease(path, entry);
+        }
+        catch
+        {
+            ReleaseReference(path, entry, releaseSemaphore: false);
+            throw;
+        }
+    }
+
+    private static void ReleaseReference(string path, LockEntry entry, bool releaseSemaphore)
+    {
+        if (releaseSemaphore)
+        {
+            entry.Semaphore.Release();
+        }
+
+        lock (Gate)
+        {
+            entry.References--;
+            if (entry.References == 0)
+            {
+                Locks.Remove(path);
+                entry.Semaphore.Dispose();
+            }
+        }
+    }
+
+    private sealed class LockEntry
+    {
+        public SemaphoreSlim Semaphore { get; } = new(1, 1);
+        public int References { get; set; }
+    }
+
+    private sealed class Lease(string path, LockEntry entry) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                ReleaseReference(path, entry, releaseSemaphore: true);
+            }
+        }
+    }
 }
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "Creato dal model binder ASP.NET Core.")]
 sealed record TailRequest(string Path, int Lines);
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "Creato dal model binder ASP.NET Core.")]
 sealed record FileListRequest(string Path);
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "Creato dal model binder ASP.NET Core.")]
 sealed record FileReadRequest(string Path);
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "Creato dal model binder ASP.NET Core.")]
 sealed record FileWriteRequest(string Path, string? Text);
 
 sealed class BridgeConfig
@@ -359,15 +508,21 @@ sealed class BridgeConfig
     public required int MaxWriteChars { get; init; }
     public required Dictionary<string, (string FileName, string Arguments)> Actions { get; init; }
 
-    public static BridgeConfig Load()
+    public static BridgeConfig Load(long? fixedMaxRequestBytes = null)
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var data = Path.Combine(home, ".chatclaw-admin-bridge");
         Directory.CreateDirectory(data);
 
-        var roots = (Environment.GetEnvironmentVariable("CHATCLAW_ADMIN_ROOTS") ?? Path.Combine(home, "hermes-workspace"))
+        var configuredRoots = Environment.GetEnvironmentVariable("CHATCLAW_ADMIN_ROOTS");
+        if (string.IsNullOrWhiteSpace(configuredRoots))
+        {
+            configuredRoots = Path.Combine(home, "hermes-workspace");
+        }
+        var roots = configuredRoots
             .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(path => Path.GetFullPath(path))
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
             .ToArray();
         foreach (var root in roots)
         {
@@ -387,11 +542,11 @@ sealed class BridgeConfig
         {
             Token = Environment.GetEnvironmentVariable("CHATCLAW_ADMIN_TOKEN") ?? string.Empty,
             Roots = roots,
-            AuditPath = Environment.GetEnvironmentVariable("CHATCLAW_ADMIN_AUDIT") ?? Path.Combine(data, "audit.log"),
-            CommandTimeoutSeconds = Math.Max(1, int.TryParse(Environment.GetEnvironmentVariable("CHATCLAW_ADMIN_TIMEOUT"), out var timeout) ? timeout : 120),
-            MaxReadBytes = Math.Max(1024, long.TryParse(Environment.GetEnvironmentVariable("CHATCLAW_ADMIN_MAX_READ_BYTES"), out var maxRead) ? maxRead : 1_000_000),
-            MaxRequestBytes = Math.Max(1024, long.TryParse(Environment.GetEnvironmentVariable("CHATCLAW_ADMIN_MAX_REQUEST_BYTES"), out var maxReq) ? maxReq : 4_000_000),
-            MaxWriteChars = Math.Max(1, int.TryParse(Environment.GetEnvironmentVariable("CHATCLAW_ADMIN_MAX_WRITE_CHARS"), out var maxWrite) ? maxWrite : 2_000_000),
+            AuditPath = Path.GetFullPath(Environment.GetEnvironmentVariable("CHATCLAW_ADMIN_AUDIT") ?? Path.Combine(data, "audit.log")),
+            CommandTimeoutSeconds = Math.Clamp(int.TryParse(Environment.GetEnvironmentVariable("CHATCLAW_ADMIN_TIMEOUT"), out var timeout) ? timeout : 120, 1, 3600),
+            MaxReadBytes = Math.Clamp(long.TryParse(Environment.GetEnvironmentVariable("CHATCLAW_ADMIN_MAX_READ_BYTES"), out var maxRead) ? maxRead : 1_000_000, 1024, 100L * 1024 * 1024),
+            MaxRequestBytes = fixedMaxRequestBytes ?? Math.Clamp(long.TryParse(Environment.GetEnvironmentVariable("CHATCLAW_ADMIN_MAX_REQUEST_BYTES"), out var maxReq) ? maxReq : 4_000_000, 1024, 100L * 1024 * 1024),
+            MaxWriteChars = Math.Clamp(int.TryParse(Environment.GetEnvironmentVariable("CHATCLAW_ADMIN_MAX_WRITE_CHARS"), out var maxWrite) ? maxWrite : 2_000_000, 1, 10_000_000),
             Actions = actions
         };
     }
@@ -406,6 +561,10 @@ sealed class BridgeConfig
         if (string.IsNullOrWhiteSpace(requested))
         {
             requested = Roots.FirstOrDefault() ?? ".";
+        }
+        else if (!Path.IsPathRooted(requested) && Roots.FirstOrDefault() is { } firstRoot)
+        {
+            requested = Path.Combine(firstRoot, requested);
         }
 
         string canonical;
@@ -441,16 +600,20 @@ sealed class BridgeConfig
                 }
             }
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             return null;
         }
 
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         foreach (var root in Roots)
         {
-            var normalizedRoot = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            if (canonical.Equals(root, StringComparison.OrdinalIgnoreCase) ||
-                canonical.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+            var relative = Path.GetRelativePath(root, canonical);
+            var outsideRoot = Path.IsPathRooted(relative) ||
+                              relative.Equals("..", comparison) ||
+                              relative.StartsWith($"..{Path.DirectorySeparatorChar}", comparison) ||
+                              relative.StartsWith($"..{Path.AltDirectorySeparatorChar}", comparison);
+            if (!outsideRoot && !ContainsReparsePoint(root, canonical))
             {
                 return canonical;
             }
@@ -458,12 +621,56 @@ sealed class BridgeConfig
         return null;
     }
 
+    private static bool ContainsReparsePoint(string root, string target)
+    {
+        try
+        {
+            var relative = Path.GetRelativePath(root, target);
+            var current = root;
+            if (File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+            {
+                return true;
+            }
+
+            foreach (var segment in relative.Split(
+                         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                         StringSplitOptions.RemoveEmptyEntries))
+            {
+                current = Path.Combine(current, segment);
+                if (!File.Exists(current) && !Directory.Exists(current))
+                {
+                    break;
+                }
+                if (File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
     private static (string FileName, string Arguments) SplitCommand(string command)
     {
-        var firstSpace = command.IndexOf(' ');
+        var trimmed = command.Trim();
+        if (trimmed.StartsWith('"'))
+        {
+            var closingQuote = trimmed.IndexOf('"', 1);
+            if (closingQuote < 0)
+            {
+                throw new FormatException("Comando allowlist con virgolette non chiuse.");
+            }
+            return (trimmed[1..closingQuote], trimmed[(closingQuote + 1)..].TrimStart());
+        }
+
+        var firstSpace = trimmed.IndexOfAny([' ', '\t']);
         return firstSpace < 0
-            ? (command, string.Empty)
-            : (command[..firstSpace], command[(firstSpace + 1)..]);
+            ? (trimmed, string.Empty)
+            : (trimmed[..firstSpace], trimmed[(firstSpace + 1)..].TrimStart());
     }
 }
 
@@ -524,60 +731,115 @@ sealed class AuditLog(string path)
 
 static class CommandRunner
 {
-    public static async Task<(int ExitCode, string Stdout, string Stderr)> RunAsync(string fileName, string arguments, int timeoutSeconds)
+    private const int MaxCapturedChars = 1_000_000;
+    private static readonly SemaphoreSlim ConcurrencyLimit = new(2, 2);
+
+    public static async Task<(int ExitCode, string Stdout, string Stderr)> RunAsync(
+        string fileName,
+        string arguments,
+        int timeoutSeconds,
+        CancellationToken cancellationToken)
     {
-        using var process = new Process();
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = fileName,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        foreach (var arg in SplitArguments(arguments))
-        {
-            startInfo.ArgumentList.Add(arg);
-        }
-        process.StartInfo = startInfo;
-
-        process.Start();
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
-
+        await ConcurrencyLimit.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await process.WaitForExitAsync(timeout.Token);
-        }
-        catch (OperationCanceledException)
-        {
+            using var process = new Process();
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = fileName,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            foreach (var arg in SplitArguments(arguments))
+            {
+                startInfo.ArgumentList.Add(arg);
+            }
+            process.StartInfo = startInfo;
+
+            if (!process.Start())
+            {
+                throw new InvalidOperationException("Il processo configurato non è stato avviato.");
+            }
+            var stdoutTask = ReadBoundedAsync(process.StandardOutput, MaxCapturedChars);
+            var stderrTask = ReadBoundedAsync(process.StandardError, MaxCapturedChars);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
             try
             {
-                if (!process.HasExited)
+                await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                try
                 {
-                    process.Kill(entireProcessTree: true);
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
                 }
-            }
-            catch (InvalidOperationException)
-            {
-                // Process gia' uscito: ignora.
-            }
-            catch (System.ComponentModel.Win32Exception)
-            {
-                // Access denied / handle non valido: ignora.
-            }
-            string stdoutOnTimeout;
-            try { stdoutOnTimeout = await stdoutTask; }
-            catch { stdoutOnTimeout = string.Empty; }
-            return (-1, stdoutOnTimeout, "Timeout: processo terminato.");
-        }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+                {
+                    await Console.Error.WriteLineAsync($"[admin-bridge] process kill failed: {ex.Message}").ConfigureAwait(false);
+                }
 
-        string stdoutFinal;
-        string stderrFinal;
-        try { stdoutFinal = await stdoutTask; } catch { stdoutFinal = string.Empty; }
-        try { stderrFinal = await stderrTask; } catch { stderrFinal = string.Empty; }
-        return (process.ExitCode, stdoutFinal, stderrFinal);
+                var stdoutOnTimeout = await AwaitOutputAsync(stdoutTask).ConfigureAwait(false);
+                var stderrOnTimeout = await AwaitOutputAsync(stderrTask).ConfigureAwait(false);
+                var reason = cancellationToken.IsCancellationRequested
+                    ? "Richiesta annullata: processo terminato."
+                    : "Timeout: processo terminato.";
+                return (-1, stdoutOnTimeout, string.IsNullOrWhiteSpace(stderrOnTimeout) ? reason : $"{reason}\n{stderrOnTimeout}");
+            }
+
+            var stdoutFinal = await AwaitOutputAsync(stdoutTask).ConfigureAwait(false);
+            var stderrFinal = await AwaitOutputAsync(stderrTask).ConfigureAwait(false);
+            return (process.ExitCode, stdoutFinal, stderrFinal);
+        }
+        finally
+        {
+            ConcurrencyLimit.Release();
+        }
+    }
+
+    private static async Task<string> ReadBoundedAsync(TextReader reader, int maxChars)
+    {
+        var result = new System.Text.StringBuilder(Math.Min(maxChars, 16 * 1024));
+        var buffer = new char[8192];
+        var truncated = false;
+        while (true)
+        {
+            var read = await reader.ReadAsync(buffer.AsMemory()).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+
+            var remaining = maxChars - result.Length;
+            if (remaining > 0)
+            {
+                result.Append(buffer, 0, Math.Min(read, remaining));
+            }
+            truncated |= read > remaining;
+        }
+        if (truncated)
+        {
+            result.Append("\n[output troncato al limite operativo]");
+        }
+        return result.ToString();
+    }
+
+    private static async Task<string> AwaitOutputAsync(Task<string> outputTask)
+    {
+        try
+        {
+            return await outputTask.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is TimeoutException or IOException or ObjectDisposedException)
+        {
+            return string.Empty;
+        }
     }
 
     private static IEnumerable<string> SplitArguments(string arguments)

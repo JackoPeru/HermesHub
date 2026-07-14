@@ -55,7 +55,7 @@ public sealed partial class NotificationsPage : Page
         }
     }
 
-    private UIElement CreateCard(HubNotificationRecord item)
+    private Border CreateCard(HubNotificationRecord item)
     {
         var unread = item.ReadAt is null;
         var title = new TextBlock

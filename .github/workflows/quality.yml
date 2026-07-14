@@ -1,0 +1,107 @@
+name: Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gateway:
+    name: Gateway and scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install linters
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+
+      - name: Python checks
+        run: |
+          python -m ruff check scripts tests
+          python -m py_compile scripts/patch-hermes-gateway-native.py
+          python scripts/validate-visual-blocks-contract.py
+          python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Shell checks
+        shell: bash
+        run: |
+          mapfile -d '' scripts < <(find scripts -type f -name '*.sh' -print0)
+          for script in "${scripts[@]}"; do bash -n "$script"; done
+          shellcheck --severity=warning "${scripts[@]}"
+
+  android:
+    name: Android
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: src/NemoclawChat.Android
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Verify wrapper
+        run: test -x gradlew
+
+      - name: Lint, unit tests and release APK
+        run: ./gradlew --no-daemon lintRelease testDebugUnitTest assembleRelease
+
+  windows:
+    name: Windows
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install contract validator
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Build release
+        shell: pwsh
+        run: |
+          dotnet build .\src\NemoclawChat.Windows\NemoclawChat.Windows.csproj -c Release -p:Platform=x64
+          dotnet build .\src\ChatClaw.AdminBridge\ChatClaw.AdminBridge.csproj -c Release
+
+      - name: Formatting and contracts
+        shell: pwsh
+        run: |
+          dotnet format .\NemoclawChat.sln --verify-no-changes --no-restore
+          .\scripts\verify-visual-blocks-contract.ps1
+
+      - name: PowerShell analysis
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+          $results = Invoke-ScriptAnalyzer -Path .\scripts -Recurse -Severity Warning,Error
+          $results | Format-Table -AutoSize
+          if ($results) { throw "PSScriptAnalyzer found $($results.Count) issue(s)." }

@@ -254,7 +254,7 @@ internal static class MarkdownRenderer
         return tb;
     }
 
-    private static IEnumerable<Inline> BuildInlines(string text, Color color)
+    private static List<Inline> BuildInlines(string text, Color color)
     {
         int i = 0;
         var buffer = new System.Text.StringBuilder();
@@ -325,7 +325,7 @@ internal static class MarkdownRenderer
         return sink;
     }
 
-    private static UIElement BuildCodeBlock(string language, string code, Color color)
+    private static Border BuildCodeBlock(string language, string code, Color color)
     {
         var panel = new StackPanel { Spacing = 4 };
 

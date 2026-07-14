@@ -132,7 +132,7 @@ public sealed partial class VideoPage : Page
             FeedbackStatusText.Text = "Hermes non ha ancora inviato la cartella video.";
             return;
         }
-        if (folder.StartsWith("/", StringComparison.Ordinal) && OperatingSystem.IsWindows())
+        if (folder.StartsWith('/') && OperatingSystem.IsWindows())
         {
             FeedbackStatusText.Text = $"Cartella sul server Linux: {folder}. Usa il feed gateway o aprila via SSH/SFTP.";
             return;
@@ -294,6 +294,15 @@ public sealed partial class VideoPage : Page
         if (string.IsNullOrWhiteSpace(url) ||
             !url.Contains("/v1/media/", StringComparison.OrdinalIgnoreCase) ||
             url.Contains("hub_token=", StringComparison.OrdinalIgnoreCase))
+        {
+            return url;
+        }
+
+        var settings = AppSettingsStore.Load();
+        var resolved = Uri.TryCreate(url, UriKind.Absolute, out var absolute)
+            ? absolute
+            : new Uri(GatewayService.ResolveHermesUri(settings, url));
+        if (!GatewayService.IsTrustedGatewayUri(settings, resolved))
         {
             return url;
         }

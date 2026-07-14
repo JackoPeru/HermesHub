@@ -11,7 +11,9 @@ internal fun hermesAuthRetryCandidates(apiKey: String?): List<String> {
 }
 
 internal fun hermesAuthCandidates(apiKey: String?, allowCompatAuth: Boolean = true): List<String?> {
-    return hermesAuthRetryCandidates(apiKey) + listOf(null)
+    val configured = apiKey?.trim()?.takeIf { it.isNotEmpty() }
+    if (!allowCompatAuth) return listOf(configured)
+    return (hermesAuthRetryCandidates(configured) + listOf(null)).distinct()
 }
 
 internal fun shouldUseResponsesFirst(settings: AppSettings, mode: String): Boolean {

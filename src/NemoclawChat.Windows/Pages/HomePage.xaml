@@ -325,6 +325,7 @@
                             TextWrapping="Wrap" />
 
                         <Button
+                            x:Name="VoiceNoteButton"
                             Grid.Column="2"
                             Width="38"
                             Height="38"

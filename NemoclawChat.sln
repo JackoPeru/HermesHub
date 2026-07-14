@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -7,21 +7,28 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{FFE8CFDA-431
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NemoclawChat.Windows", "src\NemoclawChat.Windows\NemoclawChat.Windows.csproj", "{57FF629A-E8E7-40CA-9F4F-2F768C56AD36}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChatClaw.AdminBridge", "src\ChatClaw.AdminBridge\ChatClaw.AdminBridge.csproj", "{D13C96FC-6F47-4CE8-B957-A5BCB2FE1D0F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Debug|Any CPU = Debug|Any CPU
-		Release|Any CPU = Release|Any CPU
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{57FF629A-E8E7-40CA-9F4F-2F768C56AD36}.Debug|x64.ActiveCfg = Debug|x64
+		{57FF629A-E8E7-40CA-9F4F-2F768C56AD36}.Debug|x64.Build.0 = Debug|x64
+		{57FF629A-E8E7-40CA-9F4F-2F768C56AD36}.Release|x64.ActiveCfg = Release|x64
+		{57FF629A-E8E7-40CA-9F4F-2F768C56AD36}.Release|x64.Build.0 = Release|x64
+		{D13C96FC-6F47-4CE8-B957-A5BCB2FE1D0F}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D13C96FC-6F47-4CE8-B957-A5BCB2FE1D0F}.Debug|x64.Build.0 = Debug|Any CPU
+		{D13C96FC-6F47-4CE8-B957-A5BCB2FE1D0F}.Release|x64.ActiveCfg = Release|Any CPU
+		{D13C96FC-6F47-4CE8-B957-A5BCB2FE1D0F}.Release|x64.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
-	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{57FF629A-E8E7-40CA-9F4F-2F768C56AD36}.Debug|Any CPU.ActiveCfg = Debug|x86
-		{57FF629A-E8E7-40CA-9F4F-2F768C56AD36}.Debug|Any CPU.Build.0 = Debug|x86
-		{57FF629A-E8E7-40CA-9F4F-2F768C56AD36}.Release|Any CPU.ActiveCfg = Release|x86
-		{57FF629A-E8E7-40CA-9F4F-2F768C56AD36}.Release|Any CPU.Build.0 = Release|x86
-	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{57FF629A-E8E7-40CA-9F4F-2F768C56AD36} = {FFE8CFDA-431C-4266-9A09-C57071D08333}
+		{D13C96FC-6F47-4CE8-B957-A5BCB2FE1D0F} = {FFE8CFDA-431C-4266-9A09-C57071D08333}
 	EndGlobalSection
 EndGlobal

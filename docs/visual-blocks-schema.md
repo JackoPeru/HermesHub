@@ -208,11 +208,9 @@ Verifica locale:
 - Video/audio/documenti vanno esposti come URL scaricabili via Hermes, non come path filesystem locali.
 - Diagram max 500 KB; gallery image default max 2 MB.
 
-## Golden screenshot
+## Fixture contrattuale
 
-Baseline unica e versionata in `tests/golden/`.
-
-- Windows CI genera gli screenshot canonici.
-- Android confronta contro gli stessi file con diff tolerance.
-- Android non deve creare baseline autonoma.
-- Le fixture dati partono da `tests/golden/visual-blocks-fixture.json`.
+`tests/contracts/visual-blocks-fixture.json` copre tutti i tipi v1. Lo script
+`scripts/verify-visual-blocks-contract.ps1` verifica schema, fixture e wire
+value condivisi dai due client. Non esiste ancora un test golden screenshot;
+la documentazione non deve presentarlo come controllo attivo.

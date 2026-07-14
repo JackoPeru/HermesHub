@@ -15,6 +15,7 @@ internal sealed class StreamingBubble
 {
     private const int MaxLivePreviewChars = 120_000;
     private const int MaxMarkdownRenderChars = 32_000;
+    private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
 
     private readonly Page _page;
     private readonly Action<UIElement> _addElement;
@@ -701,6 +702,44 @@ internal sealed class StreamingBubble
         ScheduleScroll();
     }
 
+    public void CompleteInterrupted()
+    {
+        FlushTextPreview();
+        _renderTimer.Stop();
+        _shimmerTimer.Stop();
+        _promptProgressBar.Visibility = Visibility.Collapsed;
+
+        if (_hasThinking)
+        {
+            FreezeThinkingLabel();
+        }
+        else
+        {
+            _thinkingExpander.Visibility = Visibility.Collapsed;
+        }
+
+        if (!_hasText && _textBuilder.Length > 0)
+        {
+            _assistantContainer.Visibility = Visibility.Visible;
+            _hasText = true;
+        }
+
+        if (_textBuilder.Length > 0)
+        {
+            var finalText = _textBuilder.ToString();
+            _assistantContainer.Content = finalText.Length <= MaxMarkdownRenderChars
+                ? MarkdownRenderer.Render(finalText, Colors.White)
+                : _assistantTextPreview;
+            _footerGrid.Visibility = Visibility.Visible;
+        }
+
+        _phaseStatusBase = "Risposta interrotta.";
+        _statusText.Text = _phaseStatusBase;
+        _statusText.Foreground = (Brush)Application.Current.Resources["MutedTextBrush"];
+        _statusText.Visibility = Visibility.Visible;
+        ScheduleScroll();
+    }
+
     public void SynchronizeFinalContent(string? finalText, string? finalThinking)
     {
         if (!string.IsNullOrEmpty(finalText) && !string.Equals(_textBuilder.ToString(), finalText, StringComparison.Ordinal))
@@ -834,7 +873,7 @@ internal sealed class StreamingBubble
         try
         {
             using var doc = JsonDocument.Parse(trimmed);
-            return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+            return JsonSerializer.Serialize(doc.RootElement, IndentedJsonOptions);
         }
         catch
         {

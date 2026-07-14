@@ -14,8 +14,13 @@ using Windows.System;
 
 namespace NemoclawChat_Windows.Pages;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design",
+    "CA1001:Types that own disposable fields should be disposable",
+    Justification = "La pagina WinUI rilascia recorder, token e player nel ciclo Unloaded; il framework non consuma IDisposable.")]
 public sealed partial class VoicePage : Page
 {
+    private static readonly char[] SoftBreakCharacters = [',', ';', ':', ' '];
     private readonly List<VoiceParticle> _particles = BuildParticles();
     private readonly ProjectedParticle[] _projectedParticles = new ProjectedParticle[520];
     private readonly List<ChatMessageRecord> _history = [];
@@ -26,11 +31,12 @@ public sealed partial class VoicePage : Page
     private MediaPlayer? _waitingPlayer;
     private string? _waitingTonePath;
     private DateTimeOffset _lastTranscriptAt = DateTimeOffset.MinValue;
-    private VoiceCallPhase _phase = VoiceCallPhase.Idle;
+    private volatile VoiceCallPhase _phase = VoiceCallPhase.Idle;
     private double _time;
     private double _assembly;
-    private bool _callActive;
-    private bool _callReady;
+    private volatile bool _callActive;
+    private volatile bool _callReady;
+    private bool _callOperationInProgress;
     private string _lastTranscript = string.Empty;
 
     public VoicePage()
@@ -44,31 +50,52 @@ public sealed partial class VoicePage : Page
         ParticleCanvas.Paused = false;
     }
 
-    private void Page_Unloaded(object sender, RoutedEventArgs e)
+    private async void Page_Unloaded(object sender, RoutedEventArgs e)
     {
         ParticleCanvas.Paused = true;
-        _callActive = false;
-        _callReady = false;
-        _callCts?.Cancel();
-        _recorder.Stop();
-        _voicePlayer?.Dispose();
-        StopWaitingTone();
-        if (_waitingTonePath is not null)
+        try
         {
-            TryDelete(_waitingTonePath);
-            _waitingTonePath = null;
+            await StopCallSessionAsync(updateVisual: false);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"[VoicePage] Cleanup failed: {ex}");
+        }
+        finally
+        {
+            StopWaitingTone();
+            if (_waitingTonePath is not null)
+            {
+                TryDelete(_waitingTonePath);
+                _waitingTonePath = null;
+            }
         }
     }
 
     private async void CallButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_callActive)
+        if (_callOperationInProgress)
         {
-            await StopCallSessionAsync();
+            return;
         }
-        else
+
+        _callOperationInProgress = true;
+        CallButton.IsEnabled = false;
+        try
         {
-            await StartCallSessionAsync();
+            if (_callActive)
+            {
+                await StopCallSessionAsync();
+            }
+            else
+            {
+                await StartCallSessionAsync();
+            }
+        }
+        finally
+        {
+            _callOperationInProgress = false;
+            CallButton.IsEnabled = true;
         }
     }
 
@@ -96,6 +123,7 @@ public sealed partial class VoicePage : Page
     private async Task StartCallSessionAsync()
     {
         _callCts?.Cancel();
+        _callCts?.Dispose();
         _callCts = new CancellationTokenSource();
         _callActive = true;
         _callReady = false;
@@ -117,6 +145,8 @@ public sealed partial class VoicePage : Page
         }
         catch (OperationCanceledException)
         {
+            _callActive = false;
+            _callReady = false;
         }
         catch (Exception ex)
         {
@@ -125,13 +155,23 @@ public sealed partial class VoicePage : Page
             SetPhase(VoiceCallPhase.Error, $"Voce non disponibile: {ex.Message}");
             SetCallVisual(false);
         }
+        finally
+        {
+            if (!_callActive && _callTask is null)
+            {
+                _callCts?.Dispose();
+                _callCts = null;
+            }
+        }
     }
 
-    private async Task StopCallSessionAsync()
+    private async Task StopCallSessionAsync(bool updateVisual = true)
     {
         _callActive = false;
         _callReady = false;
-        _callCts?.Cancel();
+        var callCts = _callCts;
+        _callCts = null;
+        callCts?.Cancel();
         _recorder.Stop();
         _voicePlayer?.Dispose();
         _voicePlayer = null;
@@ -140,11 +180,19 @@ public sealed partial class VoicePage : Page
         if (callTask is not null)
         {
             try { await callTask.ConfigureAwait(true); }
-            catch (OperationCanceledException) { }
-            catch { }
+            catch (OperationCanceledException) when (callCts?.IsCancellationRequested == true)
+            {
+                // Arresto richiesto dall'utente o dalla navigazione.
+            }
+            catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"[VoicePage] Call loop stop failed: {ex}"); }
         }
-        SetPhase(VoiceCallPhase.Idle, "Chiamata chiusa.");
-        SetCallVisual(false);
+        callCts?.Dispose();
+        StopWaitingTone();
+        if (updateVisual)
+        {
+            SetPhase(VoiceCallPhase.Idle, "Chiamata chiusa.");
+            SetCallVisual(false);
+        }
     }
 
     private async Task ListenLoopAsync(CancellationToken cancellationToken)
@@ -179,7 +227,11 @@ public sealed partial class VoicePage : Page
             catch (Exception ex)
             {
                 SetPhase(VoiceCallPhase.Error, $"Errore voce: {ex.Message}");
-                await Task.Delay(900, CancellationToken.None).ConfigureAwait(false);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                await Task.Delay(900, cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -200,43 +252,55 @@ public sealed partial class VoicePage : Page
         var answer = new StringBuilder();
         var speechBuffer = new StringBuilder();
         Task playbackChain = Task.CompletedTask;
+        using var turnCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var turnToken = turnCts.Token;
         SetPhase(VoiceCallPhase.Thinking, "Hermes sta pensando...");
 
-        await foreach (var ev in ChatStreamClient.StreamChatAsync(
-                           settings,
-                           "Chat",
-                           $"Sei in una chiamata vocale. Rispondi subito in italiano, con tono naturale e frasi brevi. Niente markdown, elenchi o preamboli. La prima frase deve avere al massimo 8 parole. Utente: {prompt}",
-                           contextHistory,
-                           conversationId: null,
-                           previousResponseId: null,
-                           cancellationToken: cancellationToken))
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            switch (ev)
+            await foreach (var ev in ChatStreamClient.StreamChatAsync(
+                               settings,
+                               "Chat",
+                               $"Sei in una chiamata vocale. Rispondi subito in italiano, con tono naturale e frasi brevi. Niente markdown, elenchi o preamboli. La prima frase deve avere al massimo 8 parole. Utente: {prompt}",
+                               contextHistory,
+                               conversationId: null,
+                               previousResponseId: null,
+                               cancellationToken: turnToken))
             {
-                case StreamTextDelta delta:
-                    answer.Append(delta.Delta);
-                    speechBuffer.Append(delta.Delta);
-                    SetStatus($"Hermes: {TrimForStatus(answer.ToString())}");
-                    foreach (var segment in DrainSpeechSegments(speechBuffer, flush: false))
-                    {
-                        playbackChain = QueueSpeechSegmentAsync(playbackChain, settings, segment, cancellationToken);
-                    }
-                    break;
-                case StreamDone done when !string.IsNullOrWhiteSpace(done.AccumulatedText):
-                    answer.Clear();
-                    answer.Append(done.AccumulatedText);
-                    break;
-                case StreamError error:
-                    throw new InvalidOperationException(error.Message);
+                turnToken.ThrowIfCancellationRequested();
+                switch (ev)
+                {
+                    case StreamTextDelta delta:
+                        answer.Append(delta.Delta);
+                        speechBuffer.Append(delta.Delta);
+                        SetStatus($"Hermes: {TrimForStatus(answer.ToString())}");
+                        foreach (var segment in DrainSpeechSegments(speechBuffer, flush: false))
+                        {
+                            playbackChain = QueueSpeechSegmentAsync(playbackChain, settings, segment, turnToken);
+                        }
+                        break;
+                    case StreamDone done when !string.IsNullOrWhiteSpace(done.AccumulatedText):
+                        answer.Clear();
+                        answer.Append(done.AccumulatedText);
+                        break;
+                    case StreamError error:
+                        throw new InvalidOperationException(error.Message);
+                }
             }
-        }
 
-        foreach (var segment in DrainSpeechSegments(speechBuffer, flush: true))
-        {
-            playbackChain = QueueSpeechSegmentAsync(playbackChain, settings, segment, cancellationToken);
+            foreach (var segment in DrainSpeechSegments(speechBuffer, flush: true))
+            {
+                playbackChain = QueueSpeechSegmentAsync(playbackChain, settings, segment, turnToken);
+            }
+            await playbackChain.ConfigureAwait(false);
         }
-        await playbackChain.ConfigureAwait(false);
+        catch
+        {
+            turnCts.Cancel();
+            try { await playbackChain.ConfigureAwait(false); }
+            catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"[VoicePage] Speech queue cleanup failed: {ex.Message}"); }
+            throw;
+        }
 
         var finalText = answer.ToString().Trim();
         if (!string.IsNullOrWhiteSpace(finalText))
@@ -256,19 +320,20 @@ public sealed partial class VoicePage : Page
         string text,
         CancellationToken cancellationToken)
     {
-        var synthesis = SpeechGatewayService.SynthesizeToFileAsync(settings, text, cancellationToken);
-        return PlaySynthesizedAfterAsync(previous, synthesis, cancellationToken);
+        return SynthesizeAndPlayAfterAsync(previous, settings, text, cancellationToken);
     }
 
-    private async Task PlaySynthesizedAfterAsync(
+    private async Task SynthesizeAndPlayAfterAsync(
         Task previous,
-        Task<string> synthesis,
+        AppSettings settings,
+        string text,
         CancellationToken cancellationToken)
     {
-        var file = await synthesis.ConfigureAwait(false);
+        await previous.ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        var file = await SpeechGatewayService.SynthesizeToFileAsync(settings, text, cancellationToken).ConfigureAwait(false);
         try
         {
-            await previous.ConfigureAwait(false);
             await PlayAudioFileAsync(file, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -325,10 +390,22 @@ public sealed partial class VoicePage : Page
                 return;
             }
             registration = cancellationToken.Register(() => DispatcherQueue.TryEnqueue(() => Complete(canceled: true)));
+            if (Volatile.Read(ref finished) != 0)
+            {
+                registration.Dispose();
+                return;
+            }
             if (Volatile.Read(ref finished) == 0)
             {
                 SetPhase(VoiceCallPhase.Speaking);
-                player.Play();
+                try
+                {
+                    player.Play();
+                }
+                catch (Exception ex)
+                {
+                    Complete(ex);
+                }
             }
         }))
         {
@@ -474,7 +551,7 @@ public sealed partial class VoicePage : Page
         }
         if (text.Length > 46)
         {
-            var soft = text.LastIndexOfAny(new[] { ',', ';', ':', ' ' }, Math.Min(text.Length - 1, 46));
+            var soft = text.LastIndexOfAny(SoftBreakCharacters, Math.Min(text.Length - 1, 46));
             return soft > 25 ? soft + 1 : 46;
         }
         return flush ? text.Length : -1;
@@ -581,7 +658,8 @@ public sealed partial class VoicePage : Page
 
     private static void TryDelete(string path)
     {
-        try { File.Delete(path); } catch { }
+        try { File.Delete(path); }
+        catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"[VoicePage] Temp cleanup failed for '{path}': {ex.Message}"); }
     }
 
     private static string CreateWaitingToneFile()

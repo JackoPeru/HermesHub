@@ -33,6 +33,7 @@ public sealed record StreamVisualBlocks(IReadOnlyList<VisualBlockRecord> Blocks,
 public sealed record StreamRawHermesEvent(string Name, string Json) : ChatStreamEvent;
 public sealed record StreamDone(ChatStreamStats Stats, string AccumulatedText, string AccumulatedThinking) : ChatStreamEvent;
 public sealed record StreamError(string Message) : ChatStreamEvent;
+public sealed record StreamCancelled : ChatStreamEvent;
 public sealed record StreamStatus(string Message) : ChatStreamEvent;
 public sealed record StreamPromptProgress(
     int Percent,
@@ -83,7 +84,7 @@ public static class ChatStreamClient
         string? lastError = null;
         var nativeMode = HermesHubProtocol.IsNativePreferred(settings);
         attachments ??= Array.Empty<ChatInputAttachment>();
-        await GatewayService.EnsureReachableGatewayAsync(settings);
+        await GatewayService.EnsureReachableGatewayAsync(settings, cancellationToken);
         var (promptForModel, uploadedRefs) = await BuildPromptWithAttachmentToolRefsAsync(settings, prompt, attachments, cancellationToken);
         var payloadAttachments = uploadedRefs > 0
             ? attachments.Where(attachment => !attachment.MimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)).ToArray()
@@ -432,6 +433,10 @@ public static class ChatStreamClient
             {
                 response = await StreamClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 sendError = ex.Message;
@@ -443,29 +448,29 @@ public static class ChatStreamClient
                 yield break;
             }
 
-            if (!response.IsSuccessStatusCode)
-            {
-                var body = await response.Content.ReadAsStringAsync(cancellationToken);
-                var canRetry = attempt < authCandidates.Length - 1 &&
-                               GatewayService.ShouldRetryWithBearerAuth((int)response.StatusCode, body);
-                if (canRetry)
-                {
-                    yield return new StreamStatus("API key Hermes non accettata. Riprovo automaticamente...");
-                    continue;
-                }
-                yield return new StreamError($"{label}: HTTP {(int)response.StatusCode} {response.ReasonPhrase}: {Trim(body)}");
-                yield break;
-            }
-
             try
             {
+                if (!response.IsSuccessStatusCode)
+                {
+                    var body = await ReadLimitedStringAsync(response.Content, 64 * 1024, cancellationToken);
+                    var canRetry = attempt < authCandidates.Length - 1 &&
+                                   GatewayService.ShouldRetryWithBearerAuth((int)response.StatusCode, body);
+                    if (canRetry)
+                    {
+                        yield return new StreamStatus("API key Hermes non accettata. Riprovo automaticamente...");
+                        continue;
+                    }
+                    yield return new StreamError($"{label}: HTTP {(int)response.StatusCode} {response.ReasonPhrase}: {Trim(body)}");
+                    yield break;
+                }
+
                 yield return new StreamStatus("Prompt inviato. Attendo primo token...");
                 var mediaType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
                 var isSse = mediaType.Contains("event-stream", StringComparison.OrdinalIgnoreCase);
 
                 if (!isSse)
                 {
-                    var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                    var body = await ReadLimitedStringAsync(response.Content, 10 * 1024 * 1024, cancellationToken);
                     foreach (var ev in FallbackParseFullBody(body))
                     {
                         yield return ev;
@@ -522,7 +527,7 @@ public static class ChatStreamClient
                         continue;
                     }
 
-                    if (line.StartsWith(":", StringComparison.Ordinal))
+                    if (line.StartsWith(':'))
                     {
                         continue;
                     }
@@ -633,24 +638,39 @@ public static class ChatStreamClient
         ChatStreamStats? finalStats = null;
         var lastStatus = string.Empty;
         var startedAt = Stopwatch.StartNew();
-        while (!cancellationToken.IsCancellationRequested)
+        var consecutiveFailures = 0;
+        while (!cancellationToken.IsCancellationRequested && startedAt.Elapsed < TimeSpan.FromMinutes(30))
         {
             await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
             var status = await SendJsonAsync(HttpMethod.Get, $"{settings.GatewayUrl.TrimEnd('/')}/runs/{runId}", null, true, cancellationToken);
             if (status.StatusCode == 404)
             {
+                consecutiveFailures++;
                 yield return new StreamStatus($"Run {runId}: non piu' in cache gateway. Se il lavoro era lungo, puo' essere ancora in esecuzione sul processo Hermes.");
+                if (consecutiveFailures >= 5)
+                {
+                    yield return new StreamError($"Run {runId}: stato non più disponibile dopo {consecutiveFailures} tentativi.");
+                    yield break;
+                }
                 continue;
             }
             if (status.StatusCode is < 200 or > 299)
             {
+                consecutiveFailures++;
                 yield return new StreamStatus($"Run {runId}: polling HTTP {status.StatusCode}");
+                if (consecutiveFailures >= 5)
+                {
+                    yield return new StreamError($"Run {runId}: polling fallito dopo {consecutiveFailures} tentativi.");
+                    yield break;
+                }
                 continue;
             }
 
+            consecutiveFailures = 0;
+
             using var doc = JsonDocument.Parse(status.Body);
             var root = doc.RootElement;
-            var state = GetString(root, "status") ?? "running";
+            var state = (GetString(root, "status") ?? "running").Trim().ToLowerInvariant();
             var lastEvent = GetString(root, "last_event");
             var message = string.IsNullOrWhiteSpace(lastEvent) ? $"Run {runId}: {state}" : $"Run {runId}: {state} ({lastEvent})";
             if (!string.Equals(message, lastStatus, StringComparison.Ordinal))
@@ -691,6 +711,11 @@ public static class ChatStreamClient
                     "");
                 yield break;
             }
+        }
+
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            yield return new StreamError($"Run {runId} ancora attiva dopo 30 minuti: polling locale terminato.");
         }
     }
 
@@ -835,7 +860,7 @@ public static class ChatStreamClient
             try
             {
                 using var response = await StreamClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken);
-                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                var body = await ReadLimitedStringAsync(response.Content, 1024 * 1024, cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
                     if (GatewayService.ShouldRetryWithBearerAuth((int)response.StatusCode, body))
@@ -849,7 +874,7 @@ public static class ChatStreamClient
                 var root = doc.RootElement;
                 var path = GetString(root, "path") ?? GetString(root, "server_path");
                 var mediaUrl = GetString(root, "media_url") ?? GetString(root, "url");
-                if (!string.IsNullOrWhiteSpace(mediaUrl) && mediaUrl.StartsWith("/", StringComparison.Ordinal))
+                if (!string.IsNullOrWhiteSpace(mediaUrl) && mediaUrl.StartsWith('/'))
                 {
                     mediaUrl = $"{GatewayOrigin(settings.GatewayUrl)}{mediaUrl}";
                 }
@@ -935,7 +960,7 @@ public static class ChatStreamClient
             }
 
             using var response = await StreamClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            var body = await ReadLimitedStringAsync(response.Content, 10 * 1024 * 1024, cancellationToken);
             if (GatewayService.ShouldRetryWithBearerAuth((int)response.StatusCode, body))
             {
                 continue;
@@ -960,7 +985,7 @@ public static class ChatStreamClient
         }
         catch (JsonException ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[ChatStream] JSON parse fallito ({eventName ?? "<no-event>"}): {ex.Message}. Payload: {data[..Math.Min(120, data.Length)]}");
+            System.Diagnostics.Trace.WriteLine($"[ChatStream] JSON parse fallito ({eventName ?? "<no-event>"}): {ex.Message}. Payload: {data[..Math.Min(120, data.Length)]}");
             document = null;
         }
 
@@ -1078,7 +1103,8 @@ public static class ChatStreamClient
                 yield break;
             }
 
-            if (t.Contains("output_text.delta") || t.EndsWith(".delta") && t.Contains("output_text"))
+            if (t.Contains("output_text.delta", StringComparison.Ordinal) ||
+                t.EndsWith(".delta", StringComparison.Ordinal) && t.Contains("output_text", StringComparison.Ordinal))
             {
                 var delta = GetString(element, "delta") ?? GetString(element, "text");
                 if (!string.IsNullOrEmpty(delta))
@@ -1683,6 +1709,39 @@ public static class ChatStreamClient
         }
         var t = body.Trim();
         return t.Length > 240 ? t[..240] + "…" : t;
+    }
+
+    private static async Task<string> ReadLimitedStringAsync(
+        HttpContent content,
+        int maxBytes,
+        CancellationToken cancellationToken)
+    {
+        if (content.Headers.ContentLength is long declaredLength && declaredLength > maxBytes)
+        {
+            throw new InvalidDataException($"Risposta Hermes oltre il limite di {maxBytes / 1024} KB.");
+        }
+
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var buffer = new MemoryStream(Math.Min(maxBytes, 64 * 1024));
+        var chunk = new byte[16 * 1024];
+        var total = 0;
+        while (true)
+        {
+            var read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+            if (total > maxBytes)
+            {
+                throw new InvalidDataException($"Risposta Hermes oltre il limite di {maxBytes / 1024} KB.");
+            }
+            buffer.Write(chunk, 0, read);
+        }
+
+        return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, checked((int)buffer.Length));
     }
 
     private static string StripReasoningArtifacts(string text)

@@ -117,7 +117,7 @@ public sealed partial class HardwarePage : Page
         }
     }
 
-    private static UIElement ComponentCard(HardwareComponent component)
+    private static Grid ComponentCard(HardwareComponent component)
     {
         var root = new Grid { RowSpacing = 6 };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -160,7 +160,7 @@ public sealed partial class HardwarePage : Page
         return root;
     }
 
-    private static FrameworkElement UsageBar(double percent)
+    private static Grid UsageBar(double percent)
     {
         var root = new Grid
         {
@@ -210,7 +210,7 @@ public sealed partial class HardwarePage : Page
         DetailPanel.Children.Add(StatsGrid(component.Stats));
     }
 
-    private static UIElement ChartBlock(string title, IReadOnlyList<double?> values, double maxValue, string unit, Brush lineBrush)
+    private static Border ChartBlock(string title, IReadOnlyList<double?> values, double maxValue, string unit, Brush lineBrush)
     {
         const double width = 900;
         const double height = 220;
@@ -275,7 +275,7 @@ public sealed partial class HardwarePage : Page
         return root;
     }
 
-    private static UIElement StatsGrid(IReadOnlyList<HardwareStat> stats)
+    private static Grid StatsGrid(IReadOnlyList<HardwareStat> stats)
     {
         var grid = new Grid { ColumnSpacing = 12, RowSpacing = 12 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -323,7 +323,7 @@ public sealed partial class HardwarePage : Page
         }
     }
 
-    private static IReadOnlyList<HardwareComponent> BuildComponents(HardwareSnapshot snapshot, HardwareSnapshot? previous)
+    private static List<HardwareComponent> BuildComponents(HardwareSnapshot snapshot, HardwareSnapshot? previous)
     {
         var components = new List<HardwareComponent>();
         var temperatures = NormalizeTemperatures(snapshot.Temperatures);
@@ -449,7 +449,7 @@ public sealed partial class HardwarePage : Page
     private sealed record DiskGroup(string Key, bool IsSsd, string Subtitle, long TotalBytes, long UsedBytes, long FreeBytes, double Percent, string PartitionsText, string DevicesText);
     private sealed record TemperatureView(string Title, string Source, double CurrentC, double? HighC, double? CriticalC, int SortKey);
 
-    private static IReadOnlyList<DiskGroup> BuildDiskGroups(IReadOnlyList<HardwareDiskRecord> disks)
+    private static List<DiskGroup> BuildDiskGroups(IReadOnlyList<HardwareDiskRecord> disks)
     {
         var physicalKeys = disks
             .Select(disk => TryPhysicalDiskKey(disk.Device))
@@ -518,7 +518,7 @@ public sealed partial class HardwarePage : Page
         return mountpoint == "/" ? " " : mountpoint;
     }
 
-    private static IReadOnlyList<TemperatureView> NormalizeTemperatures(IReadOnlyList<HardwareTemperatureRecord> temperatures)
+    private static List<TemperatureView> NormalizeTemperatures(IReadOnlyList<HardwareTemperatureRecord> temperatures)
     {
         var hasNvmeComposite = temperatures.Any(item =>
             item.Name.Equals("nvme", StringComparison.OrdinalIgnoreCase) &&
@@ -596,11 +596,11 @@ public sealed partial class HardwarePage : Page
         TextWrapping = TextWrapping.Wrap
     };
 
-    private static Brush WhiteBrush() => new SolidColorBrush(Colors.White);
+    private static SolidColorBrush WhiteBrush() => new(Colors.White);
     private static Brush MutedBrush() => (Brush)Application.Current.Resources["MutedTextBrush"];
-    private static Brush AccentBrush(double alpha = 1.0) => new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb((byte)(255 * alpha), 245, 165, 36));
+    private static SolidColorBrush AccentBrush(double alpha = 1.0) => new(Microsoft.UI.ColorHelper.FromArgb((byte)(255 * alpha), 245, 165, 36));
     private static Brush UiBorderBrush() => (Brush)Application.Current.Resources["BorderBrushSoft"];
-    private static Brush PanelBrush() => new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(255, 21, 25, 34));
+    private static SolidColorBrush PanelBrush() => new(Microsoft.UI.ColorHelper.FromArgb(255, 21, 25, 34));
 
     private static double ClampPercent(double value) => double.IsFinite(value) ? Math.Clamp(value, 0, 100) : 0;
 

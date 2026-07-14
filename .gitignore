@@ -6,6 +6,15 @@ obj/
 
 # Android / Gradle
 .gradle/
+.kotlin/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+__pycache__/
+*.py[cod]
+.coverage
+coverage.xml
+htmlcov/
 build/
 local.properties
 src/NemoclawChat.Android/app/build/
@@ -20,9 +29,28 @@ dist/
 .vs/
 *.iml
 
+# Local Codex/debug sessions
+.codex-remote-attachments/
+.dbg/
+.agents/
+.codex/
+
 # OS
 Thumbs.db
 Desktop.ini
+
+# Local signing material
+*.jks
+*.keystore
+*.pfx
+*.p12
+*.pem
+*.key
+*.cer
+keystore.properties
+.env
+.env.*
+!.env.example
 
 # Build / Release
 publish/
@@ -30,3 +58,9 @@ release_assets*/
 release-assets/
 update_assets/
 artifacts/
+*.apk
+*.msix
+*.msixupload
+*.appx
+*.appxbundle
+*.tar.gz

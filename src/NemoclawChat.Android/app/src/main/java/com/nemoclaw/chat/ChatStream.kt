@@ -5,37 +5,50 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.trySendBlocking
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.Response
+import okio.BufferedSink
 import android.util.Log
+import android.util.Base64
+import android.util.Base64OutputStream
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
+import java.io.File
 import java.net.ConnectException
 import java.net.URI
 import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.coroutines.resume
 
 private const val STREAM_ACCUM_MAX_CHARS = 2_000_000
 private const val STREAM_UI_BATCH_MAX_CHARS = 2048
 private const val STREAM_UI_BATCH_NS = 33_000_000L
+private const val RUN_POLL_TIMEOUT_MS = 30 * 60 * 1000L
+private const val RUN_POLL_MAX_CONSECUTIVE_FAILURES = 5
+private const val INLINE_ATTACHMENT_MAX_BYTES = 8L * 1024 * 1024
+private const val INLINE_ATTACHMENTS_TOTAL_MAX_BYTES = 12L * 1024 * 1024
+private const val SSE_LINE_MAX_BYTES = 256L * 1024L
 private val plugAndPlayStreamGatewayRoots = listOf(
     "http://hermes:8642",
     "http://100.94.223.14:8642",
-    "http://hermes.local:8642",
-    "http://hermes-hub:8642",
-    "http://hermeshub:8642",
-    "http://home-server:8642",
-    "http://server:8642",
-    "http://100.105.46.6:8642"
+    "http://hermes.local:8642"
 )
 
 private val streamHttpClient: OkHttpClient = OkHttpClient.Builder()
@@ -159,6 +172,22 @@ data class StreamingState(
                 } else thinkingElapsedSec
             ).withActivity(if (text.isEmpty()) "Primo testo ricevuto." else null)
         }
+        is ChatStreamEvent.TextSnapshot -> {
+            val merged = mergeTextSnapshot(text, event.text)
+            val media = extractInlineMediaBlocks(merged)
+            copy(
+                text = stripInlineMediaMarkup(merged),
+                visualBlocks = mergeVisualBlocks(visualBlocks, media),
+                promptProgressPercent = null,
+                promptProgressEstimated = false,
+                promptProgressProcessedTokens = null,
+                promptProgressTotalTokens = null,
+                promptProgressCachedTokens = null,
+                promptProgressTimeMs = null,
+                status = "Risposta finale ricevuta.",
+                thinkingFrozen = thinkingFrozen || hasThinking
+            ).withActivity("Snapshot finale ricevuto.")
+        }
         is ChatStreamEvent.ThinkingDelta -> copy(
             thinking = mergeTextDelta(thinking, event.delta),
             hasThinking = true,
@@ -269,13 +298,17 @@ private fun mergeVisualBlocks(current: List<VisualBlock>, incoming: List<VisualB
     }
 }
 
-private fun mergeTextDelta(current: String, delta: String): String {
+internal fun mergeTextDelta(current: String, delta: String): String {
     if (delta.isEmpty()) return current
     if (current.isEmpty()) return delta
-    if (delta == current) return current
-    if (delta.startsWith(current)) return delta
-    if (current.endsWith(delta)) return current
     return current + delta
+}
+
+internal fun mergeTextSnapshot(current: String, snapshot: String): String {
+    if (snapshot.isEmpty()) return current
+    if (current.isEmpty() || snapshot.startsWith(current)) return snapshot
+    if (current.startsWith(snapshot) || current == snapshot) return current
+    return current + snapshot
 }
 
 private fun inferToolPendingStatus(tool: ToolCallState): Boolean {
@@ -285,6 +318,7 @@ private fun inferToolPendingStatus(tool: ToolCallState): Boolean {
 
 sealed class ChatStreamEvent {
     data class TextDelta(val delta: String) : ChatStreamEvent()
+    data class TextSnapshot(val text: String) : ChatStreamEvent()
     data class ThinkingDelta(val delta: String) : ChatStreamEvent()
     data class ToolCallStart(val id: String, val name: String) : ChatStreamEvent()
     data class ToolCallArgs(val id: String, val delta: String) : ChatStreamEvent()
@@ -313,8 +347,9 @@ sealed class ChatStreamEvent {
 data class ChatInputAttachment(
     val filename: String,
     val mimeType: String,
-    val dataUrl: String,
-    val sizeBytes: Long
+    val dataUrl: String = "",
+    val sizeBytes: Long,
+    val localFilePath: String? = null
 )
 
 private data class UploadedAttachmentRef(
@@ -336,7 +371,10 @@ fun streamChatRequest(
     apiKey: String?
 ): Flow<ChatStreamEvent> = flow {
     val start = System.nanoTime()
-    var sawDelta = false
+    var sawActivity = false
+    var sawAnswerText = false
+    var sawVisualOutput = false
+    var sawTerminal = false
     var ttftMs: Double? = null
     var promptTokens: Int? = null
     var completionTokens: Int? = null
@@ -352,15 +390,21 @@ fun streamChatRequest(
     val videoMode = isVideoRequest(prompt)
     val nativeMode = isHermesNative(settings)
     val serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
-    val promptForModelResult = buildPromptWithAttachmentToolRefs(settings, prompt, attachments, apiKey)
-    val promptForModel = promptForModelResult.first
-    val payloadAttachments = if (promptForModelResult.second > 0) {
-        attachments.filterNot { it.mimeType.startsWith("image/", ignoreCase = true) }
-    } else {
-        attachments
+    val attachmentPreparation = buildPromptWithAttachmentToolRefs(settings, prompt, attachments, apiKey)
+    val promptForModel = attachmentPreparation.prompt
+    val payloadAttachments = attachmentPreparation.inlineAttachments
+    if (attachmentPreparation.uploadedCount > 0) {
+        emit(ChatStreamEvent.Status("Allegati caricati sul gateway: ${attachmentPreparation.uploadedCount}."))
     }
-    if (promptForModelResult.second > 0) {
-        emit(ChatStreamEvent.Status("Allegati caricati sul gateway per tool vision: ${promptForModelResult.second}."))
+    if (attachmentPreparation.uploadErrors.isNotEmpty()) {
+        emit(ChatStreamEvent.Status("Upload parziale: ${attachmentPreparation.uploadErrors.joinToString("; ").take(320)}"))
+    }
+    val inlineBytes = payloadAttachments.sumOf { it.sizeBytes.coerceAtLeast(0) }
+    val oversizedInline = payloadAttachments.firstOrNull { it.sizeBytes > INLINE_ATTACHMENT_MAX_BYTES }
+    if (oversizedInline != null || inlineBytes > INLINE_ATTACHMENTS_TOTAL_MAX_BYTES) {
+        val detail = oversizedInline?.filename ?: "allegati multipli"
+        emit(ChatStreamEvent.Error("Upload gateway fallito per $detail e payload inline oltre il limite memoria sicuro."))
+        return@flow
     }
     val textBatch = StringBuilder()
     val thinkingBatch = StringBuilder()
@@ -383,10 +427,11 @@ fun streamChatRequest(
         when (ev) {
             is ChatStreamEvent.TextDelta -> {
                 val tokenAt = System.nanoTime()
-                if (!sawDelta) {
+                if (!sawActivity) {
                     ttftMs = (tokenAt - start) / 1_000_000.0
-                    sawDelta = true
                 }
+                sawActivity = true
+                if (ev.delta.isNotEmpty()) sawAnswerText = true
                 accumText.appendBounded(ev.delta)
                 textBatch.append(ev.delta)
                 val now = System.nanoTime()
@@ -397,11 +442,24 @@ fun streamChatRequest(
                 }
                 return false
             }
-            is ChatStreamEvent.ThinkingDelta -> {
-                if (!sawDelta) {
+            is ChatStreamEvent.TextSnapshot -> {
+                if (!sawActivity) {
                     ttftMs = (System.nanoTime() - start) / 1_000_000.0
-                    sawDelta = true
                 }
+                sawActivity = true
+                if (ev.text.isNotEmpty()) sawAnswerText = true
+                flushDeltaBatches()
+                val merged = mergeTextSnapshot(accumText.toString(), ev.text)
+                accumText.clear()
+                accumText.appendBounded(merged)
+                emit(ev)
+                return false
+            }
+            is ChatStreamEvent.ThinkingDelta -> {
+                if (!sawActivity) {
+                    ttftMs = (System.nanoTime() - start) / 1_000_000.0
+                }
+                sawActivity = true
                 accumThink.appendBounded(ev.delta)
                 thinkingBatch.append(ev.delta)
                 val now = System.nanoTime()
@@ -430,23 +488,42 @@ fun streamChatRequest(
             is ChatStreamEvent.Error -> {
                 flushDeltaBatches()
                 lastError = ev.message
+                emit(ev)
                 return true
             }
-            else -> flushDeltaBatches()
+            else -> {
+                if (ev is ChatStreamEvent.VisualBlocks || ev is ChatStreamEvent.ToolCallStart ||
+                    ev is ChatStreamEvent.ToolCallArgs || ev is ChatStreamEvent.ToolCallEnd ||
+                    ev is ChatStreamEvent.ToolResult
+                ) {
+                    sawActivity = true
+                }
+                if (ev is ChatStreamEvent.VisualBlocks && ev.blocks.isNotEmpty()) sawVisualOutput = true
+                flushDeltaBatches()
+            }
         }
         emit(ev)
         return false
     }
 
     suspend fun emitAndTrack(ev: ChatStreamEvent): Boolean {
-        if (ev is ChatStreamEvent.TextDelta) {
-            var stop = false
-            for (extracted in thinkExtractor.process(ev.delta)) {
-                if (emitAndTrackInternal(extracted)) stop = true
+        when (ev) {
+            is ChatStreamEvent.TextDelta -> {
+                var stop = false
+                for (extracted in thinkExtractor.process(ev.delta)) {
+                    if (emitAndTrackInternal(extracted)) stop = true
+                }
+                return stop
             }
-            return stop
+            is ChatStreamEvent.TextSnapshot -> {
+                var stop = false
+                for (reconciled in thinkExtractor.processSnapshot(ev.text)) {
+                    if (emitAndTrackInternal(reconciled)) stop = true
+                }
+                return stop
+            }
+            else -> return emitAndTrackInternal(ev)
         }
-        return emitAndTrackInternal(ev)
     }
 
     if (mode.equals("Agente", ignoreCase = true)) {
@@ -481,7 +558,7 @@ fun streamChatRequest(
         }
 
         val responseUrl = "${settings.gatewayUrl.trimEnd('/')}/responses"
-        val previousResponseCandidates = if (previousResponseId.isNullOrBlank()) {
+        val previousResponseCandidates = if (serverConversationId != null || previousResponseId.isNullOrBlank()) {
             listOf<String?>(null)
         } else {
             listOf(previousResponseId, null)
@@ -492,30 +569,21 @@ fun streamChatRequest(
                 emit(ChatStreamEvent.Status("Contesto server rifiutato. Riprovo senza previous_response_id..."))
             }
             val responsePayload = buildResponsePayload(candidatePreviousResponseId)
-            var responsesAttempt = 0
-            while (responsesAttempt < 2 && !sawDelta) {
-                responsesAttempt++
-                lastError = null
-                val terminated = openSseStream(responseUrl, responsePayload, "Hermes Responses API", apiKey, true) { ev ->
-                    emitAndTrack(ev)
-                }
-                if (!terminated || sawDelta) {
-                    break
-                }
-                if (lastError != null && responsesAttempt < 2) {
-                    kotlinx.coroutines.delay(500L)
-                    emit(ChatStreamEvent.Status("Riconnessione Hermes (tentativo ${responsesAttempt + 1})..."))
-                }
+            lastError = null
+            val result = openSseStream(responseUrl, responsePayload, "Hermes Responses API", apiKey, true) { ev ->
+                emitAndTrack(ev)
             }
-            if (sawDelta || lastError == null) {
+            sawTerminal = result.terminal
+            lastError = result.error ?: lastError
+            if (result.accepted || result.error == null) {
                 break
             }
-            if (candidatePreviousResponseId != null && isRecoverablePreviousResponseError(lastError)) {
+            if (candidatePreviousResponseId != null && isRecoverablePreviousResponseError(result.error)) {
                 continue@responseCandidateLoop
             }
             break
         }
-        if (lastError != null && !sawDelta) {
+        if (lastError != null && !sawActivity) {
             Log.w("ChatStream", "Responses API fallback: $lastError")
             if (nativeMode && isHermesAuthError(lastError)) {
                 emit(ChatStreamEvent.Error("Hermes ha rifiutato l'API key anche dopo retry con key salvata, hermes-hub, no-auth e senza previous_response_id. Ripristina API key in Impostazioni o allinea HERMES_API_KEY sul gateway."))
@@ -529,7 +597,7 @@ fun streamChatRequest(
         }
     }
 
-    if (!sawDelta) {
+    if (!sawActivity) {
         if (nativeMode && settings.strictNativeMode) {
             emit(ChatStreamEvent.Error("Strict native mode: Hermes Native/Responses non disponibile. Stream vuoto."))
             return@flow
@@ -581,15 +649,31 @@ fun streamChatRequest(
         })
         val url = "${settings.gatewayUrl.trimEnd('/')}/chat/completions"
         lastError = null
-        openSseStream(url, payload, "Hermes Chat Completions", apiKey, true, serverConversationId) { ev ->
+        val result = openSseStream(url, payload, "Hermes Chat Completions", apiKey, true, serverConversationId) { ev ->
             emitAndTrack(ev)
         }
+        sawTerminal = result.terminal
+        lastError = result.error ?: lastError
     }
 
     val totalMs = (System.nanoTime() - start) / 1_000_000.0
-    if (!sawDelta) {
+    if (lastError != null) {
         flushDeltaBatches()
-        emit(ChatStreamEvent.Error(lastError ?: "Stream Hermes vuoto."))
+        if (sawActivity && !lastError.orEmpty().contains("parziale", ignoreCase = true)) {
+            emit(ChatStreamEvent.Error("Stream Hermes interrotto dopo una risposta parziale. $lastError"))
+        } else if (!sawActivity) {
+            emit(ChatStreamEvent.Error(lastError ?: "Errore stream Hermes."))
+        }
+        return@flow
+    }
+    if (!sawTerminal) {
+        flushDeltaBatches()
+        emit(ChatStreamEvent.Error("Stream Hermes chiuso senza evento terminale; risposta non confermata."))
+        return@flow
+    }
+    if (!sawActivity || (!sawAnswerText && !sawVisualOutput && accumText.isEmpty())) {
+        flushDeltaBatches()
+        emit(ChatStreamEvent.Error("Stream Hermes completato senza contenuto risposta."))
         return@flow
     }
 
@@ -606,6 +690,27 @@ fun streamChatRequest(
     emit(ChatStreamEvent.Done(ChatStreamStats(ttftMs, totalMs, tokensOut, tps, promptTokens, contextTokens, contextLength, contextPercent)))
 }.flowOn(Dispatchers.IO)
 
+private data class SseOpenResult(
+    val accepted: Boolean,
+    val terminal: Boolean,
+    val error: String?
+)
+
+private data class AttachmentPreparation(
+    val prompt: String,
+    val inlineAttachments: List<ChatInputAttachment>,
+    val uploadedCount: Int,
+    val uploadErrors: List<String>
+)
+
+private sealed interface SseAttemptSignal {
+    data object Accepted : SseAttemptSignal
+    data class Event(val event: ChatStreamEvent) : SseAttemptSignal
+    data class HttpFailure(val code: Int, val body: String) : SseAttemptSignal
+    data class NetworkFailure(val message: String) : SseAttemptSignal
+    data class Finished(val terminal: Boolean) : SseAttemptSignal
+}
+
 private suspend fun openSseStream(
     url: String,
     payload: JSONObject,
@@ -613,123 +718,165 @@ private suspend fun openSseStream(
     apiKey: String?,
     allowCompatAuth: Boolean,
     sessionId: String? = null,
-    onEvent: suspend (ChatStreamEvent) -> Boolean
-): Boolean {
-    var call: Call? = null
-    val cancellationHook = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
-        if (cause is CancellationException) {
-            call?.cancel()
-        }
-    }
-    return try {
-        val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-        val authCandidates = hermesAuthCandidates(apiKey, allowCompatAuth)
-        var lastHttpError: Pair<Int, String>? = null
-        var lastNetworkError: String? = null
+    onEvent: suspend (ChatStreamEvent) -> Unit
+): SseOpenResult {
+    val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+    val authCandidates = hermesAuthCandidates(apiKey, allowCompatAuth)
+    var lastError: String? = null
 
-        for (candidateUrl in plugAndPlayStreamUrlCandidates(url)) {
-            for ((index, bearerToken) in authCandidates.withIndex()) {
-                onEvent(ChatStreamEvent.Status("$label: connessione stream..."))
-                val builder = Request.Builder()
-                    .url(candidateUrl)
-                    .header("Accept", "text/event-stream, application/json")
-                    .header("User-Agent", "HermesHub-Android")
-                bearerToken?.let { builder.header("Authorization", "Bearer $it") }
-                sessionId?.takeIf { it.isNotBlank() }?.let { builder.header("X-Hermes-Session-Id", it) }
-                val request = builder.post(body).build()
-                val activeCall = streamHttpClient.newCall(request)
-                call = activeCall
-                var completedSuccessfully = false
-                try {
-                    activeCall.execute().use { response ->
-                        val responseBody = response.body
-                        if (!response.isSuccessful) {
-                            val text = responseBody.string().take(240)
-                            lastHttpError = response.code to text
-                            val canRetry = index < authCandidates.lastIndex && shouldRetryHermesWithBearerAuth(response.code, text)
-                            if (canRetry) {
-                                onEvent(ChatStreamEvent.Status("API key Hermes non accettata. Riprovo automaticamente..."))
-                                return@use
-                            }
-                            return@use
-                        }
-                        lastHttpError = null
+    candidateLoop@ for (candidateUrl in plugAndPlayStreamUrlCandidates(url)) {
+        for ((index, bearerToken) in authCandidates.withIndex()) {
+            currentCoroutineContext().ensureActive()
+            onEvent(ChatStreamEvent.Status("$label: connessione stream..."))
+            val builder = Request.Builder()
+                .url(candidateUrl)
+                .header("Accept", "text/event-stream, application/json")
+                .header("User-Agent", "HermesHub-Android")
+            bearerToken?.let { builder.header("Authorization", "Bearer $it") }
+            sessionId?.takeIf { it.isNotBlank() }?.let { builder.header("X-Hermes-Session-Id", it) }
+            val request = builder.post(body).build()
+            var accepted = false
+            var terminal = false
+            var httpFailure: SseAttemptSignal.HttpFailure? = null
+            var networkFailure: String? = null
+
+            streamSseAttempt(request).collect { signal ->
+                when (signal) {
+                    SseAttemptSignal.Accepted -> {
+                        accepted = true
                         onEvent(ChatStreamEvent.Status("$label connesso: $candidateUrl"))
                         onEvent(ChatStreamEvent.Status("Prompt inviato. Attendo primo token..."))
-                        val ct = responseBody.contentType()?.toString().orEmpty()
-                        if (!ct.contains("event-stream", ignoreCase = true)) {
-                            val full = responseBody.string()
-                            parseFullBody(full).forEach { onEvent(it) }
-                            completedSuccessfully = true
-                            return@use
-                        }
-                        val source = responseBody.source()
-                        val dataBuf = StringBuilder()
-                        var eventName: String? = null
-                        while (true) {
-                            currentCoroutineContext().ensureActive()
-                            val line = source.readUtf8Line() ?: break
-                            if (line.isEmpty()) {
-                                if (dataBuf.isNotEmpty()) {
-                                    parseSseData(eventName, dataBuf.toString()).forEach { onEvent(it) }
-                                    dataBuf.clear()
-                                    eventName = null
-                                }
-                                continue
-                            }
-                            when {
-                                line.startsWith(":") -> Unit
-                                line.startsWith("event:", ignoreCase = true) -> {
-                                    eventName = line.substring(6).trim()
-                                }
-                                line.startsWith("data:", ignoreCase = true) -> {
-                                    if (dataBuf.isNotEmpty()) dataBuf.append('\n')
-                                    val part = line.substring(5).let { if (it.startsWith(" ")) it.drop(1) else it }
-                                    dataBuf.append(part)
-                                }
-                            }
-                        }
-                        if (dataBuf.isNotEmpty()) {
-                            parseSseData(eventName, dataBuf.toString()).forEach { onEvent(it) }
-                        }
-                        completedSuccessfully = true
                     }
-                } catch (ex: CancellationException) {
-                    throw ex
-                } catch (ex: Exception) {
-                    lastNetworkError = when (ex) {
-                        is SocketTimeoutException -> "$candidateUrl timeout"
-                        is ConnectException -> "$candidateUrl connessione fallita"
-                        else -> "$candidateUrl ${ex.message ?: ex.javaClass.simpleName}"
-                    }
-                }
-                if (completedSuccessfully && lastHttpError == null) {
-                    return false
+                    is SseAttemptSignal.Event -> onEvent(signal.event)
+                    is SseAttemptSignal.HttpFailure -> httpFailure = signal
+                    is SseAttemptSignal.NetworkFailure -> networkFailure = signal.message
+                    is SseAttemptSignal.Finished -> terminal = signal.terminal
                 }
             }
-        }
-        lastHttpError?.let {
-            val message = if (it.first == 401) {
-                "$label: API key rifiutata. Provati token salvato, hermes-hub e no-auth."
-            } else {
-                "$label HTTP ${it.first}: ${it.second}"
+
+            if (accepted) {
+                if (terminal) return SseOpenResult(true, true, null)
+                val detail = networkFailure ?: "connessione chiusa prima dell'evento terminale"
+                return SseOpenResult(true, false, "$label: stream parziale, $detail")
             }
-            onEvent(ChatStreamEvent.Error(message))
+
+            httpFailure?.let { failure ->
+                val canRetryAuth = shouldRetrySseAuth(
+                    accepted = false,
+                    code = failure.code,
+                    body = failure.body,
+                    hasMoreAuthCandidates = index < authCandidates.lastIndex
+                )
+                if (canRetryAuth) {
+                    onEvent(ChatStreamEvent.Status("API key Hermes non accettata. Riprovo automaticamente..."))
+                    return@let
+                }
+                val message = if (failure.code == 401) {
+                    "$label: API key rifiutata."
+                } else {
+                    "$label HTTP ${failure.code}: ${failure.body.take(240)}"
+                }
+                return SseOpenResult(false, false, message)
+            }
+            if (httpFailure != null) continue
+
+            lastError = networkFailure ?: "$candidateUrl non raggiungibile"
+            continue@candidateLoop
         }
-            ?: onEvent(ChatStreamEvent.Error(lastNetworkError ?: "$label: Hermes Gateway non raggiungibile."))
-        true
-    } catch (ex: CancellationException) {
-        throw ex
-    } catch (ex: Exception) {
-        val message = when (ex) {
-            is SocketTimeoutException -> "$label: timeout di rete verso Hermes Gateway."
-            is ConnectException -> "$label: connessione a Hermes Gateway fallita."
-            else -> "$label: ${ex.message ?: ex.javaClass.simpleName}"
+    }
+    return SseOpenResult(false, false, lastError ?: "$label: Hermes Gateway non raggiungibile.")
+}
+
+private fun streamSseAttempt(request: Request): Flow<SseAttemptSignal> = callbackFlow {
+    val call = streamHttpClient.newCall(request)
+    fun sendSignal(signal: SseAttemptSignal): Boolean = trySendBlocking(signal).isSuccess
+    call.enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            if (!call.isCanceled()) sendSignal(SseAttemptSignal.NetworkFailure(e.message ?: e.javaClass.simpleName))
+            close()
         }
-        onEvent(ChatStreamEvent.Error(message))
-        true
-    } finally {
-        cancellationHook?.dispose()
+
+        override fun onResponse(call: Call, response: Response) {
+            try {
+                response.use { current ->
+                    val responseBody = current.body
+                    if (!current.isSuccessful) {
+                        sendSignal(SseAttemptSignal.HttpFailure(current.code, responseBody.byteStream().readUtf8Bounded().take(240)))
+                        return@use
+                    }
+                    if (!sendSignal(SseAttemptSignal.Accepted)) return@use
+                    val contentType = responseBody.contentType()?.toString().orEmpty()
+                    if (!contentType.contains("event-stream", ignoreCase = true)) {
+                        parseFullBody(responseBody.byteStream().readUtf8Bounded()).forEach { if (!sendSignal(SseAttemptSignal.Event(it))) return@use }
+                        sendSignal(SseAttemptSignal.Finished(terminal = true))
+                        return@use
+                    }
+
+                    val source = responseBody.source()
+                    val dataBuffer = StringBuilder()
+                    var eventName: String? = null
+                    var terminalSeen = false
+
+                    fun flushEvent(): Boolean {
+                        if (dataBuffer.isEmpty()) return true
+                        val data = dataBuffer.toString()
+                        terminalSeen = terminalSeen || isTerminalSseEvent(eventName, data)
+                        val parsed = parseSseData(eventName, data)
+                        dataBuffer.clear()
+                        eventName = null
+                        return parsed.all { sendSignal(SseAttemptSignal.Event(it)) }
+                    }
+
+                    while (!call.isCanceled()) {
+                        val line = source.readUtf8LineBounded(SSE_LINE_MAX_BYTES) ?: break
+                        if (line.isEmpty()) {
+                            if (!flushEvent()) return@use
+                            continue
+                        }
+                        when {
+                            line.startsWith(":") -> Unit
+                            line.startsWith("event:", ignoreCase = true) -> eventName = line.substring(6).trim()
+                            line.startsWith("data:", ignoreCase = true) -> {
+                                val part = line.substring(5).let { if (it.startsWith(" ")) it.drop(1) else it }
+                                val separatorLength = if (dataBuffer.isNotEmpty()) 1 else 0
+                                if (dataBuffer.length + separatorLength + part.length > STREAM_ACCUM_MAX_CHARS) {
+                                    throw PayloadTooLargeException("Evento SSE superiore al limite consentito")
+                                }
+                                if (separatorLength > 0) dataBuffer.append('\n')
+                                dataBuffer.append(part)
+                            }
+                        }
+                    }
+                    if (!call.isCanceled() && !flushEvent()) return@use
+                    if (!call.isCanceled()) sendSignal(SseAttemptSignal.Finished(terminalSeen))
+                }
+            } catch (ex: Exception) {
+                if (!call.isCanceled()) sendSignal(SseAttemptSignal.NetworkFailure(ex.message ?: ex.javaClass.simpleName))
+            } finally {
+                close()
+            }
+        }
+    })
+    awaitClose { call.cancel() }
+}
+
+internal fun shouldRetrySseAuth(
+    accepted: Boolean,
+    code: Int,
+    body: String,
+    hasMoreAuthCandidates: Boolean
+): Boolean = !accepted && hasMoreAuthCandidates && shouldRetryHermesWithBearerAuth(code, body)
+
+internal fun isTerminalSseEvent(eventName: String?, data: String): Boolean {
+    if (data.trim() == "[DONE]") return true
+    val eventType = eventName.orEmpty().lowercase()
+    if (eventType.contains("response.completed") || eventType.contains("response.done")) return true
+    val root = runCatching { JSONObject(data) }.getOrNull() ?: return false
+    val type = root.optString("type", "").lowercase()
+    if (type.contains("response.completed") || type.contains("response.done")) return true
+    val choices = root.optJSONArray("choices") ?: return false
+    return (0 until choices.length()).any { index ->
+        choices.optJSONObject(index)?.optString("finish_reason").orEmpty().isNotBlank()
     }
 }
 
@@ -742,7 +889,7 @@ private fun buildMultimodalInput(prompt: String, attachments: List<ChatInputAtta
             content.put(
                 JSONObject()
                     .put("type", "input_image")
-                    .put("image_url", attachment.dataUrl)
+                    .put("image_url", attachment.inlineDataUrl())
                     .put("detail", "auto")
             )
         } else {
@@ -750,7 +897,7 @@ private fun buildMultimodalInput(prompt: String, attachments: List<ChatInputAtta
                 JSONObject()
                     .put("type", "input_file")
                     .put("filename", attachment.filename)
-                    .put("file_data", attachment.dataUrl)
+                    .put("file_data", attachment.inlineDataUrl())
             )
         }
     }
@@ -769,7 +916,7 @@ private fun buildChatCompletionsContent(prompt: String, attachments: List<ChatIn
                     .put(
                         "image_url",
                         JSONObject()
-                            .put("url", attachment.dataUrl)
+                            .put("url", attachment.inlineDataUrl())
                             .put("detail", "auto")
                     )
             )
@@ -784,26 +931,40 @@ private fun buildChatCompletionsContent(prompt: String, attachments: List<ChatIn
     return content
 }
 
-private fun buildPromptWithAttachmentToolRefs(
+private fun ChatInputAttachment.inlineDataUrl(): String {
+    if (dataUrl.isNotBlank()) return dataUrl
+    val path = localFilePath?.takeIf { it.isNotBlank() }
+        ?: throw IOException("Payload locale assente per $filename")
+    val file = File(path)
+    if (!file.isFile || file.length() <= 0L || file.length() > INLINE_ATTACHMENT_MAX_BYTES) {
+        throw IOException("Payload locale non valido o troppo grande per $filename")
+    }
+    val encoded = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
+    return "data:$mimeType;base64,$encoded"
+}
+
+private suspend fun buildPromptWithAttachmentToolRefs(
     settings: AppSettings,
     prompt: String,
     attachments: List<ChatInputAttachment>,
     apiKey: String?
-): Pair<String, Int> {
-    val images = attachments.filter { it.mimeType.startsWith("image/", ignoreCase = true) }
-    if (images.isEmpty()) return prompt to 0
-    val refs = images.map { uploadAttachmentForTool(settings, it, apiKey) }
-    val uploaded = refs.filter { it.error.isNullOrBlank() }
-    if (uploaded.isEmpty()) return prompt to 0
+): AttachmentPreparation {
+    if (attachments.isEmpty()) return AttachmentPreparation(prompt, emptyList(), 0, emptyList())
+    val refs = attachments.map { uploadAttachmentForTool(settings, it, apiKey) }
+    val uploadedIndexes = refs.indices.filter { refs[it].error.isNullOrBlank() }.toSet()
+    val uploaded = refs.filterIndexed { index, _ -> index in uploadedIndexes }
+    val remaining = attachments.filterIndexed { index, _ -> index !in uploadedIndexes }
+    val errors = refs.mapNotNull { ref -> ref.error?.let { "${ref.filename}: $it" } }
+    if (uploaded.isEmpty()) return AttachmentPreparation(prompt, attachments, 0, errors)
     val text = buildString {
         append(prompt.trimEnd())
         append("\n\n")
-        append("Allegati immagine disponibili per tool vision_analyze sul server Hermes:\n")
+        append("Allegati caricati e disponibili sul server Hermes:\n")
         uploaded.forEach { item ->
             append("- ")
             append(item.filename)
             item.path?.takeIf { it.isNotBlank() }?.let {
-                append(" | image_url da usare nel tool vision_analyze: ")
+                append(" | path server: ")
                 append(it)
             }
             item.mediaUrl?.takeIf { it.isNotBlank() }?.let {
@@ -812,21 +973,18 @@ private fun buildPromptWithAttachmentToolRefs(
             }
             append('\n')
         }
-        append("Se devi vedere/leggere l'immagine, chiama vision_analyze usando esattamente il path server indicato come image_url.\n")
-        append("Non usare attachment:image/png, None, /tmp/... inventati o URL incompleti. Se vision_analyze fallisce, riporta l'errore tecnico; non concludere che il modello non supporta vision.")
+        append("Per le immagini usa vision_analyze con esattamente il path server indicato. Per gli altri file usa il path o URL proxy riportato.\n")
+        append("Non inventare path o URL. Se un tool fallisce, riporta l'errore tecnico.")
     }
-    return text to uploaded.size
+    return AttachmentPreparation(text, remaining, uploaded.size, errors)
 }
 
-private fun uploadAttachmentForTool(settings: AppSettings, attachment: ChatInputAttachment, apiKey: String?): UploadedAttachmentRef {
+private suspend fun uploadAttachmentForTool(settings: AppSettings, attachment: ChatInputAttachment, apiKey: String?): UploadedAttachmentRef {
     val endpoint = "${settings.gatewayUrl.trimEnd('/')}/media/upload"
-    val payload = JSONObject()
-        .put("filename", attachment.filename)
-        .put("mime_type", attachment.mimeType)
-        .put("data_url", attachment.dataUrl)
-    val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+    val body = attachment.streamingJsonUploadBody()
     val authCandidates = hermesAuthCandidates(apiKey, true)
-    for (candidateUrl in plugAndPlayStreamUrlCandidates(endpoint)) {
+    var lastError = "gateway non raggiungibile"
+    candidateLoop@ for (candidateUrl in plugAndPlayStreamUrlCandidates(endpoint)) {
         for ((index, token) in authCandidates.withIndex()) {
             val builder = Request.Builder()
                 .url(candidateUrl)
@@ -834,38 +992,66 @@ private fun uploadAttachmentForTool(settings: AppSettings, attachment: ChatInput
                 .header("User-Agent", "HermesHub-Android")
                 .post(body)
             token?.let { builder.header("Authorization", "Bearer $it") }
-            try {
-                streamHttpClient.newCall(builder.build()).execute().use { response ->
-                    val responseBody = response.body.string()
-                    if (!response.isSuccessful) {
-                        if (index < authCandidates.lastIndex && shouldRetryHermesWithBearerAuth(response.code, responseBody)) {
-                            return@use
-                        }
-                        return UploadedAttachmentRef(attachment.filename, attachment.mimeType, null, null, "HTTP ${response.code}")
-                    }
-                    val root = JSONObject(responseBody)
-                    val media = root.optString("media_url", root.optString("url")).takeIf { it.isNotBlank() }?.let { value ->
-                        if (value.startsWith("/")) "${gatewayOrigin(settings.gatewayUrl)}$value" else value
-                    }
-                    return UploadedAttachmentRef(
-                        filename = root.optString("filename", attachment.filename),
-                        mimeType = root.optString("mime_type", attachment.mimeType),
-                        path = root.optString("path", root.optString("server_path")).takeIf { it.isNotBlank() },
-                        mediaUrl = media,
-                        error = null
-                    )
-                }
-            } catch (ex: Exception) {
-                return UploadedAttachmentRef(attachment.filename, attachment.mimeType, null, null, ex.message ?: ex.javaClass.simpleName)
+            val response = executeCancellableRequest(builder.build())
+            if (response.first == 0) {
+                lastError = response.second
+                continue@candidateLoop
             }
+            if (response.first !in 200..299) {
+                if (index < authCandidates.lastIndex && shouldRetryHermesWithBearerAuth(response.first, response.second)) {
+                    continue
+                }
+                lastError = "HTTP ${response.first}: ${response.second.take(120)}"
+                continue@candidateLoop
+            }
+            val root = runCatching { JSONObject(response.second) }.getOrElse {
+                return UploadedAttachmentRef(attachment.filename, attachment.mimeType, null, null, "risposta upload non valida")
+            }
+            val media = root.optString("media_url", root.optString("url")).takeIf { it.isNotBlank() }?.let { value ->
+                if (value.startsWith("/")) "${gatewayOrigin(candidateUrl)}$value" else value
+            }
+            return UploadedAttachmentRef(
+                filename = root.optString("filename", attachment.filename),
+                mimeType = root.optString("mime_type", attachment.mimeType),
+                path = root.optString("path", root.optString("server_path")).takeIf { it.isNotBlank() },
+                mediaUrl = media,
+                error = null
+            )
         }
     }
-    return UploadedAttachmentRef(attachment.filename, attachment.mimeType, null, null, "auth failed")
+    return UploadedAttachmentRef(attachment.filename, attachment.mimeType, null, null, lastError)
 }
 
-private fun gatewayOrigin(gatewayUrl: String): String {
-    val root = gatewayUrl.trimEnd('/')
-    return if (root.endsWith("/v1", ignoreCase = true)) root.dropLast(3) else root
+private fun ChatInputAttachment.streamingJsonUploadBody(): RequestBody = object : RequestBody() {
+    override fun contentType() = "application/json; charset=utf-8".toMediaType()
+
+    override fun writeTo(sink: BufferedSink) {
+        val file = localFilePath?.let(::File)?.takeIf { it.isFile }
+        if (file == null) {
+            val payload = JSONObject()
+                .put("filename", filename)
+                .put("mime_type", mimeType)
+                .put("data_url", dataUrl)
+            sink.writeUtf8(payload.toString())
+            return
+        }
+        sink.writeUtf8("{\"filename\":${JSONObject.quote(filename)},\"mime_type\":${JSONObject.quote(mimeType)},\"data_url\":\"data:${mimeType};base64,")
+        sink.flush()
+        val encoder = Base64OutputStream(sink.outputStream(), Base64.NO_WRAP or Base64.NO_CLOSE)
+        file.inputStream().use { input -> input.copyTo(encoder) }
+        encoder.close()
+        sink.writeUtf8("\"}")
+    }
+}
+
+internal fun gatewayOrigin(gatewayUrl: String): String {
+    return runCatching {
+        val uri = URI(gatewayUrl)
+        "${uri.scheme}://${uri.rawAuthority}"
+    }.getOrElse {
+        val root = gatewayUrl.trimEnd('/')
+        if (root.endsWith("/v1", ignoreCase = true)) root.dropLast(3) else root
+    }
 }
 
 private fun runDetachedAgent(
@@ -908,25 +1094,42 @@ private fun runDetachedAgent(
 
     var lastStatus = ""
     var finalText = ""
+    var consecutiveFailures = 0
+    val pollDeadline = System.currentTimeMillis() + RUN_POLL_TIMEOUT_MS
     while (true) {
-        kotlinx.coroutines.delay(2_000L)
+        if (System.currentTimeMillis() >= pollDeadline) {
+            emit(ChatStreamEvent.Error("Run $runId ancora attiva dopo 30 minuti: polling locale terminato, controlla lo stato sul gateway."))
+            return@flow
+        }
+        kotlinx.coroutines.delay((2_000L * (consecutiveFailures + 1)).coerceAtMost(10_000L))
         val statusResponse = executeRunJsonRequest("${settings.gatewayUrl.trimEnd('/')}/runs/$runId", null, apiKey, "GET")
         if (statusResponse.first == 404) {
+            consecutiveFailures++
             val message = "Run $runId non piu' in cache gateway; se era lunga puo' ancora lavorare sul processo Hermes."
             if (message != lastStatus) {
                 lastStatus = message
                 emit(ChatStreamEvent.Status(message))
             }
+            if (consecutiveFailures >= RUN_POLL_MAX_CONSECUTIVE_FAILURES) {
+                emit(ChatStreamEvent.Error("Run $runId non disponibile sul gateway dopo $consecutiveFailures tentativi."))
+                return@flow
+            }
             continue
         }
         if (statusResponse.first !in 200..299) {
+            consecutiveFailures++
             val message = "Run $runId polling HTTP ${statusResponse.first}"
             if (message != lastStatus) {
                 lastStatus = message
                 emit(ChatStreamEvent.Status(message))
             }
+            if (consecutiveFailures >= RUN_POLL_MAX_CONSECUTIVE_FAILURES) {
+                emit(ChatStreamEvent.Error("Run $runId: polling fallito dopo $consecutiveFailures tentativi (${statusResponse.first})."))
+                return@flow
+            }
             continue
         }
+        consecutiveFailures = 0
         val root = JSONObject(statusResponse.second)
         val state = root.optString("status", "running")
         val lastEvent = root.optString("last_event")
@@ -941,8 +1144,9 @@ private fun runDetachedAgent(
                 emit(ChatStreamEvent.VisualBlocks(it, VISUAL_BLOCKS_VERSION))
             }
             if (finalText.isNotBlank()) {
-                emit(ChatStreamEvent.TextDelta(finalText))
-            } else if (state != "completed") {
+                emit(ChatStreamEvent.TextSnapshot(finalText))
+            }
+            if (state != "completed") {
                 emit(ChatStreamEvent.Error(root.optString("error", "Run $runId: $state")))
                 return@flow
             }
@@ -956,7 +1160,7 @@ private fun runDetachedAgent(
     }
 }.flowOn(Dispatchers.IO)
 
-private fun executeRunJsonRequest(url: String, payload: JSONObject?, apiKey: String?, method: String): Pair<Int, String> {
+private suspend fun executeRunJsonRequest(url: String, payload: JSONObject?, apiKey: String?, method: String): Pair<Int, String> {
     var last: Pair<Int, String>? = null
     val authCandidates = hermesAuthCandidates(apiKey, true)
     for (candidateUrl in plugAndPlayStreamUrlCandidates(url)) {
@@ -971,14 +1175,14 @@ private fun executeRunJsonRequest(url: String, payload: JSONObject?, apiKey: Str
                 else -> builder.post((payload ?: JSONObject()).toString().toRequestBody("application/json; charset=utf-8".toMediaType())).build()
             }
             try {
-                streamHttpClient.newCall(request).execute().use { response ->
-                    val body = response.body.string()
-                    last = response.code to body
-                    if (index < authCandidates.lastIndex && shouldRetryHermesWithBearerAuth(response.code, body)) {
-                        return@use
-                    }
-                    return response.code to body
+                val response = executeCancellableRequest(request)
+                last = response
+                if (index < authCandidates.lastIndex && shouldRetryHermesWithBearerAuth(response.first, response.second)) {
+                    continue
                 }
+                return response
+            } catch (ex: CancellationException) {
+                throw ex
             } catch (ex: Exception) {
                 last = 0 to (ex.message ?: ex.javaClass.simpleName)
             }
@@ -1011,7 +1215,7 @@ private fun plugAndPlayStreamUrlCandidates(url: String): List<String> {
     }
 }
 
-private fun parseSseData(eventName: String?, data: String): List<ChatStreamEvent> {
+internal fun parseSseData(eventName: String?, data: String): List<ChatStreamEvent> {
     if (data.isEmpty() || data.trim() == "[DONE]") return emptyList()
     val json = try { JSONObject(data) } catch (_: Exception) {
         return listOf(ChatStreamEvent.TextDelta(data))
@@ -1087,6 +1291,9 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
             return out
         }
         t.contains("output_text") && (t.contains("done") || t.contains("completed")) -> {
+            extractTextFromAnyJson(obj).takeIf { it.isNotEmpty() }?.let {
+                out += ChatStreamEvent.TextSnapshot(it)
+            }
             val usage = obj.optJSONObject("usage")
             if (usage != null) {
                 out += ChatStreamEvent.Usage(
@@ -1134,6 +1341,9 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
                     val reasoning = extractReasoningText(item)
                     if (reasoning.isNotEmpty()) out += ChatStreamEvent.ThinkingDelta(reasoning)
                 } else if (itemType.contains("message", ignoreCase = true)) {
+                    extractTextFromAnyJson(item).takeIf { it.isNotEmpty() }?.let {
+                        out += ChatStreamEvent.TextSnapshot(it)
+                    }
                     val blocks = extractVisualBlocksFromJson(item.toString())
                     if (blocks.isNotEmpty()) {
                         out += ChatStreamEvent.VisualBlocks(blocks, VISUAL_BLOCKS_VERSION)
@@ -1176,6 +1386,9 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
                     )
                 }
                 out += extractToolEventsFromAnyJson(resp)
+                extractTextFromAnyJson(resp).takeIf { it.isNotEmpty() }?.let {
+                    out += ChatStreamEvent.TextSnapshot(it)
+                }
                 val blocks = extractVisualBlocksFromJson(resp.toString())
                 if (blocks.isNotEmpty()) {
                     out += ChatStreamEvent.VisualBlocks(blocks, VISUAL_BLOCKS_VERSION)
@@ -1221,6 +1434,9 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
             }
             val message = choice.optJSONObject("message")
             if (message != null) {
+                extractTextFromAnyJson(message).takeIf { it.isNotEmpty() }?.let {
+                    out += ChatStreamEvent.TextSnapshot(it)
+                }
                 out += extractToolEventsFromAnyJson(message)
             }
         }
@@ -1399,6 +1615,26 @@ private fun extractTextFromAnyJson(obj: JSONObject, depth: Int = 0): String {
 
     return ""
 }
+
+private suspend fun executeCancellableRequest(request: Request): Pair<Int, String> =
+    suspendCancellableCoroutine { continuation ->
+        val call = streamHttpClient.newCall(request)
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) {
+                    continuation.resume(0 to (e.message ?: e.javaClass.simpleName))
+                }
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val result = runCatching {
+                    response.use { it.code to it.body.byteStream().readUtf8Bounded() }
+                }.getOrElse { 0 to (it.message ?: it.javaClass.simpleName) }
+                if (continuation.isActive) continuation.resume(result)
+            }
+        })
+    }
 
 private fun isNonAssistantTextPayload(obj: JSONObject): Boolean {
     val type = obj.optString("type", "").lowercase()
@@ -1773,7 +2009,7 @@ private fun stripReasoningArtifacts(text: String): String {
         .trimStart('\r', '\n')
 }
 
-private class ThinkExtractor {
+internal class ThinkExtractor {
     private companion object {
         const val MAX_THINK_TAG_FRAGMENT_CHARS = 24
         val OPEN_THINK_TAG = Regex("<\\s*think\\s*>", RegexOption.IGNORE_CASE)
@@ -1844,5 +2080,9 @@ private class ThinkExtractor {
         }
         buffer.clear()
         return events
+    }
+
+    fun processSnapshot(snapshot: String): List<ChatStreamEvent> {
+        return flush() + ChatStreamEvent.TextSnapshot(snapshot)
     }
 }

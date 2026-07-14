@@ -29,6 +29,10 @@ using WinRT.Interop;
 
 namespace NemoclawChat_Windows.Pages;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design",
+    "CA1001:Types that own disposable fields should be disposable",
+    Justification = "La pagina WinUI rilascia MediaCapture nel ciclo Unloaded; il framework non consuma IDisposable.")]
 public sealed partial class HomePage : Page
 {
     private const int DefaultContextWindowTokens = 90000;
@@ -37,6 +41,9 @@ public sealed partial class HomePage : Page
     private const int StreamingCheckpointIntervalMs = 5000;
     private const int StreamingCheckpointMaxChars = 50_000;
     private const int StreamAccumMaxChars = 2_000_000;
+    private const int MaxQueuedAttachments = 8;
+    private const long MaxMediaDownloadBytes = 20L * 1024 * 1024 * 1024;
+    private const long DownloadDiskReserveBytes = 256L * 1024 * 1024;
 
     public ObservableCollection<MessageViewModel> Messages { get; } = [];
     private string _mode = "Chat";
@@ -46,18 +53,19 @@ public sealed partial class HomePage : Page
     private int _lastServerContextTokens;
     private int _lastServerContextLength;
     private int? _lastServerContextPercent;
-    
+
     private sealed record ActiveStreamState(
         string ComposerRunId,
         StreamingBubble Bubble,
         CancellationTokenSource Cts,
         string? GatewayRunId
-    ) {
+    )
+    {
         public string? GatewayRunId { get; set; } = GatewayRunId;
     }
 
     private readonly Dictionary<string, ActiveStreamState> _activeStreams = new();
-    
+
     private string? _currentComposerRunId;
     private StreamingBubble? _currentStreamingBubble;
     private CancellationTokenSource? _activeStreamCts;
@@ -70,7 +78,10 @@ public sealed partial class HomePage : Page
 
     private MediaCapture? _mediaCapture;
     private MediaPlayer? _ttsPlayer;
+    private TaskCompletionSource? _ttsCompletion;
+    private string? _ttsTempPath;
     private bool _isRecordingVoiceNote;
+    private bool _voiceNoteOperationInProgress;
     private StorageFile? _tempVoiceNoteFile;
 
     public HomePage()
@@ -89,10 +100,18 @@ public sealed partial class HomePage : Page
         try
         {
             if (_slashPopup is not null) _slashPopup.IsOpen = false;
+            StopCurrentTts();
+            CleanupVoiceNoteCapture(deleteTemporaryFile: true);
+            VoiceNoteButton.Foreground = (Brush)Application.Current.Resources["MutedTextBrush"];
+            if (VoiceNoteButton.Content is FontIcon voiceIcon)
+            {
+                voiceIcon.Glyph = "\xE720";
+            }
+            PromptBox.PlaceholderText = "Fai una domanda";
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[HomePage] Unload error: {ex.Message}");
+            Trace.WriteLine($"[HomePage] Unload error: {ex}");
         }
     }
 
@@ -105,8 +124,10 @@ public sealed partial class HomePage : Page
             if (!string.IsNullOrWhiteSpace(request.ConversationId))
             {
                 LoadConversation(request.ConversationId);
+                return;
             }
 
+            ResetForNewChat();
             if (!string.IsNullOrWhiteSpace(request.Prompt))
             {
                 PromptBox.Text = request.Prompt;
@@ -115,6 +136,7 @@ public sealed partial class HomePage : Page
         }
         else if (e.Parameter is string prompt && !string.IsNullOrWhiteSpace(prompt))
         {
+            ResetForNewChat();
             PromptBox.Text = prompt;
             PromptBox.Focus(FocusState.Programmatic);
         }
@@ -228,17 +250,30 @@ public sealed partial class HomePage : Page
             return;
         }
 
-        var settings = AppSettingsStore.Load();
-        var attachment = await TryCreateAttachmentAsync(file, settings.MaxAttachmentMb);
-        if (attachment is null)
+        try
         {
-            AddAction("Allegato", $"File vuoto, non leggibile o troppo grande. Limite attuale: {settings.MaxAttachmentMb} MB.");
-            return;
-        }
+            var settings = AppSettingsStore.Load();
+            var attachment = await TryCreateAttachmentAsync(file, settings.MaxAttachmentMb);
+            if (attachment is null)
+            {
+                AddAction("Allegato", $"File vuoto, non leggibile o troppo grande. Limite attuale: {settings.MaxAttachmentMb} MB.");
+                return;
+            }
 
-        _pendingAttachments.Add(attachment);
-        RenderAttachmentPreviews();
-        AddAction("Allegato", $"{file.Name} pronto per Hermes ({FormatAttachmentBytes(attachment.SizeBytes)}).");
+            if (!TryQueueAttachment(attachment, settings.MaxAttachmentMb, out var reason))
+            {
+                AddAction("Allegato", reason);
+                return;
+            }
+
+            RenderAttachmentPreviews();
+            AddAction("Allegato", $"{file.Name} pronto per Hermes ({FormatAttachmentBytes(attachment.SizeBytes)}).");
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"[HomePage] Attachment read failed: {ex}");
+            AddAction("Allegato", "Impossibile leggere il file selezionato.");
+        }
     }
 
     private async void PasteImage_Click(object sender, RoutedEventArgs e)
@@ -256,7 +291,11 @@ public sealed partial class HomePage : Page
             return;
         }
 
-        _pendingAttachments.Add(attachment);
+        if (!TryQueueAttachment(attachment, settings.MaxAttachmentMb, out var reason))
+        {
+            AddAction("Incolla immagine", reason);
+            return;
+        }
         RenderAttachmentPreviews();
         AddAction("Incolla immagine", $"{attachment.FileName} pronta per Hermes ({FormatAttachmentBytes(attachment.SizeBytes)}).");
         PromptBox.Focus(FocusState.Programmatic);
@@ -284,15 +323,19 @@ public sealed partial class HomePage : Page
 
     private async void VoiceNote_Click(object sender, RoutedEventArgs e)
     {
-        var button = sender as Button;
-        if (button == null) return;
-        var icon = button.Content as FontIcon;
-        if (icon == null) return;
-
-        if (!_isRecordingVoiceNote)
+        if (sender is not Button button || button.Content is not FontIcon icon || _voiceNoteOperationInProgress)
         {
-            try
+            return;
+        }
+
+        _voiceNoteOperationInProgress = true;
+        button.IsEnabled = false;
+
+        try
+        {
+            if (!_isRecordingVoiceNote)
             {
+                CleanupVoiceNoteCapture(deleteTemporaryFile: true);
                 _mediaCapture = new MediaCapture();
                 var settings = new MediaCaptureInitializationSettings
                 {
@@ -311,35 +354,73 @@ public sealed partial class HomePage : Page
                 icon.Glyph = "\xE71A"; // Stop icon
                 PromptBox.PlaceholderText = "Registrazione in corso... Clicca per trascrivere.";
             }
-            catch (Exception ex)
+            else
             {
-                Debug.WriteLine($"Error starting voice note: {ex}");
-                AddAction("Errore Voce", "Impossibile accedere al microfono. Controlla le impostazioni di privacy di Windows.");
-            }
-        }
-        else
-        {
-            try
-            {
-                await _mediaCapture!.StopRecordAsync();
+                var capture = _mediaCapture ?? throw new InvalidOperationException("Registratore audio non disponibile.");
+                var tempFile = _tempVoiceNoteFile;
+                await capture.StopRecordAsync();
                 _isRecordingVoiceNote = false;
 
                 button.Foreground = (Brush)Application.Current.Resources["MutedTextBrush"];
                 icon.Glyph = "\xE720"; // Mic icon
                 PromptBox.PlaceholderText = "Elaborazione audio...";
 
-                _mediaCapture.Dispose();
-                _mediaCapture = null;
+                CleanupVoiceNoteCapture(deleteTemporaryFile: false);
 
-                if (_tempVoiceNoteFile != null)
+                if (tempFile is not null)
                 {
-                    await ProcessVoiceNoteAsync(_tempVoiceNoteFile.Path);
+                    await ProcessVoiceNoteAsync(tempFile.Path);
                 }
+            }
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"[HomePage] Voice note failed: {ex}");
+            var wasRecording = _isRecordingVoiceNote;
+            CleanupVoiceNoteCapture(deleteTemporaryFile: true);
+            button.Foreground = (Brush)Application.Current.Resources["MutedTextBrush"];
+            icon.Glyph = "\xE720";
+            PromptBox.PlaceholderText = "Fai una domanda";
+            AddAction(
+                "Errore Voce",
+                wasRecording
+                    ? "Impossibile completare la registrazione audio."
+                    : "Impossibile accedere al microfono. Controlla le impostazioni di privacy di Windows.");
+        }
+        finally
+        {
+            _voiceNoteOperationInProgress = false;
+            button.IsEnabled = true;
+        }
+    }
+
+    private void CleanupVoiceNoteCapture(bool deleteTemporaryFile)
+    {
+        _isRecordingVoiceNote = false;
+        try
+        {
+            _mediaCapture?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"[HomePage] Voice capture cleanup failed: {ex}");
+        }
+        finally
+        {
+            _mediaCapture = null;
+        }
+
+        var temporaryFile = _tempVoiceNoteFile;
+        _tempVoiceNoteFile = null;
+        if (deleteTemporaryFile && temporaryFile is not null)
+        {
+            try
+            {
+                File.Delete(temporaryFile.Path);
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Error stopping voice note: {ex}");
-                PromptBox.PlaceholderText = "Fai una domanda";
+                Trace.WriteLine($"[HomePage] Voice note temp cleanup failed: {ex.Message}");
             }
         }
     }
@@ -353,7 +434,7 @@ public sealed partial class HomePage : Page
             if (!string.IsNullOrWhiteSpace(transcribedText))
             {
                 var currentText = PromptBox.Text;
-                if (!string.IsNullOrEmpty(currentText) && !currentText.EndsWith(" "))
+                if (!string.IsNullOrEmpty(currentText) && !currentText.EndsWith(' '))
                     currentText += " ";
                 PromptBox.Text = currentText + transcribedText;
                 PromptBox.SelectionStart = PromptBox.Text.Length;
@@ -361,13 +442,14 @@ public sealed partial class HomePage : Page
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Error uploading voice note: {ex}");
+            Trace.WriteLine($"[HomePage] Voice transcription failed: {ex}");
             AddAction("Errore Voce", $"Errore invio audio: {ex.Message}");
         }
         finally
         {
             PromptBox.PlaceholderText = "Fai una domanda";
-            try { System.IO.File.Delete(filePath); } catch { }
+            try { File.Delete(filePath); }
+            catch (Exception ex) { Trace.WriteLine($"[HomePage] Voice note cleanup failed: {ex.Message}"); }
         }
     }
 
@@ -415,16 +497,44 @@ public sealed partial class HomePage : Page
 
     private void NewChat_Click(object sender, RoutedEventArgs e)
     {
+        ResetForNewChat();
+        PromptBox.Focus(FocusState.Programmatic);
+    }
+
+    private void ResetForNewChat()
+    {
+        var streamCts = _activeStreamCts;
+        var gatewayRunId = _activeGatewayRunId;
+        streamCts?.Cancel();
+        if (!string.IsNullOrWhiteSpace(gatewayRunId))
+        {
+            _ = StopRunAfterResetAsync(gatewayRunId);
+        }
         ReleaseCurrentComposerRun();
         _messageHistory.Clear();
         ResetServerContextMeter();
         _conversationId = null;
         _previousResponseId = null;
+        _activeStreamCts = null;
         Messages.Clear();
+        _pendingAttachments.Clear();
+        RenderAttachmentPreviews();
         EmptyState.Visibility = Visibility.Visible;
         PromptBox.Text = string.Empty;
         UpdateContextMeter();
-        PromptBox.Focus(FocusState.Programmatic);
+    }
+
+    private static async Task StopRunAfterResetAsync(string runId)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await GatewayService.TryStopRunAsync(AppSettingsStore.Load(), runId, timeout.Token);
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"[HomePage] Detached run stop after reset failed: {ex.Message}");
+        }
     }
 
     private void SetMode(string mode)
@@ -482,11 +592,12 @@ public sealed partial class HomePage : Page
         var cts = _activeStreamCts;
         var runId = _activeGatewayRunId;
         var composerId = _currentComposerRunId;
+        var bubble = _currentStreamingBubble;
         _activeStreamCts = null;
         _activeGatewayRunId = null;
 
-        _currentStreamingBubble?.SetStatus("Interruzione richiesta. Chiudo stream Hermes...");
-        _currentStreamingBubble?.StopShimmer();
+        bubble?.SetStatus("Interruzione richiesta. Chiudo stream Hermes...");
+        bubble?.StopShimmer();
         ReleaseCurrentComposerRun();
 
         if (composerId is not null)
@@ -501,8 +612,8 @@ public sealed partial class HomePage : Page
         if (cts is not null)
         {
             cts.Cancel();
-            cts.Dispose();
         }
+        bubble?.CompleteInterrupted();
 
         if (string.IsNullOrWhiteSpace(runId))
         {
@@ -514,9 +625,9 @@ public sealed partial class HomePage : Page
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             await GatewayService.TryStopRunAsync(AppSettingsStore.Load(), runId, timeout.Token);
         }
-        catch
+        catch (Exception ex)
         {
-            // Stream stop locale resta prioritario; se il gateway non conferma in tempo non bloccare la UI.
+            Trace.WriteLine($"[HomePage] Gateway run stop failed: {ex.Message}");
         }
     }
 
@@ -530,12 +641,16 @@ public sealed partial class HomePage : Page
             return;
         }
         var composerRunId = Guid.NewGuid().ToString("N");
+        var streamCts = new CancellationTokenSource();
         _currentComposerRunId = composerRunId;
+        _activeStreamCts = streamCts;
         UpdateSendButtonVisual(isStreaming: true);
 
         var prompt = PromptBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(prompt) && _pendingAttachments.Count == 0)
         {
+            _activeStreamCts = null;
+            streamCts.Dispose();
             ReleaseComposerRun(composerRunId);
             return;
         }
@@ -544,28 +659,29 @@ public sealed partial class HomePage : Page
         CloseSlashPopup();
 
         StreamingBubble? bubble = null;
-        CancellationTokenSource? streamCts = null;
         var sendMode = _mode;
         var conversationId = _conversationId;
         var previousResponseId = _previousResponseId;
         var localHistory = _messageHistory.ToList();
+        var attachments = _pendingAttachments.ToList();
 
         try
         {
             EmptyState.Visibility = Visibility.Collapsed;
-            var attachments = _pendingAttachments.ToList();
             _pendingAttachments.Clear();
             RenderAttachmentPreviews();
             var displayPrompt = attachments.Count == 0
                 ? prompt
                 : string.IsNullOrWhiteSpace(prompt) ? "Media condiviso." : prompt;
             AddBubble("Tu", displayPrompt, "UserBubbleBrush", HorizontalAlignment.Right, VisualBlockParser.CreateLocalAttachmentBlocks(attachments));
-            _messageHistory.Add(new ChatMessageRecord("Tu", displayPrompt, DateTimeOffset.Now));
-            localHistory.Add(new ChatMessageRecord("Tu", displayPrompt, DateTimeOffset.Now));
+            var userMessage = new ChatMessageRecord("Tu", displayPrompt, DateTimeOffset.Now);
+            _messageHistory.Add(userMessage);
+            localHistory.Add(userMessage);
             PromptBox.Text = string.Empty;
             var initialSave = await Task.Run(() => ChatArchiveStore.SaveSnapshot(conversationId, sendMode, displayPrompt, localHistory.ToList(), "Hermes in corso", previousResponseId));
             conversationId = initialSave.Id;
             previousResponseId = initialSave.PreviousResponseId;
+            streamCts.Token.ThrowIfCancellationRequested();
             if (IsComposerRunCurrent(composerRunId))
             {
                 _conversationId = conversationId;
@@ -589,14 +705,13 @@ public sealed partial class HomePage : Page
             bool usedFallback = false;
             string? streamError = null;
             ChatStreamStats? finalStats = null;
+            var wasCancelled = false;
             var rawEvents = new List<HermesRawEventRecord>();
             var lastCheckpointAt = DateTimeOffset.MinValue;
             var lastUiPumpAt = Stopwatch.GetTimestamp();
             var uiStreamStopwatch = Stopwatch.StartNew();
             double? uiFirstTextMs = null;
             double? uiLastTextMs = null;
-            streamCts = new CancellationTokenSource();
-            _activeStreamCts = streamCts;
             _activeGatewayRunId = null;
             _activeStreams[conversationId] = new ActiveStreamState(composerRunId, bubble, streamCts, null);
             var streamEvents = StartStreamProducer(settings, sendMode, prompt, localHistory.ToList(), conversationId, previousResponseId, attachments, streamCts.Token);
@@ -619,6 +734,11 @@ public sealed partial class HomePage : Page
 
             await foreach (var ev in streamEvents.ReadAllAsync())
             {
+                if (streamCts.IsCancellationRequested && ev is not StreamCancelled)
+                {
+                    continue;
+                }
+
                 switch (ev)
                 {
                     case StreamTextDelta td:
@@ -663,6 +783,10 @@ public sealed partial class HomePage : Page
                         finalBlocksVersion = vb.Version;
                         bubble.SetVisualBlocks(vb.Blocks, RenderVisualBlock);
                         break;
+                    case StreamCancelled:
+                        wasCancelled = true;
+                        bubble.CompleteInterrupted();
+                        break;
                     case StreamStatus ss:
                         statusMessage = ss.Message;
                         bubble.SetStatus(ss.Message);
@@ -699,7 +823,7 @@ public sealed partial class HomePage : Page
                         {
                             finalBlocks = MergeVisualBlocks(finalBlocks, inlineBlocks);
                             finalBlocksVersion = VisualBlocksContract.Version;
-                            bubble.SetVisualBlocks(inlineBlocks, RenderVisualBlock);
+                            bubble.SetVisualBlocks(finalBlocks, RenderVisualBlock);
                             var cleanedFinalText = VisualBlockParser.StripInlineMediaMarkup(finalTextBuilder.ToString());
                             finalTextBuilder.Clear();
                             AppendBounded(finalTextBuilder, cleanedFinalText);
@@ -754,8 +878,27 @@ public sealed partial class HomePage : Page
                 }
             }
 
+            // Alcuni stream terminano normalmente quando il token viene cancellato invece di
+            // lanciare OperationCanceledException. Il token resta quindi la verita autorevole.
+            if (!wasCancelled && streamCts.IsCancellationRequested)
+            {
+                wasCancelled = true;
+                bubble.CompleteInterrupted();
+            }
+
+            if (wasCancelled)
+            {
+                await Task.Run(() => ChatArchiveStore.SaveSnapshot(
+                    conversationId,
+                    sendMode,
+                    prompt,
+                    localHistory.ToList(),
+                    "Risposta interrotta",
+                    previousResponseId));
+                return;
+            }
+
             var finalText = finalTextBuilder.ToString();
-            var finalThinking = finalThinkingBuilder.ToString();
             if (finalStats is null && finalTextBuilder.Length > 0)
             {
                 var totalMs = uiStreamStopwatch.Elapsed.TotalMilliseconds;
@@ -818,8 +961,34 @@ public sealed partial class HomePage : Page
                 AddAction("Stato", statusMessage);
             }
         }
+        catch (OperationCanceledException) when (streamCts.IsCancellationRequested)
+        {
+            bubble?.CompleteInterrupted();
+            try
+            {
+                await Task.Run(() => ChatArchiveStore.SaveSnapshot(
+                    conversationId,
+                    sendMode,
+                    prompt,
+                    localHistory.ToList(),
+                    "Risposta interrotta",
+                    previousResponseId));
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine($"[HomePage] Interrupted snapshot save failed: {ex}");
+            }
+        }
         catch (Exception ex)
         {
+            if (IsComposerRunCurrent(composerRunId) && attachments.Count > 0)
+            {
+                foreach (var attachment in attachments.Where(item => !_pendingAttachments.Contains(item)))
+                {
+                    _pendingAttachments.Add(attachment);
+                }
+                RenderAttachmentPreviews();
+            }
             if (IsComposerRunCurrent(composerRunId))
             {
                 ShowError($"Stream interrotto: {ex.Message}");
@@ -850,9 +1019,12 @@ public sealed partial class HomePage : Page
             {
                 _activeStreamCts = null;
             }
-            _activeGatewayRunId = null;
-            streamCts?.Cancel();
-            streamCts?.Dispose();
+            if (IsComposerRunCurrent(composerRunId))
+            {
+                _activeGatewayRunId = null;
+            }
+            streamCts.Cancel();
+            streamCts.Dispose();
             bubble?.StopShimmer();
             if (ReferenceEquals(_currentStreamingBubble, bubble))
             {
@@ -911,6 +1083,12 @@ public sealed partial class HomePage : Page
                 lastBatchFlushAt = Stopwatch.GetTimestamp();
             }
 
+            void WriteCancellationMarker()
+            {
+                // Se il canale e pieno, il consumer usa comunque il token cancellato come fallback terminale.
+                channel.Writer.TryWrite(new StreamCancelled());
+            }
+
             try
             {
                 await foreach (var ev in ChatStreamClient
@@ -942,15 +1120,30 @@ public sealed partial class HomePage : Page
                         await FlushBatchesAsync().ConfigureAwait(false);
                     }
                 }
-                await FlushBatchesAsync().ConfigureAwait(false);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    WriteCancellationMarker();
+                }
+                else
+                {
+                    await FlushBatchesAsync().ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                WriteCancellationMarker();
             }
             catch (Exception ex)
             {
-                await FlushBatchesAsync().ConfigureAwait(false);
-                channel.Writer.TryWrite(new StreamError($"Stream interrotto: {ex.Message}"));
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    WriteCancellationMarker();
+                }
+                else
+                {
+                    await FlushBatchesAsync().ConfigureAwait(false);
+                    channel.Writer.TryWrite(new StreamError($"Stream interrotto: {ex.Message}"));
+                }
             }
             finally
             {
@@ -960,7 +1153,7 @@ public sealed partial class HomePage : Page
                     $"textBatches={emittedTextBatches} thinkingBatches={emittedThinkingBatches} maxBatchChars={maxBatchChars}");
                 channel.Writer.TryComplete();
             }
-        }, cancellationToken);
+        }, CancellationToken.None);
 
         return channel.Reader;
     }
@@ -1026,6 +1219,12 @@ public sealed partial class HomePage : Page
     private static async Task<ChatInputAttachment?> TryCreateAttachmentAsync(StorageFile file, int maxAttachmentMb)
     {
         var mimeType = MimeTypeFromExtension(file.FileType);
+        var maxBytes = (long)Math.Clamp(maxAttachmentMb, 1, 150) * 1024 * 1024;
+        var properties = await file.GetBasicPropertiesAsync();
+        if (properties.Size == 0 || properties.Size > (ulong)maxBytes)
+        {
+            return null;
+        }
 
         var buffer = await FileIO.ReadBufferAsync(file);
         var bytes = new byte[buffer.Length];
@@ -1033,7 +1232,6 @@ public sealed partial class HomePage : Page
         {
             reader.ReadBytes(bytes);
         }
-        var maxBytes = Math.Clamp(maxAttachmentMb, 1, 150) * 1024 * 1024;
         if (bytes.Length <= 0 || bytes.Length > maxBytes)
         {
             return null;
@@ -1076,6 +1274,27 @@ public sealed partial class HomePage : Page
         return new ChatInputAttachment(fileName, "image/png", dataUrl, bytes.LongLength);
     }
 
+    private bool TryQueueAttachment(ChatInputAttachment attachment, int maxAttachmentMb, out string reason)
+    {
+        if (_pendingAttachments.Count >= MaxQueuedAttachments)
+        {
+            reason = $"Puoi accodare al massimo {MaxQueuedAttachments} allegati per messaggio.";
+            return false;
+        }
+
+        var maxTotalBytes = (long)Math.Clamp(maxAttachmentMb, 1, 150) * 1024 * 1024;
+        var currentBytes = _pendingAttachments.Sum(item => item.SizeBytes);
+        if (attachment.SizeBytes > maxTotalBytes - currentBytes)
+        {
+            reason = $"Gli allegati superano il limite complessivo di {maxAttachmentMb} MB per messaggio.";
+            return false;
+        }
+
+        _pendingAttachments.Add(attachment);
+        reason = string.Empty;
+        return true;
+    }
+
     private static string MimeTypeFromExtension(string extension)
     {
         return extension.ToLowerInvariant() switch
@@ -1113,7 +1332,7 @@ public sealed partial class HomePage : Page
         }
     }
 
-    private UIElement AttachmentPreviewCard(ChatInputAttachment attachment)
+    private Border AttachmentPreviewCard(ChatInputAttachment attachment)
     {
         var root = new Border
         {
@@ -1214,7 +1433,7 @@ public sealed partial class HomePage : Page
             }
             var bytes = Convert.FromBase64String(dataUrl[(comma + 1)..]);
             using var stream = new MemoryStream(bytes);
-            var bitmap = new BitmapImage();
+            var bitmap = new BitmapImage { DecodePixelWidth = 320 };
             bitmap.SetSource(stream.AsRandomAccessStream());
             return bitmap;
         }
@@ -1304,7 +1523,7 @@ public sealed partial class HomePage : Page
                 message.Stats,
                 message.RawEvents);
         }
-        
+
         if (isStreaming && activeStream is not null)
         {
             Messages.Add(new MessageViewModel(activeStream.Bubble.Container));
@@ -1322,7 +1541,7 @@ public sealed partial class HomePage : Page
             _activeGatewayRunId = null;
             UpdateSendButtonVisual(isStreaming: false);
         }
-        
+
         UpdateContextMeter();
     }
 
@@ -1480,6 +1699,10 @@ public sealed partial class HomePage : Page
             var audioPath = await SpeechGatewayService.SynthesizeToFileAsync(settings, text);
             await PlayTtsFileAsync(audioPath);
         }
+        catch (OperationCanceledException)
+        {
+            // Un nuovo messaggio o l'uscita dalla pagina interrompono intenzionalmente la riproduzione.
+        }
         catch (Exception ex)
         {
             ShowError($"Errore TTS Kokoro: {ex.Message}");
@@ -1496,19 +1719,103 @@ public sealed partial class HomePage : Page
 
     private Task PlayTtsFileAsync(string filePath)
     {
+        StopCurrentTts();
+
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _ttsPlayer?.Dispose();
-        _ttsPlayer = new MediaPlayer
+        var player = new MediaPlayer
         {
             Source = MediaSource.CreateFromUri(new Uri(filePath))
         };
-        _ttsPlayer.MediaEnded += (_, _) => completion.TrySetResult();
-        _ttsPlayer.MediaFailed += (_, args) => completion.TrySetException(new InvalidOperationException(args.ErrorMessage));
-        _ttsPlayer.Play();
+
+        _ttsPlayer = player;
+        _ttsCompletion = completion;
+        _ttsTempPath = filePath;
+        player.MediaEnded += (_, _) => CompleteTtsPlayback(player, completion, filePath, null);
+        player.MediaFailed += (_, args) => CompleteTtsPlayback(
+            player,
+            completion,
+            filePath,
+            new InvalidOperationException(string.IsNullOrWhiteSpace(args.ErrorMessage) ? "Riproduzione audio non riuscita." : args.ErrorMessage));
+
+        try
+        {
+            player.Play();
+        }
+        catch (Exception ex)
+        {
+            CompleteTtsPlayback(player, completion, filePath, ex);
+        }
+
         return completion.Task;
     }
 
-    private static UIElement RenderRawHermesEvent(HermesRawEventRecord raw)
+    private void CompleteTtsPlayback(MediaPlayer player, TaskCompletionSource completion, string filePath, Exception? error)
+    {
+        if (ReferenceEquals(_ttsPlayer, player))
+        {
+            _ttsPlayer = null;
+            _ttsCompletion = null;
+            _ttsTempPath = null;
+        }
+
+        try
+        {
+            player.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"[HomePage] TTS player cleanup failed: {ex.Message}");
+        }
+
+        DeleteTemporaryAudio(filePath);
+        if (error is null)
+        {
+            completion.TrySetResult();
+        }
+        else
+        {
+            completion.TrySetException(error);
+        }
+    }
+
+    private void StopCurrentTts()
+    {
+        var player = _ttsPlayer;
+        var completion = _ttsCompletion;
+        var filePath = _ttsTempPath;
+        _ttsPlayer = null;
+        _ttsCompletion = null;
+        _ttsTempPath = null;
+
+        try
+        {
+            player?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"[HomePage] TTS stop failed: {ex.Message}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(filePath))
+        {
+            DeleteTemporaryAudio(filePath);
+        }
+        completion?.TrySetCanceled();
+    }
+
+    private static void DeleteTemporaryAudio(string filePath)
+    {
+        try
+        {
+            File.Delete(filePath);
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"[HomePage] TTS temp cleanup failed for '{filePath}': {ex.Message}");
+        }
+    }
+
+    private static Expander RenderRawHermesEvent(HermesRawEventRecord raw)
     {
         return new Expander
         {
@@ -1795,15 +2102,7 @@ public sealed partial class HomePage : Page
 
     private void ClearChat_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
-        ReleaseCurrentComposerRun();
-        _messageHistory.Clear();
-        ResetServerContextMeter();
-        _conversationId = null;
-        _previousResponseId = null;
-        Messages.Clear();
-        EmptyState.Visibility = Visibility.Visible;
-        PromptBox.Text = string.Empty;
-        UpdateContextMeter();
+        ResetForNewChat();
         args.Handled = true;
     }
 
@@ -1817,14 +2116,44 @@ public sealed partial class HomePage : Page
 
     private async void PromptBox_Drop(object sender, DragEventArgs e)
     {
-        if (!e.DataView.Contains(StandardDataFormats.StorageItems)) return;
-        var items = await e.DataView.GetStorageItemsAsync();
-        foreach (var item in items.Take(5))
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems))
         {
-            if (item is StorageFile file)
+            return;
+        }
+
+        try
+        {
+            var settings = AppSettingsStore.Load();
+            var items = await e.DataView.GetStorageItemsAsync();
+            var added = 0;
+            foreach (var file in items.OfType<StorageFile>())
             {
-                // Let the backend handle empty prompts if needed
+                var attachment = await TryCreateAttachmentAsync(file, settings.MaxAttachmentMb);
+                if (attachment is null)
+                {
+                    AddAction("Allegato", $"{file.Name} ignorato: file vuoto, non leggibile o troppo grande.");
+                    continue;
+                }
+
+                if (!TryQueueAttachment(attachment, settings.MaxAttachmentMb, out var reason))
+                {
+                    AddAction("Allegato", reason);
+                    break;
+                }
+
+                added++;
             }
+
+            if (added > 0)
+            {
+                RenderAttachmentPreviews();
+                AddAction("Allegato", $"{added} file pronti per Hermes.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"[HomePage] Drop attachment failed: {ex}");
+            AddAction("Allegato", "Impossibile leggere uno o più file trascinati.");
         }
     }
 
@@ -1904,7 +2233,7 @@ public sealed partial class HomePage : Page
         }
     }
 
-    private DataTemplate BuildSlashItemTemplate()
+    private static DataTemplate BuildSlashItemTemplate()
     {
         var xaml = @"<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>
                         <StackPanel Padding='8,4'>
@@ -1919,7 +2248,7 @@ public sealed partial class HomePage : Page
     {
         var text = PromptBox.Text ?? string.Empty;
         UpdateContextMeter();
-        if (string.IsNullOrEmpty(text) || !text.StartsWith("/", StringComparison.Ordinal) || text.Contains('\n'))
+        if (string.IsNullOrEmpty(text) || !text.StartsWith('/') || text.Contains('\n'))
         {
             CloseSlashPopup();
             return;
@@ -2020,14 +2349,7 @@ public sealed partial class HomePage : Page
                 AddAction("Modalita", "Agente attivo.");
                 break;
             case SlashAction.Clear:
-                ReleaseCurrentComposerRun();
-                _messageHistory.Clear();
-                ResetServerContextMeter();
-                _conversationId = null;
-                _previousResponseId = null;
-                Messages.Clear();
-                EmptyState.Visibility = Visibility.Visible;
-                UpdateContextMeter();
+                ResetForNewChat();
                 break;
             case SlashAction.Help:
                 var lines = string.Join("\n", _slashCommands
@@ -2173,7 +2495,7 @@ public sealed partial class HomePage : Page
         return panel;
     }
 
-    private static UIElement RenderCode(string language, string code, string? filename)
+    private static StackPanel RenderCode(string language, string code, string? filename)
     {
         var panel = new StackPanel { Spacing = 8 };
         var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -2211,7 +2533,7 @@ public sealed partial class HomePage : Page
         return panel;
     }
 
-    private static UIElement RenderTable(VisualBlockRecord block)
+    private static ScrollViewer RenderTable(VisualBlockRecord block)
     {
         var grid = new Grid { RowSpacing = 1, ColumnSpacing = 1 };
         foreach (var _ in block.Columns)
@@ -2266,7 +2588,7 @@ public sealed partial class HomePage : Page
         grid.Children.Add(border);
     }
 
-    private static UIElement RenderChart(VisualBlockRecord block)
+    private static StackPanel RenderChart(VisualBlockRecord block)
     {
         var panel = new StackPanel { Spacing = 8 };
         panel.Children.Add(new TextBlock
@@ -2320,7 +2642,7 @@ public sealed partial class HomePage : Page
         return bitmap;
     }
 
-    private UIElement RenderDiagram(VisualBlockRecord block)
+    private static UIElement RenderDiagram(VisualBlockRecord block)
     {
         if (IsSafeMediaUrl(block.RenderedMediaUrl))
         {
@@ -2336,7 +2658,7 @@ public sealed partial class HomePage : Page
         return RenderCode("mermaid", block.Source ?? string.Empty, "diagram.mmd");
     }
 
-    private UIElement RenderGallery(VisualBlockRecord block)
+    private static StackPanel RenderGallery(VisualBlockRecord block)
     {
         var panel = new StackPanel { Spacing = 8 };
         foreach (var image in block.Images.Take(12))
@@ -2368,7 +2690,7 @@ public sealed partial class HomePage : Page
         return panel;
     }
 
-    private static UIElement RenderMediaFile(VisualBlockRecord block)
+    private static StackPanel RenderMediaFile(VisualBlockRecord block)
     {
         var panel = new StackPanel { Spacing = 10 };
         var isLocalAttachment = !string.IsNullOrWhiteSpace(block.LocalDataUrl);
@@ -2466,7 +2788,7 @@ public sealed partial class HomePage : Page
         download.Click += async (_, _) =>
         {
             if (block.MediaUrl is not { Length: > 0 } value || !IsSafeMediaUrl(value, allowExternalMedia: true)) return;
-            
+
             var picker = new FileSavePicker();
             picker.SuggestedFileName = block.Filename ?? "download";
             var ext = System.IO.Path.GetExtension(picker.SuggestedFileName);
@@ -2492,32 +2814,40 @@ public sealed partial class HomePage : Page
             try
             {
                 using var httpClient = new System.Net.Http.HttpClient();
+                using var downloadTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(30));
+                var settings = AppSettingsStore.Load();
                 var apiKey = GatewayCredentialStore.LoadSecret();
                 if (string.IsNullOrWhiteSpace(apiKey)) apiKey = GatewayCredentialStore.DefaultApiKey;
                 var uri = ResolveMediaUri(value);
                 Exception? lastError = null;
-                foreach (var candidateUri in MediaDownloadUriCandidates(uri))
+                foreach (var candidateUri in MediaDownloadUriCandidates(uri, settings))
                 {
                     try
                     {
                         using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, candidateUri);
                         request.Headers.TryAddWithoutValidation("Accept", "*/*");
                         request.Headers.TryAddWithoutValidation("User-Agent", "HermesHub-Windows");
-                        if (IsHermesMediaUri(candidateUri) && !string.IsNullOrWhiteSpace(apiKey))
+                        if (IsHermesMediaUri(candidateUri) &&
+                            GatewayService.IsTrustedGatewayUri(settings, candidateUri) &&
+                            !string.IsNullOrWhiteSpace(apiKey))
                         {
                             request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {apiKey}");
                         }
 
-                        using var response = await httpClient.SendAsync(request, System.Net.Http.HttpCompletionOption.ResponseHeadersRead);
+                        using var response = await httpClient.SendAsync(
+                            request,
+                            System.Net.Http.HttpCompletionOption.ResponseHeadersRead,
+                            downloadTimeout.Token);
                         if (!response.IsSuccessStatusCode)
                         {
                             lastError = new System.Net.Http.HttpRequestException($"HTTP {(int)response.StatusCode}");
                             continue;
                         }
 
-                        await using var stream = await response.Content.ReadAsStreamAsync();
-                        using var fileStream = await file.OpenStreamForWriteAsync();
-                        await stream.CopyToAsync(fileStream);
+                        await CopyMediaResponseToFileAsync(
+                            response.Content,
+                            file,
+                            downloadTimeout.Token);
                         lastError = null;
                         break;
                     }
@@ -2613,7 +2943,7 @@ public sealed partial class HomePage : Page
         return minutes > 0 ? $"{minutes}m {seconds}s" : $"{seconds}s";
     }
 
-    private static UIElement RenderCallout(VisualBlockRecord block)
+    private static Border RenderCallout(VisualBlockRecord block)
     {
         var accent = block.Variant switch
         {
@@ -2663,7 +2993,7 @@ public sealed partial class HomePage : Page
             return false;
         }
 
-        return uri.Host.Equals(new Uri(GatewayService.HermesRoot(AppSettingsStore.Load())).Host, StringComparison.OrdinalIgnoreCase);
+        return GatewayService.IsTrustedGatewayUri(AppSettingsStore.Load(), uri);
     }
 
     private static Uri ResolveMediaUri(string value)
@@ -2675,11 +3005,13 @@ public sealed partial class HomePage : Page
 
         var apiKey = GatewayCredentialStore.LoadSecret();
         if (string.IsNullOrWhiteSpace(apiKey)) apiKey = GatewayCredentialStore.DefaultApiKey;
-        if (uri.AbsolutePath.StartsWith("/v1/media/", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(apiKey))
+        if (uri.AbsolutePath.StartsWith("/v1/media/", StringComparison.OrdinalIgnoreCase) &&
+            GatewayService.IsTrustedGatewayUri(settings, uri) &&
+            !string.IsNullOrWhiteSpace(apiKey))
         {
             var builder = new UriBuilder(uri);
             var query = builder.Query;
-            if (query.Length > 1) query = query.Substring(1) + "&";
+            if (query.Length > 1) query = string.Concat(query.AsSpan(1), "&");
             else query = "";
             query += $"hub_token={Uri.EscapeDataString(apiKey)}";
             builder.Query = query;
@@ -2695,11 +3027,11 @@ public sealed partial class HomePage : Page
                uri.AbsolutePath.StartsWith("/v1/media/", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static IEnumerable<Uri> MediaDownloadUriCandidates(Uri uri)
+    private static IEnumerable<Uri> MediaDownloadUriCandidates(Uri uri, AppSettings settings)
     {
         yield return uri;
 
-        if (!IsHermesMediaUri(uri) || uri.Port != 8642)
+        if (!IsHermesMediaUri(uri) || uri.Port != 8642 || !GatewayService.IsTrustedGatewayUri(settings, uri))
         {
             yield break;
         }
@@ -2709,12 +3041,7 @@ public sealed partial class HomePage : Page
         {
             "http://hermes:8642",
             "http://100.94.223.14:8642",
-            "http://hermes.local:8642",
-            "http://hermes-hub:8642",
-            "http://hermeshub:8642",
-            "http://home-server:8642",
-            "http://server:8642",
-            "http://100.105.46.6:8642"
+            "http://hermes.local:8642"
         };
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { uri.ToString() };
         foreach (var root in roots)
@@ -2725,6 +3052,66 @@ public sealed partial class HomePage : Page
                 yield return candidate;
             }
         }
+    }
+
+    private static async Task CopyMediaResponseToFileAsync(
+        System.Net.Http.HttpContent content,
+        StorageFile file,
+        CancellationToken cancellationToken)
+    {
+        var maxBytes = MediaDownloadLimit(file);
+        if (maxBytes <= 0)
+        {
+            throw new IOException("Spazio libero insufficiente per il download.");
+        }
+        if (content.Headers.ContentLength is long contentLength && contentLength > maxBytes)
+        {
+            throw new IOException($"File troppo grande: limite disponibile {FormatAttachmentBytes(maxBytes)}.");
+        }
+
+        await using var input = await content.ReadAsStreamAsync(cancellationToken);
+        using var output = await file.OpenStreamForWriteAsync();
+        output.SetLength(0);
+        var buffer = new byte[64 * 1024];
+        long total = 0;
+        while (true)
+        {
+            var read = await input.ReadAsync(buffer, cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+            if (total > maxBytes)
+            {
+                throw new IOException($"File troppo grande: limite disponibile {FormatAttachmentBytes(maxBytes)}.");
+            }
+
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+
+        await output.FlushAsync(cancellationToken);
+        output.SetLength(total);
+    }
+
+    private static long MediaDownloadLimit(StorageFile file)
+    {
+        try
+        {
+            var root = System.IO.Path.GetPathRoot(file.Path);
+            if (!string.IsNullOrWhiteSpace(root))
+            {
+                var available = new DriveInfo(root).AvailableFreeSpace;
+                return Math.Min(MaxMediaDownloadBytes, Math.Max(0, available - DownloadDiskReserveBytes));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            Trace.WriteLine($"[HomePage] Impossibile leggere lo spazio libero: {ex.Message}");
+        }
+
+        return MaxMediaDownloadBytes;
     }
 }
 

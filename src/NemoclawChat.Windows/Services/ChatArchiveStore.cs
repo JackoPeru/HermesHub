@@ -11,7 +11,10 @@ public sealed record ChatMessageRecord(
     int? VisualBlocksVersion = null,
     List<VisualBlockRecord>? VisualBlocks = null,
     ChatStreamStats? Stats = null,
-    List<HermesRawEventRecord>? RawEvents = null);
+    List<HermesRawEventRecord>? RawEvents = null)
+{
+    public string Id { get; init; } = Guid.NewGuid().ToString("N");
+}
 
 public sealed class ConversationRecord
 {
@@ -39,9 +42,6 @@ public static class ChatArchiveStore
         add { _changed += value; }
         remove { _changed -= value; }
     }
-    private const string CurrentDirectoryName = "ChatClaw";
-    private const string LegacyDirectoryName = "NemoclawChat";
-
     private static readonly object _cacheLock = new();
     private static List<ConversationRecord>? _cache;
 
@@ -49,25 +49,8 @@ public static class ChatArchiveStore
     {
         get
         {
-            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var currentDirectory = Path.Combine(localAppData, CurrentDirectoryName);
-            var legacyDirectory = Path.Combine(localAppData, LegacyDirectoryName);
-
-            if (!Directory.Exists(currentDirectory) && Directory.Exists(legacyDirectory))
-            {
-                Directory.CreateDirectory(currentDirectory);
-                foreach (var file in Directory.GetFiles(legacyDirectory))
-                {
-                    var destination = Path.Combine(currentDirectory, Path.GetFileName(file));
-                    if (!File.Exists(destination))
-                    {
-                        File.Copy(file, destination);
-                    }
-                }
-            }
-
-            Directory.CreateDirectory(currentDirectory);
-            return currentDirectory;
+            AppDataMigration.Run();
+            return AppDataMigration.CurrentDirectoryPath;
         }
     }
 
@@ -107,67 +90,9 @@ public static class ChatArchiveStore
         }
     }
 
-    private static void InvalidateCache()
-    {
-        lock (_cacheLock)
-        {
-            _cache = null;
-        }
-    }
-
     public static ConversationRecord? Find(string id)
     {
         return Load().FirstOrDefault(item => item.Id == id);
-    }
-
-    public static ConversationRecord SaveExchange(
-        string? conversationId,
-        string mode,
-        string prompt,
-        string response,
-        string source,
-        string? previousResponseId = null,
-        IReadOnlyList<VisualBlockRecord>? visualBlocks = null,
-        int? visualBlocksVersion = null)
-    {
-        lock (_cacheLock)
-        {
-            var items = Load(includeDeleted: true);
-            var conversation = string.IsNullOrWhiteSpace(conversationId)
-                ? null
-                : items.FirstOrDefault(item => item.Id == conversationId && item.DeletedAt is null);
-
-            if (conversation is null)
-            {
-                conversation = new ConversationRecord
-                {
-                    Id = Guid.NewGuid().ToString("N"),
-                    Title = MakeTitle(prompt),
-                    Kind = mode == "Agente" ? "Task" : "Chat",
-                    Description = mode == "Agente"
-                        ? $"Conversazione agente via {source}."
-                        : $"Conversazione chat via {source}.",
-                    Prompt = prompt
-                };
-                items.Insert(0, conversation);
-            }
-
-            conversation.Kind = mode == "Agente" ? "Task" : conversation.Kind;
-            conversation.Description = mode == "Agente"
-                ? $"Conversazione agente via {source}."
-                : $"Conversazione chat via {source}.";
-            conversation.Prompt = prompt;
-            conversation.ServerConversationId = HermesHubProtocol.ServerConversationId(conversation.Id) ?? string.Empty;
-            if (previousResponseId is not null)
-            {
-                conversation.PreviousResponseId = previousResponseId.Trim();
-            }
-            conversation.UpdatedAt = DateTimeOffset.Now;
-            conversation.Messages.Add(new ChatMessageRecord("Tu", prompt, DateTimeOffset.Now));
-            conversation.Messages.Add(new ChatMessageRecord("Hermes", response, DateTimeOffset.Now, visualBlocksVersion, visualBlocks?.ToList()));
-            SaveAll(items);
-            return CloneConversation(conversation);
-        }
     }
 
     public static ConversationRecord SaveSnapshot(
@@ -324,7 +249,14 @@ public static class ChatArchiveStore
                     continue;
                 }
 
-                if (incomingUpdated >= existing.UpdatedAt)
+                var newer = incomingUpdated > existing.UpdatedAt;
+                var newerTombstoneAtSameRevision = incomingUpdated == existing.UpdatedAt &&
+                                                    incomingDeletedAt is not null &&
+                                                    (existing.DeletedAt is null || incomingDeletedAt > existing.DeletedAt);
+                var deterministicTieWinner = incomingUpdated == existing.UpdatedAt &&
+                                             incomingDeletedAt == existing.DeletedAt &&
+                                             string.CompareOrdinal(RevisionKey(conversation), RevisionKey(existing)) > 0;
+                if (newer || newerTombstoneAtSameRevision || deterministicTieWinner)
                 {
                     existing.Title = conversation.Title;
                     existing.Kind = conversation.Kind;
@@ -366,7 +298,15 @@ public static class ChatArchiveStore
         {
             _cache = CloneConversations(ordered);
         }
-        _changed?.Invoke();
+        var changedHandlers = _changed;
+        if (changedHandlers is not null)
+        {
+            foreach (Action handler in changedHandlers.GetInvocationList())
+            {
+                try { handler(); }
+                catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"[ChatArchiveStore] Changed handler failed: {ex}"); }
+            }
+        }
     }
 
     private static List<ConversationRecord> CloneConversations(IEnumerable<ConversationRecord> items) =>
@@ -384,8 +324,35 @@ public static class ChatArchiveStore
             ServerConversationId = item.ServerConversationId,
             UpdatedAt = item.UpdatedAt,
             DeletedAt = item.DeletedAt,
-            Messages = item.Messages.ToList()
+            Messages = item.Messages.Select(CloneMessage).ToList()
         };
+
+    private static ChatMessageRecord CloneMessage(ChatMessageRecord message) => message with
+    {
+        VisualBlocks = message.VisualBlocks?.Select(CloneVisualBlock).ToList(),
+        RawEvents = message.RawEvents?.ToList()
+    };
+
+    private static VisualBlockRecord CloneVisualBlock(VisualBlockRecord block) => block with
+    {
+        HighlightLines = block.HighlightLines.ToList(),
+        Columns = block.Columns.ToList(),
+        Rows = block.Rows.Select(row => new Dictionary<string, JsonElement>(row, StringComparer.Ordinal)).ToList(),
+        Series = block.Series.Select(series => series with { Points = series.Points.ToList() }).ToList(),
+        Images = block.Images.ToList()
+    };
+
+    private static string RevisionKey(ConversationRecord item) => JsonSerializer.Serialize(new
+    {
+        item.Title,
+        item.Kind,
+        item.Description,
+        item.Prompt,
+        item.PreviousResponseId,
+        item.ServerConversationId,
+        item.DeletedAt,
+        item.Messages
+    });
 
     private static string MakeTitle(string prompt)
     {

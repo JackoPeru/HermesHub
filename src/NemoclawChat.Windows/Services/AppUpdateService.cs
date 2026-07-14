@@ -1,6 +1,9 @@
 using System.Net.Http;
 using System.Diagnostics;
 using System.Text.Json;
+using System.IO.Compression;
+using System.Runtime.InteropServices;
+using System.Xml.Linq;
 using Windows.ApplicationModel;
 using Windows.Storage;
 using Windows.System;
@@ -25,8 +28,11 @@ public static class AppUpdateService
     public const string RepositoryName = "app-interazione-nemoclaw";
     public const string ReleasesPage = "https://github.com/JackoPeru/app-interazione-nemoclaw/releases";
     private const long MaxAssetBytes = 500L * 1024 * 1024;
+    private const int MaxReleaseMetadataBytes = 2 * 1024 * 1024;
     private const string TrustedAssetHost = "objects.githubusercontent.com";
     private const string TrustedReleaseHost = "github.com";
+    private static readonly SemaphoreSlim DownloadLock = new(1, 1);
+    private static readonly string[] SupportedAssetExtensions = [".msix", ".appx", ".appinstaller", ".exe", ".zip"];
 
     private static readonly HttpClientHandler HttpHandler = new()
     {
@@ -42,7 +48,7 @@ public static class AppUpdateService
 
     public static async Task<UpdateCheckResult> CheckAsync(string localVersion)
     {
-        var request = new HttpRequestMessage(
+        using var request = new HttpRequestMessage(
             HttpMethod.Get,
             $"https://api.github.com/repos/{RepositoryOwner}/{RepositoryName}/releases/latest");
         request.Headers.UserAgent.ParseAdd("HermesHub-Windows");
@@ -50,7 +56,11 @@ public static class AppUpdateService
 
         try
         {
-            using var response = await HttpClient.SendAsync(request);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var response = await HttpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                timeout.Token);
             if (!response.IsSuccessStatusCode)
             {
                 return new UpdateCheckResult(
@@ -64,8 +74,10 @@ public static class AppUpdateService
                     string.Empty);
             }
 
-            using var stream = await response.Content.ReadAsStreamAsync();
-            using var document = await JsonDocument.ParseAsync(stream);
+            using var document = await ReadBoundedJsonAsync(
+                response.Content,
+                MaxReleaseMetadataBytes,
+                timeout.Token);
             var root = document.RootElement;
             var tag = root.GetProperty("tag_name").GetString() ?? string.Empty;
             var latest = NormalizeVersion(tag);
@@ -122,8 +134,9 @@ public static class AppUpdateService
 
         if (!string.IsNullOrWhiteSpace(assetName))
         {
-            var exactPath = Path.Combine(updatesDirectory, assetName);
-            if (File.Exists(exactPath))
+            var safeAssetName = SanitizeFileName(assetName);
+            var exactPath = safeAssetName is null ? null : Path.Combine(updatesDirectory, safeAssetName);
+            if (exactPath is not null && IsUsableDownloadedAsset(exactPath))
             {
                 return new FileInfo(exactPath);
             }
@@ -131,14 +144,17 @@ public static class AppUpdateService
 
         return new DirectoryInfo(updatesDirectory)
             .GetFiles()
-            .FirstOrDefault(file => file.Name.Contains(normalizedVersion, StringComparison.OrdinalIgnoreCase));
+            .Where(file => file.Length > 0 && SupportedAssetExtensions.Contains(file.Extension, StringComparer.OrdinalIgnoreCase))
+            .Where(file => AssetMatchesCurrentArchitecture(file.Name))
+            .FirstOrDefault(file => AssetNameMatchesVersion(file.Name, normalizedVersion));
     }
 
     public static async Task<string?> DownloadAssetAsync(
         string assetUrl,
         string version,
         string? assetName,
-        IProgress<UpdateDownloadProgress>? progress)
+        IProgress<UpdateDownloadProgress>? progress,
+        CancellationToken cancellationToken = default)
     {
         if (!IsTrustedAssetUrl(assetUrl))
         {
@@ -159,6 +175,7 @@ public static class AppUpdateService
             return null;
         }
         var destinationPath = Path.Combine(updatesDirectory, sanitizedFileName);
+        var partialPath = $"{destinationPath}.{Guid.NewGuid():N}.partial";
         var canonicalUpdates = Path.GetFullPath(updatesDirectory);
         var canonicalDest = Path.GetFullPath(destinationPath);
         if (!canonicalDest.StartsWith(canonicalUpdates + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
@@ -168,15 +185,20 @@ public static class AppUpdateService
             return null;
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, assetUrl);
-        request.Headers.UserAgent.ParseAdd("HermesHub-Windows");
-        request.Headers.Accept.ParseAdd("application/octet-stream");
-
+        await DownloadLock.WaitAsync(cancellationToken);
         try
         {
-            using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+            using var request = new HttpRequestMessage(HttpMethod.Get, assetUrl);
+            request.Headers.UserAgent.ParseAdd("HermesHub-Windows");
+            request.Headers.Accept.ParseAdd("application/octet-stream");
+            using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
+                return null;
+            }
+            if (response.RequestMessage?.RequestUri is not { } finalUri || !IsTrustedAssetUrl(finalUri.ToString()))
+            {
+                progress?.Report(new UpdateDownloadProgress(null, "Download annullato.", "Redirect finale fuori dagli host GitHub consentiti."));
                 return null;
             }
 
@@ -187,29 +209,30 @@ public static class AppUpdateService
                 return null;
             }
 
-            await using var input = await response.Content.ReadAsStreamAsync();
-            await using var output = File.Create(destinationPath);
+            await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var output = new FileStream(
+                partialPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                81920,
+                FileOptions.Asynchronous | FileOptions.WriteThrough);
             var buffer = new byte[81920];
             long readTotal = 0;
 
             while (true)
             {
-                var read = await input.ReadAsync(buffer);
+                var read = await input.ReadAsync(buffer, cancellationToken);
                 if (read <= 0)
                 {
                     break;
                 }
 
-                await output.WriteAsync(buffer.AsMemory(0, read));
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                 readTotal += read;
                 if (readTotal > MaxAssetBytes)
                 {
                     progress?.Report(new UpdateDownloadProgress(null, "Download annullato.", $"Asset oltre {ToReadableSize(MaxAssetBytes)}, interrotto."));
-                    output.Close();
-                    if (File.Exists(destinationPath))
-                    {
-                        File.Delete(destinationPath);
-                    }
                     return null;
                 }
 
@@ -227,17 +250,41 @@ public static class AppUpdateService
                 }
             }
 
+            await output.FlushAsync(cancellationToken);
+            output.Flush(flushToDisk: true);
+            if (total is long expected && readTotal != expected)
+            {
+                progress?.Report(new UpdateDownloadProgress(null, "Download incompleto.", $"Ricevuti {readTotal} byte su {expected}."));
+                return null;
+            }
+
+            output.Close();
+            if (!ValidateDownloadedAsset(partialPath, version, out var validationError))
+            {
+                progress?.Report(new UpdateDownloadProgress(null, "Download non valido.", validationError));
+                return null;
+            }
+
+            File.Move(partialPath, destinationPath, overwrite: true);
+
             progress?.Report(new UpdateDownloadProgress(100d, "Download completato.", ToReadableSize(readTotal)));
             return destinationPath;
         }
-        catch
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            if (File.Exists(destinationPath))
-            {
-                File.Delete(destinationPath);
-            }
-
+            progress?.Report(new UpdateDownloadProgress(null, "Download annullato.", string.Empty));
             return null;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"[AppUpdate] download failed: {ex}");
+            return null;
+        }
+        finally
+        {
+            try { File.Delete(partialPath); }
+            catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"[AppUpdateService] Partial cleanup failed: {ex.Message}"); }
+            DownloadLock.Release();
         }
     }
 
@@ -283,6 +330,10 @@ public static class AppUpdateService
     {
         if (IsMsixPackage(path))
         {
+            if (!ValidateDownloadedAsset(path, expectedVersion: null, out _))
+            {
+                return false;
+            }
             return LaunchMsixInstallScript(path);
         }
 
@@ -301,9 +352,7 @@ public static class AppUpdateService
     {
         var extension = Path.GetExtension(path);
         return extension.Equals(".msix", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".appx", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".msixbundle", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".appxbundle", StringComparison.OrdinalIgnoreCase);
+               extension.Equals(".appx", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool LaunchMsixInstallScript(string path)
@@ -394,8 +443,7 @@ public static class AppUpdateService
             startInfo.ArgumentList.Add("-File");
             startInfo.ArgumentList.Add(scriptPath);
 
-            Process.Start(startInfo);
-            return true;
+            return Process.Start(startInfo) is not null;
         }
         catch
         {
@@ -405,12 +453,12 @@ public static class AppUpdateService
 
     public static string GetUpdatesDirectoryDisplayPath()
     {
-        return "%LOCALAPPDATA%\\ChatClaw\\updates";
+        return GetUpdatesDirectoryPath();
     }
 
     public static string GetUpdateInstallLogDisplayPath()
     {
-        return "%LOCALAPPDATA%\\ChatClaw\\updates\\install-msix-update.log";
+        return Path.Combine(GetUpdatesDirectoryPath(), "install-msix-update.log");
     }
 
     private static string? GetCurrentAppUserModelId()
@@ -459,7 +507,7 @@ public static class AppUpdateService
             .Select(asset => new AssetReference(
                 asset.GetProperty("name").GetString() ?? string.Empty,
                 asset.GetProperty("browser_download_url").GetString()))
-            .Where(asset => !string.IsNullOrWhiteSpace(asset.Name))
+            .Where(asset => !string.IsNullOrWhiteSpace(asset.Name) && AssetMatchesCurrentArchitecture(asset.Name))
             .ToList();
 
         foreach (var suffix in suffixes)
@@ -475,6 +523,175 @@ public static class AppUpdateService
     {
         var extension = Path.GetExtension(assetUrl);
         return string.IsNullOrWhiteSpace(extension) ? ".bin" : extension;
+    }
+
+    private static bool IsUsableDownloadedAsset(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        var info = new FileInfo(path);
+        return info.Length > 0 &&
+               SupportedAssetExtensions.Contains(info.Extension, StringComparer.OrdinalIgnoreCase) &&
+               AssetMatchesCurrentArchitecture(info.Name) &&
+               ValidateDownloadedAsset(path, expectedVersion: null, out _);
+    }
+
+    private static bool AssetMatchesCurrentArchitecture(string assetName)
+    {
+        var lower = assetName.ToLowerInvariant();
+        var mentionsX64 = lower.Contains("x64");
+        var mentionsX86 = lower.Contains("x86");
+        var mentionsArm64 = lower.Contains("arm64");
+        if (!mentionsX64 && !mentionsX86 && !mentionsArm64)
+        {
+            return true;
+        }
+
+        return RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X64 => mentionsX64,
+            Architecture.X86 => mentionsX86,
+            Architecture.Arm64 => mentionsArm64,
+            _ => false
+        };
+    }
+
+    private static bool ValidateDownloadedAsset(string path, string? expectedVersion, out string error)
+    {
+        error = string.Empty;
+        var info = new FileInfo(path);
+        if (!info.Exists || info.Length <= 0 || info.Length > MaxAssetBytes)
+        {
+            error = "File update vuoto o oltre il limite consentito.";
+            return false;
+        }
+
+        if (!IsMsixPackage(path))
+        {
+            return SupportedAssetExtensions.Contains(info.Extension, StringComparer.OrdinalIgnoreCase);
+        }
+
+        try
+        {
+            using var archive = ZipFile.OpenRead(path);
+            var manifestEntry = archive.GetEntry("AppxManifest.xml");
+            if (manifestEntry is null)
+            {
+                error = "AppxManifest.xml assente nel pacchetto.";
+                return false;
+            }
+
+            using var manifestStream = manifestEntry.Open();
+            var document = XDocument.Load(manifestStream, LoadOptions.None);
+            var identity = document.Descendants().FirstOrDefault(element => element.Name.LocalName == "Identity");
+            var publisher = identity?.Attribute("Publisher")?.Value;
+            var packageVersion = identity?.Attribute("Version")?.Value;
+            var architecture = identity?.Attribute("ProcessorArchitecture")?.Value;
+            var expectedPublisher = GetCurrentPublisher();
+            if (!string.IsNullOrWhiteSpace(expectedPublisher) &&
+                !string.Equals(publisher, expectedPublisher, StringComparison.OrdinalIgnoreCase))
+            {
+                error = $"Publisher MSIX inatteso: {publisher ?? "assente"}.";
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(architecture) &&
+                !architecture.Equals("neutral", StringComparison.OrdinalIgnoreCase) &&
+                !ArchitectureMatches(architecture))
+            {
+                error = $"Architettura MSIX non compatibile: {architecture}.";
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(expectedVersion))
+            {
+                if (!Version.TryParse(packageVersion, out var manifestVersion) ||
+                    !Version.TryParse(NormalizeVersion(expectedVersion), out var requestedVersion))
+                {
+                    error = "Versione MSIX assente o non valida.";
+                    return false;
+                }
+                if (manifestVersion.Major != requestedVersion.Major ||
+                    manifestVersion.Minor != requestedVersion.Minor ||
+                    manifestVersion.Build != requestedVersion.Build)
+                {
+                    error = $"Versione MSIX {manifestVersion} diversa dalla release {requestedVersion}.";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or System.Xml.XmlException)
+        {
+            error = $"Pacchetto MSIX non leggibile: {ex.Message}";
+            return false;
+        }
+    }
+
+    private static async Task<JsonDocument> ReadBoundedJsonAsync(
+        HttpContent content,
+        int maxBytes,
+        CancellationToken cancellationToken)
+    {
+        if (content.Headers.ContentLength is long contentLength && contentLength > maxBytes)
+        {
+            throw new InvalidDataException($"Metadati release oltre il limite di {maxBytes / 1024} KB.");
+        }
+
+        await using var input = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var buffer = new MemoryStream(Math.Min(
+            maxBytes,
+            (int)Math.Max(0, content.Headers.ContentLength ?? 0)));
+        var chunk = new byte[16 * 1024];
+        while (true)
+        {
+            var read = await input.ReadAsync(chunk, cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (buffer.Length + read > maxBytes)
+            {
+                throw new InvalidDataException($"Metadati release oltre il limite di {maxBytes / 1024} KB.");
+            }
+
+            await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+        }
+
+        return JsonDocument.Parse(buffer.ToArray());
+    }
+
+    private static string GetCurrentPublisher()
+    {
+        try { return Package.Current.Id.Publisher; }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"[AppUpdateService] Package publisher lookup failed: {ex.Message}");
+            return "CN=AppPublisher";
+        }
+    }
+
+    private static bool ArchitectureMatches(string architecture) => RuntimeInformation.ProcessArchitecture switch
+    {
+        Architecture.X64 => architecture.Equals("x64", StringComparison.OrdinalIgnoreCase),
+        Architecture.X86 => architecture.Equals("x86", StringComparison.OrdinalIgnoreCase),
+        Architecture.Arm64 => architecture.Equals("arm64", StringComparison.OrdinalIgnoreCase),
+        _ => false
+    };
+
+    private static bool AssetNameMatchesVersion(string assetName, string version)
+    {
+        var escaped = System.Text.RegularExpressions.Regex.Escape(version);
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            assetName,
+            $@"(?<!\d){escaped}(?:\.0)?(?!\d)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
     }
 
     private static string ToReadableSize(long bytes)

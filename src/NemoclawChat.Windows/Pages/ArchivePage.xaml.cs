@@ -37,24 +37,38 @@ public sealed partial class ArchivePage : Page
     private async void UploadServer_Click(object sender, RoutedEventArgs e)
     {
         StatusText.Text = "Carico archivio sul gateway...";
-        var result = await GatewayService.SaveHubConversationsAsync(AppSettingsStore.Load(), ChatArchiveStore.Load(includeDeleted: true));
-        StatusText.Text = result;
+        try
+        {
+            var result = await GatewayService.SaveHubConversationsAsync(AppSettingsStore.Load(), ChatArchiveStore.Load(includeDeleted: true));
+            StatusText.Text = result.Status;
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Caricamento archivio non riuscito: {ex.Message}";
+        }
     }
 
     private async void DownloadServer_Click(object sender, RoutedEventArgs e)
     {
         StatusText.Text = "Scarico archivio dal gateway...";
-        var result = await GatewayService.LoadHubConversationsAsync(AppSettingsStore.Load());
-        if (result.Items.Count == 0)
+        try
         {
-            StatusText.Text = result.Status;
-            return;
-        }
+            var result = await GatewayService.LoadHubConversationsAsync(AppSettingsStore.Load());
+            if (!result.Success || result.Items.Count == 0)
+            {
+                StatusText.Text = result.Status;
+                return;
+            }
 
-        var changed = ChatArchiveStore.Merge(result.Items);
-        ReloadItems();
-        RenderResults();
-        StatusText.Text = $"{result.Status} Import locale: {changed} aggiornati.";
+            var changed = ChatArchiveStore.Merge(result.Items);
+            ReloadItems();
+            RenderResults();
+            StatusText.Text = $"{result.Status} Import locale: {changed} aggiornati.";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Download archivio non riuscito: {ex.Message}";
+        }
     }
 
     private void OpenSelected_Click(object sender, RoutedEventArgs e)

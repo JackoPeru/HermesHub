@@ -188,7 +188,7 @@ public static class VideoLibraryService
     }
 
     private static bool IsRemoteLinuxPath(string path) =>
-        path.StartsWith("/", StringComparison.Ordinal) && OperatingSystem.IsWindows();
+        path.StartsWith('/') && OperatingSystem.IsWindows();
 
     private static string BuildCompatiblePlaybackUrl(string mediaUrl)
     {

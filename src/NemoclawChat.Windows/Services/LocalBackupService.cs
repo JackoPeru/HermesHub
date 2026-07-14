@@ -12,7 +12,7 @@ public static class LocalBackupService
         var directory = Path.Combine(documents, "HermesHubBackups");
         Directory.CreateDirectory(directory);
 
-        var fileName = $"HermesHub-backup-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.json";
+        var fileName = $"HermesHub-backup-{DateTimeOffset.Now:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}.json";
         var path = Path.Combine(directory, fileName);
 
         var payload = new
@@ -20,11 +20,10 @@ public static class LocalBackupService
             schema = "hermes-hub.local-backup.v1",
             exportedAt = DateTimeOffset.Now,
             settings = AppSettingsStore.Load(),
-            gatewayApiKey = GatewayCredentialStore.LoadSecret(),
             conversations = ChatArchiveStore.Load()
         };
 
-        File.WriteAllText(path, JsonSerializer.Serialize(payload, JsonOptions));
+        AtomicJsonFile.Write(path, JsonSerializer.Serialize(payload, JsonOptions));
         return path;
     }
 }

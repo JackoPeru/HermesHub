@@ -21,7 +21,7 @@ internal fun exportLocalBackup(context: Context, apiKey: String?): String {
         .put("archive", archivePrefs)
         .put("items", conversations)
         .put("conversations", conversations)
-        .put("tasks", parseJsonArray(sharedPreferencesJson(context, "chatclaw_tasks").optString("tasks", "[]")))
+        .put("tasks", parseJsonArray(sharedPreferencesJson(context, "chatclaw_tasks").optString("items", "[]")))
         .put("workspace", sharedPreferencesJson(context, "chatclaw_workspace_requests"))
 
     if (!apiKey.isNullOrBlank()) {

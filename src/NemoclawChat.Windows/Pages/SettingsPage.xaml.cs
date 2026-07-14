@@ -56,9 +56,11 @@ public sealed partial class SettingsPage : Page
         }
 
         AppSettingsStore.Save(settings);
-        GatewayCredentialStore.SaveSecret(ApiKeyBox.Password);
+        var credentialSaved = GatewayCredentialStore.SaveSecret(ApiKeyBox.Password);
 
-        StatusText.Text = "Impostazioni salvate. Hermes usa API key Bearer salvata.";
+        StatusText.Text = credentialSaved
+            ? "Impostazioni salvate. Hermes usa API key Bearer salvata."
+            : "Impostazioni salvate, ma la API key precedente e' rimasta attiva: PasswordVault non disponibile.";
     }
 
     private async void TestGatewayWs_Click(object sender, RoutedEventArgs e)

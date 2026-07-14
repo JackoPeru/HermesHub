@@ -30,7 +30,7 @@ public static class FileLogger
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Debug.WriteLine($"[FileLogger] init failed: {ex.Message}");
+            Trace.WriteLine($"[FileLogger] init failed: {ex.Message}");
         }
     }
 

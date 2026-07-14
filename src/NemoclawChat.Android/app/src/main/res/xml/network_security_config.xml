@@ -1,14 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Hermes Hub e' un client LAN: si collega tipicamente a hermes.local o ad un IP privato
-    senza certificato TLS valido. Per non rompere setup user-controlled (IP arbitrario
-    nel range RFC1918) lasciamo cleartext permesso globalmente; pinning/HTTPS deve essere
-    scelta dell'utente quando installa un gateway con TLS reale.
-    Per release Store/firmate sarebbe meglio whitelistare solo hermes.local e disabilitare
-    il resto: vedi audit-0.6.20.md.
+    Hermes Hub deve raggiungere gateway personali configurabili su Tailnet/LAN, spesso
+    esposti in HTTP tramite MagicDNS o IP privato. Il cleartext resta quindi abilitato;
+    quando il gateway configurato offre HTTPS, il client usa comunque quell'URL.
 -->
-<network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <base-config
+        cleartextTrafficPermitted="true"
+        tools:ignore="InsecureBaseConfiguration">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

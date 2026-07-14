@@ -27,6 +27,7 @@ public sealed class VoiceActivityRecorder : IDisposable
 
     public Task<string?> CaptureUtteranceAsync(CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -45,15 +46,21 @@ public sealed class VoiceActivityRecorder : IDisposable
             };
             _capture.DataAvailable += Capture_DataAvailable;
             _capture.RecordingStopped += Capture_RecordingStopped;
-            _cancellationRegistration = cancellationToken.Register(RequestStop);
-
             try
             {
                 _capture.StartRecording();
+                _cancellationRegistration = cancellationToken.Register(RequestStop);
+                if (_stopRequested)
+                {
+                    _cancellationRegistration.Dispose();
+                    _cancellationRegistration = default;
+                }
             }
             catch
             {
+                var pcm = _pcm;
                 CleanupCapture();
+                pcm?.Dispose();
                 throw;
             }
 
@@ -186,7 +193,7 @@ public sealed class VoiceActivityRecorder : IDisposable
         {
             var directory = Path.Combine(Path.GetTempPath(), "HermesHub", "voice");
             Directory.CreateDirectory(directory);
-            var path = Path.Combine(directory, $"voice-call-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.wav");
+            var path = Path.Combine(directory, $"voice-call-{Guid.NewGuid():N}.wav");
             pcm.Position = 0;
             using (var writer = new WaveFileWriter(path, new WaveFormat(SampleRate, BitsPerSample, 1)))
             {
@@ -220,8 +227,26 @@ public sealed class VoiceActivityRecorder : IDisposable
         var capture = _capture;
         _ = Task.Run(() =>
         {
-            try { capture.StopRecording(); }
-            catch (Exception ex) { _completion?.TrySetException(ex); }
+            try
+            {
+                capture.StopRecording();
+            }
+            catch (Exception ex)
+            {
+                TaskCompletionSource<string?>? completion = null;
+                MemoryStream? pcm = null;
+                lock (_gate)
+                {
+                    if (ReferenceEquals(_capture, capture))
+                    {
+                        completion = _completion;
+                        pcm = _pcm;
+                        CleanupCapture();
+                    }
+                }
+                pcm?.Dispose();
+                completion?.TrySetException(ex);
+            }
         });
     }
 

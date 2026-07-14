@@ -5,3 +5,5 @@ Documentation=https://github.com/JackoPeru/app-interazione-nemoclaw
 [Service]
 Type=oneshot
 ExecStart=%h/.local/bin/hermes-hub-linux-update --restart
+# API paginata (fino a 5 x 60 s) + download (900 s) + restart gateway (1300 s) + probe + margine.
+TimeoutStartSec=3000

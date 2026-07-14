@@ -75,7 +75,7 @@ public sealed partial class CronPage : Page
         }
     }
 
-    private UIElement CreateJobCard(CronJobRecord job)
+    private Border CreateJobCard(CronJobRecord job)
     {
         var stateBrush = job.Enabled
             ? (Brush)Application.Current.Resources["AccentGreenBrush"]

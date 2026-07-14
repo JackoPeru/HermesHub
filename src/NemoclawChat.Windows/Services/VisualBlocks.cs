@@ -184,6 +184,9 @@ public static class VisualBlockParser
     private static readonly Regex InlineMediaRegex = new("""MEDIA\s*:\s*\[([^\]]{1,500})]\(([^)\s]{1,1200})\)|!\[([^\]]{1,500})]\(([^)\s]{1,1200})\)""", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex MediaProxyLineRegex = new("""^\s*(?:Media\s+proxy\s+URL|Media\s+URL|Download\s+URL|File\s+URL|URL\s+media|Link\s+download)\s*:\s*([^\s<>"'`]{1,1200})\s*$""", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
     private static readonly Regex RawMediaProxyUrlRegex = new("""(?:https?://[^\s<>)"']+/v1/media/[^\s<>)"']{1,1200}|/v1/media/[^\s<>)"']{1,1200})""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"];
+    private static readonly string[] VideoExtensions = [".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi", ".wmv", ".flv", ".mpg", ".mpeg", ".ts", ".m2ts", ".3gp", ".ogv"];
+    private static readonly string[] AudioExtensions = [".mp3", ".wav", ".m4a", ".flac", ".ogg"];
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -216,7 +219,7 @@ public static class VisualBlockParser
         }
 
         var trimmed = body.Trim();
-        if (!trimmed.StartsWith("{", StringComparison.Ordinal) && !trimmed.StartsWith("[", StringComparison.Ordinal))
+        if (!trimmed.StartsWith('{') && !trimmed.StartsWith('['))
         {
             return [];
         }
@@ -227,8 +230,9 @@ public static class VisualBlockParser
             var root = document.RootElement;
             if (root.ValueKind == JsonValueKind.Object &&
                 root.TryGetProperty("visual_blocks_version", out var version) &&
-                version.ValueKind == JsonValueKind.Number &&
-                version.GetInt32() < VisualBlocksContract.Version)
+                (version.ValueKind != JsonValueKind.Number ||
+                 !version.TryGetInt32(out var contractVersion) ||
+                 contractVersion != VisualBlocksContract.Version))
             {
                 return [];
             }
@@ -245,16 +249,16 @@ public static class VisualBlockParser
                 var blocks = new List<VisualBlockRecord>();
                 foreach (var item in blocksElement.EnumerateArray().Take(VisualBlocksContract.MaxBlocks))
                 {
-                    var block = JsonSerializer.Deserialize<VisualBlockRecord>(item.GetRawText(), JsonOptions);
-                    if (block is not null)
+                    try
                     {
-                        block = NormalizeBlock(block);
+                        var block = JsonSerializer.Deserialize<VisualBlockRecord>(item.GetRawText(), JsonOptions);
+                        if (block is not null)
+                        {
+                            block = NormalizeBlock(block);
+                        }
+                        blocks.Add(block is not null && IsValid(block) ? block : ToUnknownBlock(item));
                     }
-                    if (block is not null && IsValid(block))
-                    {
-                        blocks.Add(block);
-                    }
-                    else
+                    catch (JsonException)
                     {
                         blocks.Add(ToUnknownBlock(item));
                     }
@@ -402,15 +406,15 @@ public static class VisualBlockParser
     private static string InferMediaKind(string filename, string url)
     {
         var value = $"{filename} {url}".ToLowerInvariant();
-        if (new[] { ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp" }.Any(value.Contains))
+        if (ImageExtensions.Any(value.Contains))
         {
             return "image";
         }
-        if (new[] { ".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi", ".wmv", ".flv", ".mpg", ".mpeg", ".ts", ".m2ts", ".3gp", ".ogv" }.Any(value.Contains))
+        if (VideoExtensions.Any(value.Contains))
         {
             return "video";
         }
-        if (new[] { ".mp3", ".wav", ".m4a", ".flac", ".ogg" }.Any(value.Contains))
+        if (AudioExtensions.Any(value.Contains))
         {
             return "audio";
         }

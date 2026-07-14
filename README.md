@@ -1,74 +1,72 @@
 # Hermes Hub
 
-Client Windows + Android per parlare con Hermes Agent su home-server.
+Client Windows e Android per usare Hermes Agent sul proprio home server, con gateway Linux integrato.
 
-## Progetti
+## Componenti
 
-- Windows: `src/NemoclawChat.Windows`
-- Android: `src/NemoclawChat.Android`
-- Admin Bridge legacy/dev opzionale: `src/ChatClaw.AdminBridge`
-- Guide: `docs/windows-desktop-guide.md`, `docs/android-app-guide.md`, `docs/hermes-hub-conversion.md`, `docs/hermes-hub-linux.md`
-- Preset: `config/hermes-defaults.json`
+- `src/NemoclawChat.Windows`: app WinUI 3.
+- `src/NemoclawChat.Android`: app Jetpack Compose.
+- `scripts`: launcher, patcher, updater e packaging del gateway Linux.
+- `src/ChatClaw.AdminBridge`: bridge locale opzionale per sviluppo.
+- `config`: contratti di configurazione verificati dalla CI e schema Visual Blocks.
+- `tests`: contratti e test automatici.
 
-## Stato attuale
+Hermes Hub resta un thin client: contesto, memoria, planning e strumenti appartengono a Hermes Agent.
 
-- Windows WinUI 3: UI dark stile ChatGPT, sidebar, chat, archivio, jobs, Hermes server, hardware, runs, settings, profilo e updater.
-- Android Compose: UI mobile dark stile ChatGPT, composer, menu `+`, archivio, jobs, Hermes server, hardware, runs, settings, profilo e updater in-app.
-- Chat: Hermes Native default via Responses/native transport con `store`, `conversation`, `previous_response_id`; fallback compat solo se strict native mode e' disattivato.
-- Visual Blocks v1: spiegazioni visuali statiche sicure nella chat (`markdown`, `code`, `table`, `chart`, `diagram`, `image_gallery`, `media_file`, `callout`) con fallback testuale.
-- Jobs: task persistenti, sync reale su Hermes Jobs API `/api/jobs`, azioni `run`, `pause`, `delete`.
-- Server: dashboard Hermes con `/health`, `/health/detailed`, `/v1/models`, `/v1/capabilities`, video library, memoria e hub state.
-- Hardware: prestazioni host remoto via gateway `GET /v1/hub/hardware`, polling 1s con CPU, RAM, swap, dischi, rete, processi e temperature se esposte dal sistema.
-- Runs: endpoint manuale e preset reali per health, models, capabilities, runs e jobs.
-- Memoria/Sync: `/v1/hub/memory` e `/v1/hub/state` per preferenze, feedback Video/News, progetto attivo e stato letto.
-- Update: Android scarica APK in app e apre installer; Windows scarica asset `.msix`, `.exe` o `.zip`.
-- Linux Gateway: update da GitHub Releases con `~/.local/bin/hermes-hub-linux-update --restart` e timer systemd opzionale.
+## Connessione
 
-## Preset Hermes
+Ordine predefinito:
 
-Preset in [config/hermes-defaults.json](config/hermes-defaults.json):
+1. `http://hermes:8642/v1`
+2. `http://100.94.223.14:8642/v1`
+3. `http://hermes.local:8642/v1`
 
-- Hermes API URL: `http://hermes:8642/v1`
-- Health: `http://hermes:8642/health`
-- Model: `hermes-agent`
-- API primaria: Hermes Native (`/v1/responses` o alias gateway `/v1/hermes/native`)
-- API fallback: `/v1/chat/completions` solo compat/strict OFF
-- Accesso consigliato: `Tailscale/LAN`
-- Auth: client usa `Authorization: Bearer hermes-hub` come default; se fallisce prova fallback compat.
+Protocollo preferito: Hermes Native/Responses. Il fallback Chat Completions dipende dall'impostazione `strict native mode`. L'accesso HTTP cleartext e' intenzionale solo su Tailnet/LAN privata.
+
+## Funzioni principali
+
+- chat e agent mode in streaming;
+- reasoning, progressi, tool call ed eventi Hermes separati;
+- allegati, Visual Blocks e download media;
+- archivio sincronizzato multidispositivo con tombstone;
+- modalita Voce continua con VAD, Whisper STT e Kokoro TTS;
+- jobs, runs, memoria, stato, video, notifiche e telemetria host;
+- aggiornamento in-app Windows/Android;
+- aggiornamento transazionale del gateway Linux con health probe e rollback.
 
 ## Build
 
-Windows:
+Windows x64:
 
 ```powershell
-dotnet build .\src\NemoclawChat.Windows\NemoclawChat.Windows.csproj -c Debug -p:Platform=x64
+dotnet build .\src\NemoclawChat.Windows\NemoclawChat.Windows.csproj -c Release -p:Platform=x64
 ```
 
 Android:
 
 ```powershell
-$env:ANDROID_HOME='C:\Users\Matteo\AppData\Local\Android\Sdk'
-$env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+$env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
 cd .\src\NemoclawChat.Android
-.\gradlew.bat assembleDebug
+.\gradlew.bat lintRelease testDebugUnitTest assembleRelease
 ```
 
-APK debug:
+Gateway e contratti:
 
-```text
-src/NemoclawChat.Android/app/build/outputs/apk/debug/androidApp-debug.apk
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m ruff check scripts tests
+python -m unittest discover -s tests -p "test_*.py"
+.\scripts\verify-visual-blocks-contract.ps1
 ```
 
-## Release
+## Documentazione
 
-Versione corrente:
+- [Windows](docs/windows-desktop-guide.md)
+- [Android](docs/android-app-guide.md)
+- [Gateway Linux](docs/hermes-hub-linux.md)
+- [Confini architetturali](docs/hermes-hub-vs-hermes-native.md)
+- [Visual Blocks](docs/visual-blocks-schema.md)
+- [Cronologia release](CHANGELOG.md)
 
-```text
-v0.6.132
-```
-
-Asset attesi dagli updater:
-
-- Android: `.apk`
-- Windows: `.msix`, `.exe` o `.zip`
-- Linux Gateway: `HermesHub-X.Y.Z-linux-gateway.tar.gz`
+Versione corrente: `0.6.156`.

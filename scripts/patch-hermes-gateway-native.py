@@ -8,8 +8,6 @@ until the same contract lands upstream in Hermes.
 from __future__ import annotations
 
 import argparse
-import importlib
-import inspect
 import os
 import py_compile
 import re
@@ -19,6 +17,74 @@ import time
 from pathlib import Path
 
 
+class PatchError(RuntimeError):
+    """Raised when a supported Hermes source cannot be patched safely."""
+
+
+_HARDWARE_DISK_FILTER_MARKER = "# HERMES_HUB_HARDWARE_DISK_FILTER_V1"
+_HARDWARE_DISK_BLOCK_V1 = f'''    {_HARDWARE_DISK_FILTER_MARKER}
+    disks: List[Dict[str, Any]] = []
+    ignored_filesystems = {{
+        "autofs", "cgroup", "cgroup2", "configfs", "debugfs", "devtmpfs",
+        "efivarfs", "fusectl", "hugetlbfs", "mqueue", "nsfs", "overlay",
+        "proc", "pstore", "ramfs", "securityfs", "squashfs", "sysfs",
+        "tmpfs", "tracefs",
+    }}
+    for part in psutil.disk_partitions(all=False):
+        filesystem = (part.fstype or '').strip().lower()
+        device = (part.device or '').strip()
+        if filesystem in ignored_filesystems or device.startswith('/dev/loop'):
+            continue
+        try:
+            usage = psutil.disk_usage(part.mountpoint)
+        except Exception:
+            continue
+        disks.append({{
+            "device": device,
+            "mountpoint": part.mountpoint,
+            "fstype": filesystem,
+            "total_bytes": int(usage.total),
+            "used_bytes": int(usage.used),
+            "free_bytes": int(usage.free),
+            "percent": float(usage.percent),
+        }})
+    snapshot["disks"] = disks
+'''
+
+
+def _upgrade_hardware_disk_filter(text: str) -> tuple[str, bool]:
+    """Upgrade the injected hardware collector without replacing upstream code."""
+    collector_match = re.search(
+        r"(?ms)^def _collect_hardware_snapshot\([^\n]*\)[^\n]*:\n.*?(?=^def |\Z)",
+        text,
+    )
+    if collector_match is None:
+        return text, False
+
+    collector = collector_match.group(0)
+    if _HARDWARE_DISK_FILTER_MARKER in collector:
+        return text, False
+
+    disk_block_pattern = re.compile(
+        r'(?ms)^    disks: List\[Dict\[str, Any\]\] = \[\]\n'
+        r'.*?^    snapshot\["disks"\] = disks\n'
+    )
+    upgraded_collector, count = disk_block_pattern.subn(
+        _HARDWARE_DISK_BLOCK_V1,
+        collector,
+        count=1,
+    )
+    if count == 0:
+        # A future upstream collector with a different layout remains owned by
+        # upstream; only the Hermes Hub collector shape is migrated here.
+        return text, False
+
+    return (
+        text[:collector_match.start()] + upgraded_collector + text[collector_match.end():],
+        True,
+    )
+
+
 def _candidate_paths() -> list[Path]:
     candidates: list[Path] = []
 
@@ -26,11 +92,11 @@ def _candidate_paths() -> list[Path]:
     if explicit:
         candidates.append(Path(explicit).expanduser())
 
-    try:
-        module = importlib.import_module("gateway.platforms.api_server")
-        candidates.append(Path(inspect.getfile(module)))
-    except Exception:
-        pass
+    # Do not import gateway.platforms.api_server here: patched installations
+    # contain model preload side effects at module import time.
+    for entry in sys.path:
+        if entry:
+            candidates.append(Path(entry) / "gateway" / "platforms" / "api_server.py")
 
     home = Path.home()
     hermes_home = Path(os.environ.get("HERMES_HOME", home / ".hermes")).expanduser()
@@ -49,13 +115,19 @@ def _candidate_paths() -> list[Path]:
         for rel in rels:
             candidates.append(root / rel)
 
-    # Small bounded fallback for common local source installs.
+    # Bounded fallback for common editable/source layouts. Avoid recursive **
+    # scans across HERMES_HOME, which can include models and large media trees.
     for root in (hermes_home, Path.cwd()):
         if root.exists():
-            try:
-                candidates.extend(root.glob("**/gateway/platforms/api_server.py"))
-            except Exception:
-                pass
+            for pattern in (
+                "*/gateway/platforms/api_server.py",
+                "*/*/gateway/platforms/api_server.py",
+                "src/*/gateway/platforms/api_server.py",
+            ):
+                try:
+                    candidates.extend(root.glob(pattern))
+                except Exception:
+                    pass
 
     unique: list[Path] = []
     seen: set[str] = set()
@@ -116,6 +188,1030 @@ def _replace_regex_once(text: str, pattern: str, repl: str, label: str) -> tuple
     if count != 1:
         raise RuntimeError(f"Patch anchor not found: {label}")
     return patched, True
+
+
+def _write_compiled_transaction(updates: list[tuple[Path, str]]) -> dict[Path, Path]:
+    """Compile every replacement first, then atomically replace all targets.
+
+    Python cannot atomically exchange multiple files, so a failure after the
+    first os.replace is recovered from durable sibling backups before raising.
+    """
+    if not updates:
+        return {}
+
+    stamp = f"{int(time.time())}-{os.getpid()}-{time.time_ns()}"
+    prepared: dict[Path, Path] = {}
+    backups: dict[Path, Path] = {}
+    bytecode: list[Path] = []
+    try:
+        for target, content in updates:
+            temporary = target.with_name(f".{target.name}.hermes-native-{stamp}.tmp")
+            compiled = temporary.with_suffix(temporary.suffix + ".pyc")
+            temporary.write_text(content, encoding="utf-8", newline="")
+            os.chmod(temporary, target.stat().st_mode & 0o777)
+            py_compile.compile(str(temporary), cfile=str(compiled), doraise=True)
+            prepared[target] = temporary
+            bytecode.append(compiled)
+
+        for target, _ in updates:
+            backup = target.with_suffix(target.suffix + f".bak-hermes-native-{stamp}")
+            shutil.copy2(target, backup)
+            backups[target] = backup
+
+        for target, _ in updates:
+            os.replace(prepared[target], target)
+        return backups
+    except Exception:
+        for target, backup in reversed(list(backups.items())):
+            try:
+                recovery = target.with_name(f".{target.name}.hermes-recovery-{stamp}.tmp")
+                shutil.copy2(backup, recovery)
+                os.replace(recovery, target)
+            except Exception as recovery_error:
+                print(f"CRITICAL: failed to restore {target}: {recovery_error}", file=sys.stderr)
+        raise
+    finally:
+        for temporary in prepared.values():
+            temporary.unlink(missing_ok=True)
+        for compiled in bytecode:
+            compiled.unlink(missing_ok=True)
+
+
+def _harden_runtime(text: str) -> tuple[str, list[str]]:
+    """Upgrade injected handlers to bounded, non-blocking runtime behavior."""
+    initial_text = text
+    changes: list[str] = []
+
+    runtime_helpers = r'''# HERMES_HUB_RUNTIME_HARDENING_V1
+def _hermes_hub_env_int(name, default, minimum=1, maximum=None):
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except Exception:
+        value = int(default)
+    value = max(int(minimum), value)
+    if maximum is not None:
+        value = min(value, int(maximum))
+    return value
+
+
+def _hermes_hub_io_executor():
+    from concurrent.futures import ThreadPoolExecutor
+
+    global _hermes_hub_io_thread_pool
+    if "_hermes_hub_io_thread_pool" not in globals():
+        workers = _hermes_hub_env_int("HERMES_HUB_IO_WORKERS", 4, 1, 16)
+        _hermes_hub_io_thread_pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="hermes-hub-io")
+    return _hermes_hub_io_thread_pool
+
+
+def _hermes_hub_transcode_executor():
+    from concurrent.futures import ThreadPoolExecutor
+
+    global _hermes_hub_transcode_thread_pool
+    if "_hermes_hub_transcode_thread_pool" not in globals():
+        workers = _hermes_hub_env_int("HERMES_HUB_TRANSCODE_WORKERS", 1, 1, 2)
+        _hermes_hub_transcode_thread_pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="hermes-transcode")
+    return _hermes_hub_transcode_thread_pool
+
+
+def _hermes_hub_stt_executor():
+    from concurrent.futures import ThreadPoolExecutor
+
+    global _hermes_hub_stt_thread_pool
+    if "_hermes_hub_stt_thread_pool" not in globals():
+        _hermes_hub_stt_thread_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hermes-stt")
+    return _hermes_hub_stt_thread_pool
+
+
+def _hermes_hub_ensure_whisper_model():
+    global _hermes_hub_whisper_model
+    if "_hermes_hub_whisper_model" not in globals():
+        from faster_whisper import WhisperModel
+
+        model = os.environ.get("HERMES_WHISPER_MODEL", "large-v3-turbo")
+        device = os.environ.get("HERMES_WHISPER_DEVICE", "cuda")
+        compute_type = os.environ.get("HERMES_WHISPER_COMPUTE_TYPE", "int8")
+        device_index = _hermes_hub_env_int("HERMES_WHISPER_DEVICE_INDEX", 1, 0, 32)
+        kwargs = {"device": device, "compute_type": compute_type}
+        if device.lower() == "cuda":
+            kwargs["device_index"] = [device_index]
+        _hermes_hub_whisper_model = WhisperModel(model, **kwargs)
+    return _hermes_hub_whisper_model
+
+
+def _hermes_hub_transcribe_file(path):
+    model = _hermes_hub_ensure_whisper_model()
+    language = os.environ.get("HERMES_WHISPER_LANGUAGE", "it")
+    beam_size = _hermes_hub_env_int("HERMES_WHISPER_BEAM_SIZE", 5, 1, 10)
+    segments, _ = model.transcribe(path, beam_size=beam_size, language=language)
+    return "".join(segment.text for segment in segments).strip()
+
+
+def _hermes_hub_cached_hardware_snapshot():
+    import threading as _threading
+
+    global _hermes_hub_hardware_cache_lock, _hermes_hub_hardware_cache
+    if "_hermes_hub_hardware_cache_lock" not in globals():
+        _hermes_hub_hardware_cache_lock = _threading.Lock()
+        _hermes_hub_hardware_cache = None
+    ttl = _hermes_hub_env_int("HERMES_HUB_HARDWARE_CACHE_SECONDS", 2, 1, 60)
+    with _hermes_hub_hardware_cache_lock:
+        now = time.monotonic()
+        if _hermes_hub_hardware_cache is not None and now - _hermes_hub_hardware_cache[0] < ttl:
+            return _hermes_hub_hardware_cache[1]
+        snapshot = _collect_hardware_snapshot()
+        _hermes_hub_hardware_cache = (now, snapshot)
+        return snapshot
+
+
+def _hermes_hub_bounded_media_matches(root, basename, prefix=False):
+    from pathlib import Path as _Path
+
+    max_files = _hermes_hub_env_int("HERMES_HUB_MEDIA_SCAN_MAX_FILES", 12000, 100, 200000)
+    max_seconds = float(os.environ.get("HERMES_HUB_MEDIA_SCAN_TIMEOUT_SECONDS", "2.0"))
+    deadline = time.monotonic() + max(0.1, min(max_seconds, 15.0))
+    matches = {}
+    scanned = 0
+    try:
+        resolved_root = _Path(root).expanduser().resolve()
+        if not resolved_root.is_dir():
+            return []
+        for current, directories, files in os.walk(resolved_root, followlinks=False):
+            directories[:] = [name for name in directories if not (_Path(current) / name).is_symlink()]
+            for filename in files:
+                scanned += 1
+                if scanned > max_files or time.monotonic() >= deadline:
+                    return list(matches.values())
+                matched = filename.startswith(basename) if prefix else filename == basename
+                if not matched:
+                    continue
+                candidate = (_Path(current) / filename).resolve()
+                if resolved_root != candidate and resolved_root not in candidate.parents:
+                    continue
+                if candidate.is_file():
+                    matches[str(candidate)] = candidate
+                    if len(matches) > 1:
+                        return list(matches.values())
+    except Exception:
+        return list(matches.values())
+    return list(matches.values())
+
+
+def _hermes_hub_library_files(root, extensions):
+    from pathlib import Path as _Path
+
+    max_scan = _hermes_hub_env_int("HERMES_HUB_LIBRARY_SCAN_MAX_FILES", 50000, 100, 500000)
+    max_items = _hermes_hub_env_int("HERMES_HUB_LIBRARY_MAX_ITEMS", 2000, 1, 50000)
+    max_seconds = float(os.environ.get("HERMES_HUB_LIBRARY_SCAN_TIMEOUT_SECONDS", "8"))
+    deadline = time.monotonic() + max(0.5, min(max_seconds, 30.0))
+    found = []
+    scanned = 0
+    try:
+        resolved_root = _Path(root).expanduser().resolve()
+        for current, directories, files in os.walk(resolved_root, followlinks=False):
+            directories[:] = [name for name in directories if not (_Path(current) / name).is_symlink()]
+            for filename in files:
+                scanned += 1
+                if scanned > max_scan or time.monotonic() >= deadline:
+                    found.sort(key=lambda item: item[0], reverse=True)
+                    return [item[1] for item in found[:max_items]]
+                path = _Path(current) / filename
+                if path.suffix.lower() not in extensions:
+                    continue
+                try:
+                    found.append((float(path.stat().st_mtime), path))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    found.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in found[:max_items]]
+
+
+def _hermes_hub_conversation_io(action, payload=None):
+    import threading as _threading
+
+    global _hermes_hub_conversation_io_lock
+    if "_hermes_hub_conversation_io_lock" not in globals():
+        _hermes_hub_conversation_io_lock = _threading.RLock()
+    with _hermes_hub_conversation_io_lock:
+        if action == "get":
+            return _hermes_hub_conversations_payload()
+        if action in {"put", "import"}:
+            result = _hermes_hub_merge_conversations(payload if isinstance(payload, list) else [])
+        elif action == "delete":
+            result = _hermes_hub_delete_conversation(str(payload or ""))
+        elif action == "snapshot":
+            return _hermes_hub_conversation_event_payload("snapshot")
+        else:
+            raise ValueError(f"unsupported conversation operation: {action}")
+        event = _hermes_hub_conversation_event_payload(action, result)
+        return result, event
+
+
+def _hermes_hub_prune_media_cache(cache_dir, keep=None):
+    max_files = _hermes_hub_env_int("HERMES_HUB_MEDIA_CACHE_MAX_FILES", 96, 1, 10000)
+    max_bytes = _hermes_hub_env_int("HERMES_HUB_MEDIA_CACHE_MAX_MB", 10240, 64, 1048576) * 1024 * 1024
+    entries = []
+    try:
+        for path in cache_dir.glob("*.compat.mp4"):
+            try:
+                stat = path.stat()
+                entries.append((float(stat.st_mtime), int(stat.st_size), path))
+            except Exception:
+                continue
+        entries.sort(reverse=True)
+        total = 0
+        for index, (_, size, path) in enumerate(entries):
+            total += size
+            if path == keep:
+                continue
+            if index >= max_files or total > max_bytes:
+                try:
+                    path.unlink(missing_ok=True)
+                    total -= size
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+'''
+    if "# HERMES_HUB_RUNTIME_HARDENING_V1" not in text:
+        anchor = 'def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Response":'
+        if anchor not in text:
+            raise PatchError("runtime hardening helper anchor not found")
+        text = text.replace(anchor, runtime_helpers + anchor, 1)
+        changes.append("bounded runtime executors and helpers")
+
+    safe_name = r'''def _hermes_hub_safe_upload_name(filename: str, mime_type: str) -> str:
+    import re as _re
+    from pathlib import Path as _Path
+
+    name = _re.sub(r"[^A-Za-z0-9._-]+", "_", str(filename or "attachment")).strip("._") or "attachment"
+    suffix = _Path(name).suffix
+    if not suffix:
+        suffix = {
+            "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
+            "image/gif": ".gif", "image/bmp": ".bmp",
+        }.get(str(mime_type or "").lower(), ".bin")
+    stem = name[:-len(suffix)] if suffix and name.lower().endswith(suffix.lower()) else name
+    return (stem[: max(1, 160 - len(suffix))] + suffix)[:160]
+'''
+    text, count = re.subn(
+        r'(?s)def _hermes_hub_safe_upload_name\(filename: str, mime_type: str\) -> str:\n.*?(?=\n\ndef _hermes_hub_save_upload)',
+        lambda _: safe_name.rstrip(),
+        text,
+        count=1,
+    )
+    if count:
+        changes.append("upload filename extension preservation")
+
+    save_upload = r'''def _hermes_hub_save_upload(filename: str, mime_type: str, data_url: str) -> Dict[str, Any]:
+    import base64 as _base64
+    import hashlib as _hashlib
+    import tempfile as _tempfile
+    import urllib.parse as _urlparse
+
+    raw = str(data_url or "")
+    if "," not in raw or not raw.startswith("data:"):
+        raise ValueError("data_url must be a data: URL")
+    meta, encoded = raw.split(",", 1)
+    detected_mime = meta[5:].split(";", 1)[0].strip() or str(mime_type or "application/octet-stream")
+    mime = str(mime_type or detected_mime or "application/octet-stream")
+    max_mb = _hermes_hub_env_int("HERMES_HUB_JSON_UPLOAD_MAX_MB", 64, 1, 1024)
+    max_bytes = max_mb * 1024 * 1024
+    estimated = (len(encoded) * 3) // 4
+    if not encoded or estimated > max_bytes + 3:
+        raise ValueError(f"upload empty or over JSON upload limit ({max_mb} MB)")
+
+    root = _hermes_hub_upload_root()
+    safe = _hermes_hub_safe_upload_name(filename, mime)
+    digest = _hashlib.sha256()
+    size = 0
+    temporary_path = None
+    try:
+        with _tempfile.NamedTemporaryFile(dir=root, prefix=".upload-", suffix=".tmp", delete=False) as handle:
+            temporary_path = handle.name
+            chunk_chars = 1024 * 1024
+            for offset in range(0, len(encoded), chunk_chars):
+                chunk = encoded[offset: offset + chunk_chars]
+                try:
+                    decoded = _base64.b64decode(chunk, validate=True)
+                except Exception as exc:
+                    raise ValueError(f"invalid base64 upload: {exc}") from exc
+                size += len(decoded)
+                if size > max_bytes:
+                    raise ValueError(f"upload over JSON upload limit ({max_mb} MB)")
+                digest.update(decoded)
+                handle.write(decoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if size <= 0:
+            raise ValueError("upload empty")
+        target = root / f"{int(time.time())}-{digest.hexdigest()[:16]}-{safe}"
+        os.replace(temporary_path, target)
+        temporary_path = None
+    finally:
+        if temporary_path:
+            try:
+                os.unlink(temporary_path)
+            except Exception:
+                pass
+    rel = target.relative_to(root).as_posix()
+    media_id = _urlparse.quote(rel, safe="")
+    return {
+        "object": "hermes.media.upload", "filename": safe, "mime_type": mime,
+        "size_bytes": size, "path": str(target), "server_path": str(target),
+        "media_id": rel, "media_url": f"/v1/media/{media_id}", "url": f"/v1/media/{media_id}",
+    }
+'''
+    text, count = re.subn(
+        r'(?s)def _hermes_hub_save_upload\(filename: str, mime_type: str, data_url: str\) -> Dict\[str, Any\]:\n.*?(?=\n\ndef )',
+        lambda _: save_upload.rstrip(),
+        text,
+        count=1,
+    )
+    if count:
+        changes.append("bounded streaming base64 upload decode")
+
+    read_json = r'''def _hermes_hub_read_json(path: "Path", default: Dict[str, Any]) -> Dict[str, Any]:
+    import json as _json
+    import shutil as _shutil
+
+    if not path.is_file():
+        return dict(default)
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            loaded = _json.load(handle)
+        if not isinstance(loaded, dict):
+            raise ValueError("JSON store root must be an object")
+        return loaded
+    except Exception as exc:
+        try:
+            corrupt = path.with_suffix(path.suffix + ".corrupt")
+            _shutil.copy2(path, corrupt)
+            logger.exception("Hermes Hub store is corrupt; preserved at %s", corrupt)
+        except Exception:
+            pass
+        raise RuntimeError(f"Failed to read Hermes Hub store {path}: {exc}") from exc
+'''
+    text, count = re.subn(
+        r'(?s)def _hermes_hub_read_json\(path: "Path", default: Dict\[str, Any\]\) -> Dict\[str, Any\]:\n.*?(?=\n\ndef _hermes_hub_write_json)',
+        lambda _: read_json.rstrip(), text, count=1,
+    )
+    if count:
+        changes.append("fail-closed JSON store reads")
+
+    write_json = r'''def _hermes_hub_write_json(path: "Path", payload: Dict[str, Any]) -> None:
+    import json as _json
+    import shutil as _shutil
+    import tempfile as _tempfile
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with _tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=path.name + ".", delete=False) as handle:
+            temporary = handle.name
+            _json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
+        if path.is_file():
+            _shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
+        os.replace(temporary, path)
+        temporary = None
+        try:
+            directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except Exception:
+            pass
+    finally:
+        if temporary:
+            try:
+                os.unlink(temporary)
+            except Exception:
+                pass
+'''
+    text, count = re.subn(
+        r'(?s)def _hermes_hub_write_json\(path: "Path", payload: Dict\[str, Any\]\) -> None:\n.*?(?=\n\ndef )',
+        lambda _: write_json.rstrip(), text, count=1,
+    )
+    if count:
+        changes.append("durable atomic JSON store writes")
+
+    resolver = r'''def _hermes_hub_resolve_media_path(media_id: str, extra_root: Optional[str] = None) -> Optional["Path"]:
+    import urllib.parse as _urlparse
+    from pathlib import Path as _Path
+
+    decoded = _urlparse.unquote(str(media_id or "")).replace(chr(92), "/").lstrip("/")
+    if not decoded:
+        return None
+    roots = _hermes_hub_media_roots()
+    if extra_root:
+        try:
+            requested = _Path(str(extra_root).strip()).expanduser().resolve()
+            if any(requested == root.resolve() or root.resolve() in requested.parents for root in roots):
+                roots.insert(0, requested)
+        except Exception:
+            pass
+    for root in roots:
+        try:
+            root_resolved = root.resolve()
+            candidate = (root_resolved / decoded).resolve()
+            if (root_resolved == candidate or root_resolved in candidate.parents) and candidate.is_file():
+                return candidate
+        except Exception:
+            continue
+
+    basename = _Path(decoded).name
+    if not basename or basename != decoded:
+        return None
+    upload_root = _Path(os.environ.get("HERMES_HUB_UPLOAD_PATH", str(_Path.home() / ".hermes" / "hub_uploads"))).expanduser()
+    ordered_roots = [upload_root] + [root for root in roots if root != upload_root]
+    exact = {}
+    for root in ordered_roots:
+        for candidate in _hermes_hub_bounded_media_matches(root, basename, prefix=False):
+            exact[str(candidate)] = candidate
+            if len(exact) > 1:
+                return None
+    if len(exact) == 1:
+        return next(iter(exact.values()))
+    if len(basename) < 4:
+        return None
+    prefixed = {}
+    for root in ordered_roots:
+        for candidate in _hermes_hub_bounded_media_matches(root, basename, prefix=True):
+            prefixed[str(candidate)] = candidate
+            if len(prefixed) > 1:
+                return None
+    return next(iter(prefixed.values())) if len(prefixed) == 1 else None
+'''
+    text, count = re.subn(
+        r'(?s)def _hermes_hub_resolve_media_path\(media_id: str, extra_root: Optional\[str\] = None\) -> Optional\["Path"\]:\n.*?(?=\n\ndef _hermes_hub_is_tailnet_peer)',
+        lambda _: resolver.rstrip(),
+        text,
+        count=1,
+    )
+    if count:
+        changes.append("bounded unambiguous media lookup")
+
+    cache_path = r'''def _hermes_hub_media_cache_path(source: "Path") -> "Path":
+    import hashlib as _hashlib
+    import re as _re
+    from pathlib import Path as _Path
+
+    stat = source.stat()
+    home = _Path(os.environ.get("HERMES_HOME", str(_Path.home() / ".hermes"))).expanduser()
+    digest = _hashlib.sha256(f"{source.resolve()}:{stat.st_size}:{stat.st_mtime_ns}:compatv3".encode("utf-8")).hexdigest()[:24]
+    cache_dir = _Path(os.environ.get("HERMES_HUB_MEDIA_CACHE", str(home / "hub_media_cache"))).expanduser()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    safe_stem = _re.sub(r"[^A-Za-z0-9._-]+", "_", source.stem).strip("._")[:80] or "media"
+    return cache_dir / f"{safe_stem}.{digest}.compat.mp4"
+'''
+    text, count = re.subn(
+        r'(?s)def _hermes_hub_media_cache_path\(source: "Path"\) -> "Path":\n.*?(?=\n\ndef _hermes_hub_transcode_mp4)',
+        lambda _: cache_path.rstrip(),
+        text,
+        count=1,
+    )
+    if count:
+        changes.append("bounded media cache filenames")
+
+    transcode = r'''def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
+    import subprocess as _subprocess
+    import threading as _threading
+
+    target = _hermes_hub_media_cache_path(source)
+    global _hermes_hub_transcode_locks_guard, _hermes_hub_transcode_locks
+    if "_hermes_hub_transcode_locks_guard" not in globals():
+        _hermes_hub_transcode_locks_guard = _threading.Lock()
+        _hermes_hub_transcode_locks = {}
+    key = str(target)
+    with _hermes_hub_transcode_locks_guard:
+        lock = _hermes_hub_transcode_locks.setdefault(key, _threading.Lock())
+        if len(_hermes_hub_transcode_locks) > 512:
+            _hermes_hub_transcode_locks = {name: item for name, item in _hermes_hub_transcode_locks.items() if item.locked() or name == key}
+    with lock:
+        if target.is_file() and target.stat().st_size > 0:
+            return target
+        _hermes_hub_prune_media_cache(target.parent, keep=target)
+        tmp = target.with_name(f".{target.name}.{os.getpid()}.{_threading.get_ident()}.tmp")
+        try:
+            probe = _subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=index", "-of", "csv=p=0", str(source)],
+                capture_output=True, text=True, timeout=30,
+            )
+            has_audio = probe.returncode == 0 and bool((probe.stdout or "").strip())
+            cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(source)]
+            if not has_audio:
+                cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=44100"]
+            cmd += [
+                "-map", "0:v:0", "-map", "0:a:0" if has_audio else "1:a:0",
+                "-c:v", "libx264", "-profile:v", "main", "-level:v", os.environ.get("HERMES_HUB_TRANSCODE_H264_LEVEL", "4.2"),
+                "-preset", os.environ.get("HERMES_HUB_TRANSCODE_PRESET", "veryfast"),
+                "-pix_fmt", "yuv420p", "-tag:v", "avc1", "-movflags", "+faststart",
+                "-c:a", "aac", "-b:a", os.environ.get("HERMES_HUB_TRANSCODE_AUDIO_BITRATE", "160k"), "-f", "mp4", str(tmp),
+            ]
+            if not has_audio:
+                cmd.insert(len(cmd) - 3, "-shortest")
+            timeout = _hermes_hub_env_int("HERMES_HUB_TRANSCODE_TIMEOUT", 900, 30, 7200)
+            result = _subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            if result.returncode != 0:
+                raise RuntimeError((result.stderr or result.stdout or "ffmpeg transcode failed").strip())
+            if not tmp.is_file() or tmp.stat().st_size <= 0:
+                raise RuntimeError("ffmpeg produced an empty output")
+            os.replace(tmp, target)
+            _hermes_hub_prune_media_cache(target.parent, keep=target)
+            return target
+        finally:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+'''
+    text, count = re.subn(
+        r'(?s)def _hermes_hub_transcode_mp4\(source: "Path"\) -> "Path":\n.*?(?=\n\ndef )',
+        lambda _: transcode.rstrip(),
+        text,
+        count=1,
+    )
+    if count:
+        changes.append("single-flight bounded media transcode cache")
+
+    stt_handler = r'''    async def _handle_audio_transcriptions(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        import tempfile as _tempfile
+        from pathlib import Path as _Path
+
+        max_mb = _hermes_hub_env_int("HERMES_STT_MAX_UPLOAD_MB", 256, 1, 4096)
+        max_bytes = max_mb * 1024 * 1024
+        tmp_path = None
+        total = 0
+        found_file = False
+        try:
+            reader = await request.multipart()
+            with _tempfile.NamedTemporaryFile(delete=False, suffix=".audio") as tmp:
+                tmp_path = tmp.name
+                field = await reader.next()
+                while field is not None:
+                    if field.name == "file":
+                        found_file = True
+                        while True:
+                            chunk = await field.read_chunk(size=64 * 1024)
+                            if not chunk:
+                                break
+                            total += len(chunk)
+                            if total > max_bytes:
+                                return web.json_response({"error": f"Audio upload over limit ({max_mb} MB)"}, status=413)
+                            tmp.write(chunk)
+                    field = await reader.next()
+                tmp.flush()
+                os.fsync(tmp.fileno())
+            if not found_file or total <= 0:
+                return web.json_response({"error": "No audio file provided"}, status=400)
+            loop = asyncio.get_running_loop()
+            timeout = _hermes_hub_env_int("HERMES_STT_TIMEOUT_SECONDS", 300, 10, 1800)
+            global _hermes_hub_stt_async_lock
+            if "_hermes_hub_stt_async_lock" not in globals():
+                _hermes_hub_stt_async_lock = asyncio.Lock()
+            async with _hermes_hub_stt_async_lock:
+                result_text = await asyncio.wait_for(
+                    loop.run_in_executor(_hermes_hub_stt_executor(), _hermes_hub_transcribe_file, tmp_path),
+                    timeout=timeout,
+                )
+            return web.json_response({"text": result_text})
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Speech transcription timed out"}, status=504)
+        except Exception as exc:
+            return web.json_response({"error": "Invalid or unavailable audio transcription", "detail": str(exc)}, status=400)
+        finally:
+            if tmp_path:
+                try:
+                    _Path(tmp_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+'''
+    text, count = re.subn(
+        r'(?s)^    async def _handle_audio_transcriptions\(self, request: "web.Request"\) -> "web.Response":\n.*?(?=^    async def )',
+        lambda _: stt_handler.rstrip() + "\n\n",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if count:
+        changes.append("streamed bounded STT handler")
+
+    media_handler = r'''    async def _handle_hub_media(self, request: "web.Request") -> "web.StreamResponse":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            if _hermes_hub_is_tailnet_peer(request):
+                auth_error = None
+            else:
+                media_token = request.query.get("hub_token") or request.query.get("api_key") or request.query.get("token")
+                accepted_api_keys = _hermes_hub_api_keys(self._api_key)
+                if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):
+                    return auth_error
+        media_id = request.match_info.get("media_id", "")
+        loop = asyncio.get_running_loop()
+        try:
+            lookup_timeout = _hermes_hub_env_int("HERMES_HUB_MEDIA_LOOKUP_TIMEOUT", 8, 1, 30)
+            path = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_resolve_media_path, media_id, request.query.get("root")),
+                timeout=lookup_timeout,
+            )
+            if path is None:
+                return web.json_response({"error": "Media not found"}, status=404)
+            if request.query.get("format", "").lower() == "mp4" or request.query.get("transcode", "").lower() in {"1", "true", "mp4"}:
+                transcode_timeout = _hermes_hub_env_int("HERMES_HUB_TRANSCODE_TIMEOUT", 900, 30, 7200) + 10
+                path = await asyncio.wait_for(
+                    loop.run_in_executor(_hermes_hub_transcode_executor(), _hermes_hub_transcode_mp4, path),
+                    timeout=transcode_timeout,
+                )
+                return web.FileResponse(path, headers={"Content-Type": "video/mp4", "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600"})
+            import mimetypes as _mimetypes
+            mime = _mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            return web.FileResponse(path, headers={"Content-Type": mime, "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600"})
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Media operation timed out"}, status=504)
+        except Exception as exc:
+            try:
+                logger.exception("Hermes Hub media proxy failed for %s", media_id)
+            except Exception:
+                pass
+            return web.json_response({"error": str(exc)}, status=500)
+'''
+    text, count = re.subn(
+        r'(?s)^    async def _handle_hub_media\(self, request: "web.Request"\) -> "web.StreamResponse":\n.*?(?=^    async def )',
+        lambda _: media_handler.rstrip() + "\n\n",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if count:
+        changes.append("non-blocking bounded media handler")
+
+    upload_handler = r'''    async def _handle_hub_media_upload(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        max_mb = _hermes_hub_env_int("HERMES_HUB_JSON_UPLOAD_MAX_MB", 64, 1, 1024)
+        encoded_limit = ((max_mb * 1024 * 1024 + 2) // 3) * 4 + 1024 * 1024
+        if request.content_length is None:
+            return web.json_response({"error": "Content-Length required for JSON media upload"}, status=411)
+        if request.content_length > encoded_limit:
+            return web.json_response({"error": f"JSON media upload over limit ({max_mb} MB decoded)"}, status=413)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("JSON body must be an object")
+            loop = asyncio.get_running_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    _hermes_hub_io_executor(),
+                    _hermes_hub_save_upload,
+                    str(body.get("filename") or "attachment"),
+                    str(body.get("mime_type") or body.get("mimeType") or "application/octet-stream"),
+                    str(body.get("data_url") or body.get("dataUrl") or ""),
+                ),
+                timeout=_hermes_hub_env_int("HERMES_HUB_UPLOAD_TIMEOUT_SECONDS", 120, 10, 900),
+            )
+            return web.json_response(result)
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Media upload timed out"}, status=504)
+        except Exception as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+'''
+    text, count = re.subn(
+        r'(?s)^    async def _handle_hub_media_upload\(self, request: "web.Request"\) -> "web.Response":\n.*?(?=^    async def )',
+        lambda _: upload_handler.rstrip() + "\n\n",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if count:
+        changes.append("bounded JSON media upload handler")
+
+    conversation_get = r'''    async def _handle_get_hub_conversations(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            loop = asyncio.get_running_loop()
+            payload = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_conversation_io, "get", None),
+                timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 30, 2, 300),
+            )
+            return web.json_response(payload)
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Conversation store timed out"}, status=504)
+        except Exception as exc:
+            return web.json_response({"error": "Conversation store unavailable", "detail": str(exc)}, status=500)
+'''
+    text, count = re.subn(
+        r'(?s)^    async def _handle_get_hub_conversations\(self, request: "web.Request"\) -> "web.Response":\n.*?(?=^    async def )',
+        lambda _: conversation_get.rstrip() + "\n\n", text, count=1, flags=re.MULTILINE,
+    )
+    if count:
+        changes.append("non-blocking conversation GET")
+
+    conversation_put = r'''    async def _handle_put_hub_conversation(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            body = await request.json()
+        except Exception as exc:
+            return web.json_response({"error": "Invalid JSON body", "detail": str(exc)}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "JSON body must be an object"}, status=400)
+        conversation_id = str(request.match_info.get("conversation_id") or body.get("id") or "").strip()
+        if not conversation_id:
+            return web.json_response({"error": "Conversation id is required"}, status=400)
+        body["id"] = conversation_id
+        try:
+            loop = asyncio.get_running_loop()
+            operation = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_conversation_io, "put", [body]),
+                timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 30, 2, 300),
+            )
+            merged, event = operation
+            _hermes_hub_publish_conversation_event_payload(event)
+            return web.json_response(merged)
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Conversation store timed out"}, status=504)
+        except Exception as exc:
+            return web.json_response({"error": "Conversation update failed", "detail": str(exc)}, status=500)
+'''
+    text, count = re.subn(
+        r'(?s)^    async def _handle_put_hub_conversation\(self, request: "web.Request"\) -> "web.Response":\n.*?(?=^    async def )',
+        lambda _: conversation_put.rstrip() + "\n\n", text, count=1, flags=re.MULTILINE,
+    )
+    if count:
+        changes.append("serialized validated conversation PUT")
+
+    conversation_import = r'''    async def _handle_post_hub_conversations_import(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            body = await request.json()
+        except Exception as exc:
+            return web.json_response({"error": "Invalid JSON body", "detail": str(exc)}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "JSON body must be an object"}, status=400)
+        incoming = body.get("items") if isinstance(body.get("items"), list) else None
+        if incoming is None:
+            incoming = _hermes_hub_extract_backup_conversations(body)
+        if not isinstance(incoming, list):
+            return web.json_response({"error": "Conversation items must be an array"}, status=400)
+        try:
+            loop = asyncio.get_running_loop()
+            operation = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_conversation_io, "import", incoming),
+                timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 30, 2, 300),
+            )
+            merged, event = operation
+            _hermes_hub_publish_conversation_event_payload(event)
+            return web.json_response(merged)
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Conversation import timed out"}, status=504)
+        except Exception as exc:
+            return web.json_response({"error": "Conversation import failed", "detail": str(exc)}, status=500)
+'''
+    text, count = re.subn(
+        r'(?s)^    async def _handle_post_hub_conversations_import\(self, request: "web.Request"\) -> "web.Response":\n.*?(?=^    async def )',
+        lambda _: conversation_import.rstrip() + "\n\n", text, count=1, flags=re.MULTILINE,
+    )
+    if count:
+        changes.append("serialized validated conversation import")
+
+    conversation_delete = r'''    async def _handle_delete_hub_conversation(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        conversation_id = str(request.match_info.get("conversation_id") or "").strip()
+        if not conversation_id:
+            return web.json_response({"error": "Conversation id is required"}, status=400)
+        try:
+            loop = asyncio.get_running_loop()
+            operation = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_conversation_io, "delete", conversation_id),
+                timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 30, 2, 300),
+            )
+            deleted, event = operation
+            _hermes_hub_publish_conversation_event_payload(event)
+            return web.json_response(deleted)
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Conversation delete timed out"}, status=504)
+        except Exception as exc:
+            return web.json_response({"error": "Conversation delete failed", "detail": str(exc)}, status=500)
+'''
+    text, count = re.subn(
+        r'(?s)^    async def _handle_delete_hub_conversation\(self, request: "web.Request"\) -> "web.Response":\n.*?(?=^    async def )',
+        lambda _: conversation_delete.rstrip() + "\n\n", text, count=1, flags=re.MULTILINE,
+    )
+    if count:
+        changes.append("serialized conversation delete")
+
+    conversation_events = r'''    async def _handle_get_hub_conversations_events(self, request: "web.Request") -> "web.StreamResponse":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        import json as _json
+
+        queue = asyncio.Queue(maxsize=1)
+        response = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive"})
+        registered = False
+        try:
+            await response.prepare(request)
+            _hermes_hub_conversation_event_subscribers.add(queue)
+            registered = True
+            await response.write(b": connected\n\n")
+            loop = asyncio.get_running_loop()
+            snapshot = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_conversation_io, "snapshot", None),
+                timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 30, 2, 300),
+            )
+            queue.put_nowait(snapshot)
+            while True:
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=25)
+                except asyncio.TimeoutError:
+                    await response.write(b": keepalive\n\n")
+                    continue
+                data = _json.dumps(payload, ensure_ascii=False)
+                await response.write(f"event: conversations.updated\ndata: {data}\n\n".encode("utf-8"))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        finally:
+            if registered:
+                _hermes_hub_conversation_event_subscribers.discard(queue)
+        return response
+'''
+    text, count = re.subn(
+        r'(?s)^    async def _handle_get_hub_conversations_events\(self, request: "web.Request"\) -> "web.StreamResponse":\n.*?(?=^    async def )',
+        lambda _: conversation_events.rstrip() + "\n\n", text, count=1, flags=re.MULTILINE,
+    )
+    if count:
+        changes.append("bounded leak-free conversation SSE")
+
+    publisher = r'''def _hermes_hub_publish_conversation_event_payload(payload: Dict[str, Any]) -> None:
+    if not _hermes_hub_conversation_event_subscribers:
+        return
+    dead = []
+    for queue in list(_hermes_hub_conversation_event_subscribers):
+        try:
+            if queue.full():
+                queue.get_nowait()
+            queue.put_nowait(payload)
+        except Exception:
+            dead.append(queue)
+    for queue in dead:
+        _hermes_hub_conversation_event_subscribers.discard(queue)
+
+
+def _hermes_hub_publish_conversation_event(reason: str, result: Optional[Dict[str, Any]] = None) -> None:
+    _hermes_hub_publish_conversation_event_payload(_hermes_hub_conversation_event_payload(reason, result))
+'''
+    if "def _hermes_hub_publish_conversation_event_payload(" not in text:
+        text, count = re.subn(
+            r'(?s)def _hermes_hub_publish_conversation_event\(reason: str, result: Optional\[Dict\[str, Any\]\] = None\) -> None:\n.*?(?=\n\ndef _hermes_hub_number)',
+            lambda _: publisher.rstrip(), text, count=1,
+        )
+        if count:
+            changes.append("coalescing conversation event queues")
+
+    replacements = {
+        "        return web.json_response(_collect_hardware_snapshot())": (
+            "        loop = asyncio.get_running_loop()\n"
+            "        snapshot = await asyncio.wait_for(loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_cached_hardware_snapshot), timeout=10)\n"
+            "        return web.json_response(snapshot)"
+        ),
+        "        return web.json_response(_hermes_hub_video_library_payload(request))": (
+            "        loop = asyncio.get_running_loop()\n"
+            "        payload = await asyncio.wait_for(loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_video_library_payload, request), timeout=15)\n"
+            "        return web.json_response(payload)"
+        ),
+        "        return web.json_response(_hermes_hub_news_library_payload(request))": (
+            "        loop = asyncio.get_running_loop()\n"
+            "        payload = await asyncio.wait_for(loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_news_library_payload, request), timeout=15)\n"
+            "        return web.json_response(payload)"
+        ),
+    }
+    for old, new in replacements.items():
+        if old in text:
+            text = text.replace(old, new)
+            changes.append("offload blocking support endpoint")
+
+    permissive_json = (
+        "        try:\n"
+        "            body = await request.json()\n"
+        "        except Exception:\n"
+        "            body = {}\n"
+    )
+    strict_json = (
+        "        try:\n"
+        "            body = await request.json()\n"
+        "        except Exception as exc:\n"
+        "            return web.json_response({\"error\": \"Invalid JSON body\", \"detail\": str(exc)}, status=400)\n"
+        "        if not isinstance(body, dict):\n"
+        "            return web.json_response({\"error\": \"JSON body must be an object\"}, status=400)\n"
+    )
+    if permissive_json in text:
+        text = text.replace(permissive_json, strict_json)
+        changes.append("strict JSON validation for hub mutations")
+
+    old_tts = "audio = await loop.run_in_executor(_hermes_hub_kokoro_executor(), _hermes_hub_kokoro_speech_bytes, text, voice, lang, speed)"
+    if old_tts in text:
+        text = text.replace(
+            old_tts,
+            "audio = await asyncio.wait_for(loop.run_in_executor(_hermes_hub_kokoro_executor(), _hermes_hub_kokoro_speech_bytes, text, voice, lang, speed), timeout=_hermes_hub_env_int(\"HERMES_KOKORO_TTS_TIMEOUT_SECONDS\", 180, 10, 900))",
+            1,
+        )
+        changes.append("bounded TTS handler timeout")
+
+    speed_anchor = (
+        "        except Exception:\n"
+        "            speed = 1.0\n"
+        "        try:\n"
+        "            loop = asyncio.get_running_loop()"
+    )
+    if speed_anchor in text:
+        text = text.replace(
+            speed_anchor,
+            "        except Exception:\n"
+            "            return web.json_response({\"error\": \"Invalid speech speed\"}, status=400)\n"
+            "        import math as _math\n"
+            "        if not _math.isfinite(speed) or speed < 0.5 or speed > 2.0:\n"
+            "            return web.json_response({\"error\": \"Speech speed must be between 0.5 and 2.0\"}, status=400)\n"
+            "        try:\n"
+            "            loop = asyncio.get_running_loop()",
+            1,
+        )
+        changes.append("strict finite TTS speed validation")
+
+    kokoro_preload = "_hermes_hub_kokoro_executor().submit(_hermes_hub_kokoro_speech_bytes, 'ok', voice, 'it', 1.08).result()"
+    if kokoro_preload in text:
+        text = text.replace(
+            kokoro_preload,
+            "_hermes_hub_kokoro_executor().submit(_hermes_hub_kokoro_speech_bytes, 'ok', voice, 'it', 1.08).result(timeout=_hermes_hub_env_int('HERMES_KOKORO_PRELOAD_TIMEOUT_SECONDS', 120, 10, 900))",
+            1,
+        )
+        changes.append("bounded Kokoro preload timeout")
+
+    preload_whisper = r'''def _hermes_hub_preload_whisper():
+    try:
+        enabled = str(os.environ.get("HERMES_WHISPER_PRELOAD", "1")).lower() not in {"0", "false", "no"}
+        if enabled:
+            _hermes_hub_stt_executor().submit(_hermes_hub_ensure_whisper_model)
+            print("Whisper preload scheduled on dedicated executor.")
+    except Exception as exc:
+        print("Failed to schedule Whisper preload:", exc)
+
+
+_hermes_hub_preload_whisper()
+'''
+    text, count = re.subn(
+        r'(?s)def _hermes_hub_preload_whisper\(\):\n.*?_hermes_hub_preload_whisper\(\)\n?',
+        lambda _: preload_whisper,
+        text,
+        count=1,
+    )
+    if count:
+        changes.append("non-blocking configurable Whisper preload")
+
+    library_replacements = {
+        'for path in sorted(root.rglob("*"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True):':
+            'for path in _hermes_hub_library_files(root, extensions):',
+        'candidates = sorted(root.rglob("*"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)':
+            'candidates = _hermes_hub_library_files(root, extensions)',
+    }
+    for old, new in library_replacements.items():
+        if old in text:
+            text = text.replace(old, new)
+            changes.append("bounded media library scan")
+
+    merge_tie = '        if _hermes_hub_number(conv.get("updatedAt")) >= _hermes_hub_number(existing.get("updatedAt")):\n'
+    if merge_tie in text:
+        text = text.replace(
+            merge_tie,
+            '        incoming_updated = _hermes_hub_number(conv.get("updatedAt"))\n'
+            '        existing_updated = _hermes_hub_number(existing.get("updatedAt"))\n'
+            '        tombstone_wins_tie = incoming_updated == existing_updated and bool(conv.get("deletedAt")) and not bool(existing.get("deletedAt"))\n'
+            '        if incoming_updated > existing_updated or tombstone_wins_tie:\n',
+            1,
+        )
+        changes.append("deterministic tombstone conflict tie")
+
+    return text, changes if text != initial_text else []
 
 
 def _patch_text(text: str) -> tuple[str, list[str]]:
@@ -407,23 +1503,8 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
             '        "percent": float(swap.percent),\n'
             "    }\n"
             "\n"
-            "    disks: List[Dict[str, Any]] = []\n"
-            "    for part in psutil.disk_partitions(all=False):\n"
-            "        try:\n"
-            "            usage = psutil.disk_usage(part.mountpoint)\n"
-            "        except Exception:\n"
-            "            continue\n"
-            "        disks.append({\n"
-            '            "device": part.device,\n'
-            '            "mountpoint": part.mountpoint,\n'
-            '            "fstype": part.fstype,\n'
-            '            "total_bytes": int(usage.total),\n'
-            '            "used_bytes": int(usage.used),\n'
-            '            "free_bytes": int(usage.free),\n'
-            '            "percent": float(usage.percent),\n'
-            "        })\n"
-            '    snapshot["disks"] = disks\n'
-            "\n"
+            + _HARDWARE_DISK_BLOCK_V1
+            + "\n"
             "    net = psutil.net_io_counters()\n"
             '    snapshot["network"] = {\n'
             '        "bytes_sent": int(net.bytes_sent),\n'
@@ -527,6 +1608,10 @@ def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Respons
             "hardware telemetry collector",
         )
         changes.append("hardware telemetry collector")
+
+    text, hardware_filter_upgraded = _upgrade_hardware_disk_filter(text)
+    if hardware_filter_upgraded:
+        changes.append("hardware disk filter v1")
 
     if "def _hermes_hub_storage_path" not in text:
         text, _ = _replace_once(
@@ -1964,6 +3049,7 @@ def _hermes_hub_media_roots() -> List["Path"]:''',
         changes.append("news library custom path query")
 
     if "def _hermes_hub_news_library_payload" in text:
+        news_before = text
         text = text.replace(
             '    roots: List[_Path] = [_Path(raw).expanduser()]\n'
             '    for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):\n'
@@ -1977,7 +3063,8 @@ def _hermes_hub_media_roots() -> List["Path"]:''',
             '"description": "Feed News Hermes Hub: file HTML presenti solo nella cartella news monitorata dal server.",',
             1,
         )
-        changes.append("news library folder only")
+        if text != news_before:
+            changes.append("news library folder only")
 
     if 'raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"' not in text and 'raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"' in text:
         text = text.replace(
@@ -2041,6 +3128,7 @@ def _hermes_hub_media_roots() -> List["Path"]:''',
         changes.append("media proxy tailnet helper")
 
     if 'root.rglob(f"{basename}*")' not in text and 'def _hermes_hub_resolve_media_path' in text:
+        media_prefix_before = text
         text = text.replace(
             '    if basename and basename == decoded:\n'
             '        for root in roots:\n'
@@ -2073,7 +3161,8 @@ def _hermes_hub_media_roots() -> List["Path"]:''',
             '    return None\n',
             1,
         )
-        changes.append("media proxy basename prefix fallback")
+        if text != media_prefix_before:
+            changes.append("media proxy basename prefix fallback")
 
     if 'upload_matches = [candidate.resolve() for candidate in upload_root.rglob(f"{basename}*")' not in text and 'root.rglob(f"{basename}*")' in text:
         text = text.replace(
@@ -2147,7 +3236,7 @@ def _hermes_hub_media_roots() -> List["Path"]:''',
         )
         changes.append("media transcode explicit mp4 muxer")
 
-    if ":compatv2" not in text and "def _hermes_hub_transcode_mp4" in text:
+    if not re.search(r":compatv[23]", text) and "def _hermes_hub_transcode_mp4" in text:
         text, replaced = _replace_regex_once(
             text,
             r'(?s)def _hermes_hub_media_cache_path\(source: "Path"\) -> "Path":\n.*?\n\n\ndef _hermes_hub_transcode_mp4\(source: "Path"\) -> "Path":\n.*?\n(?=\n\ndef _multimodal_validation_error)',
@@ -3646,7 +4735,10 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("chat completions raw hermes dispatch")
 
-    if 'def _on_tool_progress(event_type, name, preview, args, **kwargs):\n                """Forward real llama.cpp processing/timing events to Chat Completions SSE."""' not in text:
+    if (
+        'def _on_tool_progress(event_type, name, preview, args, **kwargs):\n                """Forward real llama.cpp processing/timing events to Chat Completions SSE."""' not in text
+        and '"""Pass through Hermes-native tool/progress metadata."""' not in text
+    ):
         text, _ = _replace_once(
             text,
             '            # Start agent in background.  agent_ref is a mutable container\n',
@@ -3681,19 +4773,11 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("chat completions processing progress callback")
 
-    old_progress = (
-        '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
-        '                """Queue non-start tool progress events if needed in future.\n'
-        "\n"
-        '                The structured Responses stream uses ``tool_start_callback``\n'
-        '                and ``tool_complete_callback`` for exact call-id correlation,\n'
-        '                so progress events are currently ignored here.\n'
-        '                """\n'
-        "                return"
-    )
-    if old_progress in text:
-        text = text.replace(
-            old_progress,
+    progress_passthrough = '"""Pass through Hermes-native tool/progress metadata."""'
+    if progress_passthrough not in text:
+        text, count = re.subn(
+            r'(?m)^            def _on_tool_progress\(event_type, name, preview, args, \*\*kwargs\):\n'
+            r'(?:^ {16,}.*\n|^[ \t]*\n)*',
             '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
             '                """Pass through Hermes-native tool/progress metadata."""\n'
             '                if str(name).startswith("_"):\n'
@@ -3706,12 +4790,13 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             '                    "arguments": args or {},\n'
             "                }\n"
             "                payload.update(kwargs or {})\n"
-            '                _stream_q.put(("__hermes_raw_event__", payload))',
-            1,
+            '                _stream_q.put(("__hermes_raw_event__", payload))\n',
+            text,
+            count=1,
         )
+        if count != 1:
+            raise RuntimeError("Patch anchor not found: responses tool_progress callback")
         changes.append("responses tool_progress raw passthrough")
-    elif '"""Pass through Hermes-native tool/progress metadata."""' not in text:
-        raise RuntimeError("Patch anchor not found: responses tool_progress callback")
 
     if '"event": "tool.started",' not in text:
         text, _ = _replace_once(
@@ -3882,7 +4967,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
 
     kokoro_runtime = (
             "\n\n"
-            "# HERMES_HUB_KOKORO_GPU_V4\n"
+            "# HERMES_HUB_KOKORO_GPU_V5\n"
             "def _hermes_hub_kokoro_executor():\n"
             "    from concurrent.futures import ThreadPoolExecutor\n"
             "\n"
@@ -3963,7 +5048,9 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "        try:\n"
             "            audio, sample_rate = _hermes_hub_kokoro_model.create(text, voice=voice, lang=lang, speed=float(speed))\n"
             "        except Exception as exc:\n"
-            "            if _hermes_hub_kokoro_provider != 'CUDAExecutionProvider':\n"
+            "            detail = f'{type(exc).__name__}: {exc}'.lower()\n"
+            "            provider_failure = any(token in detail for token in ('cuda', 'cudnn', 'cublas', 'onnxruntime', 'execution provider', 'device error'))\n"
+            "            if _hermes_hub_kokoro_provider != 'CUDAExecutionProvider' or not provider_failure:\n"
             "                raise\n"
             "            print('Kokoro CUDA inference failed, switching to CPU:', exc)\n"
             "            _hermes_hub_kokoro_model, _hermes_hub_kokoro_provider = _hermes_hub_build_kokoro_model(force_cpu=True)\n"
@@ -3996,7 +5083,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
     if "def _hermes_hub_kokoro_speech_bytes(" not in text:
         text += kokoro_runtime
         changes.append("kokoro tts runtime helpers")
-    elif "# HERMES_HUB_KOKORO_GPU_V4" not in text:
+    elif "# HERMES_HUB_KOKORO_GPU_V5" not in text:
         runtime_start = text.find("# HERMES_HUB_KOKORO_GPU_")
         if runtime_start < 0:
             runtime_start = text.index("def _hermes_hub_kokoro_speech_bytes(")
@@ -4050,6 +5137,8 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("pre-load whisper model at startup")
 
+    text, hardening_changes = _harden_runtime(text)
+    changes.extend(hardening_changes)
     return text, changes
 
 
@@ -4224,24 +5313,24 @@ def main() -> int:
             print(f"Hermes Agent stream helper already patched: {helper_target}")
         return 0
 
+    updates: list[tuple[Path, str]] = []
     if changes:
-        backup = target.with_suffix(target.suffix + f".bak-hermes-native-{int(time.time())}")
-        shutil.copy2(target, backup)
-        target.write_text(patched, encoding="utf-8", newline="")
-        py_compile.compile(str(target), doraise=True)
+        updates.append((target, patched))
+    if helper_target is not None and actionable_helper_changes and helper_patched is not None:
+        updates.append((helper_target, helper_patched))
+
+    backups = _write_compiled_transaction(updates)
+
+    if changes:
         print(f"Hermes native gateway patched: {target}")
-        print(f"Backup: {backup}")
+        print(f"Backup: {backups[target]}")
     else:
         print(f"Hermes native gateway already patched: {target}")
     for change in changes:
         print(f"- {change}")
     if helper_target is not None and actionable_helper_changes:
-        helper_backup = helper_target.with_suffix(helper_target.suffix + f".bak-hermes-native-{int(time.time())}")
-        shutil.copy2(helper_target, helper_backup)
-        helper_target.write_text(helper_patched, encoding="utf-8", newline="")
-        py_compile.compile(str(helper_target), doraise=True)
         print(f"Hermes Agent stream helper patched: {helper_target}")
-        print(f"Backup: {helper_backup}")
+        print(f"Backup: {backups[helper_target]}")
         for change in helper_changes:
             print(f"- {change}")
     elif helper_target is not None:

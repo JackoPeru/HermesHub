@@ -47,7 +47,7 @@ public sealed class HubNotificationPoller
         catch (Exception ex)
         {
             // Polling must never crash the app.
-            System.Diagnostics.Debug.WriteLine($"[HubNotificationPoller] PollAsync error: {ex.Message}");
+            System.Diagnostics.Trace.WriteLine($"[HubNotificationPoller] PollAsync error: {ex}");
         }
         finally
         {

@@ -1,47 +1,57 @@
-# Guida Android Hermes Hub
+# Android
 
-## Obiettivo
+App Jetpack Compose di Hermes Hub.
 
-App Android Jetpack Compose per usare Hermes Agent dal telefono con UI chatbot moderna.
+## Compatibilita
 
-Nome visibile: `Hermes Hub`.
+- nome visibile: `Hermes Hub`;
+- `applicationId`: `com.nemoclaw.chat`;
+- `minSdk`: 26;
+- `compileSdk`/`targetSdk`: 36;
+- la firma e il `versionCode` devono restare compatibili con gli APK pubblicati.
 
-Compatibilita aggiornamento preservata:
-
-- `applicationId = com.nemoclaw.chat`.
-- `versionCode` aumenta a ogni release.
-- SharedPreferences `chatclaw_*` restano per non perdere dati.
+Le preferenze storiche `chatclaw_*` e i dati utente vengono migrati, non azzerati.
 
 ## Backend
 
-Default:
+Ordine endpoint:
 
-```text
-Hermes API URL: http://hermes.local:8642/v1
-Health: http://hermes.local:8642/health
-Model: hermes-agent
-Auth: Authorization: Bearer <Hermes API key>
-```
+1. `http://hermes:8642/v1`
+2. `http://100.94.223.14:8642/v1`
+3. `http://hermes.local:8642/v1`
 
-Endpoint usati:
+La chat usa Hermes Native/Responses e, se consentito, Chat Completions compat. Health, capabilities, archivio, media, STT, TTS, jobs, runs e stato Hub passano dallo stesso gateway.
 
-- `POST /v1/responses` per chat primaria.
-- `POST /v1/chat/completions` come fallback.
-- `GET /health`, `GET /health/detailed`, `GET /v1/models`, `GET /v1/capabilities` per dashboard.
-- `POST /v1/runs` e endpoint manuali `/v1/runs/{run_id}` per Runs.
-- `GET/POST/DELETE /api/jobs` e azioni `/run`, `/pause` per Jobs.
-- Hermes Visual Blocks v1 per spiegazioni visuali statiche sicure; `output_text` resta sempre fallback completo.
-
-## Build
+## Build e test
 
 ```powershell
-$env:ANDROID_HOME='C:\Users\Matteo\AppData\Local\Android\Sdk'
-$env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
-.\gradlew.bat assembleDebug
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+$env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
+cd .\src\NemoclawChat.Android
+.\gradlew.bat lintRelease testDebugUnitTest assembleRelease
 ```
 
-APK:
+Output:
 
 ```text
-src/NemoclawChat.Android/app/build/outputs/apk/debug/androidApp-debug.apk
+src/NemoclawChat.Android/app/build/outputs/apk/release/app-release.apk
 ```
+
+## QA release
+
+- installare l'APK su emulatore o dispositivo supportato;
+- verificare aggiornamento sopra la release precedente;
+- aprire Chat, Voce, Archivio, Server, Video e Impostazioni;
+- inviare e interrompere uno stream reale;
+- verificare allegato, download, STT e TTS;
+- controllare logcat per crash, ANR, leak e violazioni StrictMode;
+- verificare versione, package name e certificato con `apkanalyzer`/`apksigner`.
+
+## Regole runtime
+
+- ogni coroutine lunga deve avere owner lifecycle e cancellazione;
+- timeout finiti per rete, polling e media;
+- niente retry automatico di operazioni mutate dopo accettazione server;
+- allegati grandi in streaming su file, non interamente in memoria;
+- WebView e player devono essere distrutti quando la schermata termina;
+- il token Hermes non deve raggiungere host esterni.

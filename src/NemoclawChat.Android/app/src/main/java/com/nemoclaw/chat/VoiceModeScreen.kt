@@ -124,6 +124,11 @@ private enum class VoiceCallPhase {
     Error
 }
 
+private data class VoiceConversationContext(
+    val conversationId: String,
+    var previousResponseId: String? = null
+)
+
 @Composable
 internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?) {
     val context = LocalContext.current
@@ -158,11 +163,13 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?) {
                 if (!callActive) return@launch
                 phase = VoiceCallPhase.Listening
                 status = "Ti ascolto."
+                history.clear()
                 runVoiceCallLoop(
                     context = context,
                     settings = settings,
                     apiKey = apiKey,
                     history = history,
+                    voiceConversation = VoiceConversationContext("voice_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}"),
                     isCallActive = { callActive },
                     setPhase = { phase = it },
                     setStatus = { status = it }
@@ -275,7 +282,7 @@ private fun VoiceParticleField(
         }
         assembly = target
     }
-    var time by remember { mutableStateOf(0f) }
+    var time by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) {
         val start = withFrameNanos { it }
         while (true) time = (withFrameNanos { it } - start) / 1_000_000_000f
@@ -334,6 +341,7 @@ private suspend fun runVoiceCallLoop(
     settings: AppSettings,
     apiKey: String?,
     history: MutableList<ChatMessage>,
+    voiceConversation: VoiceConversationContext,
     isCallActive: () -> Boolean,
     setPhase: (VoiceCallPhase) -> Unit,
     setStatus: (String) -> Unit
@@ -359,7 +367,7 @@ private suspend fun runVoiceCallLoop(
             lastTranscript = text
             lastTranscriptAt = now
             setStatus("Tu: ${text.trimForStatus()}")
-            runVoiceTurn(context, settings, apiKey, history, text, setPhase, setStatus)
+            runVoiceTurn(context, settings, apiKey, history, voiceConversation, text, setPhase, setStatus)
         } catch (_: CancellationException) {
             break
         } catch (ex: Exception) {
@@ -391,8 +399,6 @@ private suspend fun captureVoiceUtterance(context: Context): File? = withContext
         )
         .setBufferSizeInBytes(max(minimumBuffer, VoiceFrameBytes * 6))
         .build()
-    check(recorder.state == AudioRecord.STATE_INITIALIZED) { "Impossibile inizializzare il microfono." }
-
     val preRoll = ArrayDeque<ByteArray>(VoicePreRollFrames)
     val pcm = ByteArrayOutputStream(VoiceSampleRate * 2 * 8)
     val frame = ByteArray(VoiceFrameBytes)
@@ -405,6 +411,7 @@ private suspend fun captureVoiceUtterance(context: Context): File? = withContext
     var heardVoice = false
 
     try {
+        check(recorder.state == AudioRecord.STATE_INITIALIZED) { "Impossibile inizializzare il microfono." }
         recorder.startRecording()
         check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Microfono non in registrazione." }
         while (coroutineContext.isActive) {
@@ -467,6 +474,7 @@ private suspend fun runVoiceTurn(
     settings: AppSettings,
     apiKey: String?,
     history: MutableList<ChatMessage>,
+    voiceConversation: VoiceConversationContext,
     prompt: String,
     setPhase: (VoiceCallPhase) -> Unit,
     setStatus: (String) -> Unit
@@ -486,8 +494,8 @@ private suspend fun runVoiceTurn(
         mode = "Chat",
         prompt = "Sei in una chiamata vocale. Rispondi subito in italiano, con tono naturale e frasi brevi. Niente markdown, elenchi o preamboli. La prima frase deve avere al massimo 8 parole. Utente: $prompt",
         history = contextHistory,
-        conversationId = null,
-        previousResponseId = null,
+        conversationId = voiceConversation.conversationId,
+        previousResponseId = voiceConversation.previousResponseId,
         attachments = emptyList(),
         apiKey = apiKey
     ).collect { event ->
@@ -503,6 +511,17 @@ private suspend fun runVoiceTurn(
                     }
                 }
             }
+            is ChatStreamEvent.TextSnapshot -> {
+                val previous = answer.toString()
+                val merged = mergeTextSnapshot(previous, event.text)
+                answer.clear()
+                answer.append(merged)
+                if (merged.startsWith(previous) && merged.length > previous.length) {
+                    speechBuffer.append(merged.substring(previous.length))
+                }
+                setStatus("Hermes: ${merged.trimForStatus()}")
+            }
+            is ChatStreamEvent.ResponseId -> voiceConversation.previousResponseId = event.id.takeIf { it.isNotBlank() }
             is ChatStreamEvent.Error -> throw java.io.IOException(event.message)
             else -> Unit
         }
@@ -571,11 +590,22 @@ private suspend fun synthesizeVoiceFile(
                 continue
             }
             response.use {
-                val bytes = it.body.bytes()
-                if (it.isSuccessful && bytes.isNotEmpty()) {
-                    return@withContext File(context.cacheDir, "voice-tts-${System.nanoTime()}.wav").apply { writeBytes(bytes) }
+                val body = it.body
+                if (it.isSuccessful) {
+                    try {
+                        return@withContext streamWavToTempFile(
+                            directory = File(context.cacheDir, "voice-tts"),
+                            prefix = "voice-tts-",
+                            input = body.byteStream(),
+                            contentLength = body.contentLength()
+                        )
+                    } catch (ex: Exception) {
+                        lastError = ex.message ?: ex.javaClass.simpleName
+                    }
+                } else {
+                    val errorBody = body.byteStream().readUtf8Bounded()
+                    lastError = "HTTP ${it.code}: ${errorBody.take(160)}"
                 }
-                lastError = "HTTP ${it.code}: ${bytes.decodeToString().take(160)}"
                 if (it.code != 401) break
             }
         }
@@ -664,7 +694,7 @@ private suspend fun transcribeVoiceFile(settings: AppSettings, apiKey: String?, 
                 continue
             }
             response.use {
-                val responseBody = it.body.string()
+                val responseBody = it.body.byteStream().readUtf8Bounded()
                 if (it.isSuccessful) return@withContext JSONObject(responseBody).optString("text").trim()
                 lastError = "HTTP ${it.code}: ${responseBody.take(180)}"
                 if (it.code != 401) break

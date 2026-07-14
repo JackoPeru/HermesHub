@@ -1,5 +1,6 @@
 package com.nemoclaw.chat
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.app.Activity
 import android.app.NotificationChannel
@@ -12,6 +13,7 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
@@ -87,6 +89,7 @@ import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.automirrored.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.AccountCircle
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AttachFile
@@ -141,6 +144,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -187,7 +192,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.edit
 import androidx.core.content.FileProvider
+import androidx.core.graphics.scale
+import androidx.core.net.toUri
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -214,6 +222,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -223,12 +234,12 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
 import java.net.URL
 import java.security.KeyStore
-import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
@@ -264,7 +275,6 @@ class MainActivity : ComponentActivity() {
         ensureHermesNotificationChannel(this)
         requestHermesNotificationPermission()
         scheduleHermesNotificationWorker(this)
-        this.requestBatteryOptimizationExemption()
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             ChatClawTheme {
@@ -379,7 +389,7 @@ private object ConversationArchiveAutoSync {
                     val response = archiveEventsHttpClient.newCall(request).execute()
                     try {
                         if (!response.isSuccessful) {
-                            val body = runCatching { response.body.string() }.getOrDefault("")
+                            val body = runCatching { response.body.byteStream().readUtf8Bounded() }.getOrDefault("")
                             if (shouldRetryHermesWithBearerAuth(response.code, body)) continue
                             throw IllegalStateException("Archivio events HTTP ${response.code}: ${extractHumanError(body)}")
                         }
@@ -387,17 +397,7 @@ private object ConversationArchiveAutoSync {
                         reader.useLines { lines ->
                             for (line in lines) {
                                 if (line.startsWith("data:", ignoreCase = true)) {
-                                    applyingRemote.set(true)
-                                    try {
-                                        restoreConversationsFromHub(
-                                            context,
-                                            loadSettings(context),
-                                            loadGatewaySecret(context),
-                                            syncAfterSave = false
-                                        )
-                                    } finally {
-                                        applyingRemote.set(false)
-                                    }
+                                    pullFromHub(context)
                                 }
                             }
                         }
@@ -1383,23 +1383,63 @@ private fun ChatScreen(
             Surface(color = Color(0xFF7A3E00), modifier = Modifier.fillMaxWidth()) {
                 Text(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                    text = "Offline. Hermes non raggiungibile.",
+                    text = "Rete Internet non validata. Provo comunque Hermes via LAN/Tailnet.",
                     color = Color.White,
                     fontSize = 12.sp
                 )
             }
         }
         var mediaRecorder by remember { mutableStateOf<android.media.MediaRecorder?>(null) }
+        fun releaseVoiceRecorder(deleteTempFile: Boolean) {
+            val recorder = mediaRecorder
+            mediaRecorder = null
+            state.isRecordingVoiceNote = false
+            if (recorder != null) {
+                runCatching { recorder.stop() }
+                runCatching { recorder.reset() }
+                runCatching { recorder.release() }
+            }
+            if (deleteTempFile) {
+                state.tempVoiceNoteFile?.let { runCatching { it.delete() } }
+                state.tempVoiceNoteFile = null
+            }
+        }
+        val startVoiceRecording: () -> Unit = {
+            try {
+                val tempFile = File.createTempFile("voice_note", ".m4a", context.cacheDir)
+                state.tempVoiceNoteFile = tempFile
+                val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    android.media.MediaRecorder(context)
+                } else {
+                    @Suppress("DEPRECATION")
+                    android.media.MediaRecorder()
+                }
+                mediaRecorder = recorder
+                recorder.setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+                recorder.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+                recorder.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+                recorder.setOutputFile(tempFile.absolutePath)
+                recorder.prepare()
+                recorder.start()
+                state.isRecordingVoiceNote = true
+            } catch (ex: Exception) {
+                releaseVoiceRecorder(deleteTempFile = true)
+                state.messages.add(ChatMessage("Errore Voce", "Impossibile registrare audio: ${ex.message ?: ex.javaClass.simpleName}", fromUser = false, isAction = true))
+            }
+        }
         val permissionLauncher = rememberLauncherForActivityResult(
             contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
             onResult = { isGranted ->
                 if (isGranted) {
-                    android.widget.Toast.makeText(context, "Permesso microfono concesso.", android.widget.Toast.LENGTH_SHORT).show()
+                    startVoiceRecording()
                 } else {
                     android.widget.Toast.makeText(context, "Permesso microfono negato.", android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
         )
+        DisposableEffect(Unit) {
+            onDispose { releaseVoiceRecorder(deleteTempFile = true) }
+        }
 
         Composer(
             context = context,
@@ -1421,14 +1461,13 @@ private fun ChatScreen(
             onRemoveAttachment = { state.pendingAttachments.remove(it) },
             onAction = { title, text, prompt ->
                 state.messages.add(ChatMessage(title, text, fromUser = false, isAction = true))
+                if (prompt.isNotBlank()) {
+                    state.draft = if (state.draft.isBlank()) prompt else "${state.draft.trimEnd()}\n\n$prompt"
+                }
             },
             onModeChange = { state.mode = it },
             onSend = {
                 var text = state.draft.trim()
-                if (!online) {
-                    state.messages.add(ChatMessage("Stato", "Offline. Hermes non raggiungibile.", fromUser = false, isAction = true))
-                    return@Composer
-                }
                 if ((text.isNotEmpty() || state.pendingAttachments.isNotEmpty()) && !state.sending && state.activeStreamJob == null) {
                     // No fallback prompt required when only sending attachments
                     val attachments = state.pendingAttachments.toList()
@@ -1443,12 +1482,15 @@ private fun ChatScreen(
                     
                     state.messages.add(ChatMessage("Tu", displayText, true, visualBlocks = createLocalAttachmentBlocks(attachments)))
                     state.draft = ""
-                    state.streamingState = StreamingState()
+                    val streamCid = state.activeConversationId
+                        ?: "conv_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(8)}"
+                    state.activeConversationId = streamCid
+                    state.activeStreams[streamCid] = ActiveStreamState(StreamingState(), null)
 
                     val job = HermesStreamRuntime.scope.launch {
                         var localState = StreamingState()
                         val mode = state.mode
-                        val convId = state.activeConversationId
+                        val convId = streamCid
                         val prevId = state.previousResponseId
                         var interrupted = false
                         var lastCheckpointAt = 0L
@@ -1461,19 +1503,21 @@ private fun ChatScreen(
                                 prompt = displayText,
                                 messages = localHistory.toList(),
                                 source = "Hermes in corso",
-                                responseId = prevId
+                                responseId = prevId,
+                                syncAfterSave = false
                             )
                         }
-                        val streamCid = initialConversation.id
-                        if (state.activeConversationId == convId) {
-                            state.activeConversationId = streamCid
+                        val persistedStreamCid = initialConversation.id
+                        if (persistedStreamCid != streamCid) {
+                            state.activeStreams.remove(streamCid)?.let { state.activeStreams[persistedStreamCid] = it }
+                            if (state.activeConversationId == streamCid) state.activeConversationId = persistedStreamCid
                         }
-                        
+                        val activeStreamCid = persistedStreamCid
                         val initialActiveState = state.activeStreams[streamCid] ?: ActiveStreamState(null, null)
-                        state.activeStreams[streamCid] = initialActiveState.copy(streamingState = localState)
+                        state.activeStreams[activeStreamCid] = initialActiveState.copy(streamingState = localState, job = coroutineContext[kotlinx.coroutines.Job])
 
                         try {
-                            streamChatRequest(settings, mode, text, localHistory.takeLast(CHAT_HISTORY_MAX_MESSAGES).toList(), streamCid, prevId, attachments, loadGatewaySecret(context))
+                            streamChatRequest(settings, mode, text, localHistory.takeLast(CHAT_HISTORY_MAX_MESSAGES).toList(), activeStreamCid, prevId, attachments, loadGatewaySecret(context))
                                 .collect { event ->
                                     if (event is ChatStreamEvent.RawHermesEvent) {
                                         rawEvents += HermesRawEvent(event.name, event.json)
@@ -1485,12 +1529,12 @@ private fun ChatScreen(
                                         }
                                     }
                                     localState = localState.applyEvent(event)
-                                    if (state.activeConversationId == streamCid) {
+                                    if (state.activeConversationId == activeStreamCid) {
                                         state.streamingState = localState
                                     } else {
-                                        val existing = state.activeStreams[streamCid]
+                                        val existing = state.activeStreams[activeStreamCid]
                                         if (existing != null) {
-                                            state.activeStreams[streamCid] = existing.copy(streamingState = localState)
+                                            state.activeStreams[activeStreamCid] = existing.copy(streamingState = localState)
                                         }
                                     }
                                     val now = System.currentTimeMillis()
@@ -1499,7 +1543,7 @@ private fun ChatScreen(
                                         withContext(Dispatchers.IO) {
                                             saveConversationSnapshot(
                                                 context = context,
-                                                conversationId = streamCid,
+                                                conversationId = activeStreamCid,
                                                 mode = mode,
                                                 prompt = displayText,
                                                 messages = localHistory.toList() + ChatMessage(
@@ -1513,13 +1557,24 @@ private fun ChatScreen(
                                                     rawEvents = rawEvents.toList()
                                                 ),
                                                 source = "Hermes in corso",
-                                                responseId = localState.responseId ?: prevId
+                                                responseId = localState.responseId ?: prevId,
+                                                syncAfterSave = false
                                             )
                                         }
                                     }
                                 }
                         } catch (_: CancellationException) {
                             interrupted = true
+                        } catch (ex: Exception) {
+                            val message = ex.message?.takeIf { it.isNotBlank() } ?: ex.javaClass.simpleName
+                            localState = localState.applyEvent(ChatStreamEvent.Error("Errore runtime Hermes: $message"))
+                            if (state.activeConversationId == activeStreamCid) {
+                                state.streamingState = localState
+                            } else {
+                                state.activeStreams[activeStreamCid]?.let {
+                                    state.activeStreams[activeStreamCid] = it.copy(streamingState = localState)
+                                }
+                            }
                         } finally {
                             val finalState = localState
                             val partialText = finalState.text.trimEnd()
@@ -1581,14 +1636,14 @@ private fun ChatScreen(
                             }
                             
                             localHistory.addAll(newMessagesToAppend)
-                            if (state.activeConversationId == streamCid) {
+                            if (state.activeConversationId == activeStreamCid) {
                                 state.messages.addAll(newMessagesToAppend)
                             }
                             
                             val saved = withContext(NonCancellable + Dispatchers.IO) {
                                 saveConversationSnapshot(
                                     context = context,
-                                    conversationId = streamCid,
+                                    conversationId = activeStreamCid,
                                     mode = mode,
                                     prompt = displayText,
                                     messages = localHistory.toList(),
@@ -1596,17 +1651,17 @@ private fun ChatScreen(
                                     responseId = finalState.responseId ?: prevId
                                 )
                             }
-                            if (state.activeConversationId == streamCid) {
+                            if (state.activeConversationId == activeStreamCid) {
                                 state.activeConversationId = saved.id
                                 state.previousResponseId = saved.previousResponseId
                                 state.streamingState = null
                                 state.activeStreamJob = null
                             } else {
-                                state.activeStreams.remove(streamCid)
+                                state.activeStreams.remove(activeStreamCid)
                             }
                         }
                     }
-                    state.activeStreamJob = job
+                    state.activeStreams[streamCid] = (state.activeStreams[streamCid] ?: ActiveStreamState(StreamingState(), null)).copy(job = job)
                 }
             },
             onStop = {
@@ -1632,50 +1687,23 @@ private fun ChatScreen(
                         permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                         return@Composer
                     }
-                    try {
-                        val tempFile = java.io.File.createTempFile("voice_note", ".m4a", context.cacheDir)
-                        state.tempVoiceNoteFile = tempFile
-                        val recorder = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                            android.media.MediaRecorder(context)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            android.media.MediaRecorder()
-                        }
-                        recorder.setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
-                        recorder.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
-                        recorder.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
-                        recorder.setOutputFile(tempFile.absolutePath)
-                        recorder.prepare()
-                        recorder.start()
-                        mediaRecorder = recorder
-                        state.isRecordingVoiceNote = true
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                        state.messages.add(ChatMessage("Errore Voce", "Impossibile registrare audio: ${e.message}", fromUser = false, isAction = true))
-                    }
+                    startVoiceRecording()
                 } else {
+                    val recorder = mediaRecorder
+                    mediaRecorder = null
+                    state.isRecordingVoiceNote = false
+                    val file = state.tempVoiceNoteFile
                     try {
-                        mediaRecorder?.stop()
-                        mediaRecorder?.release()
-                        mediaRecorder = null
-                        state.isRecordingVoiceNote = false
-                        
-                        val file = state.tempVoiceNoteFile
+                        recorder?.stop()
                         if (file != null && file.exists()) {
                             scope.launch {
                                 try {
                                     val secret = loadGatewaySecret(context) ?: ""
                                     val baseUrl = settings.gatewayUrl.trimEnd('/')
                                     
-                                    val client = okhttp3.OkHttpClient.Builder()
-                                        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                                        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-                                        .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-                                        .build()
-                                        
                                     val requestBody = okhttp3.MultipartBody.Builder()
                                         .setType(okhttp3.MultipartBody.FORM)
-                                        .addFormDataPart("file", file.name, okhttp3.RequestBody.create("audio/mp4".toMediaTypeOrNull(), file))
+                                        .addFormDataPart("file", file.name, file.asRequestBody("audio/mp4".toMediaTypeOrNull()))
                                         .build()
                                         
                                     val requestBuilder = okhttp3.Request.Builder()
@@ -1686,10 +1714,9 @@ private fun ChatScreen(
                                         requestBuilder.header("Authorization", "Bearer $secret")
                                     }
                                     
-                                    val response = withContext(Dispatchers.IO) { client.newCall(requestBuilder.build()).execute() }
-                                    if (response.isSuccessful) {
-                                        val responseStr = response.body?.string()
-                                        if (responseStr != null) {
+                                    withContext(Dispatchers.IO) { voiceNoteHttpClient.newCall(requestBuilder.build()).execute() }.use { response ->
+                                        if (response.isSuccessful) {
+                                            val responseStr = response.body.byteStream().readUtf8Bounded()
                                             val json = org.json.JSONObject(responseStr)
                                             val text = json.optString("text", "")
                                             if (text.isNotEmpty()) {
@@ -1698,12 +1725,11 @@ private fun ChatScreen(
                                                 }
                                                 state.draft += text
                                             }
+                                        } else {
+                                            state.messages.add(ChatMessage("Errore Voce", "Trascrizione fallita: ${response.code}", fromUser = false, isAction = true))
                                         }
-                                    } else {
-                                        state.messages.add(ChatMessage("Errore Voce", "Trascrizione fallita: ${response.code}", fromUser = false, isAction = true))
                                     }
-                                } catch (e: Exception) {
-                                    e.printStackTrace()
+                                } catch (_: Exception) {
                                     state.messages.add(ChatMessage("Errore Voce", "Invio audio fallito.", fromUser = false, isAction = true))
                                 } finally {
                                     file.delete()
@@ -1712,8 +1738,11 @@ private fun ChatScreen(
                             }
                         }
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                        file?.let { runCatching { it.delete() } }
+                        state.tempVoiceNoteFile = null
                         state.messages.add(ChatMessage("Errore Voce", "Errore arresto registrazione.", fromUser = false, isAction = true))
+                    } finally {
+                        runCatching { recorder?.release() }
                     }
                 }
             }
@@ -2080,8 +2109,8 @@ private fun RawHermesEventsView(events: List<HermesRawEvent>) {
 
 @Composable
 private fun MessageFooter(text: String, stats: ChatStreamStats?, settings: AppSettings, showMetrics: Boolean, filter: MetricDisplayFilter) {
-    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = LocalContext.current
+    val clipboardManager = remember(context) { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
     val scope = rememberCoroutineScope()
     var speaking by remember { mutableStateOf(false) }
     val line = remember(stats, filter, showMetrics) { 
@@ -2128,7 +2157,7 @@ private fun MessageFooter(text: String, stats: ChatStreamStats?, settings: AppSe
         }
 
         androidx.compose.material3.IconButton(
-            onClick = { clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(text)) },
+            onClick = { clipboardManager.setPrimaryClip(ClipData.newPlainText("Hermes", text)) },
             modifier = Modifier.size(24.dp)
         ) {
             Icon(
@@ -2313,7 +2342,28 @@ private fun MediaFileBlock(block: VisualBlock) {
     val clipboard = remember(context) { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
     val scope = rememberCoroutineScope()
     var isDownloading by remember(block.mediaUrl) { mutableStateOf(false) }
+    var pendingLegacyDownload by remember(block.id) { mutableStateOf<Pair<String, String>?>(null) }
     val canOpen = resolvedMediaUrl != null
+    val downloadNow: (String, String) -> Unit = { url, filename ->
+        isDownloading = true
+        android.widget.Toast.makeText(context, "Scaricamento: ${sanitizeDownloadFilename(filename)}", android.widget.Toast.LENGTH_SHORT).show()
+        scope.launch {
+            val message = runCatching {
+                downloadHermesMediaFile(context, url, filename, block.mimeType, loadGatewaySecret(context))
+            }.getOrElse { "Download fallito: ${it.message ?: "errore sconosciuto"}" }
+            isDownloading = false
+            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+    val legacyStoragePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val pending = pendingLegacyDownload
+        pendingLegacyDownload = null
+        if (granted && pending != null) {
+            downloadNow(pending.first, pending.second)
+        } else if (!granted) {
+            android.widget.Toast.makeText(context, "Permesso Download negato.", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (isLocalAttachment && block.mediaKind == "image") {
@@ -2366,11 +2416,11 @@ private fun MediaFileBlock(block: VisualBlock) {
                     Button(
                         enabled = canOpen,
                         onClick = {
-                            val url = resolvedMediaUrl ?: return@Button
+                            val url = resolvedMediaUrl
                             val viewUrl = withHermesMediaQueryToken(url, loadGatewaySecret(context))
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(viewUrl))
+                            val intent = Intent(Intent.ACTION_VIEW, viewUrl.toUri())
                             if (block.mimeType.isNotBlank()) {
-                                intent.setDataAndType(Uri.parse(viewUrl), block.mimeType)
+                                intent.setDataAndType(viewUrl.toUri(), block.mimeType)
                             }
                             openAndroidIntent(context, intent)
                         }
@@ -2378,30 +2428,22 @@ private fun MediaFileBlock(block: VisualBlock) {
                     Button(
                         enabled = canOpen && !isDownloading,
                         onClick = {
-                            val url = resolvedMediaUrl ?: return@Button
+                            val url = resolvedMediaUrl
                             val filename = block.filename.ifBlank { block.title.ifBlank { "hermes-file" } }
-                            isDownloading = true
-                            android.widget.Toast.makeText(context, "Scaricamento: ${sanitizeDownloadFilename(filename)}", android.widget.Toast.LENGTH_SHORT).show()
-                            scope.launch {
-                                val currentApiKey = loadGatewaySecret(context)
-                                val message = runCatching {
-                                    downloadHermesMediaFile(
-                                        context = context,
-                                        url = url,
-                                        filename = filename,
-                                        mimeType = block.mimeType,
-                                        apiKey = currentApiKey
-                                    )
-                                }.getOrElse { "Download fallito: ${it.message ?: "errore sconosciuto"}" }
-                                isDownloading = false
-                                android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+                            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+                                androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                            ) {
+                                pendingLegacyDownload = url to filename
+                                legacyStoragePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            } else {
+                                downloadNow(url, filename)
                             }
                         }
                     ) { Text(if (isDownloading) "Scarico..." else "Scarica") }
                     Button(
                         enabled = canOpen,
                         onClick = {
-                            val url = resolvedMediaUrl ?: return@Button
+                            val url = resolvedMediaUrl
                             clipboard.setPrimaryClip(ClipData.newPlainText("hermes-media-url", withHermesMediaQueryToken(url, loadGatewaySecret(context))))
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = AppColors.Elevated)
@@ -2414,11 +2456,11 @@ private fun MediaFileBlock(block: VisualBlock) {
 
 suspend fun downloadHermesMediaFile(context: Context, url: String, filename: String, mimeType: String, apiKey: String?): String = withContext(Dispatchers.IO) {
     val safeName = sanitizeDownloadFilename(filename.ifBlank {
-        runCatching { Uri.parse(url).lastPathSegment.orEmpty() }.getOrDefault("").ifBlank { "hermes-file" }
+        runCatching { url.toUri().lastPathSegment.orEmpty() }.getOrDefault("").ifBlank { "hermes-file" }
     })
     var lastError = "nessuna risposta"
     for (candidateUrl in plugAndPlayUrlCandidates(url)) {
-        val needsHermesAuth = Uri.parse(candidateUrl).path.orEmpty().startsWith("/v1/media/", ignoreCase = true)
+        val needsHermesAuth = candidateUrl.toUri().path.orEmpty().startsWith("/v1/media/", ignoreCase = true)
         val candidates = if (needsHermesAuth) hermesAuthCandidates(apiKey) else listOf<String?>(null)
         for (token in candidates) {
             val urls = if (needsHermesAuth && !token.isNullOrBlank()) {
@@ -2444,7 +2486,13 @@ suspend fun downloadHermesMediaFile(context: Context, url: String, filename: Str
                         return@use
                     }
                     val body = response.body
-                    saveDownloadBytes(context, safeName, mimeType.ifBlank { body.contentType()?.toString().orEmpty() }, body.byteStream())
+                    saveDownloadBytes(
+                        context = context,
+                        filename = safeName,
+                        mimeType = mimeType.ifBlank { body.contentType()?.toString().orEmpty() },
+                        input = body.byteStream(),
+                        expectedBytes = body.contentLength()
+                    )
                     return@withContext "File salvato in Download: $safeName"
                 }
             }
@@ -2456,7 +2504,7 @@ suspend fun downloadHermesMediaFile(context: Context, url: String, filename: Str
 private fun withHermesMediaQueryToken(url: String, apiKey: String?): String {
     val token = apiKey?.trim()?.takeIf { it.isNotBlank() } ?: HERMES_FALLBACK_API_KEY
     return try {
-        val parsed = Uri.parse(url)
+        val parsed = url.toUri()
         if (!parsed.path.orEmpty().startsWith("/v1/media/", ignoreCase = true)) {
             return url
         }
@@ -2472,14 +2520,43 @@ private fun withHermesMediaQueryToken(url: String, apiKey: String?): String {
     }
 }
 
-private fun saveDownloadBytes(context: Context, filename: String, mimeType: String, input: java.io.InputStream) {
+private fun saveDownloadBytes(
+    context: Context,
+    filename: String,
+    mimeType: String,
+    input: java.io.InputStream,
+    expectedBytes: Long = -1L
+) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
         val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         if (!dir.exists() && !dir.mkdirs()) {
             throw IllegalStateException("cartella Download non accessibile")
         }
-        File(dir, filename).outputStream().use { output ->
-            input.use { it.copyTo(output) }
+        ensureDownloadSpace(context, dir, expectedBytes)
+        val target = File(dir, filename)
+        val partial = File(dir, ".$filename.${java.util.UUID.randomUUID()}.part")
+        try {
+            FileOutputStream(partial).use { output ->
+                input.use { it.copyTo(output) }
+                output.fd.sync()
+            }
+            try {
+                java.nio.file.Files.move(
+                    partial.toPath(),
+                    target.toPath(),
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                )
+            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                java.nio.file.Files.move(
+                    partial.toPath(),
+                    target.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                )
+            }
+        } catch (ex: Exception) {
+            partial.delete()
+            throw ex
         }
         return
     }
@@ -2504,6 +2581,21 @@ private fun saveDownloadBytes(context: Context, filename: String, mimeType: Stri
         resolver.delete(target, null, null)
         throw ex
     }
+}
+
+private fun ensureDownloadSpace(context: Context, directory: File, expectedBytes: Long) {
+    if (expectedBytes <= 0L) return
+    val reserveBytes = 16L * 1024L * 1024L
+    if (expectedBytes > Long.MAX_VALUE - reserveBytes) {
+        throw IllegalStateException("dimensione download non valida")
+    }
+    val requiredBytes = expectedBytes + reserveBytes
+    val storageManager = context.getSystemService(android.os.storage.StorageManager::class.java)
+    val storageUuid = storageManager.getUuidForPath(directory)
+    if (storageManager.getAllocatableBytes(storageUuid) < requiredBytes) {
+        throw IllegalStateException("spazio insufficiente nella cartella Download")
+    }
+    storageManager.allocateBytes(storageUuid, requiredBytes)
 }
 
 private fun sanitizeDownloadFilename(value: String): String {
@@ -2562,11 +2654,11 @@ private fun authHeaders(apiKey: String?): Map<String, String> {
     return mapOf("Authorization" to "Bearer $token", "User-Agent" to "HermesHub-Android")
 }
 
-private fun loadVideoThumbnail(url: String, apiKey: String?): Bitmap? {
+private fun loadVideoThumbnail(settings: AppSettings, url: String, apiKey: String?): Bitmap? {
     val retriever = MediaMetadataRetriever()
     return try {
         if (url.startsWith("http://", true) || url.startsWith("https://", true)) {
-            retriever.setDataSource(url, authHeaders(apiKey))
+            retriever.setDataSource(url, if (shouldAuthenticateHermesUrl(settings, url)) authHeaders(apiKey) else emptyMap())
         } else {
             retriever.setDataSource(url)
         }
@@ -2584,33 +2676,43 @@ private fun Bitmap.scaleBitmapToMaxWidth(maxWidth: Int): Bitmap {
     if (width <= maxWidth || width <= 0 || height <= 0) return this
     val ratio = maxWidth.toFloat() / width.toFloat()
     val targetHeight = (height * ratio).toInt().coerceAtLeast(1)
-    return Bitmap.createScaledBitmap(this, maxWidth, targetHeight, true)
+    return scale(maxWidth, targetHeight)
 }
 
-private fun decodeAttachmentPreview(dataUrl: String): Bitmap? {
+private fun decodeAttachmentPreview(source: String): Bitmap? {
     return try {
-        val payload = dataUrl.substringAfter(',', missingDelimiterValue = "")
-        if (payload.isBlank()) return null
-        val bytes = Base64.decode(payload, Base64.DEFAULT)
-        
-        val options = BitmapFactory.Options()
-        options.inJustDecodeBounds = true
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-        
-        val maxWidth = 240
-        var scale = 1
-        if (options.outWidth > maxWidth) {
-            scale = options.outWidth / maxWidth
+        val payload = source.substringAfter(',', missingDelimiterValue = "")
+        val file = source.takeIf { payload.isBlank() }?.let(::File)?.takeIf { it.isFile }
+        val bytes = if (file == null && payload.isNotBlank()) Base64.decode(payload, Base64.DEFAULT) else null
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        when {
+            file != null -> BitmapFactory.decodeFile(file.absolutePath, options)
+            bytes != null -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+            else -> return null
         }
-        
-        val decodeOptions = BitmapFactory.Options()
-        decodeOptions.inSampleSize = scale
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)?.scaleBitmapToMaxWidth(maxWidth)
+        val maxWidth = 240
+        val scale = if (options.outWidth > maxWidth) (options.outWidth / maxWidth).coerceAtLeast(1) else 1
+        val decodeOptions = BitmapFactory.Options().apply { inSampleSize = scale }
+        val decoded = if (file != null) {
+            BitmapFactory.decodeFile(file.absolutePath, decodeOptions)
+        } else {
+            BitmapFactory.decodeByteArray(bytes!!, 0, bytes.size, decodeOptions)
+        }
+        decoded?.scaleBitmapToMaxWidth(maxWidth)
     } catch (_: Exception) {
         null
     } catch (_: OutOfMemoryError) {
         null
     }
+}
+
+private fun shouldAuthenticateHermesUrl(settings: AppSettings, url: String): Boolean {
+    return runCatching {
+        val uri = URI(url)
+        val configuredHost = URI(hermesRoot(settings)).host
+        uri.path.orEmpty().startsWith("/v1/") &&
+            (uri.host.equals(configuredHost, ignoreCase = true) || isKnownHermesGatewayHost(uri.host))
+    }.getOrDefault(false)
 }
 
 @Composable
@@ -2653,7 +2755,7 @@ private fun resolveMediaUrl(settings: AppSettings, value: String, allowExternalI
             if (
                 (uri.scheme == "http" || uri.scheme == "https") &&
                 path.startsWith("/v1/media/") &&
-                uri.host.equals(root.host, ignoreCase = true)
+                (uri.host.equals(root.host, ignoreCase = true) || isKnownHermesGatewayHost(uri.host))
             ) {
                 value
             } else if (
@@ -2686,21 +2788,31 @@ private const val REMOTE_BITMAP_MAX_BYTES = 10L * 1024 * 1024
 private const val REMOTE_BITMAP_MAX_DIMENSION = 2048
 
 private fun loadRemoteBitmap(url: String, apiKey: String?): Bitmap? {
-    val parsed = runCatching { Uri.parse(url) }.getOrNull()
+    val parsed = runCatching { url.toUri() }.getOrNull()
     val needsHermesAuth = parsed?.path.orEmpty().startsWith("/v1/media/", ignoreCase = true)
     val candidates = if (needsHermesAuth) hermesAuthCandidates(apiKey) else listOf<String?>(null)
-    for (token in candidates) {
-        val urls = if (needsHermesAuth && !token.isNullOrBlank()) {
-            listOf(url, withHermesMediaQueryToken(url, token))
-        } else {
-            listOf(url)
-        }
-        for ((index, attemptUrl) in urls.distinct().withIndex()) {
-            val loaded = loadRemoteBitmapAttempt(attemptUrl, token.takeIf { index == 0 })
-            if (loaded != null) return loaded
+    val gatewayUrls = if (needsHermesAuth) plugAndPlayUrlCandidates(url) else listOf(url)
+    for (gatewayUrl in gatewayUrls) {
+        for (token in candidates) {
+            val urls = if (needsHermesAuth && !token.isNullOrBlank()) {
+                listOf(gatewayUrl, withHermesMediaQueryToken(gatewayUrl, token))
+            } else {
+                listOf(gatewayUrl)
+            }
+            for ((index, attemptUrl) in urls.distinct().withIndex()) {
+                val loaded = loadRemoteBitmapAttempt(attemptUrl, token.takeIf { index == 0 })
+                if (loaded != null) return loaded
+            }
         }
     }
     return null
+}
+
+private fun isKnownHermesGatewayHost(host: String?): Boolean {
+    if (host.isNullOrBlank()) return false
+    return plugAndPlayGatewayRoots.any { root ->
+        runCatching { URI(root).host.equals(host, ignoreCase = true) }.getOrDefault(false)
+    }
 }
 
 private fun loadRemoteBitmapAttempt(url: String, bearerToken: String?): Bitmap? {
@@ -2968,9 +3080,10 @@ private fun Composer(
                     if (attachments.isNotEmpty()) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             attachments.forEach { attachment ->
-                                val preview by produceState<Bitmap?>(initialValue = null, attachment.dataUrl) {
+                                val previewSource = attachment.localFilePath ?: attachment.dataUrl
+                                val preview by produceState<Bitmap?>(initialValue = null, previewSource) {
                                     this.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                        decodeAttachmentPreview(attachment.dataUrl)
+                                        decodeAttachmentPreview(previewSource)
                                     }
                                 }
                                 Surface(
@@ -3094,7 +3207,7 @@ private fun ArchiveScreen(
     context: Context,
     onOpenConversation: (String?, String) -> Unit
 ) {
-    var refreshKey by remember { mutableStateOf(0) }
+    var refreshKey by remember { mutableIntStateOf(0) }
     val archive = remember(refreshKey) { loadArchiveItems(context) }
     var query by rememberSaveable { mutableStateOf("") }
     var filter by remember { mutableStateOf("Tutto") }
@@ -3358,7 +3471,7 @@ private fun CronScreen(context: Context, settings: AppSettings) {
     val scope = rememberCoroutineScope()
     var jobs by remember { mutableStateOf<List<CronJob>>(emptyList()) }
     var status by remember { mutableStateOf("Carico cron Hermes...") }
-    var refreshNonce by remember { mutableStateOf(0) }
+    var refreshNonce by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(settings.gatewayUrl, refreshNonce) {
         val result = loadCronJobs(settings, loadGatewaySecret(context))
@@ -3470,7 +3583,7 @@ private fun NotificationsScreen(context: Context, settings: AppSettings, onOpenC
     val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf<List<HubNotification>>(emptyList()) }
     var status by remember { mutableStateOf("Carico notifiche Hermes...") }
-    var refreshNonce by remember { mutableStateOf(0) }
+    var refreshNonce by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(settings.gatewayUrl, refreshNonce) {
         val result = loadHubNotifications(settings, loadGatewaySecret(context), unreadOnly = false)
@@ -4106,6 +4219,17 @@ private fun diskMountSortKey(mountpoint: String): String {
     return if (mountpoint == "/") " " else mountpoint
 }
 
+private val ignoredHardwareFileSystems = setOf(
+    "autofs", "cgroup", "cgroup2", "configfs", "debugfs", "devtmpfs", "efivarfs",
+    "fusectl", "hugetlbfs", "mqueue", "nsfs", "overlay", "proc", "pstore", "ramfs",
+    "securityfs", "squashfs", "sysfs", "tmpfs", "tracefs"
+)
+
+internal fun isMeaningfulHardwareDisk(device: String, fileSystem: String): Boolean {
+    return !device.trim().startsWith("/dev/loop", ignoreCase = true) &&
+        fileSystem.trim().lowercase() !in ignoredHardwareFileSystems
+}
+
 private fun List<HardwareTemperature>.toHardwareTemperatureViews(): List<HardwareTemperatureView> {
     val hasNvmeComposite = any { it.name.equals("nvme", ignoreCase = true) && it.label.equals("Composite", ignoreCase = true) }
     return mapNotNull { temp ->
@@ -4324,7 +4448,7 @@ private fun OperatorActionButton(label: String, onClick: () -> Unit) {
 
 @Composable
 private fun VideoScreen(context: Context, settings: AppSettings, onOpenChatPrompt: (String) -> Unit) {
-    var refreshKey by remember { mutableStateOf(0) }
+    var refreshKey by remember { mutableIntStateOf(0) }
     var status by remember { mutableStateOf("Sincronizzo cartella video Hermes...") }
     var items by remember { mutableStateOf<List<VideoLibraryItem>>(emptyList()) }
     var selectedVideoId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -4573,7 +4697,7 @@ private fun VideoThumbnail(settings: AppSettings, item: VideoLibraryItem, apiKey
     }
     val bitmap by produceState<Bitmap?>(initialValue = null, videoUrl, thumbUrl, apiKey) {
         value = withContext(Dispatchers.IO) {
-            thumbUrl?.let { loadRemoteBitmap(it, apiKey) } ?: loadVideoThumbnail(videoUrl, apiKey)
+            thumbUrl?.let { loadRemoteBitmap(it, apiKey) } ?: loadVideoThumbnail(settings, videoUrl, apiKey)
         }
     }
     Box(
@@ -4626,12 +4750,12 @@ private fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vide
     }
     val player = remember(videoUrl, apiKey) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setDefaultRequestProperties(authHeaders(apiKey))
+            .setDefaultRequestProperties(if (shouldAuthenticateHermesUrl(settings, videoUrl)) authHeaders(apiKey) else emptyMap())
         ExoPlayer.Builder(context)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .build()
             .apply {
-                setMediaItem(MediaItem.fromUri(Uri.parse(videoUrl)))
+                setMediaItem(MediaItem.fromUri(videoUrl.toUri()))
                 prepare()
                 playWhenReady = true
             }
@@ -4660,7 +4784,7 @@ private fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vide
                 window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 insetsController?.show(WindowInsetsCompat.Type.systemBars())
                 if (window != null) {
-                    WindowCompat.setDecorFitsSystemWindows(window, true)
+                    WindowCompat.setDecorFitsSystemWindows(window, false)
                 }
             }
         }
@@ -4851,7 +4975,7 @@ private fun VideoReactionButton(label: String, icon: ImageVector, selected: Bool
 @Composable
 private fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPrompt: (String) -> Unit) {
     val scope = rememberCoroutineScope()
-    var refreshKey by remember { mutableStateOf(0) }
+    var refreshKey by remember { mutableIntStateOf(0) }
     var status by remember { mutableStateOf("Articoli HTML creati da Hermes.") }
     var selectedHtmlId by rememberSaveable { mutableStateOf<String?>(null) }
     var htmlItems by remember { mutableStateOf<List<NewsHtmlItem>>(emptyList()) }
@@ -5001,6 +5125,38 @@ private fun NewsHtmlCard(item: NewsHtmlItem, onClick: () -> Unit) {
     }
 }
 
+@SuppressLint("SetJavaScriptEnabled")
+private fun createNewsWebView(context: Context): WebView = WebView(context).apply {
+    settings.javaScriptEnabled = true
+    settings.domStorageEnabled = true
+    settings.loadWithOverviewMode = true
+    settings.useWideViewPort = true
+    webViewClient = object : WebViewClient() {
+        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = false
+    }
+}
+
+private fun updateNewsWebView(webView: WebView, pageUrl: String, html: String) {
+    val content = if (html.isBlank()) {
+        "<html><body style=\"font-family:sans-serif;background:#111827;color:#fff\"><p>Caricamento...</p></body></html>"
+    } else {
+        injectHtmlBase(html, pageUrl)
+    }
+    val contentKey = "$pageUrl:${content.hashCode()}"
+    if (webView.tag == contentKey) return
+    webView.tag = contentKey
+    webView.loadDataWithBaseURL(pageUrl, content, "text/html", "utf-8", null)
+}
+
+private fun releaseNewsWebView(webView: WebView) {
+    webView.stopLoading()
+    webView.webViewClient = WebViewClient()
+    webView.loadUrl("about:blank")
+    webView.clearHistory()
+    webView.removeAllViews()
+    webView.destroy()
+}
+
 @Composable
 private fun NewsHtmlScreen(context: Context, settings: AppSettings, item: NewsHtmlItem, onBack: () -> Unit) {
     val apiKey = remember { loadGatewaySecret(context) }
@@ -5032,7 +5188,7 @@ private fun NewsHtmlScreen(context: Context, settings: AppSettings, item: NewsHt
                 window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 insetsController?.show(WindowInsetsCompat.Type.systemBars())
                 if (window != null) {
-                    WindowCompat.setDecorFitsSystemWindows(window, true)
+                    WindowCompat.setDecorFitsSystemWindows(window, false)
                 }
             }
         }
@@ -5060,30 +5216,9 @@ private fun NewsHtmlScreen(context: Context, settings: AppSettings, item: NewsHt
                 HorizontalDivider(color = AppColors.Border)
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
-                    factory = { viewContext ->
-                        WebView(viewContext).apply {
-                            this.settings.javaScriptEnabled = true
-                            this.settings.domStorageEnabled = true
-                            this.settings.loadWithOverviewMode = true
-                            this.settings.useWideViewPort = true
-                            webViewClient = object : WebViewClient() {
-                                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = false
-                            }
-                        }
-                    },
-                    update = { webView ->
-                        if (html.isBlank()) {
-                            webView.loadDataWithBaseURL(
-                                pageUrl,
-                                "<html><body style=\"font-family:sans-serif;background:#111827;color:#fff\"><p>Caricamento...</p></body></html>",
-                                "text/html",
-                                "utf-8",
-                                null
-                            )
-                        } else {
-                            webView.loadDataWithBaseURL(pageUrl, injectHtmlBase(html, pageUrl), "text/html", "utf-8", null)
-                        }
-                    }
+                    factory = ::createNewsWebView,
+                    update = { updateNewsWebView(it, pageUrl, html) },
+                    onRelease = ::releaseNewsWebView
                 )
             }
         }
@@ -5097,30 +5232,9 @@ private fun NewsHtmlScreen(context: Context, settings: AppSettings, item: NewsHt
             ) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
-                    factory = { viewContext ->
-                        WebView(viewContext).apply {
-                            this.settings.javaScriptEnabled = true
-                            this.settings.domStorageEnabled = true
-                            this.settings.loadWithOverviewMode = true
-                            this.settings.useWideViewPort = true
-                            webViewClient = object : WebViewClient() {
-                                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = false
-                            }
-                        }
-                    },
-                    update = { webView ->
-                        if (html.isBlank()) {
-                            webView.loadDataWithBaseURL(
-                                pageUrl,
-                                "<html><body style=\"font-family:sans-serif;background:#111827;color:#fff\"><p>Caricamento...</p></body></html>",
-                                "text/html",
-                                "utf-8",
-                                null
-                            )
-                        } else {
-                            webView.loadDataWithBaseURL(pageUrl, injectHtmlBase(html, pageUrl), "text/html", "utf-8", null)
-                        }
-                    }
+                    factory = ::createNewsWebView,
+                    update = { updateNewsWebView(it, pageUrl, html) },
+                    onRelease = ::releaseNewsWebView
                 )
                 Button(
                     modifier = Modifier
@@ -5206,7 +5320,7 @@ private fun WorkspaceFeedScreen(
     onOpenChatPrompt: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var refreshKey by remember { mutableStateOf(0) }
+    var refreshKey by remember { mutableIntStateOf(0) }
     var status by remember { mutableStateOf("Feed sincronizzato localmente. I nuovi spunti arrivano dalla chat e dagli artifact Hermes.") }
     val items = remember(refreshKey) { loadWorkspaceRequests(context, kind) }
 
@@ -5274,10 +5388,10 @@ private fun WorkspaceFeedItem(
             item.remoteId?.let { Text("Job: $it", color = AppColors.Faint, fontSize = 12.sp) }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (item.streamUrl.isNotBlank()) {
-                    Button(onClick = { openAndroidIntent(context, Intent(Intent.ACTION_VIEW, Uri.parse(resolveWorkspaceUrl(settings, item.streamUrl)))) }) { Text("Streaming") }
+                    Button(onClick = { openAndroidIntent(context, Intent(Intent.ACTION_VIEW, resolveWorkspaceUrl(settings, item.streamUrl).toUri())) }) { Text("Streaming") }
                 }
                 if (item.downloadUrl.isNotBlank()) {
-                    Button(onClick = { openAndroidIntent(context, Intent(Intent.ACTION_VIEW, Uri.parse(resolveWorkspaceUrl(settings, item.downloadUrl)))) }) { Text("Scarica") }
+                    Button(onClick = { openAndroidIntent(context, Intent(Intent.ACTION_VIEW, resolveWorkspaceUrl(settings, item.downloadUrl).toUri())) }) { Text("Scarica") }
                 }
                 if (item.remoteId != null) {
                     Button(onClick = {
@@ -5625,7 +5739,7 @@ private fun SettingsScreen(
     var videoLibraryPath by remember(settings.videoLibraryPath) { mutableStateOf(settings.videoLibraryPath) }
     var newsLibraryPath by remember(settings.newsLibraryPath) { mutableStateOf(settings.newsLibraryPath) }
     var apiKey by remember { mutableStateOf(loadGatewaySecret(context) ?: HERMES_FALLBACK_API_KEY) }
-    var fontScale by remember(settings.fontScale) { mutableStateOf(settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)) }
+    var fontScale by remember(settings.fontScale) { mutableFloatStateOf(settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)) }
     var showToolCalls by remember(settings.showToolCalls) { mutableStateOf(settings.showToolCalls) }
     var showMessageMetrics by remember(settings.showMessageMetrics) { mutableStateOf(settings.showMessageMetrics) }
     var metricTtft by remember(settings.metricTtft) { mutableStateOf(settings.metricTtft) }
@@ -5634,7 +5748,7 @@ private fun SettingsScreen(
     var metricPromptTokens by remember(settings.metricPromptTokens) { mutableStateOf(settings.metricPromptTokens) }
     var metricContextTokens by remember(settings.metricContextTokens) { mutableStateOf(settings.metricContextTokens) }
     var metricDuration by remember(settings.metricDuration) { mutableStateOf(settings.metricDuration) }
-    var maxAttachmentMb by remember(settings.maxAttachmentMb) { mutableStateOf(settings.maxAttachmentMb.coerceIn(1, 150)) }
+    var maxAttachmentMb by remember(settings.maxAttachmentMb) { mutableIntStateOf(settings.maxAttachmentMb.coerceIn(1, 150)) }
     var strictNativeMode by remember(settings.strictNativeMode) { mutableStateOf(settings.strictNativeMode) }
     var demoMode by remember(settings.demoMode) { mutableStateOf(settings.demoMode) }
     var status by remember { mutableStateOf("Pronto.") }
@@ -5687,8 +5801,7 @@ private fun SettingsScreen(
                     value = fontScale,
                     onValueChange = { scale ->
                         fontScale = scale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
-                        onSave(currentSettings(fontScale))
-                        status = "Dimensione caratteri: ${(fontScale * 100).toInt()}%."
+                        status = "Dimensione caratteri: ${(fontScale * 100).toInt()}%. Premi Salva per applicare."
                     }
                 )
             }
@@ -6475,11 +6588,14 @@ private fun parseHardwareSnapshot(json: JSONObject): HardwareSnapshot {
         val array = json.optJSONArray("disks") ?: JSONArray()
         for (i in 0 until array.length()) {
             val item = array.optJSONObject(i) ?: continue
+            val device = item.optString("device", "-")
+            val fileSystem = item.optString("fstype", "-")
+            if (!isMeaningfulHardwareDisk(device, fileSystem)) continue
             add(
                 HardwareDisk(
-                    device = item.optString("device", "-"),
+                    device = device,
                     mountpoint = item.optString("mountpoint", "-"),
-                    fileSystem = item.optString("fstype", "-"),
+                    fileSystem = fileSystem,
                     totalBytes = item.optLong("total_bytes", 0L),
                     usedBytes = item.optLong("used_bytes", 0L),
                     freeBytes = item.optLong("free_bytes", 0L),
@@ -6564,23 +6680,11 @@ private fun parseHardwareSnapshot(json: JSONObject): HardwareSnapshot {
 
 private suspend fun testGateway(healthUrl: String, apiKey: String?): String = withContext(Dispatchers.IO) {
     try {
-        var last: Pair<Int, String>? = null
-        for (token in hermesAuthCandidates(apiKey)) {
-            val response = executeHttpGet(healthUrl, token)
-            last = response
-            if (!shouldRetryHermesWithBearerAuth(response.first, response.second)) {
-                return@withContext if (response.first in 200..299) {
-                    "Hermes raggiungibile."
-                } else {
-                    "Hermes risponde: HTTP ${response.first}"
-                }
-            }
-        }
-        val code = last?.first ?: 0
-        if (code in 200..299) {
+        val response = httpGetResponse(healthUrl, apiKey)
+        if (response.first in 200..299) {
             "Hermes raggiungibile."
         } else {
-            "Hermes risponde: HTTP $code"
+            "Hermes risponde: HTTP ${response.first}"
         }
     } catch (ex: Exception) {
         "Hermes non raggiungibile: ${ex.message ?: ex.javaClass.simpleName}"
@@ -6862,15 +6966,10 @@ private fun resolveHermesUrl(settings: AppSettings, path: String): String {
 private val plugAndPlayGatewayRoots = listOf(
     "http://hermes:8642",
     "http://100.94.223.14:8642",
-    "http://hermes.local:8642",
-    "http://hermes-hub:8642",
-    "http://hermeshub:8642",
-    "http://home-server:8642",
-    "http://server:8642",
-    "http://100.105.46.6:8642"
+    "http://hermes.local:8642"
 )
 
-private fun plugAndPlayUrlCandidates(url: String): List<String> {
+internal fun plugAndPlayUrlCandidates(url: String): List<String> {
     return try {
         val uri = URI(url)
         if (uri.port != 8642) return listOf(url)
@@ -6894,16 +6993,6 @@ private suspend fun httpGet(url: String, apiKey: String? = null): String = withC
 private suspend fun httpGetResponse(url: String, apiKey: String? = null): Pair<Int, String> = withContext(Dispatchers.IO) {
     var last: Pair<Int, String>? = null
     for (candidateUrl in plugAndPlayUrlCandidates(url)) {
-        // #region debug-point D:http-notifications-start
-        if (candidateUrl.contains("/v1/hub/notifications")) {
-            debugReport(
-                hypothesisId = "D",
-                location = "MainActivity.kt:httpGetResponse:start",
-                msg = "[DEBUG] httpGetResponse notifications request starting",
-                data = mapOf("url" to candidateUrl, "apiKeyFingerprint" to debugTokenFingerprint(apiKey))
-            )
-        }
-        // #endregion
         for (token in hermesAuthCandidates(apiKey)) {
             val response = try {
                 executeHttpGet(candidateUrl, token)
@@ -6912,21 +7001,6 @@ private suspend fun httpGetResponse(url: String, apiKey: String? = null): Pair<I
                 continue
             }
             last = response
-            // #region debug-point D:http-notifications-result
-            if (candidateUrl.contains("/v1/hub/notifications")) {
-                debugReport(
-                    hypothesisId = "D",
-                    location = "MainActivity.kt:httpGetResponse:result",
-                    msg = "[DEBUG] httpGetResponse notifications response received",
-                    data = mapOf(
-                        "url" to candidateUrl,
-                        "tokenFingerprint" to debugTokenFingerprint(token),
-                        "statusCode" to response.first,
-                        "bodySnippet" to response.second.take(160)
-                    )
-                )
-            }
-            // #endregion
             if (!shouldRetryHermesWithBearerAuth(response.first, response.second)) {
                 if (response.first != 0) return@withContext response
             }
@@ -7241,6 +7315,22 @@ private val apiHttpClient: OkHttpClient by lazy {
         .build()
 }
 
+private val voiceNoteHttpClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(120, TimeUnit.SECONDS)
+        .build()
+}
+
+private val updateHttpClient: OkHttpClient by lazy {
+    apiHttpClient.newBuilder()
+        .readTimeout(5, TimeUnit.MINUTES)
+        .callTimeout(10, TimeUnit.MINUTES)
+        .build()
+}
+
 private val archiveEventsHttpClient: OkHttpClient by lazy {
     OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -7253,6 +7343,14 @@ private val archiveEventsHttpClient: OkHttpClient by lazy {
 
 @Volatile
 private var activeTtsMediaPlayer: MediaPlayer? = null
+@Volatile
+private var activeTtsFile: File? = null
+
+private data class TtsRequestResult(
+    val statusCode: Int,
+    val audioFile: File? = null,
+    val errorBody: String = ""
+)
 
 internal suspend fun speakChatMessage(context: Context, settings: AppSettings, text: String, apiKey: String?): Unit = withContext(Dispatchers.IO) {
     val cleanText = text.trim()
@@ -7265,48 +7363,66 @@ internal suspend fun speakChatMessage(context: Context, settings: AppSettings, t
         .put("response_format", "wav")
     var lastError = "nessuna risposta"
     var lastHttpError: String? = null
+    val dir = File(context.cacheDir, "tts").apply { mkdirs() }
+    dir.listFiles()?.filter { it.isFile && it.lastModified() < System.currentTimeMillis() - 24 * 60 * 60 * 1000L }
+        ?.forEach { runCatching { it.delete() } }
     for (candidateUrl in ttsUrlCandidates(resolveTtsSpeechUrl(settings))) {
         for (token in hermesAuthCandidates(apiKey)) {
             val response = try {
-                executeTtsRequest(candidateUrl, payload, token)
+                executeTtsRequest(dir, candidateUrl, payload, token)
             } catch (ex: Exception) {
                 if (lastHttpError == null) {
                     lastError = ex.message ?: ex.javaClass.simpleName
                 }
                 continue
             }
-            if (response.first in 200..299 && response.second.isNotEmpty()) {
-                val dir = File(context.cacheDir, "tts").apply { mkdirs() }
-                val file = File(dir, "hermes-tts-${System.currentTimeMillis()}.wav")
-                file.writeBytes(response.second)
+            val file = response.audioFile
+            if (response.statusCode in 200..299 && file != null) {
                 withContext(Dispatchers.Main) {
-                    activeTtsMediaPlayer?.release()
+                    runCatching { activeTtsMediaPlayer?.release() }
+                    activeTtsFile?.let { runCatching { it.delete() } }
                     val player = MediaPlayer()
                     activeTtsMediaPlayer = player
+                    activeTtsFile = file
+                    fun cleanup() {
+                        runCatching { player.release() }
+                        if (activeTtsMediaPlayer === player) activeTtsMediaPlayer = null
+                        if (activeTtsFile == file) activeTtsFile = null
+                        runCatching { file.delete() }
+                    }
                     player.setOnCompletionListener {
-                        it.release()
-                        if (activeTtsMediaPlayer === it) activeTtsMediaPlayer = null
+                        cleanup()
                     }
                     player.setOnErrorListener { mp, _, _ ->
-                        mp.release()
-                        if (activeTtsMediaPlayer === mp) activeTtsMediaPlayer = null
+                        cleanup()
                         true
                     }
                     player.setOnPreparedListener { it.start() }
-                    player.setDataSource(file.absolutePath)
-                    player.prepareAsync()
+                    try {
+                        player.setDataSource(file.absolutePath)
+                        player.prepareAsync()
+                    } catch (ex: Exception) {
+                        cleanup()
+                        throw ex
+                    }
                 }
                 return@withContext
             }
-            lastHttpError = "HTTP ${response.first}"
+            file?.let { runCatching { it.delete() } }
+            lastHttpError = "HTTP ${response.statusCode}${response.errorBody.take(160).takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()}"
             lastError = lastHttpError
-            if (response.first != 401) break
+            if (response.statusCode != 401) break
         }
     }
     throw java.io.IOException(lastError)
 }
 
-private fun executeTtsRequest(url: String, payload: JSONObject, bearerToken: String?): Pair<Int, ByteArray> {
+private fun executeTtsRequest(
+    targetDirectory: File,
+    url: String,
+    payload: JSONObject,
+    bearerToken: String?
+): TtsRequestResult {
     val builder = Request.Builder()
         .url(url)
         .header("Accept", "audio/wav")
@@ -7316,7 +7432,22 @@ private fun executeTtsRequest(url: String, payload: JSONObject, bearerToken: Str
         .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
         .build()
     return apiHttpClient.newCall(request).execute().use { response ->
-        response.code to response.body.bytes()
+        if (!response.isSuccessful) {
+            return@use TtsRequestResult(
+                statusCode = response.code,
+                errorBody = response.body.byteStream().readUtf8Bounded()
+            )
+        }
+        val body = response.body
+        TtsRequestResult(
+            statusCode = response.code,
+            audioFile = streamWavToTempFile(
+                directory = targetDirectory,
+                prefix = "hermes-tts-",
+                input = body.byteStream(),
+                contentLength = body.contentLength()
+            )
+        )
     }
 }
 
@@ -7324,15 +7455,15 @@ private fun resolveTtsSpeechUrl(settings: AppSettings): String {
     return try {
         val uri = URI(settings.gatewayUrl.trim())
         val scheme = uri.scheme ?: "http"
-        val host = uri.host?.takeIf { it.isNotBlank() } ?: "100.94.223.14"
+        val host = uri.host?.takeIf { it.isNotBlank() } ?: "hermes"
         val port = if (uri.port > 0) uri.port else 8642
         URI(scheme, null, host, port, "/v1/audio/speech", null, null).toString()
     } catch (_: Exception) {
-        "http://100.94.223.14:8642/v1/audio/speech"
+        "http://hermes:8642/v1/audio/speech"
     }
 }
 
-private fun ttsUrlCandidates(url: String): List<String> {
+internal fun ttsUrlCandidates(url: String): List<String> {
     return try {
         val uri = URI(url)
         val suffix = buildString {
@@ -7343,8 +7474,8 @@ private fun ttsUrlCandidates(url: String): List<String> {
         val currentRoot = "${uri.scheme}://${uri.host}:$port"
         val roots = listOf(
             currentRoot,
-            "http://100.94.223.14:8642",
             "http://hermes:8642",
+            "http://100.94.223.14:8642",
             "http://hermes.local:8642"
         )
         roots.distinctBy { it.lowercase() }.map { it.trimEnd('/') + suffix }
@@ -7388,44 +7519,73 @@ private fun executeHttpGet(url: String, bearerToken: String?): Pair<Int, String>
     val request = builder.get().build()
 
     return apiHttpClient.newCall(request).execute().use { response ->
-        response.code to response.body.string()
+        val limit = if (url.contains("/v1/hub/conversations", ignoreCase = true)) {
+            MAX_ARCHIVE_JSON_RESPONSE_BYTES
+        } else {
+            MAX_JSON_RESPONSE_BYTES
+        }
+        response.code to response.body.byteStream().readUtf8Bounded(limit)
     }
 }
 
 private fun createAttachmentFromUri(context: Context, uri: Uri, maxAttachmentMb: Int): ChatInputAttachment? {
     val resolver = context.contentResolver
+    var declaredSize = -1L
     val filename = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
         val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-        if (cursor.moveToFirst() && nameIndex >= 0) cursor.getString(nameIndex) else null
+        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+        if (cursor.moveToFirst()) {
+            if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) declaredSize = cursor.getLong(sizeIndex)
+            if (nameIndex >= 0) cursor.getString(nameIndex) else null
+        } else null
     } ?: (uri.lastPathSegment ?: "allegato")
     val mimeType = resolver.getType(uri)?.takeIf { it.isNotBlank() }
         ?: mimeTypeFromFilename(filename)
-    val maxBytes = maxAttachmentMb.coerceIn(1, 150) * 1024 * 1024
-    val bytes = resolver.openInputStream(uri)?.use { input ->
-        val output = ByteArrayOutputStream(minOf(maxBytes, 1024 * 1024))
-        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-        var total = 0
-        while (true) {
-            val read = input.read(buffer)
-            if (read < 0) break
-            total += read
-            if (total > maxBytes) {
-                return@use null
+    val maxBytes = maxAttachmentMb.coerceIn(1, 150).toLong() * 1024L * 1024L
+    if (declaredSize > maxBytes) return null
+    val cacheDir = File(context.cacheDir, "attachments").apply { mkdirs() }
+    pruneAttachmentCache(cacheDir)
+    val extension = filename.substringAfterLast('.', "bin").filter { it.isLetterOrDigit() }.take(12).ifBlank { "bin" }
+    val cached = File.createTempFile("attachment-", ".$extension", cacheDir)
+    var total = 0L
+    try {
+        resolver.openInputStream(uri)?.use { input ->
+            cached.outputStream().buffered().use { output ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    total += read
+                    if (total > maxBytes) {
+                        cached.delete()
+                        return null
+                    }
+                    output.write(buffer, 0, read)
+                }
             }
-            output.write(buffer, 0, read)
+        } ?: run {
+            cached.delete()
+            return null
         }
-        output.toByteArray()
-    } ?: return null
-    if (bytes.isEmpty() || bytes.size > maxBytes) {
+    } catch (_: Exception) {
+        cached.delete()
         return null
     }
-    val encoded = Base64.encodeToString(bytes, Base64.NO_WRAP)
+    if (total <= 0L) {
+        cached.delete()
+        return null
+    }
     return ChatInputAttachment(
         filename = filename,
         mimeType = mimeType,
-        dataUrl = "data:$mimeType;base64,$encoded",
-        sizeBytes = bytes.size.toLong()
+        sizeBytes = total,
+        localFilePath = cached.absolutePath
     )
+}
+
+private fun pruneAttachmentCache(directory: File) {
+    val cutoff = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+    directory.listFiles()?.filter { it.isFile && it.lastModified() < cutoff }?.forEach { runCatching { it.delete() } }
 }
 
 private fun createLocalAttachmentBlocks(attachments: List<ChatInputAttachment>): List<VisualBlock> =
@@ -7435,12 +7595,12 @@ private fun createLocalAttachmentBlocks(attachments: List<ChatInputAttachment>):
             type = "media_file",
             title = attachment.filename,
             filename = attachment.filename,
-            mediaKind = inferVisualBlockMediaKind(attachment.filename, attachment.dataUrl),
+            mediaKind = inferVisualBlockMediaKind(attachment.filename, attachment.localFilePath ?: attachment.dataUrl),
             mimeType = attachment.mimeType,
             sizeBytes = attachment.sizeBytes,
             alt = attachment.filename,
             caption = "Condiviso con Hermes.",
-            localDataUrl = attachment.dataUrl
+            localDataUrl = attachment.localFilePath ?: attachment.dataUrl
         )
     }
 
@@ -7457,19 +7617,21 @@ private fun createAttachmentFromClipboard(context: Context, maxAttachmentMb: Int
 
         val text = item.text?.toString()?.trim().orEmpty()
         if (text.startsWith("data:image/", ignoreCase = true)) {
-            createAttachmentFromDataUrl(text, maxAttachmentMb)?.let { return it }
+            createAttachmentFromDataUrl(context, text, maxAttachmentMb)?.let { return it }
         }
     }
     return null
 }
 
-private fun createAttachmentFromDataUrl(dataUrl: String, maxAttachmentMb: Int): ChatInputAttachment? {
+private fun createAttachmentFromDataUrl(context: Context, dataUrl: String, maxAttachmentMb: Int): ChatInputAttachment? {
     val comma = dataUrl.indexOf(',')
     if (comma <= 0) return null
     val meta = dataUrl.substring(5, comma)
     val mimeType = meta.substringBefore(';').takeIf { it.startsWith("image/", ignoreCase = true) } ?: return null
-    val bytes = runCatching { Base64.decode(dataUrl.substring(comma + 1), Base64.DEFAULT) }.getOrNull() ?: return null
-    val maxBytes = maxAttachmentMb.coerceIn(1, 150) * 1024 * 1024
+    val payload = dataUrl.substring(comma + 1)
+    val maxBytes = minOf(maxAttachmentMb.coerceIn(1, 150), 8) * 1024 * 1024
+    if ((payload.length.toLong() * 3L / 4L) > maxBytes.toLong()) return null
+    val bytes = runCatching { Base64.decode(payload, Base64.DEFAULT) }.getOrNull() ?: return null
     if (bytes.isEmpty() || bytes.size > maxBytes) return null
     val extension = when {
         mimeType.equals("image/jpeg", ignoreCase = true) -> "jpg"
@@ -7478,11 +7640,14 @@ private fun createAttachmentFromDataUrl(dataUrl: String, maxAttachmentMb: Int): 
         mimeType.equals("image/gif", ignoreCase = true) -> "gif"
         else -> "png"
     }
+    val cacheDir = File(context.cacheDir, "attachments").apply { mkdirs() }
+    pruneAttachmentCache(cacheDir)
+    val file = runCatching { File.createTempFile("clipboard-", ".$extension", cacheDir).apply { writeBytes(bytes) } }.getOrNull() ?: return null
     return ChatInputAttachment(
         filename = "clipboard-${System.currentTimeMillis()}.$extension",
         mimeType = mimeType,
-        dataUrl = dataUrl,
-        sizeBytes = bytes.size.toLong()
+        sizeBytes = bytes.size.toLong(),
+        localFilePath = file.absolutePath
     )
 }
 
@@ -7532,7 +7697,7 @@ private fun executeJsonRequest(url: String, payload: JSONObject, method: String,
     }
 
     return apiHttpClient.newCall(request).execute().use { response ->
-        response.code to response.body.string()
+        response.code to response.body.byteStream().readUtf8Bounded()
     }
 }
 
@@ -7548,32 +7713,71 @@ private suspend fun runDiagnostics(settings: AppSettings, apiKey: String?): List
         "Memoria" to "/v1/hub/memory",
         "Hub state" to "/v1/hub/state"
     )
-    checks.map { (label, path) ->
-        val endpoint = resolveHermesUrl(settings, path)
-        try {
-            val response = executeHttpGet(endpoint, hermesAuthCandidates(apiKey).firstOrNull())
-            val ok = when (path) {
-                "/v1/media/not-a-real-media-id" -> response.first == 404 || response.second.contains("media_not_found")
-                else -> response.first in 200..299
-            }
+
+    val (discoveryLabel, discoveryPath) = checks.first()
+    val discoveryEndpoint = resolveHermesUrl(settings, discoveryPath)
+    val discovery = probeDiagnosticEndpoint(discoveryEndpoint, apiKey)
+    val discoveryCheck = diagnosticCheck(discoveryLabel, discoveryPath, discovery)
+
+    if (discovery.statusCode == null || discovery.statusCode == 401) {
+        val reason = if (discovery.statusCode == 401) {
+            "Probe base HTTP 401: check non eseguito per evitare retry auth ridondanti."
+        } else {
+            "Gateway non raggiungibile: check non eseguito per evitare retry host/auth ridondanti."
+        }
+        return@withContext listOf(discoveryCheck) + checks.drop(1).map { (label, path) ->
+            val requestedEndpoint = resolveHermesUrl(settings, path)
             DiagnosticCheck(
                 label = label,
-                endpoint = endpoint,
-                ok = ok,
-                message = if (ok) response.second.limitText(180) else "HTTP ${response.first}: ${extractHumanError(response.second)}",
-                action = when (label) {
-                    "Tailscale/API" -> "Avvia Tailscale e hermes-hub, verifica IP/porta 8642."
-                    "Memoria" -> "Aggiorna Hermes Gateway alla latest release e riavvia hermes-hub. Memoria = preferenze/profilo Hermes Agent lato server, non RAM telefono."
-                    "Hub state" -> "Aggiorna Hermes Gateway alla latest release e riavvia hermes-hub."
-                    "Hardware" -> "Aggiorna Hermes Gateway/patcher e installa psutil su Linux se mancano metriche live."
-                    "Video library" -> "Aggiorna Hermes Gateway alla latest release. Se il feed e' vuoto, imposta HERMES_VIDEO_LIBRARY_PATH sul server."
-                    else -> "Controlla API key, gateway URL e log del terminale hermes-hub."
-                }
+                endpoint = diagnosticEffectiveUrl(requestedEndpoint, discovery.effectiveUrl),
+                ok = false,
+                message = reason,
+                action = diagnosticAction(label)
             )
-        } catch (ex: Exception) {
-            DiagnosticCheck(label, endpoint, false, ex.message ?: ex.javaClass.simpleName, "Controlla rete, Tailscale, API key e processo hermes-hub.")
         }
     }
+
+    val remaining = coroutineScope {
+        checks.drop(1).map { (label, path) ->
+            async {
+                val requestedEndpoint = resolveHermesUrl(settings, path)
+                val effectiveEndpoint = diagnosticEffectiveUrl(requestedEndpoint, discovery.effectiveUrl)
+                val response = probePinnedDiagnosticEndpoint(effectiveEndpoint, discovery.bearerToken)
+                diagnosticCheck(label, path, response)
+            }
+        }.awaitAll()
+    }
+    listOf(discoveryCheck) + remaining
+}
+
+private fun diagnosticCheck(label: String, path: String, response: DiagnosticProbeResult): DiagnosticCheck {
+    val ok = response.error == null && when (path) {
+        "/v1/media/not-a-real-media-id" -> response.statusCode == 404 || response.body.contains("media_not_found")
+        else -> response.statusCode?.let { it in 200..299 } == true
+    }
+    val attempts = if (response.attemptCount > 1) " (${response.attemptCount} tentativi)" else ""
+    val message = when {
+        response.error != null -> "Probe fallito$attempts: ${response.error}"
+        ok -> response.body.limitText(180).ifBlank { "HTTP ${response.statusCode}$attempts" }
+        response.statusCode == null -> "Trasporto fallito$attempts."
+        else -> "HTTP ${response.statusCode}$attempts: ${extractHumanError(response.body)}"
+    }
+    return DiagnosticCheck(
+        label = label,
+        endpoint = response.effectiveUrl,
+        ok = ok,
+        message = message,
+        action = diagnosticAction(label)
+    )
+}
+
+private fun diagnosticAction(label: String): String = when (label) {
+    "Tailscale/API" -> "Avvia Tailscale e hermes-hub, verifica IP/porta 8642."
+    "Memoria" -> "Aggiorna Hermes Gateway alla latest release e riavvia hermes-hub. Memoria = preferenze/profilo Hermes Agent lato server, non RAM telefono."
+    "Hub state" -> "Aggiorna Hermes Gateway alla latest release e riavvia hermes-hub."
+    "Hardware" -> "Aggiorna Hermes Gateway/patcher e installa psutil su Linux se mancano metriche live."
+    "Video library" -> "Aggiorna Hermes Gateway alla latest release. Se il feed e' vuoto, imposta HERMES_VIDEO_LIBRARY_PATH sul server."
+    else -> "Controlla API key, gateway URL e log del terminale hermes-hub."
 }
 
 private suspend fun loadHubMemory(settings: AppSettings, apiKey: String?): Pair<HubMemoryState, String> = withContext(Dispatchers.IO) {
@@ -7657,14 +7861,16 @@ private suspend fun restoreConversationsFromHub(
         if (remote.isEmpty()) {
             return@withContext "Archivio server vuoto."
         }
-        val byId = loadConversations(context, includeDeleted = true).associateBy { it.id }.toMutableMap()
-        remote.forEach { incoming ->
-            val existing = byId[incoming.id]
-            if (existing == null || incoming.updatedAt >= existing.updatedAt) {
-                byId[incoming.id] = incoming
+        synchronized(localArchiveLock) {
+            val byId = loadConversations(context, includeDeleted = true).associateBy { it.id }.toMutableMap()
+            remote.forEach { incoming ->
+                val existing = byId[incoming.id]
+                if (existing == null || incoming.updatedAt >= existing.updatedAt) {
+                    byId[incoming.id] = incoming
+                }
             }
+            saveConversations(context, byId.values.toList(), syncAfterSave)
         }
-        saveConversations(context, byId.values.toList(), syncAfterSave)
         "Archivio scaricato dal gateway: ${remote.size} chat disponibili."
     } catch (ex: Exception) {
         "Archivio server non disponibile: ${ex.message ?: ex.javaClass.simpleName}"
@@ -7932,6 +8138,7 @@ private fun readVisualBlock(obj: JSONObject): VisualBlock {
         sizeBytes = obj.optLongOrNull("size_bytes"),
         durationMs = obj.optLongOrNull("duration_ms"),
         thumbnailUrl = obj.optString("thumbnail_url"),
+        localDataUrl = obj.optString("local_data_url"),
         alt = alt,
         layout = obj.optString("layout"),
         images = readVisualImages(obj.optJSONArray("images") ?: JSONArray()),
@@ -8003,7 +8210,8 @@ internal fun VisualBlock.isValidVisualBlock(): Boolean {
         "chart" -> chartType in setOf("bar", "line") && summary.isNotBlank() && series.isNotEmpty() && series.size <= 8 && series.all { it.points.isNotEmpty() && it.points.size <= 200 }
         "diagram" -> sourceFormat == "mermaid" && source.isNotBlank() && alt.isNotBlank()
         "image_gallery" -> images.isNotEmpty() && images.size <= 12 && images.all { it.mediaUrl.isNotBlank() && it.alt.isNotBlank() }
-        "media_file" -> mediaKind in setOf("image", "video", "audio", "document") && mediaUrl.isNotBlank() && alt.isNotBlank()
+        "media_file" -> mediaKind in setOf("image", "video", "audio", "document") &&
+            (mediaUrl.isNotBlank() || isValidLocalAttachmentSource(localDataUrl)) && alt.isNotBlank()
         "callout" -> variant in setOf("info", "warning", "error", "success") && text.isNotBlank()
         "unknown_block" -> rawJson.isNotBlank()
         else -> false
@@ -8019,6 +8227,11 @@ private fun isSafeMediaUrl(value: String): Boolean {
     } catch (_: Exception) {
         false
     }
+}
+
+private fun isValidLocalAttachmentSource(value: String): Boolean {
+    if (value.startsWith("data:", ignoreCase = true)) return true
+    return value.isNotBlank() && File(value).isFile
 }
 
 private fun firstNonBlank(vararg values: String?): String {
@@ -8309,16 +8522,14 @@ private fun replaceTask(tasks: MutableList<AgentTask>, updatedTask: AgentTask) {
 
 private suspend fun checkGithubUpdate(localVersion: String): UpdateCheckResult = withContext(Dispatchers.IO) {
     try {
-        val connection = (URL(AppDefaults.latestReleaseApi).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 10_000
-            readTimeout = 10_000
-            setRequestProperty("Accept", "application/vnd.github+json")
-            setRequestProperty("User-Agent", "HermesHub-Android")
-        }
-
-        connection.use {
-            val code = it.responseCode
+        val request = Request.Builder()
+            .url(AppDefaults.latestReleaseApi)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "HermesHub-Android")
+            .get()
+            .build()
+        updateHttpClient.newCall(request).execute().use { response ->
+            val code = response.code
             if (code !in 200..299) {
                 return@withContext UpdateCheckResult(
                     hasUpdate = false,
@@ -8330,7 +8541,7 @@ private suspend fun checkGithubUpdate(localVersion: String): UpdateCheckResult =
                 )
             }
 
-            val body = it.inputStream.bufferedReader().use { reader -> reader.readText() }
+            val body = response.body.byteStream().readUtf8Bounded()
             val json = JSONObject(body)
             val latest = normalizeVersion(json.optString("tag_name"))
             val releaseUrl = json.optString("html_url", AppDefaults.releasesPage)
@@ -8371,25 +8582,21 @@ private fun summarizeReleaseNotes(body: String): String {
     return body.trim().limitText(4000)
 }
 
-private inline fun <T : HttpURLConnection, R> T.use(block: (T) -> R): R {
-    return try {
-        block(this)
-    } finally {
-        disconnect()
-    }
-}
-
 private fun findReleaseAsset(assets: JSONArray, suffix: String): String? {
+    var fallback: String? = null
     for (i in 0 until assets.length()) {
         val asset = assets.optJSONObject(i) ?: continue
         val name = asset.optString("name")
         val url = asset.optString("browser_download_url")
         if (name.endsWith(suffix, ignoreCase = true) && url.isNotBlank()) {
-            return url
+            if (fallback == null && !name.contains("debug", ignoreCase = true)) fallback = url
+            if (name.startsWith("HermesHub-", ignoreCase = true) &&
+                name.contains("android", ignoreCase = true) &&
+                !name.contains("debug", ignoreCase = true)
+            ) return url
         }
     }
-
-    return null
+    return fallback
 }
 
 private fun compareVersions(latest: String, local: String): Int {
@@ -8422,6 +8629,14 @@ private fun downloadProgressLabel(progress: Float?, label: String): String {
     return if (label.isBlank()) percent else "$percent  $label"
 }
 
+internal const val MAX_UPDATE_APK_BYTES = 250L * 1024L * 1024L
+
+internal fun isAdvertisedUpdateApkSizeRejected(contentLength: Long): Boolean =
+    contentLength > MAX_UPDATE_APK_BYTES
+
+internal fun wouldExceedUpdateApkSizeLimit(downloadedBytes: Long, nextChunkBytes: Int): Boolean =
+    nextChunkBytes > 0 && downloadedBytes > MAX_UPDATE_APK_BYTES - nextChunkBytes.toLong()
+
 private suspend fun downloadUpdateApk(
     context: Context,
     assetUrl: String,
@@ -8430,7 +8645,8 @@ private suspend fun downloadUpdateApk(
 ): File? = withContext(Dispatchers.IO) {
     val targetDirectory = File(context.getExternalFilesDir(null) ?: context.cacheDir, "exports").apply { mkdirs() }
     val targetFile = File(targetDirectory, "HermesHub-${normalizeVersion(version)}.apk")
-    val client = OkHttpClient.Builder().build()
+    val partialFile = File(targetDirectory, "${targetFile.name}.part")
+    partialFile.delete()
     val request = Request.Builder()
         .url(assetUrl)
         .header("Accept", "application/octet-stream")
@@ -8438,22 +8654,33 @@ private suspend fun downloadUpdateApk(
         .build()
 
     try {
-        client.newCall(request).execute().use { response ->
+        updateHttpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 return@withContext null
             }
 
             val body = response.body
             val totalBytes = body.contentLength()
+            if (isAdvertisedUpdateApkSizeRejected(totalBytes)) {
+                withContext(Dispatchers.Main) {
+                    onProgress(0f, "APK rifiutato: dimensione superiore a 250 MiB.", "")
+                }
+                return@withContext null
+            }
             var downloadedBytes = 0L
             var lastPercent = -1
+            var exceededSizeLimit = false
 
             body.byteStream().use { input ->
-                targetFile.outputStream().use { output ->
+                FileOutputStream(partialFile).use { output ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                     while (true) {
                         val read = input.read(buffer)
                         if (read < 0) {
+                            break
+                        }
+                        if (wouldExceedUpdateApkSizeLimit(downloadedBytes, read)) {
+                            exceededSizeLimit = true
                             break
                         }
 
@@ -8476,8 +8703,35 @@ private suspend fun downloadUpdateApk(
                             }
                         }
                     }
+                    output.fd.sync()
                 }
             }
+            if (exceededSizeLimit) {
+                partialFile.delete()
+                withContext(Dispatchers.Main) {
+                    onProgress(0f, "APK rifiutato: download superiore a 250 MiB.", "")
+                }
+                return@withContext null
+            }
+            if (totalBytes > 0L && downloadedBytes != totalBytes) {
+                partialFile.delete()
+                return@withContext null
+            }
+        }
+
+        val validationError = validateUpdateApk(context, partialFile, version)
+        if (validationError != null) {
+            partialFile.delete()
+            withContext(Dispatchers.Main) { onProgress(0f, "APK rifiutato: $validationError", "") }
+            return@withContext null
+        }
+        if (targetFile.exists() && !targetFile.delete()) {
+            partialFile.delete()
+            return@withContext null
+        }
+        if (!partialFile.renameTo(targetFile)) {
+            partialFile.delete()
+            return@withContext null
         }
 
         withContext(Dispatchers.Main) {
@@ -8485,9 +8739,7 @@ private suspend fun downloadUpdateApk(
         }
         targetFile
     } catch (_: Exception) {
-        if (targetFile.exists()) {
-            targetFile.delete()
-        }
+        partialFile.delete()
         null
     }
 }
@@ -8497,13 +8749,18 @@ private fun installDownloadedApk(context: Context, apkPath: String): String {
     if (!apkFile.exists()) {
         return "APK non trovato. Riscarica l'aggiornamento."
     }
+    val expectedVersion = apkFile.name.removePrefix("HermesHub-").removeSuffix(".apk")
+    validateUpdateApk(context, apkFile, expectedVersion)?.let {
+        runCatching { apkFile.delete() }
+        return "APK non valido: $it. Riscarica l'aggiornamento."
+    }
 
     if (!context.packageManager.canRequestPackageInstalls()) {
         openAndroidIntent(
             context,
             Intent(
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                Uri.parse("package:${context.packageName}")
+                "package:${context.packageName}".toUri()
             )
         )
         return "Consenti a Hermes Hub di installare APK sconosciuti, poi premi di nuovo Aggiorna."
@@ -8525,7 +8782,45 @@ private fun findDownloadedUpdateApk(context: Context, version: String): File? {
     val normalizedVersion = normalizeVersion(version)
     val targetDirectory = File(context.getExternalFilesDir(null) ?: context.cacheDir, "exports")
     val targetFile = File(targetDirectory, "HermesHub-$normalizedVersion.apk")
-    return targetFile.takeIf { it.exists() }
+    if (!targetFile.isFile) return null
+    val error = validateUpdateApk(context, targetFile, version)
+    if (error != null) {
+        runCatching { targetFile.delete() }
+        return null
+    }
+    return targetFile
+}
+
+private fun validateUpdateApk(context: Context, apkFile: File, expectedVersion: String): String? {
+    if (!apkFile.isFile || apkFile.length() <= 0L) return "file vuoto"
+    if (apkFile.length() > MAX_UPDATE_APK_BYTES) return "file superiore a 250 MiB"
+    val packageManager = context.packageManager
+    return runCatching {
+        @Suppress("DEPRECATION")
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+        @Suppress("DEPRECATION")
+        val archive = packageManager.getPackageArchiveInfo(apkFile.absolutePath, flags) ?: return "APK non leggibile"
+        if (archive.packageName != context.packageName) return "applicationId inatteso: ${archive.packageName}"
+        if (normalizeVersion(archive.versionName.orEmpty()) != normalizeVersion(expectedVersion)) {
+            return "versione ${archive.versionName.orEmpty()} diversa da ${normalizeVersion(expectedVersion)}"
+        }
+        @Suppress("DEPRECATION")
+        val installed = packageManager.getPackageInfo(context.packageName, flags)
+        val archiveSignatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            archive.signingInfo?.apkContentsSigners.orEmpty()
+        } else {
+            @Suppress("DEPRECATION") archive.signatures.orEmpty()
+        }
+        val installedSignatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            installed.signingInfo?.signingCertificateHistory.orEmpty()
+        } else {
+            @Suppress("DEPRECATION") installed.signatures.orEmpty()
+        }
+        if (archiveSignatures.isEmpty() || installedSignatures.isEmpty() ||
+            archiveSignatures.none { candidate -> installedSignatures.any { it.toByteArray().contentEquals(candidate.toByteArray()) } }
+        ) return "firma diversa dall'app installata"
+        null
+    }.getOrElse { "verifica APK fallita: ${it.message ?: it.javaClass.simpleName}" }
 }
 
 private fun Long.toReadableFileSize(): String {
@@ -8621,16 +8916,6 @@ private fun normalizePlugAndPlaySettings(context: Context, settings: AppSettings
         changed = true
     }
 
-    if (!next.preferredApi.equals(AppDefaults.preferredApi, ignoreCase = true)) {
-        next = next.copy(preferredApi = AppDefaults.preferredApi)
-        changed = true
-    }
-
-    if (next.strictNativeMode) {
-        next = next.copy(strictNativeMode = false)
-        changed = true
-    }
-
     if (next.model.isBlank()) {
         next = next.copy(model = AppDefaults.model)
         changed = true
@@ -8655,34 +8940,33 @@ private fun normalizePlugAndPlaySettings(context: Context, settings: AppSettings
 }
 
 private fun saveSettings(context: Context, settings: AppSettings) {
-    context.getSharedPreferences(CURRENT_SETTINGS_PREFS, Context.MODE_PRIVATE)
-        .edit()
-        .putString("gatewayUrl", normalizeUrl(settings.gatewayUrl))
-        .putString("gatewayWsUrl", normalizeUrl(settings.gatewayWsUrl))
-        .putString("adminBridgeUrl", normalizeUrl(settings.adminBridgeUrl))
-        .putString("provider", settings.provider.trim())
-        .putString("inferenceEndpoint", normalizeUrl(settings.inferenceEndpoint))
-        .putString("preferredApi", settings.preferredApi.trim())
-        .putString("model", settings.model.trim())
-        .putString("accessMode", settings.accessMode.trim())
-        .putString("visualBlocksMode", settings.visualBlocksMode.trim())
-        .putString("videoLibraryPath", settings.videoLibraryPath.trim())
-        .putString("newsLibraryPath", settings.newsLibraryPath.trim())
-        .putString("activeProjectId", settings.activeProjectId.trim())
-        .putString("activeProjectName", settings.activeProjectName.trim())
-        .putFloat("fontScale", settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE))
-        .putBoolean("showToolCalls", settings.showToolCalls)
-        .putBoolean("showMessageMetrics", settings.showMessageMetrics)
-        .putBoolean("metricTtft", settings.metricTtft)
-        .putBoolean("metricTokensPerSecond", settings.metricTokensPerSecond)
-        .putBoolean("metricOutputTokens", settings.metricOutputTokens)
-        .putBoolean("metricPromptTokens", settings.metricPromptTokens)
-        .putBoolean("metricContextTokens", settings.metricContextTokens)
-        .putBoolean("metricDuration", settings.metricDuration)
-        .putInt("maxAttachmentMb", settings.maxAttachmentMb.coerceIn(1, 150))
-        .putBoolean("strictNativeMode", settings.strictNativeMode)
-        .putBoolean("demoMode", settings.demoMode)
-        .apply()
+    context.getSharedPreferences(CURRENT_SETTINGS_PREFS, Context.MODE_PRIVATE).edit {
+        putString("gatewayUrl", normalizeUrl(settings.gatewayUrl))
+        putString("gatewayWsUrl", normalizeUrl(settings.gatewayWsUrl))
+        putString("adminBridgeUrl", normalizeUrl(settings.adminBridgeUrl))
+        putString("provider", settings.provider.trim())
+        putString("inferenceEndpoint", normalizeUrl(settings.inferenceEndpoint))
+        putString("preferredApi", settings.preferredApi.trim())
+        putString("model", settings.model.trim())
+        putString("accessMode", settings.accessMode.trim())
+        putString("visualBlocksMode", settings.visualBlocksMode.trim())
+        putString("videoLibraryPath", settings.videoLibraryPath.trim())
+        putString("newsLibraryPath", settings.newsLibraryPath.trim())
+        putString("activeProjectId", settings.activeProjectId.trim())
+        putString("activeProjectName", settings.activeProjectName.trim())
+        putFloat("fontScale", settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE))
+        putBoolean("showToolCalls", settings.showToolCalls)
+        putBoolean("showMessageMetrics", settings.showMessageMetrics)
+        putBoolean("metricTtft", settings.metricTtft)
+        putBoolean("metricTokensPerSecond", settings.metricTokensPerSecond)
+        putBoolean("metricOutputTokens", settings.metricOutputTokens)
+        putBoolean("metricPromptTokens", settings.metricPromptTokens)
+        putBoolean("metricContextTokens", settings.metricContextTokens)
+        putBoolean("metricDuration", settings.metricDuration)
+        putInt("maxAttachmentMb", settings.maxAttachmentMb.coerceIn(1, 150))
+        putBoolean("strictNativeMode", settings.strictNativeMode)
+        putBoolean("demoMode", settings.demoMode)
+    }
 }
 
 private fun loadProjects(context: Context): List<ProjectRecord> {
@@ -8709,10 +8993,9 @@ private fun saveProjects(context: Context, projects: List<ProjectRecord>) {
     projects.take(50).forEach { project ->
         array.put(JSONObject().put("id", project.id).put("name", project.name).put("updatedAt", project.updatedAt))
     }
-    context.getSharedPreferences(CURRENT_WORKSPACE_PREFS, Context.MODE_PRIVATE)
-        .edit()
-        .putString("projects", array.toString())
-        .apply()
+    context.getSharedPreferences(CURRENT_WORKSPACE_PREFS, Context.MODE_PRIVATE).edit {
+        putString("projects", array.toString())
+    }
 }
 
 internal fun loadGatewaySecret(context: Context): String? {
@@ -8720,39 +9003,14 @@ internal fun loadGatewaySecret(context: Context): String? {
     val legacyPrefs = context.applicationContext.getSharedPreferences(LEGACY_SETTINGS_PREFS, Context.MODE_PRIVATE)
     val stored = prefs.getString(GATEWAY_SECRET_PREF_KEY, null)
         ?: legacyPrefs.getString(GATEWAY_SECRET_PREF_KEY, null)?.also { legacyValue ->
-            prefs.edit().putString(GATEWAY_SECRET_PREF_KEY, legacyValue).apply()
-            // #region debug-point A:load-secret-legacy-migrated
-            debugReport(
-                hypothesisId = "A",
-                location = "MainActivity.kt:loadGatewaySecret:legacy-migrated",
-                msg = "[DEBUG] loadGatewaySecret migrated value from legacy prefs",
-                data = mapOf("storedLength" to legacyValue.length)
-            )
-            // #endregion
+            prefs.edit { putString(GATEWAY_SECRET_PREF_KEY, legacyValue) }
         }
-        ?: return HERMES_FALLBACK_API_KEY.also {
-            // #region debug-point A:load-secret-missing
-            debugReport(
-                hypothesisId = "A",
-                location = "MainActivity.kt:loadGatewaySecret:missing",
-                msg = "[DEBUG] loadGatewaySecret no stored ciphertext, using fallback",
-                data = mapOf("source" to "missing", "returnedFingerprint" to debugTokenFingerprint(it))
-            )
-            // #endregion
-        }
+        ?: return HERMES_FALLBACK_API_KEY
 
     return runCatching {
         val parts = stored.split(':', limit = 2)
         if (parts.size != 2) {
             val legacyPlaintext = stored.trim().ifBlank { HERMES_FALLBACK_API_KEY }
-            // #region debug-point A:load-secret-plain
-            debugReport(
-                hypothesisId = "A",
-                location = "MainActivity.kt:loadGatewaySecret:plain",
-                msg = "[DEBUG] loadGatewaySecret plaintext/legacy format detected",
-                data = mapOf("storedLength" to stored.length, "returnedFingerprint" to debugTokenFingerprint(legacyPlaintext))
-            )
-            // #endregion
             return@runCatching legacyPlaintext
         }
 
@@ -8761,32 +9019,8 @@ internal fun loadGatewaySecret(context: Context): String? {
         val cipher = Cipher.getInstance(GATEWAY_SECRET_TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, getOrCreateGatewaySecretKey(), GCMParameterSpec(128, iv))
         cipher.updateAAD(GATEWAY_SECRET_AAD.toByteArray(Charsets.UTF_8))
-        String(cipher.doFinal(encrypted), Charsets.UTF_8).trim().ifBlank { HERMES_FALLBACK_API_KEY }.also {
-            // #region debug-point A:load-secret-ok
-            debugReport(
-                hypothesisId = "A",
-                location = "MainActivity.kt:loadGatewaySecret:ok",
-                msg = "[DEBUG] loadGatewaySecret decrypted successfully",
-                data = mapOf("storedLength" to stored.length, "returnedFingerprint" to debugTokenFingerprint(it))
-            )
-            // #endregion
-        }
-    }.getOrElse { ex ->
-        // #region debug-point A:load-secret-failed
-        debugReport(
-            hypothesisId = "A",
-            location = "MainActivity.kt:loadGatewaySecret:failed",
-            msg = "[DEBUG] loadGatewaySecret decrypt failed, using fallback",
-            data = mapOf(
-                "error" to (ex.message ?: ex.javaClass.simpleName),
-                "errorType" to ex.javaClass.simpleName,
-                "storedLength" to stored.length,
-                "returnedFingerprint" to debugTokenFingerprint(HERMES_FALLBACK_API_KEY)
-            )
-        )
-        // #endregion
-        HERMES_FALLBACK_API_KEY
-    }
+        String(cipher.doFinal(encrypted), Charsets.UTF_8).trim().ifBlank { HERMES_FALLBACK_API_KEY }
+    }.getOrElse { HERMES_FALLBACK_API_KEY }
 }
 
 private fun saveGatewaySecret(context: Context, secret: String?) {
@@ -8799,24 +9033,10 @@ private fun saveGatewaySecret(context: Context, secret: String?) {
         "${Base64.encodeToString(cipher.iv, Base64.NO_WRAP)}:${Base64.encodeToString(encrypted, Base64.NO_WRAP)}"
     }.getOrDefault(normalized)
 
-    // #region debug-point B:save-secret
-    debugReport(
-        hypothesisId = "B",
-        location = "MainActivity.kt:saveGatewaySecret",
-        msg = "[DEBUG] saveGatewaySecret persisted value",
-        data = mapOf(
-            "inputFingerprint" to debugTokenFingerprint(normalized),
-            "encodedLength" to encoded.length,
-            "encryptedFormat" to encoded.contains(':')
-        )
-    )
-    // #endregion
-
-    migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
-        .edit()
-        .putString(GATEWAY_SECRET_PREF_KEY, encoded)
-        .remove("gatewaySecret")
-        .apply()
+    migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS).edit {
+        putString(GATEWAY_SECRET_PREF_KEY, encoded)
+        remove("gatewaySecret")
+    }
 }
 
 private fun getOrCreateGatewaySecretKey(): SecretKey = synchronized(gatewaySecretKeyLock) {
@@ -8930,7 +9150,7 @@ private fun saveWorkspaceRequest(
     }
     val array = JSONArray()
     all.sortedByDescending { it.optLong("updatedAt") }.take(200).forEach { array.put(it) }
-    prefs.edit().putString("items", array.toString()).apply()
+    prefs.edit { putString("items", array.toString()) }
 }
 
 private fun saveWorkspaceFeedback(context: Context, id: String, feedback: String, status: String) {
@@ -8950,7 +9170,7 @@ private fun saveWorkspaceFeedback(context: Context, id: String, feedback: String
         }
         array.put(obj)
     }
-    prefs.edit().putString("items", array.toString()).apply()
+    prefs.edit { putString("items", array.toString()) }
 }
 
 private suspend fun syncWorkspaceJobs(context: Context, settings: AppSettings, kind: String, apiKey: String?): String = withContext(Dispatchers.IO) {
@@ -9057,7 +9277,7 @@ private fun saveVideoFeedback(context: Context, id: String, feedback: String, re
             .put("status", status)
             .put("updatedAt", System.currentTimeMillis())
     )
-    prefs.edit().putString("video_feedback", root.toString()).apply()
+    prefs.edit { putString("video_feedback", root.toString()) }
 }
 
 private suspend fun sendVideoLibraryFeedback(settings: AppSettings, item: VideoLibraryItem, feedback: String, reaction: String, apiKey: String?): String = withContext(Dispatchers.IO) {
@@ -9167,7 +9387,7 @@ private fun saveConversationExchange(
             ChatMessage("Tu", prompt, fromUser = true),
             ChatMessage("Hermes", response, fromUser = false, visualBlocksVersion = visualBlocksVersion, visualBlocks = visualBlocks)
         )
-        val newConversationId = "conv_$now"
+        val newConversationId = conversationId?.takeIf { it.isNotBlank() } ?: "conv_$now"
 
         val conversation = if (index >= 0) {
             val current = conversations[index]
@@ -9211,13 +9431,14 @@ private fun saveConversationSnapshot(
     prompt: String,
     messages: List<ChatMessage>,
     source: String,
-    responseId: String? = null
+    responseId: String? = null,
+    syncAfterSave: Boolean = true
 ): LocalConversation {
     synchronized(localArchiveLock) {
         val conversations = loadConversations(context, includeDeleted = true).toMutableList()
         val index = conversations.indexOfFirst { it.id == conversationId && it.deletedAt == null }
         val now = System.currentTimeMillis()
-        val newConversationId = "conv_$now"
+        val newConversationId = conversationId?.takeIf { it.isNotBlank() } ?: "conv_$now"
         val conversation = if (index >= 0) {
             val current = conversations[index]
             current.copy(
@@ -9248,7 +9469,7 @@ private fun saveConversationSnapshot(
         } else {
             conversations.add(0, conversation)
         }
-        saveConversations(context, conversations)
+        saveConversations(context, conversations, syncAfterSave = syncAfterSave)
         return conversation
     }
 }
@@ -9461,10 +9682,9 @@ private fun loadConversations(context: Context, includeDeleted: Boolean = false)
 
 private fun saveConversations(context: Context, conversations: List<LocalConversation>, syncAfterSave: Boolean = true) {
     synchronized(localArchiveLock) {
-        context.getSharedPreferences(CURRENT_ARCHIVE_PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putString("items", conversationsToJsonArray(conversations).toString())
-            .commit()
+        context.getSharedPreferences(CURRENT_ARCHIVE_PREFS, Context.MODE_PRIVATE).edit(commit = true) {
+            putString("items", conversationsToJsonArray(conversations).toString())
+        }
     }
     if (syncAfterSave) {
         ConversationArchiveAutoSync.scheduleUpload(context)
@@ -9571,10 +9791,9 @@ private fun saveTasks(context: Context, tasks: List<AgentTask>) {
                 )
             }
 
-        context.getSharedPreferences(CURRENT_TASKS_PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putString("items", array.toString())
-            .apply()
+        context.getSharedPreferences(CURRENT_TASKS_PREFS, Context.MODE_PRIVATE).edit {
+            putString("items", array.toString())
+        }
     }
 }
 
@@ -9717,7 +9936,7 @@ private fun writeVisualBlocks(blocks: List<VisualBlock>): JSONArray {
             "chart" -> obj.put("chart_type", block.chartType).put("x_label", block.xLabel).put("y_label", block.yLabel).put("unit", block.unit).put("summary", block.summary).put("series", JSONArray(block.series.map { series -> JSONObject().put("name", series.name).put("points", JSONArray(series.points.map { point -> JSONObject().put("x", point.x).put("y", point.y) })) }))
             "diagram" -> obj.put("source_format", block.sourceFormat).put("source", block.source).put("rendered_media_url", block.renderedMediaUrl).put("alt", block.alt)
             "image_gallery" -> obj.put("layout", block.layout).put("images", JSONArray(block.images.map { image -> JSONObject().put("media_url", image.mediaUrl).put("alt", image.alt).put("caption", image.caption) }))
-            "media_file" -> obj.put("media_url", block.mediaUrl).put("media_kind", block.mediaKind).put("mime_type", block.mimeType).put("filename", block.filename).put("size_bytes", block.sizeBytes ?: JSONObject.NULL).put("duration_ms", block.durationMs ?: JSONObject.NULL).put("thumbnail_url", block.thumbnailUrl).put("alt", block.alt)
+            "media_file" -> obj.put("media_url", block.mediaUrl).put("media_kind", block.mediaKind).put("mime_type", block.mimeType).put("filename", block.filename).put("size_bytes", block.sizeBytes ?: JSONObject.NULL).put("duration_ms", block.durationMs ?: JSONObject.NULL).put("thumbnail_url", block.thumbnailUrl).put("local_data_url", block.localDataUrl).put("alt", block.alt)
             "callout" -> obj.put("variant", block.variant).put("text", block.text)
             "unknown_block" -> obj.put("raw_json", block.rawJson)
         }
@@ -9780,7 +9999,6 @@ private fun notificationChatPrompt(item: HubNotification): String {
 
 
 private fun ensureHermesNotificationChannel(context: Context) {
-    if (Build.VERSION.SDK_INT < 26) return
     val channel = NotificationChannel(
         HERMES_NOTIFICATION_CHANNEL,
         "Hermes Hub",
@@ -9791,101 +10009,27 @@ private fun ensureHermesNotificationChannel(context: Context) {
     context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
 }
 
-  fun Context.requestBatteryOptimizationExemption() {
-    val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
-    val packageName = packageName
-    if (powerManager.isIgnoringBatteryOptimizations(packageName)) {
-        return
-    }
-    val intent = Intent()
-    intent.action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-    intent.data = android.net.Uri.parse("package:$packageName")
-    intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-    try {
-        startActivity(intent)
-    } catch (e: android.content.ActivityNotFoundException) {
-        // Ignora, il dispositivo non supporta questa intent
-    }
-}
-
 class HermesNotificationWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         return try {
             ensureHermesNotificationChannel(applicationContext)
             val settings = loadSettings(applicationContext)
             val apiKey = loadGatewaySecret(applicationContext)
-            // #region debug-point C:worker-start
-            debugReport(
-                hypothesisId = "C",
-                location = "MainActivity.kt:HermesNotificationWorker:start",
-                msg = "[DEBUG] HermesNotificationWorker starting poll",
-                data = mapOf(
-                    "gatewayUrl" to settings.gatewayUrl,
-                    "apiKeyFingerprint" to debugTokenFingerprint(apiKey),
-                    "hasPermission" to (Build.VERSION.SDK_INT < 33 || applicationContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED)
-                )
-            )
-            // #endregion
             val result = loadHubNotifications(settings, apiKey, unreadOnly = true)
-            // #region debug-point C:worker-result
-            debugReport(
-                hypothesisId = "C",
-                location = "MainActivity.kt:HermesNotificationWorker:result",
-                msg = "[DEBUG] HermesNotificationWorker poll completed",
-                data = mapOf("items" to result.first.size, "status" to result.second)
-            )
-            // #endregion
             val prefs = applicationContext.getSharedPreferences(CURRENT_SETTINGS_PREFS, Context.MODE_PRIVATE)
             val seen = prefs.getStringSet("seenHubNotifications", emptySet())?.toMutableSet() ?: mutableSetOf()
             var changed = false
             result.first.sortedBy { it.createdAt }.forEach { item ->
-                // #region debug-point E:worker-item
-                debugReport(
-                    hypothesisId = "E",
-                    location = "MainActivity.kt:HermesNotificationWorker:item",
-                    msg = "[DEBUG] evaluating notification item for display",
-                    data = mapOf(
-                        "notificationId" to item.id,
-                        "alreadySeen" to seen.contains(item.id),
-                        "createdAt" to item.createdAt,
-                        "readAt" to item.readAt,
-                        "severity" to item.severity
-                    )
-                )
-                // #endregion
                 if (!seen.contains(item.id) && showHermesSystemNotification(applicationContext, item)) {
                     seen.add(item.id)
                     changed = true
                 }
             }
             if (changed) {
-                prefs.edit().putStringSet("seenHubNotifications", seen.toList().takeLast(300).toSet()).apply()
+                prefs.edit { putStringSet("seenHubNotifications", seen.toList().takeLast(300).toSet()) }
             }
-            // #region debug-point E:worker-seen-save
-            debugReport(
-                hypothesisId = "E",
-                location = "MainActivity.kt:HermesNotificationWorker:seen-save",
-                msg = "[DEBUG] worker finished notification iteration",
-                data = mapOf(
-                    "changed" to changed,
-                    "seenCount" to seen.size,
-                    "fetchedCount" to result.first.size
-                )
-            )
-            // #endregion
             Result.success()
-        } catch (ex: Exception) {
-            // #region debug-point C:worker-error
-            debugReport(
-                hypothesisId = "C",
-                location = "MainActivity.kt:HermesNotificationWorker:error",
-                msg = "[DEBUG] HermesNotificationWorker failed and will retry",
-                data = mapOf(
-                    "error" to (ex.message ?: ex.javaClass.simpleName),
-                    "errorType" to ex.javaClass.simpleName
-                )
-            )
-            // #endregion
+        } catch (_: Exception) {
             Result.retry()
         }
     }
@@ -9895,14 +10039,6 @@ private fun showHermesSystemNotification(context: Context, item: HubNotification
     if (Build.VERSION.SDK_INT >= 33 &&
         context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
     ) {
-        // #region debug-point E:system-notification-permission
-        debugReport(
-            hypothesisId = "E",
-            location = "MainActivity.kt:showHermesSystemNotification:permission",
-            msg = "[DEBUG] notification not shown because POST_NOTIFICATIONS is denied",
-            data = mapOf("notificationId" to item.id)
-        )
-        // #endregion
         return false
     }
     val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -9913,7 +10049,7 @@ private fun showHermesSystemNotification(context: Context, item: HubNotification
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
     val notification = NotificationCompat.Builder(context, HERMES_NOTIFICATION_CHANNEL)
-        .setSmallIcon(R.mipmap.ic_launcher)
+        .setSmallIcon(R.drawable.ic_launcher_monochrome)
         .setContentTitle(item.title.ifBlank { "Hermes" })
         .setContentText(item.message.take(180))
         .setStyle(NotificationCompat.BigTextStyle().bigText(item.message.take(1200)))
@@ -9922,18 +10058,6 @@ private fun showHermesSystemNotification(context: Context, item: HubNotification
         .setPriority(NotificationCompat.PRIORITY_DEFAULT)
         .build()
     NotificationManagerCompat.from(context).notify(item.id.hashCode(), notification)
-    // #region debug-point E:system-notification-shown
-    debugReport(
-        hypothesisId = "E",
-        location = "MainActivity.kt:showHermesSystemNotification:shown",
-        msg = "[DEBUG] notification posted to NotificationManager",
-        data = mapOf(
-            "notificationId" to item.id,
-            "title" to item.title,
-            "severity" to item.severity
-        )
-    )
-    // #endregion
     return true
 }
 
@@ -9978,17 +10102,17 @@ private fun migratePrefs(context: Context, currentName: String, legacyName: Stri
         context.applicationContext.getSharedPreferences(legacyName, Context.MODE_PRIVATE)
     }
     if (legacy.all.isNotEmpty()) {
-        val editor = current.edit()
-        legacy.all.forEach { (key, value) ->
-            when (value) {
-                is String -> editor.putString(key, value)
-                is Boolean -> editor.putBoolean(key, value)
-                is Int -> editor.putInt(key, value)
-                is Long -> editor.putLong(key, value)
-                is Float -> editor.putFloat(key, value)
+        current.edit {
+            legacy.all.forEach { (key, value) ->
+                when (value) {
+                    is String -> putString(key, value)
+                    is Boolean -> putBoolean(key, value)
+                    is Int -> putInt(key, value)
+                    is Long -> putLong(key, value)
+                    is Float -> putFloat(key, value)
+                }
             }
         }
-        editor.apply()
     }
 
     return current
@@ -10018,52 +10142,6 @@ private const val CONTEXT_SYSTEM_OVERHEAD_TOKENS = 900
 private const val MESSAGE_CONTEXT_OVERHEAD_TOKENS = 6
 private const val SETTINGS_FIELD_MAX_LENGTH = 2048
 private val gatewaySecretKeyLock = Any()
-
-private const val DEBUG_SERVER_URL = "http://192.168.1.6:7777/event"
-private const val DEBUG_SESSION_ID = "android-notifications-missed"
-
-private fun debugTokenFingerprint(value: String?): String {
-    if (value.isNullOrBlank()) return "blank"
-    val bytes = MessageDigest.getInstance("SHA-256").digest(value.trim().toByteArray(Charsets.UTF_8))
-    return bytes.take(6).joinToString("") { "%02x".format(it) }
-}
-
-private fun debugReport(
-    hypothesisId: String,
-    location: String,
-    msg: String,
-    data: Map<String, Any?> = emptyMap(),
-    runId: String = "pre-fix"
-) {
-    if (!BuildConfig.DEBUG) return
-    runCatching {
-        val body = JSONObject()
-            .put("sessionId", DEBUG_SESSION_ID)
-            .put("runId", runId)
-            .put("hypothesisId", hypothesisId)
-            .put("location", location)
-            .put("msg", msg)
-            .put("ts", System.currentTimeMillis())
-            .put("data", JSONObject().apply {
-                data.forEach { (key, value) -> put(key, value) }
-            })
-            .toString()
-        Thread {
-            runCatching {
-                val connection = (URL(DEBUG_SERVER_URL).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    doOutput = true
-                    connectTimeout = 1500
-                    readTimeout = 1500
-                    setRequestProperty("Content-Type", "application/json")
-                }
-                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-                connection.inputStream.use { it.readBytes() }
-                connection.disconnect()
-            }
-        }.start()
-    }
-}
 
 private object AppDefaults {
     const val gatewayUrl = "http://hermes:8642/v1"

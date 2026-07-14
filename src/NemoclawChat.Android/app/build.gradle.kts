@@ -11,16 +11,14 @@ android {
         applicationId = "com.nemoclaw.chat"
         minSdk = 26
         targetSdk = 36
-        versionCode = 159
-        versionName = "0.6.155"
+        versionCode = 160
+        versionName = "0.6.156"
     }
 
     buildTypes {
-        debug {
-            // Keep the same package as release so in-app update APKs replace the installed app.
-        }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -35,11 +33,15 @@ android {
         buildConfig = true
     }
 
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
     lint {
-        warningsAsErrors = false
-        abortOnError = false
-        baseline = file("lint-baseline.xml")
-        disable += listOf("MissingTranslation")
+        warningsAsErrors = true
+        abortOnError = true
+        disable += listOf("GradleDependency", "MissingTranslation", "NewerVersionAvailable", "OldTargetApi")
     }
 }
 
@@ -55,6 +57,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     implementation("androidx.media3:media3-ui:1.10.1")
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20250517")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("com.squareup.okhttp3:logging-interceptor:5.3.2")
 }

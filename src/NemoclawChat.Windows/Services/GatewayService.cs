@@ -90,7 +90,10 @@ public sealed record HubNotificationsResult(
 
 public sealed record HubConversationsResult(
     IReadOnlyList<ConversationRecord> Items,
-    string Status);
+    string Status,
+    bool Success = false);
+
+public sealed record HubOperationResult(bool Success, string Status);
 
 public sealed record HardwareDiskRecord(
     string Device,
@@ -153,17 +156,18 @@ public sealed record HardwareSnapshot(
 public static class GatewayService
 {
     internal const string HermesFallbackApiKey = GatewayCredentialStore.DefaultApiKey;
+    private const int MaxBufferedResponseBytes = 10 * 1024 * 1024;
+    private const int MaxErrorResponseBytes = 64 * 1024;
     private static readonly string[] PlugAndPlayGatewayHosts =
     [
         "hermes",
         "100.94.223.14",
-        "hermes.local",
-        "hermes-hub",
-        "hermeshub",
-        "home-server",
-        "server",
-        "100.105.46.6"
+        "hermes.local"
     ];
+    private static readonly JsonSerializerOptions CaseInsensitiveJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
 
     private static readonly HttpClientHandler HttpHandler = new()
     {
@@ -342,8 +346,8 @@ public static class GatewayService
             $"Invio fallito: {lastError ?? "errore sconosciuto"}.",
             false,
             null,
-            VisualBlockFixtures.ShouldAttach(settings, prompt) ? VisualBlockFixtures.Create() : [],
-            VisualBlocksContract.Version);
+            [],
+            null);
     }
 
     public static async Task<GatewayTaskResult> QueueTaskAsync(AppSettings settings, AgentTaskRecord task)
@@ -462,7 +466,11 @@ public static class GatewayService
         }
     }
 
-    public static async Task<WorkspaceRunResult> SendWorkspaceRunAsync(AppSettings settings, string kind, string prompt)
+    public static async Task<WorkspaceRunResult> SendWorkspaceRunAsync(
+        AppSettings settings,
+        string kind,
+        string prompt,
+        CancellationToken cancellationToken = default)
     {
         var runPrompt = kind.Equals("Video", StringComparison.OrdinalIgnoreCase)
             ? $"Destinazione: Hermes Hub / Video.\nCartella video monitorata: {settings.VideoLibraryPath}\nMemoria: usa la memoria agente condivisa Hermes/CLI/app per preferenze utente, stile, durata, ritmo, fonti e regole editoriali. Se impari una preferenza stabile, salvala lato Hermes se possibile.\nObiettivo: crea output operativo per produzione video su PC/Hermes: brief, script, storyboard, scene, asset, voce, musica, rischi, prossimi step. Tutti i file finali devono essere pensati per comparire nel feed Video tramite quella cartella monitorata. Se utile, indica stream_url/download_url.\n\nRichiesta utente:\n{prompt}"
@@ -483,17 +491,92 @@ public static class GatewayService
             }
         });
 
-        try
+        var startResponse = await SendBufferedAsync(
+            token => BuildJsonRequest(HttpMethod.Post, ResolveHermesUri(settings, "/v1/runs"), payload, token),
+            cancellationToken: cancellationToken);
+        if (startResponse.IsSuccessStatusCode)
         {
-            var runResult = await SendHermesRequestAsync(settings, HttpMethod.Post, "/v1/runs", payload);
-            if (!runResult.StartsWith("HTTP ", StringComparison.OrdinalIgnoreCase))
+            string? runId = null;
+            try
             {
-                return new WorkspaceRunResult(runResult, "Hermes Runs", "Run Hermes completata.");
+                using var document = JsonDocument.Parse(startResponse.Body);
+                runId = ExtractString(document.RootElement, "run_id", "id");
             }
-        }
-        catch
-        {
-            // Fall through to chat fallback.
+            catch (JsonException)
+            {
+                // La risposta non valida viene gestita sotto senza creare un secondo lavoro duplicato.
+            }
+
+            if (string.IsNullOrWhiteSpace(runId))
+            {
+                return new WorkspaceRunResult(
+                    "Hermes ha accettato la run ma non ha restituito un identificativo valido.",
+                    "Hermes Runs",
+                    "Run avviata con risposta non valida: controlla lo stato sul gateway.");
+            }
+
+            var deadline = DateTimeOffset.UtcNow.AddMinutes(30);
+            var failures = 0;
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                var statusResponse = await SendBufferedAsync(
+                    token => BuildRequest(
+                        HttpMethod.Get,
+                        ResolveHermesUri(settings, $"/v1/runs/{Uri.EscapeDataString(runId)}"),
+                        token),
+                    cancellationToken: cancellationToken);
+                if (!statusResponse.IsSuccessStatusCode)
+                {
+                    failures++;
+                    if (failures >= 5)
+                    {
+                        return new WorkspaceRunResult(
+                            $"Run {runId}: polling non disponibile dopo {failures} tentativi (HTTP {statusResponse.StatusCode}).",
+                            "Hermes Runs",
+                            "La run può continuare sul server; controlla il gateway.");
+                    }
+                    continue;
+                }
+
+                failures = 0;
+                try
+                {
+                    using var document = JsonDocument.Parse(statusResponse.Body);
+                    var root = document.RootElement;
+                    var state = (ExtractString(root, "status") ?? "running").Trim().ToLowerInvariant();
+                    if (state is not ("completed" or "failed" or "cancelled"))
+                    {
+                        continue;
+                    }
+
+                    var output = root.TryGetProperty("output", out var outputElement)
+                        ? ExtractTextFromJson(outputElement)
+                        : string.Empty;
+                    if (state == "completed")
+                    {
+                        return new WorkspaceRunResult(
+                            string.IsNullOrWhiteSpace(output) ? $"Run {runId} completata senza output testuale." : output,
+                            "Hermes Runs",
+                            $"Run {runId} completata.");
+                    }
+
+                    var error = ExtractString(root, "error", "message") ?? $"Run {runId}: {state}.";
+                    return new WorkspaceRunResult(error, "Hermes Runs", $"Run {runId} terminata con stato {state}.");
+                }
+                catch (JsonException ex)
+                {
+                    return new WorkspaceRunResult(
+                        $"Run {runId}: risposta di stato non valida ({ex.Message}).",
+                        "Hermes Runs",
+                        "Impossibile leggere il risultato della run.");
+                }
+            }
+
+            return new WorkspaceRunResult(
+                $"Run {runId} ancora attiva dopo 30 minuti.",
+                "Hermes Runs",
+                "Polling locale terminato; la run continua sul server.");
         }
 
         var history = new List<ChatMessageRecord>
@@ -629,10 +712,17 @@ public static class GatewayService
         {
             foreach (var item in diskArray.EnumerateArray())
             {
+                var device = ExtractString(item, "device") ?? "-";
+                var fileSystem = ExtractString(item, "fstype") ?? "-";
+                if (!IsMeaningfulHardwareDisk(device, fileSystem))
+                {
+                    continue;
+                }
+
                 disks.Add(new HardwareDiskRecord(
-                    ExtractString(item, "device") ?? "-",
+                    device,
                     ExtractString(item, "mountpoint") ?? "-",
-                    ExtractString(item, "fstype") ?? "-",
+                    fileSystem,
                     ExtractLong(item, "total_bytes"),
                     ExtractLong(item, "used_bytes"),
                     ExtractLong(item, "free_bytes"),
@@ -712,6 +802,20 @@ public static class GatewayService
             temperatures,
             gpus,
             "Statistiche aggiornate dal gateway Hermes.");
+    }
+
+    private static bool IsMeaningfulHardwareDisk(string device, string fileSystem)
+    {
+        if (device.Trim().StartsWith("/dev/loop", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return fileSystem.Trim().ToLowerInvariant() is not (
+            "autofs" or "cgroup" or "cgroup2" or "configfs" or "debugfs" or "devtmpfs" or
+            "efivarfs" or "fusectl" or "hugetlbfs" or "mqueue" or "nsfs" or "overlay" or
+            "proc" or "pstore" or "ramfs" or "securityfs" or "squashfs" or "sysfs" or
+            "tmpfs" or "tracefs");
     }
 
     private static double? SanitizeNullableRange(double? value, double min, double max)
@@ -918,9 +1022,29 @@ public static class GatewayService
 
     public static async Task<string> LoadGatewayTextAsync(AppSettings settings, string url)
     {
-        var response = await SendBufferedAsync(
-            token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, url), token),
-            allowCompatAuth: true);
+        var resolved = ResolveHermesUri(settings, url);
+        BufferedHermesResponse response;
+        if (HasSameAuthority(resolved, settings.GatewayUrl))
+        {
+            response = await SendBufferedAsync(
+                token => BuildRequest(HttpMethod.Get, resolved, token),
+                allowCompatAuth: true);
+        }
+        else
+        {
+            using var request = BuildRequest(HttpMethod.Get, resolved);
+            using var externalResponse = await HttpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead);
+            response = new BufferedHermesResponse(
+                (int)externalResponse.StatusCode,
+                externalResponse.ReasonPhrase,
+                await ReadBoundedStringAsync(
+                    externalResponse.Content,
+                    MaxBufferedResponseBytes,
+                    CancellationToken.None),
+                externalResponse.Content.Headers.ContentType?.MediaType);
+        }
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException($"HTTP {response.StatusCode}: {ExtractHumanError(response.Body)}");
@@ -1037,9 +1161,12 @@ public static class GatewayService
             : $"Hub State non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}";
     }
 
-    public static async Task<string> SaveHubConversationsAsync(AppSettings settings, IEnumerable<ConversationRecord> conversations)
+    public static async Task<HubOperationResult> SaveHubConversationsAsync(
+        AppSettings settings,
+        IEnumerable<ConversationRecord> conversations,
+        CancellationToken cancellationToken = default)
     {
-        await EnsureReachableGatewayAsync(settings);
+        await EnsureReachableGatewayAsync(settings, cancellationToken);
         var payload = JsonSerializer.Serialize(new
         {
             items = conversations
@@ -1057,7 +1184,7 @@ public static class GatewayService
                     serverConversationId = string.IsNullOrWhiteSpace(item.ServerConversationId) ? null : item.ServerConversationId,
                     messages = item.Messages.Select(message => new
                     {
-                        id = Guid.NewGuid().ToString("N"),
+                        id = message.Id,
                         author = message.Author,
                         text = message.Text,
                         fromUser = string.Equals(message.Author, "Tu", StringComparison.OrdinalIgnoreCase) ||
@@ -1070,18 +1197,24 @@ public static class GatewayService
                     })
                 })
         });
-        var response = await SendBufferedAsync(token => BuildJsonRequest(HttpMethod.Post, ResolveHermesUri(settings, "/v1/hub/conversations/import"), payload, token));
+        var response = await SendBufferedAsync(
+            token => BuildJsonRequest(HttpMethod.Post, ResolveHermesUri(settings, "/v1/hub/conversations/import"), payload, token),
+            cancellationToken: cancellationToken);
         return response.IsSuccessStatusCode
-            ? "Archivio caricato sul gateway."
-            : $"Archivio server non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}";
+            ? new HubOperationResult(true, "Archivio caricato sul gateway.")
+            : new HubOperationResult(false, $"Archivio server non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}");
     }
 
-    public static async Task<HubConversationsResult> LoadHubConversationsAsync(AppSettings settings)
+    public static async Task<HubConversationsResult> LoadHubConversationsAsync(
+        AppSettings settings,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            await EnsureReachableGatewayAsync(settings);
-            var response = await SendBufferedAsync(token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, "/v1/hub/conversations"), token));
+            await EnsureReachableGatewayAsync(settings, cancellationToken);
+            var response = await SendBufferedAsync(
+                token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, "/v1/hub/conversations"), token),
+                cancellationToken: cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 return new HubConversationsResult([], $"Archivio server non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}");
@@ -1108,12 +1241,21 @@ public static class GatewayService
                         {
                             var timestamp = ExtractDouble(message, "timestamp");
                             var visualBlocks = ReadMessageVisualBlocks(message);
+                            var role = ExtractString(message, "author", "role") ?? "Hermes";
+                            var fromUser = role.Equals("user", StringComparison.OrdinalIgnoreCase) ||
+                                           role.Equals("Tu", StringComparison.OrdinalIgnoreCase) ||
+                                           message.TryGetProperty("fromUser", out var fromUserElement) && fromUserElement.ValueKind == JsonValueKind.True;
                             messages.Add(new ChatMessageRecord(
-                                ExtractString(message, "author", "role") ?? "Hermes",
+                                fromUser ? "Tu" : role.Equals("assistant", StringComparison.OrdinalIgnoreCase) ? "Hermes" : role,
                                 ExtractString(message, "text", "content", "message") ?? string.Empty,
                                 timestamp > 0 ? DateTimeOffset.FromUnixTimeMilliseconds((long)timestamp) : DateTimeOffset.Now,
                                 ReadMessageVisualBlocksVersion(message),
-                                visualBlocks.Count > 0 ? visualBlocks : null));
+                                visualBlocks.Count > 0 ? visualBlocks : null,
+                                ReadMessageStats(message),
+                                ReadMessageRawEvents(message))
+                            {
+                                Id = ExtractString(message, "id", "messageId", "message_id") ?? Guid.NewGuid().ToString("N")
+                            });
                         }
                     }
 
@@ -1133,7 +1275,7 @@ public static class GatewayService
                 }
             }
 
-            return new HubConversationsResult(items.OrderByDescending(item => item.UpdatedAt).ToArray(), $"Archivio server: {items.Count} chat.");
+            return new HubConversationsResult(items.OrderByDescending(item => item.UpdatedAt).ToArray(), $"Archivio server: {items.Count} chat.", true);
         }
         catch (Exception ex)
         {
@@ -1175,9 +1317,45 @@ public static class GatewayService
         return VisualBlockParser.ExtractFromResponse(wrapped).ToList();
     }
 
+    private static ChatStreamStats? ReadMessageStats(JsonElement message)
+    {
+        if (!message.TryGetProperty("stats", out var stats) || stats.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ChatStreamStats>(stats.GetRawText(), CaseInsensitiveJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static List<HermesRawEventRecord>? ReadMessageRawEvents(JsonElement message)
+    {
+        if ((!message.TryGetProperty("rawEvents", out var rawEvents) &&
+             !message.TryGetProperty("raw_events", out rawEvents)) ||
+            rawEvents.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<HermesRawEventRecord>>(rawEvents.GetRawText(), CaseInsensitiveJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     public static async Task StreamHubConversationEventsAsync(AppSettings settings, Func<CancellationToken, Task> onChanged, CancellationToken cancellationToken)
     {
-        await EnsureReachableGatewayAsync(settings);
+        await EnsureReachableGatewayAsync(settings, cancellationToken);
         var endpoint = ResolveHermesUri(settings, "/v1/hub/conversations/events");
         var candidates = BuildHermesAuthCandidates().ToArray();
         Exception? lastError = null;
@@ -1191,7 +1369,10 @@ public static class GatewayService
                 using var response = await HubEventsHttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
-                    var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                    var body = await ReadBoundedStringAsync(
+                        response.Content,
+                        MaxErrorResponseBytes,
+                        cancellationToken);
                     var buffered = new BufferedHermesResponse((int)response.StatusCode, response.ReasonPhrase, body, response.Content.Headers.ContentType?.MediaType);
                     if (ShouldRetryWithBearerAuth(buffered.StatusCode, buffered.Body) && i < candidates.Length - 1)
                     {
@@ -1257,7 +1438,7 @@ public static class GatewayService
                         read = r.GetBoolean();
                     }
                     if (readAt == 0 && read) readAt = DateTimeOffset.Now.ToUnixTimeSeconds();
-                    
+
                     items.Add(new HubNotificationRecord(
                         id,
                         ExtractString(item, "title") ?? "Hermes",
@@ -1298,7 +1479,7 @@ public static class GatewayService
             return "Run Hermes assente.";
         }
 
-        await EnsureReachableGatewayAsync(settings);
+        await EnsureReachableGatewayAsync(settings, cancellationToken);
         var payload = JsonSerializer.Serialize(new { reason = "user_cancelled" });
         var response = await SendBufferedAsync(
             token => BuildJsonRequest(
@@ -1306,7 +1487,7 @@ public static class GatewayService
                 ResolveHermesUri(settings, $"/v1/runs/{Uri.EscapeDataString(runId)}/stop"),
                 payload,
                 token),
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         return response.IsSuccessStatusCode || response.StatusCode == 404
             ? "Run Hermes arrestata."
@@ -1364,7 +1545,7 @@ public static class GatewayService
             return path;
         }
 
-        var normalizedPath = path.StartsWith("/", StringComparison.Ordinal) ? path : $"/{path}";
+        var normalizedPath = path.StartsWith('/') ? path : $"/{path}";
         if (normalizedPath.StartsWith("/v1/", StringComparison.OrdinalIgnoreCase) ||
             normalizedPath.Equals("/v1", StringComparison.OrdinalIgnoreCase) ||
             normalizedPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase) ||
@@ -1374,6 +1555,25 @@ public static class GatewayService
         }
 
         return $"{settings.GatewayUrl.TrimEnd('/')}{normalizedPath}";
+    }
+
+    private static bool HasSameAuthority(string left, string right)
+    {
+        return Uri.TryCreate(left, UriKind.Absolute, out var leftUri) &&
+               Uri.TryCreate(right, UriKind.Absolute, out var rightUri) &&
+               string.Equals(leftUri.Scheme, rightUri.Scheme, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(leftUri.Host, rightUri.Host, StringComparison.OrdinalIgnoreCase) &&
+               leftUri.Port == rightUri.Port;
+    }
+
+    internal static bool IsTrustedGatewayUri(AppSettings settings, Uri uri)
+    {
+        if (HasSameAuthority(uri.ToString(), settings.GatewayUrl))
+        {
+            return true;
+        }
+
+        return uri.Port == 8642 && PlugAndPlayGatewayHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase);
     }
 
     private static string Truncate(string value, int maxLength)
@@ -1427,10 +1627,12 @@ public static class GatewayService
         }
     }
 
-    internal static async Task EnsureReachableGatewayAsync(AppSettings settings)
+    internal static async Task EnsureReachableGatewayAsync(
+        AppSettings settings,
+        CancellationToken cancellationToken = default)
     {
         var current = settings.GatewayUrl.Trim().TrimEnd('/');
-        if (await CanReachGatewayAsync(current))
+        if (await CanReachGatewayAsync(current, cancellationToken))
         {
             return;
         }
@@ -1442,7 +1644,7 @@ public static class GatewayService
                 continue;
             }
 
-            if (!await CanReachGatewayAsync(candidate))
+            if (!await CanReachGatewayAsync(candidate, cancellationToken))
             {
                 continue;
             }
@@ -1503,7 +1705,7 @@ public static class GatewayService
         }
     }
 
-    private static async Task<bool> CanReachGatewayAsync(string gatewayUrl)
+    private static async Task<bool> CanReachGatewayAsync(string gatewayUrl, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(gatewayUrl))
         {
@@ -1518,9 +1720,17 @@ public static class GatewayService
         var healthUrl = $"{HermesRoot(probeSettings)}/health";
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            var response = await SendBufferedAsync(token => BuildRequest(HttpMethod.Get, healthUrl, token), timeout.Token, allowCompatAuth: true);
-            return response.IsSuccessStatusCode || response.StatusCode is 401 or 404;
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            var response = await SendBufferedAsync(
+                token => BuildRequest(HttpMethod.Get, healthUrl, token),
+                allowCompatAuth: true,
+                cancellationToken: timeout.Token);
+            return response.IsSuccessStatusCode || response.StatusCode == 401;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
@@ -1561,16 +1771,22 @@ public static class GatewayService
 
     private static async Task<BufferedHermesResponse> SendBufferedAsync(
         Func<string?, HttpRequestMessage> requestFactory,
-        CancellationToken cancellationToken = default,
-        bool allowCompatAuth = true)
+        bool allowCompatAuth = true,
+        CancellationToken cancellationToken = default)
     {
         BufferedHermesResponse? last = null;
         var candidates = BuildHermesAuthCandidates(allowCompatAuth).ToArray();
         for (var i = 0; i < candidates.Length; i++)
         {
             using var request = requestFactory(candidates[i]);
-            using var response = await HttpClient.SendAsync(request, cancellationToken);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var response = await HttpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+            var body = await ReadBoundedStringAsync(
+                response.Content,
+                MaxBufferedResponseBytes,
+                cancellationToken);
             var buffered = new BufferedHermesResponse(
                 (int)response.StatusCode,
                 response.ReasonPhrase,
@@ -1584,6 +1800,59 @@ public static class GatewayService
         }
 
         return last ?? new BufferedHermesResponse(0, "No Response", string.Empty, null);
+    }
+
+    private static async Task<string> ReadBoundedStringAsync(
+        HttpContent content,
+        int maxBytes,
+        CancellationToken cancellationToken)
+    {
+        if (content.Headers.ContentLength is long contentLength && contentLength > maxBytes)
+        {
+            throw new InvalidOperationException($"Risposta gateway oltre il limite di {maxBytes / 1024} KB.");
+        }
+
+        await using var input = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var buffer = new MemoryStream(Math.Min(
+            maxBytes,
+            (int)Math.Max(0, content.Headers.ContentLength ?? 0)));
+        var chunk = new byte[16 * 1024];
+        while (true)
+        {
+            var read = await input.ReadAsync(chunk, cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (buffer.Length + read > maxBytes)
+            {
+                throw new InvalidOperationException($"Risposta gateway oltre il limite di {maxBytes / 1024} KB.");
+            }
+
+            buffer.Write(chunk, 0, read);
+        }
+
+        var text = ResolveContentEncoding(content).GetString(buffer.GetBuffer(), 0, checked((int)buffer.Length));
+        return text.Length > 0 && text[0] == '\uFEFF' ? text[1..] : text;
+    }
+
+    private static Encoding ResolveContentEncoding(HttpContent content)
+    {
+        var charset = content.Headers.ContentType?.CharSet?.Trim('"');
+        if (!string.IsNullOrWhiteSpace(charset))
+        {
+            try
+            {
+                return Encoding.GetEncoding(charset);
+            }
+            catch (ArgumentException ex)
+            {
+                System.Diagnostics.Trace.WriteLine($"[GatewayService] Charset non valido '{charset}': {ex.Message}");
+            }
+        }
+
+        return Encoding.UTF8;
     }
 
     private static HttpRequestMessage BuildRequest(HttpMethod method, string uri, string? bearerToken = null, string? sessionId = null)
@@ -1632,7 +1901,7 @@ public static class GatewayService
         }
 
         var trimmed = body.Trim();
-        if (!trimmed.StartsWith("{", StringComparison.Ordinal) && !trimmed.StartsWith("[", StringComparison.Ordinal))
+        if (!trimmed.StartsWith('{') && !trimmed.StartsWith('['))
         {
             return trimmed;
         }
@@ -1665,7 +1934,7 @@ public static class GatewayService
                 continue;
             }
 
-            if (payload.StartsWith("{", StringComparison.Ordinal))
+            if (payload.StartsWith('{'))
             {
                 try
                 {
@@ -1769,7 +2038,7 @@ public static class GatewayService
         }
     }
 
-    private static IReadOnlyList<CronJobRecord> ParseCronJobs(string body)
+    private static CronJobRecord[] ParseCronJobs(string body)
     {
         if (string.IsNullOrWhiteSpace(body))
         {

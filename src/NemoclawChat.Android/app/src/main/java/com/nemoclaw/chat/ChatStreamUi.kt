@@ -1,5 +1,8 @@
 package com.nemoclaw.chat
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -37,12 +40,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -104,7 +109,8 @@ internal fun StreamingBubbleView(
             }
 
             if (state.isDone) {
-                val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+                val clipboardContext = LocalContext.current
+                val clipboardManager = remember(clipboardContext) { clipboardContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
                 val parts = mutableListOf<String>()
                 if (showMessageMetrics) {
                     state.stats?.ttftMs?.takeIf { metricFilter.ttft && it > 0 }?.let { parts += "TTFT ${String.format(java.util.Locale.US, "%.1f", it / 1000.0)}s" }
@@ -146,7 +152,7 @@ internal fun StreamingBubbleView(
                     }
 
                     androidx.compose.material3.IconButton(
-                        onClick = { clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(state.text)) },
+                        onClick = { clipboardManager.setPrimaryClip(ClipData.newPlainText("Hermes", state.text)) },
                         modifier = Modifier.size(24.dp)
                     ) {
                         Icon(
@@ -175,7 +181,7 @@ internal fun StreamingBubbleView(
 
 @Composable
 internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolean, uiTickNs: Long = System.nanoTime()) {
-    var nowNs by remember(state.startedAtNs) { mutableStateOf(System.nanoTime()) }
+    var nowNs by remember(state.startedAtNs) { mutableLongStateOf(System.nanoTime()) }
     LaunchedEffect(state.startedAtNs, state.isDone) {
         while (!state.isDone) {
             kotlinx.coroutines.delay(500L)
@@ -659,7 +665,8 @@ internal fun MarkdownText(
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+                    val clipboardContext = LocalContext.current
+                    val clipboardManager = remember(clipboardContext) { clipboardContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -672,7 +679,7 @@ internal fun MarkdownText(
                                 Text("code", color = AppColors.Muted, fontSize = 11.sp)
                             }
                             androidx.compose.material3.IconButton(
-                                onClick = { clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(block.code)) },
+                                onClick = { clipboardManager.setPrimaryClip(ClipData.newPlainText("Codice Hermes", block.code)) },
                                 modifier = Modifier.size(24.dp)
                             ) {
                                 Icon(

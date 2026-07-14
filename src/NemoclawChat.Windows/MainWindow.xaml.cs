@@ -6,11 +6,12 @@ using NemoclawChat_Windows.Services;
 using Windows.Graphics;
 using Windows.Storage;
 
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
-
 namespace NemoclawChat_Windows;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design",
+    "CA1001:Types that own disposable fields should be disposable",
+    Justification = "La finestra WinUI chiude e dispone i servizi nel proprio evento Closed; il framework non consuma IDisposable.")]
 public sealed partial class MainWindow : Window
 {
     private bool _sidebarCollapsed;
@@ -39,23 +40,18 @@ public sealed partial class MainWindow : Window
         RefreshRecentChats();
     }
 
-    private void MainWindow_Closed(object sender, WindowEventArgs args)
+    private async void MainWindow_Closed(object sender, WindowEventArgs args)
     {
         if (_closing) return;
         _closing = true;
-        try
-        {
-            ChatArchiveStore.Changed -= RefreshRecentChats;
-            ContentFrame.Navigated -= ContentFrame_Navigated;
-            _notificationPoller.Stop();
-            _archiveSyncService.Stop();
-            SaveWindowState();
-            Closed -= MainWindow_Closed;
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[MainWindow] cleanup error: {ex.Message}");
-        }
+        ChatArchiveStore.Changed -= RefreshRecentChats;
+        ContentFrame.Navigated -= ContentFrame_Navigated;
+        _notificationPoller.Stop();
+        try { await _archiveSyncService.StopAsync(); }
+        catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"[MainWindow] sync cleanup error: {ex}"); }
+        try { SaveWindowState(); }
+        catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"[MainWindow] state cleanup error: {ex}"); }
+        Closed -= MainWindow_Closed;
     }
 
     private void SaveWindowState()
@@ -217,11 +213,12 @@ public sealed partial class MainWindow : Window
             Grid.SetColumn(moreButton, 1);
 
             var flyout = new MenuFlyout();
-            
+
             var renameItem = new MenuFlyoutItem { Text = "Rinomina" };
             renameItem.Icon = new FontIcon { Glyph = "\uE70F" };
-            renameItem.Click += async (s, e) => {
-                var tb = new TextBox { Text = conversation.Title };
+            renameItem.Click += async (s, e) =>
+            {
+                var tb = new TextBox { Text = conversation.Title, MaxLength = 160 };
                 var dialog = new ContentDialog
                 {
                     Title = "Rinomina chat",
@@ -241,7 +238,8 @@ public sealed partial class MainWindow : Window
 
             var deleteItem = new MenuFlyoutItem { Text = "Elimina", Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Red) };
             deleteItem.Icon = new FontIcon { Glyph = "\uE74D", Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Red) };
-            deleteItem.Click += (s, e) => {
+            deleteItem.Click += (s, e) =>
+            {
                 ChatArchiveStore.Delete(conversation.Id);
                 RefreshRecentChats();
             };
@@ -256,7 +254,7 @@ public sealed partial class MainWindow : Window
                 Content = grid,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch
             };
-            
+
             button.PointerEntered += (s, e) => moreButton.Visibility = Visibility.Visible;
             button.PointerExited += (s, e) => moreButton.Visibility = Visibility.Collapsed;
 

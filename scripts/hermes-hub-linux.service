@@ -17,9 +17,10 @@ Environment=HERMES_HUB_MAX_UPLOAD_MB=0
 Environment=HERMES_AUXILIARY_LOCAL_ONLY=true
 Environment=HERMES_INFERENCE_PROVIDER=custom
 Environment=HERMES_INFERENCE_BASE_URL=http://127.0.0.1:8000/v1
+Environment=HERMES_WAIT_ON_START=false
 Environment=HERMES_VIDEO_LIBRARY_PATH=%h/video
 Environment=HERMES_NEWS_LIBRARY_PATH=%h/news
-Environment=HERMES_MEDIA_ROOTS=%h:%h/.hermes/cache:%h/.hermes/media:%h/video:%h/news
+Environment=HERMES_MEDIA_ROOTS=%h/.hermes/hub_uploads:%h/.hermes/cache:%h/.hermes/media:%h/video:%h/news:%h
 Environment=HERMES_HUB_STATE_PATH=%h/.hermes/hub_state.json
 Environment=HERMES_HUB_MEMORY_PATH=%h/.hermes/hub_memory.json
 ExecStartPre=%h/.local/bin/hermes-wait-tailscale.sh
@@ -27,7 +28,7 @@ ExecStartPre=%h/.local/bin/hermes-wait-llama.sh
 ExecStart=%h/hermes-hub-linux.sh
 Restart=on-failure
 RestartSec=5
-TimeoutStartSec=1000
+TimeoutStartSec=1300
 TimeoutStopSec=240
 
 [Install]

@@ -15,11 +15,11 @@ public sealed class AppSettings
     public string NewsLibraryPath { get; set; } = "/home/matteo/news";
     public string ActiveProjectId { get; set; } = string.Empty;
     public string ActiveProjectName { get; set; } = string.Empty;
-    public bool StrictNativeMode { get; set; } = false;
-    public bool DemoMode { get; set; } = false;
-    public bool AdvancedChatDetails { get; set; } = false;
+    public bool StrictNativeMode { get; set; }
+    public bool DemoMode { get; set; }
+    public bool AdvancedChatDetails { get; set; }
     public bool ShowToolCalls { get; set; } = true;
-    public bool ShowMessageMetrics { get; set; } = false;
+    public bool ShowMessageMetrics { get; set; }
     public bool MetricTtft { get; set; } = true;
     public bool MetricTokensPerSecond { get; set; } = true;
     public bool MetricOutputTokens { get; set; } = true;

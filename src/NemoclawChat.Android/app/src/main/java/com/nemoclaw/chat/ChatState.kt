@@ -2,6 +2,7 @@ package com.nemoclaw.chat
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -23,7 +24,7 @@ internal class ChatStateHolder {
     var tempVoiceNoteFile: java.io.File? = null
 
     val activeStreams: androidx.compose.runtime.snapshots.SnapshotStateMap<String, ActiveStreamState> = androidx.compose.runtime.mutableStateMapOf()
-    var streamUiTickNs: Long by mutableStateOf(System.nanoTime())
+    var streamUiTickNs: Long by mutableLongStateOf(System.nanoTime())
 
     val sending: Boolean
         get() = activeConversationId?.let { activeStreams[it] != null } ?: false
