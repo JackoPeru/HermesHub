@@ -3,9 +3,11 @@ Hermes Hub 0.6.159 (TTS italiano/inglese misto)
 - TTS gateway: le frasi italiane mantengono la voce italiana; termini inglesi riconosciuti sono sintetizzati come segmenti `en-us`.
 - Affidabilita: micro-pause WAV tra cambi lingua, timeout e fallback CPU esistenti preservati; se la voce inglese non e disponibile la risposta resta riproducibile in italiano.
 - Patcher Linux: aggiornamento idempotente e copertura automatica per segmentazione, fallback e coerenza della release.
+- Repository: migrazione completata in `JackoPeru/HermesHub`; riferimenti GitHub API/Releases e updater Windows, Android e Linux aggiornati.
+- Continuita': redirect del vecchio slug verificato; override Linux `HERMES_HUB_REPO`, nomi systemd e percorsi dati storici preservati.
 - Compatibilita': `applicationId com.nemoclaw.chat`, firma Android, package identity Windows, archivio e impostazioni storiche preservati.
 - Versioni: Windows/AdminBridge `0.6.159`; Android `versionName 0.6.159`, `versionCode 163`.
 - Asset: `HermesHub-0.6.159-android.apk`, `NemoclawChat.Windows_0.6.159.0_x64.msix`, `HermesHub-0.6.159-linux-gateway.tar.gz`.
-- SHA-256 Android: `8FB5E41AA17F4592808C8469D6DD393DEE402AA5FFEFEACA2FCF57D69AE7977E`.
-- SHA-256 Windows: `FA987B82C119D8AF5C7C16E0C9A733E14CB3B78A9FB0C12BAC0D447E13CEABB9`.
-- SHA-256 gateway Linux: `92BF665CBDF6E7BD5F8B96E60577E7FD58AA22C9D81AA328712E2EFB3A6BCB53`.
+- SHA-256 Android: `28193E4C720A7CFA609FF4D1242893CFB452CF399FC3A61C2DA63FD12DE71454`.
+- SHA-256 Windows: `387201F4EBD4AB8B20F3B45315F8E9773FD36FEF2971AAF68B476D4D70C9B674`.
+- SHA-256 gateway Linux: `B081BACE3A1B30B3696AD550D1EFC4BAF88654F9066C7D2315C14E0A71267E37`.

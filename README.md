@@ -2,6 +2,8 @@
 
 Client Windows e Android per usare Hermes Agent sul proprio home server, con gateway Linux integrato.
 
+Repository ufficiale: [`JackoPeru/HermesHub`](https://github.com/JackoPeru/HermesHub).
+
 ## Componenti
 
 - `src/NemoclawChat.Windows`: app WinUI 3.
