@@ -2,6 +2,14 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.157 - 2026-07-14
+
+- Ridisegnata la UI Android con una gerarchia piu pulita e una palette scura coerente.
+- Rimossa la barra di navigazione inferiore e introdotto un drawer globale organizzato per aree operative.
+- Rinnovate testata Chat, stato vuoto, messaggi, azioni rapide e composer.
+- Aggiunta una testata coerente alle sezioni secondarie, con accesso diretto alla navigazione e ritorno alla Chat.
+- Preservati firma, `applicationId`, dati, configurazione e percorsi funzionali esistenti.
+
 ## 0.6.156 - 2026-07-14
 
 - Audit manuale completo di Windows, Android, gateway, script, build e packaging.

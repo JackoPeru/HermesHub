@@ -1,9 +1,11 @@
-Hermes Hub 0.6.156 (Reliability and maintenance audit)
+Hermes Hub 0.6.157 (Android UI redesign)
 
-- Windows: cancellazione stream ora persistente e visibile; lifecycle voce/TTS, sync archivio, persistenza JSON, allegati, discovery gateway e updater resi deterministici e non bloccanti.
-- Android: eliminato doppio rendering di risposte SSE brevi; discovery gateway limitata e cancellabile; corrette race invio/cancellazione, EOF SSE, polling agent, lifecycle coroutine/player/WebView, allegati grandi e parziali, archivio, recorder voce, autenticazione e updater.
-- Gateway Linux: patcher transazionale e idempotente, anche in migrazione da patch precedenti; limiti/timeout e store rinforzati; updater con lock, staging, verifica digest/versione, health probe e rollback.
-- Qualita': rimossi asset, log, dati diagnostici e documenti obsoleti; unificata la toolchain Android; dipendenze Windows pinning; quality gate CI e test regressione aggiunti.
+- Android: rimossa la barra inferiore e introdotta una navigazione laterale globale, organizzata in Operativita, Controllo, Contenuti e Account.
+- Chat: nuova testata compatta, accesso rapido ad archivio e nuova chat, stato vuoto piu leggibile, messaggi con gerarchia visiva distinta e composer piu ergonomico.
+- Sezioni: testata coerente con apertura del menu e ritorno immediato alla Chat; tutti i percorsi preesistenti restano raggiungibili.
+- Stile: palette scura piu profonda, superfici e bordi uniformati, arancione Hermes usato solo per stato e azioni primarie.
 - Compatibilita': `applicationId com.nemoclaw.chat`, firma Android, package identity Windows, archivio e impostazioni storiche preservati.
-- Versioni: Windows/AdminBridge `0.6.156`; Android `versionName 0.6.156`, `versionCode 160`.
-- Asset: `HermesHub-0.6.156-android.apk`, `NemoclawChat.Windows_0.6.156.0_x64.msix`, `HermesHub-0.6.156-linux-gateway.tar.gz`.
+- Versioni: Windows/AdminBridge `0.6.157`; Android `versionName 0.6.157`, `versionCode 161`.
+- Asset: `HermesHub-0.6.157-android.apk`, `NemoclawChat.Windows_0.6.157.0_x64.msix`.
+- SHA-256 Android: `9FE5D21A86F92459D83BCDA13F7200222FA09AF25400FA2515AF35D404D91DFA`.
+- SHA-256 Windows: `0545B3C61C21B3F05A95B05B337D1F755E676CB3F1A99D4588764FC2948494F8`.

@@ -73,6 +73,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -129,10 +130,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -298,11 +295,11 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     Archive("Archivio", Icons.Rounded.FolderOpen),
     Cron("Cron", Icons.Rounded.TaskAlt),
     Notifications("Notifiche", Icons.Rounded.Notifications),
-    Server("Hermes", Icons.Rounded.Dns),
+    Server("Server", Icons.Rounded.Dns),
     Hardware("Hardware", Icons.Rounded.Memory),
     Video("Video", Icons.Rounded.PlayCircle),
     News("News", Icons.AutoMirrored.Rounded.Article),
-    Settings("Imposta", Icons.Rounded.Tune),
+    Settings("Impostazioni", Icons.Rounded.Tune),
     Profile("Profilo", Icons.Rounded.AccountCircle)
 }
 
@@ -920,38 +917,21 @@ private fun ChatApp() {
     }
 
     CompositionLocalProvider(LocalDensity provides appDensity) {
-        Scaffold(
-            containerColor = AppColors.Background,
-            bottomBar = {
-                val bottomTabs = remember {
-                    listOf(Tab.Chat, Tab.Voice, Tab.Hardware, Tab.Profile)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(AppColors.Background)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (selectedTab != Tab.Chat) {
+                    SectionTopBar(
+                        tab = selectedTab,
+                        onOpenSidebar = { sidebarOpen = true },
+                        onBackToChat = { setSelectedTab(Tab.Chat) }
+                    )
                 }
-                NavigationBar(containerColor = AppColors.Sidebar) {
-                    bottomTabs.forEach { tab ->
-                        NavigationBarItem(
-                            selected = selectedTab == tab,
-                            onClick = { setSelectedTab(tab) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = Color.White,
-                                selectedTextColor = Color.White,
-                                indicatorColor = AppColors.NavIndicator,
-                                unselectedIconColor = AppColors.Muted,
-                                unselectedTextColor = AppColors.Muted
-                            ),
-                            icon = { Icon(tab.icon, contentDescription = tab.label) },
-                            label = { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                        )
-                    }
-                }
-            }
-        ) { padding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .background(AppColors.Background)
-            ) {
-                when (selectedTab) {
+                Box(modifier = Modifier.weight(1f)) {
+                    when (selectedTab) {
                     Tab.Chat -> ChatScreen(
                         context = context,
                         settings = settings,
@@ -1014,42 +994,36 @@ private fun ChatApp() {
                         },
                         onOpenTab = { tab -> setSelectedTab(tab) }
                     )
-                }
-                if (sidebarOpen) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color(0x99000000))
-                            .clickable { sidebarOpen = false }
-                    ) {
-                        HermesSidebar(
-                            context = context,
-                            onClose = { sidebarOpen = false },
-                            onNewChat = {
-                                chatState.resetForNewChat()
-                                setSelectedTab(Tab.Chat)
-                                sidebarOpen = false
-                            },
-                            onOpenConversation = { id ->
-                                pendingConversationId = id
-                                pendingPrompt = ""
-                                setSelectedTab(Tab.Chat)
-                                sidebarOpen = false
-                            },
-                            onOpenArchive = {
-                                setSelectedTab(Tab.Archive)
-                                sidebarOpen = false
-                            },
-                            onOpenCron = {
-                                setSelectedTab(Tab.Cron)
-                                sidebarOpen = false
-                            },
-                            onOpenNotifications = {
-                                setSelectedTab(Tab.Notifications)
-                                sidebarOpen = false
-                            }
-                        )
                     }
+                }
+            }
+            if (sidebarOpen) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xB8000000))
+                        .clickable { sidebarOpen = false }
+                ) {
+                    HermesSidebar(
+                        context = context,
+                        selectedTab = selectedTab,
+                        onClose = { sidebarOpen = false },
+                        onNewChat = {
+                            chatState.resetForNewChat()
+                            setSelectedTab(Tab.Chat)
+                            sidebarOpen = false
+                        },
+                        onOpenConversation = { id ->
+                            pendingConversationId = id
+                            pendingPrompt = ""
+                            setSelectedTab(Tab.Chat)
+                            sidebarOpen = false
+                        },
+                        onOpenTab = { tab ->
+                            setSelectedTab(tab)
+                            sidebarOpen = false
+                        }
+                    )
                 }
             }
         }
@@ -1057,22 +1031,57 @@ private fun ChatApp() {
 }
 
 @Composable
+private fun SectionTopBar(tab: Tab, onOpenSidebar: () -> Unit, onBackToChat: () -> Unit) {
+    Surface(
+        color = AppColors.Background,
+        border = BorderStroke(0.dp, Color.Transparent)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .height(68.dp)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.chatclaw_logo),
+                contentDescription = "Apri navigazione",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .clickable(onClick = onOpenSidebar)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(tab.label, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                Text("Hermes Hub", color = AppColors.Faint, fontSize = 11.sp)
+            }
+            IconButton(onClick = onBackToChat, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Torna alla chat", tint = AppColors.Muted)
+            }
+        }
+    }
+    HorizontalDivider(color = AppColors.Border.copy(alpha = 0.8f))
+}
+
+@Composable
 private fun HermesSidebar(
     context: Context,
+    selectedTab: Tab,
     onClose: () -> Unit,
     onNewChat: () -> Unit,
     onOpenConversation: (String) -> Unit,
-    onOpenArchive: () -> Unit,
-    onOpenCron: () -> Unit,
-    onOpenNotifications: () -> Unit
+    onOpenTab: (Tab) -> Unit
 ) {
     val conversations = remember { loadConversations(context).sortedByDescending { it.updatedAt } }
     Surface(
         modifier = Modifier
-            .width(292.dp)
+            .width(320.dp)
             .fillMaxSize()
             .clickable { },
-        color = Color(0xFF080A0E)
+        color = AppColors.Sidebar
     ) {
         LazyColumn(
             modifier = Modifier
@@ -1115,36 +1124,43 @@ private fun HermesSidebar(
                     icon = Icons.Rounded.Edit,
                     title = "Nuova chat",
                     subtitle = "Pulisci contesto corrente",
+                    selected = false,
                     onClick = onNewChat
                 )
             }
             item {
-                SidebarRow(
-                    icon = Icons.Rounded.FolderOpen,
-                    title = "Archivio",
-                    subtitle = "Conversazioni e progetti salvati",
-                    onClick = onOpenArchive
-                )
+                SidebarSectionLabel("OPERATIVITA")
             }
             item {
-                SidebarRow(
-                    icon = Icons.Rounded.TaskAlt,
-                    title = "Cron",
-                    subtitle = "Automazioni attive",
-                    onClick = onOpenCron
-                )
+                SidebarTabRow(Tab.Chat, selectedTab == Tab.Chat, onOpenTab)
             }
             item {
-                SidebarRow(
-                    icon = Icons.Rounded.Notifications,
-                    title = "Notifiche",
-                    subtitle = "Avvisi da cron e agenti",
-                    onClick = onOpenNotifications
-                )
+                SidebarTabRow(Tab.Voice, selectedTab == Tab.Voice, onOpenTab)
+            }
+            item {
+                SidebarTabRow(Tab.Archive, selectedTab == Tab.Archive, onOpenTab)
+            }
+            item {
+                SidebarSectionLabel("CONTROLLO")
+            }
+            items(listOf(Tab.Server, Tab.Hardware, Tab.Cron, Tab.Notifications), key = { "control-${it.name}" }) { tab ->
+                SidebarTabRow(tab, selectedTab == tab, onOpenTab)
+            }
+            item {
+                SidebarSectionLabel("CONTENUTI")
+            }
+            items(listOf(Tab.News, Tab.Video), key = { "content-${it.name}" }) { tab ->
+                SidebarTabRow(tab, selectedTab == tab, onOpenTab)
+            }
+            item {
+                SidebarSectionLabel("ACCOUNT")
+            }
+            items(listOf(Tab.Settings, Tab.Profile), key = { "account-${it.name}" }) { tab ->
+                SidebarTabRow(tab, selectedTab == tab, onOpenTab)
             }
             item {
                 HorizontalDivider(color = AppColors.Border, modifier = Modifier.padding(vertical = 8.dp))
-                Text("Recenti", color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("RECENTI", color = AppColors.Faint, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
             }
             if (conversations.isEmpty()) {
                 item {
@@ -1187,22 +1203,55 @@ private fun HermesSidebar(
 }
 
 @Composable
-private fun SidebarRow(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
+private fun SidebarRow(icon: ImageVector, title: String, subtitle: String, selected: Boolean, onClick: () -> Unit) {
+    val background = if (selected) AppColors.NavIndicator else Color.Transparent
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(background)
             .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Icon(icon, contentDescription = title, tint = Color.White, modifier = Modifier.size(18.dp))
+        Icon(icon, contentDescription = title, tint = if (selected) AppColors.Accent else AppColors.Muted, modifier = Modifier.size(19.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Text(subtitle, color = AppColors.Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
+}
+
+@Composable
+private fun SidebarSectionLabel(title: String) {
+    Text(
+        title,
+        color = AppColors.Faint,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.1.sp,
+        modifier = Modifier.padding(start = 12.dp, top = 10.dp, bottom = 2.dp)
+    )
+}
+
+@Composable
+private fun SidebarTabRow(tab: Tab, selected: Boolean, onOpenTab: (Tab) -> Unit) {
+    val subtitle = when (tab) {
+        Tab.Chat -> "Conversazione principale"
+        Tab.Voice -> "Interazione vocale continua"
+        Tab.Archive -> "Chat e progetti salvati"
+        Tab.Server -> "Gateway e diagnostica"
+        Tab.Hardware -> "Metriche del server"
+        Tab.Cron -> "Automazioni programmate"
+        Tab.Notifications -> "Avvisi Hermes"
+        Tab.News -> "Articoli generati"
+        Tab.Video -> "Libreria e rendering"
+        Tab.Settings -> "Connessione e comportamento"
+        Tab.Profile -> "Identita e informazioni"
+    }
+    SidebarRow(tab.icon, tab.label, subtitle, selected = selected) { onOpenTab(tab) }
 }
 
 @Composable
@@ -1324,8 +1373,10 @@ private fun ChatScreen(
     ) {
         TopBar(
             contextUsage = contextUsage,
+            connected = online,
             onNewChat = { state.resetForNewChat() },
-            onOpenSidebar = onOpenSidebar
+            onOpenSidebar = onOpenSidebar,
+            onOpenArchive = { onSwitchTab(Tab.Archive) }
         )
         Box(modifier = Modifier.weight(1f)) {
             if (isEmptyChat) {
@@ -1790,50 +1841,56 @@ private fun executeSlashCommand(
 }
 
 @Composable
-private fun TopBar(contextUsage: ContextUsage, onNewChat: () -> Unit = {}, onOpenSidebar: () -> Unit = {}) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .statusBarsPadding()
-            .height(72.dp)
-            .padding(horizontal = 18.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Image(
-            painter = painterResource(id = R.drawable.chatclaw_logo),
-            contentDescription = "Hermes Hub",
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .clickable(onClick = onOpenSidebar)
-        )
-        Column(modifier = Modifier.padding(start = 12.dp)) {
-            Text(
-                text = "Hermes Hub",
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 20.sp
-            )
-        }
-        Spacer(modifier = Modifier.weight(1f))
+private fun TopBar(
+    contextUsage: ContextUsage,
+    connected: Boolean,
+    onNewChat: () -> Unit = {},
+    onOpenSidebar: () -> Unit = {},
+    onOpenArchive: () -> Unit = {}
+) {
+    Surface(color = AppColors.Background) {
         Row(
             modifier = Modifier
-                .clickable(onClick = onNewChat)
-                .padding(horizontal = 10.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .height(68.dp)
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Rounded.Edit, contentDescription = "Nuova chat", tint = AppColors.Accent, modifier = Modifier.size(16.dp))
-            Text(text = "Nuova", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Image(
+                painter = painterResource(id = R.drawable.chatclaw_logo),
+                contentDescription = "Apri navigazione",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClick = onOpenSidebar)
+            )
+            Column(modifier = Modifier.padding(start = 11.dp).weight(1f)) {
+                Text("Hermes Hub", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .background(if (connected) AppColors.Success else AppColors.Warning, CircleShape)
+                    )
+                    Text(
+                        if (connected) "Rete disponibile" else "Rete non validata",
+                        color = AppColors.Faint,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+            IconButton(onClick = onOpenArchive, modifier = Modifier.size(38.dp)) {
+                Icon(Icons.Rounded.FolderOpen, contentDescription = "Archivio chat", tint = AppColors.Muted, modifier = Modifier.size(20.dp))
+            }
+            IconButton(onClick = onNewChat, modifier = Modifier.size(38.dp)) {
+                Icon(Icons.Rounded.Edit, contentDescription = "Nuova chat", tint = AppColors.Accent, modifier = Modifier.size(20.dp))
+            }
+            ContextMeter(usage = contextUsage, modifier = Modifier.size(40.dp))
         }
-        Spacer(modifier = Modifier.size(8.dp))
-        ContextMeter(
-            usage = contextUsage,
-            modifier = Modifier
-                .size(50.dp)
-        )
     }
+    HorizontalDivider(color = AppColors.Border.copy(alpha = 0.72f))
 }
 
 @Composable
@@ -1930,34 +1987,37 @@ private fun EmptyState(onPrompt: (String) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp),
+            .padding(horizontal = 22.dp),
         verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.Start
     ) {
         Image(
             painter = painterResource(id = R.drawable.chatclaw_logo),
             contentDescription = "Logo Hermes Hub",
             contentScale = ContentScale.Crop,
             modifier = Modifier
-                .size(108.dp)
-                .clip(RoundedCornerShape(28.dp))
+                .size(76.dp)
+                .clip(RoundedCornerShape(24.dp))
         )
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(22.dp))
         Text(
             text = "Che vuoi fare oggi, Matteo?",
             color = Color.White,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 24.sp
+            fontSize = 27.sp,
+            lineHeight = 32.sp
         )
         Spacer(modifier = Modifier.height(10.dp))
         Text(
             text = "Chat live, cron e strumenti Hermes Agent sul tuo home-server.",
             color = AppColors.Muted,
             fontSize = 14.sp,
-            textAlign = TextAlign.Center
+            lineHeight = 20.sp
         )
-        Spacer(modifier = Modifier.height(18.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Spacer(modifier = Modifier.height(28.dp))
+        Text("OPERAZIONI RAPIDE", color = AppColors.Faint, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
+        Spacer(modifier = Modifier.height(10.dp))
+        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             SuggestionButton("Prepara setup Hermes") {
                 onPrompt("Preparami i passaggi per avviare Hermes Agent API Server su Tailscale/LAN.")
             }
@@ -1977,17 +2037,22 @@ private fun createInitialTasks(@Suppress("UNUSED_PARAMETER") settings: AppSettin
 
 @Composable
 private fun SuggestionButton(text: String, onClick: () -> Unit) {
-        Surface(
-        modifier = Modifier.clickable(onClick = onClick),
-        color = AppColors.Surface,
-        shape = RoundedCornerShape(18.dp)
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        color = AppColors.Panel,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, AppColors.Border)
     ) {
-        Text(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-            text = text,
-            color = Color.White,
-            fontSize = 14.sp
-        )
+        Row(
+            modifier = Modifier.padding(horizontal = 15.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(modifier = Modifier.size(7.dp).background(AppColors.Accent, CircleShape))
+            Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 12.dp).weight(1f))
+            Text("›", color = AppColors.Faint, fontSize = 22.sp)
+        }
     }
 }
 
@@ -2022,6 +2087,10 @@ private fun MessageBubble(message: ChatMessage, settings: AppSettings) {
                     .padding(horizontal = 2.dp, vertical = 2.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Box(modifier = Modifier.size(7.dp).background(AppColors.Accent, CircleShape))
+                    Text("HERMES", color = AppColors.Faint, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
+                }
                 if (message.thinking.isNotBlank()) {
                     ThinkingExpander(thinking = message.thinking, active = false, elapsedSec = 0.0)
                 }
@@ -2046,8 +2115,12 @@ private fun MessageBubble(message: ChatMessage, settings: AppSettings) {
             Surface(
                 modifier = Modifier.fillMaxWidth(if (message.fromUser) 0.86f else 0.92f),
                 color = if (message.fromUser) AppColors.UserBubble else AppColors.Panel,
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, AppColors.Border),
+                shape = if (message.fromUser) {
+                    RoundedCornerShape(topStart = 20.dp, topEnd = 7.dp, bottomEnd = 20.dp, bottomStart = 20.dp)
+                } else {
+                    RoundedCornerShape(16.dp)
+                },
+                border = BorderStroke(1.dp, if (message.fromUser) AppColors.Accent.copy(alpha = 0.28f) else AppColors.Border),
                 shadowElevation = 0.dp,
                 tonalElevation = 0.dp
             ) {
@@ -2911,7 +2984,8 @@ private fun Composer(
         modifier = Modifier
             .fillMaxWidth()
             .imePadding()
-            .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 0.dp)
+            .navigationBarsPadding()
+            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 10.dp)
             .widthIn(max = 1040.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.Bottom
@@ -2919,13 +2993,14 @@ private fun Composer(
         Box {
             Surface(
                 modifier = Modifier
-                    .size(52.dp)
+                    .size(48.dp)
                     .clickable { expanded = true },
-                color = AppColors.Surface,
-                shape = CircleShape
+                color = AppColors.Composer,
+                shape = CircleShape,
+                border = BorderStroke(1.dp, AppColors.Border)
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Icon(Icons.Rounded.Add, contentDescription = "Apri menu azioni", tint = Color.White, modifier = Modifier.size(30.dp))
+                    Icon(Icons.Rounded.Add, contentDescription = "Apri menu azioni", tint = AppColors.Muted, modifier = Modifier.size(25.dp))
                 }
             }
             DropdownMenu(
@@ -3063,7 +3138,8 @@ private fun Composer(
                 .weight(1f)
                 .heightIn(min = (54 * fontScale).dp, max = (156 * fontScale).dp),
             color = AppColors.Composer,
-            shape = RoundedCornerShape(28.dp)
+            shape = RoundedCornerShape(25.dp),
+            border = BorderStroke(1.dp, AppColors.Border)
         ) {
             Row(
                 modifier = Modifier
@@ -3140,8 +3216,8 @@ private fun Composer(
                         maxLines = 5,
                         textStyle = TextStyle(
                             color = Color.White,
-                            fontSize = 18.sp,
-                            lineHeight = 25.sp
+                            fontSize = 16.sp,
+                            lineHeight = 23.sp
                         ),
                         cursorBrush = SolidColor(AppColors.Accent),
                         keyboardOptions = KeyboardOptions(
@@ -3153,7 +3229,7 @@ private fun Composer(
                         modifier = Modifier.fillMaxWidth()
                     )
                     if (value.isEmpty()) {
-                        Text("Fai una domanda", color = AppColors.Muted, fontSize = 18.sp)
+                        Text("Fai una domanda", color = AppColors.Faint, fontSize = 16.sp)
                     }
                     }
                 }
@@ -3186,14 +3262,14 @@ private fun Composer(
                         .clickable(enabled = canPress) {
                             if (isBusy) onStop() else onSend()
                         },
-                    color = if (canPress) Color.White else AppColors.Surface,
+                    color = if (canPress) AppColors.Accent else AppColors.Surface,
                     shape = CircleShape,
                 ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                         Icon(
                             imageVector = if (isBusy) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
                             contentDescription = if (isBusy) "Interrompi generazione" else "Invia",
-                            tint = if (canPress) Color.Black else AppColors.Muted
+                            tint = if (canPress) Color(0xFF171009) else AppColors.Muted
                         )
                     }
                 }
@@ -10174,18 +10250,20 @@ private object AppDefaults {
 }
 
 internal object AppColors {
-    val Background = Color(0xFF0F1115)
-    val Sidebar = Color(0xFF14171D)
-    val Composer = Color(0xFF1A1E26)
-    val Surface = Color(0xFF1A1E26)
-    val Panel = Color(0xFF151922)
-    val Elevated = Color(0xFF232831)
+    val Background = Color(0xFF0B0D10)
+    val Sidebar = Color(0xFF101318)
+    val Composer = Color(0xFF171A20)
+    val Surface = Color(0xFF181C23)
+    val Panel = Color(0xFF12151A)
+    val Elevated = Color(0xFF20242C)
     val AssistantBubble = Color(0xFF1F242E)
-    val UserBubble = Color(0xFF7A3E00)
+    val UserBubble = Color(0xFF3E2918)
     // Muted bumped da #A2ADBF (3.8:1 su Background) a #C8D2E0 (~6.5:1) per WCAG AA.
     val Muted = Color(0xFFC8D2E0)
-    val Faint = Color(0xFF8892A2)
+    val Faint = Color(0xFF8F99A8)
     val Accent = Color(0xFFF5A524)
-    val NavIndicator = Color(0xFF4A351F)
-    val Border = Color(0xFF232932)
+    val Success = Color(0xFF65D38E)
+    val Warning = Color(0xFFFFB24A)
+    val NavIndicator = Color(0xFF302517)
+    val Border = Color(0xFF292E37)
 }
