@@ -13,11 +13,7 @@ Migrazioni e ripristino JSON devono avvenire prima dell'avvio dei servizi che le
 
 ## Backend
 
-Ordine endpoint:
-
-1. `http://hermes:8642/v1`
-2. `http://100.94.223.14:8642/v1`
-3. `http://hermes.local:8642/v1`
+L'endpoint non e' preconfigurato: inserisci il nome MagicDNS del tuo server, per esempio `http://<nome-magicdns>:8642/v1`. Gli aggiornamenti conservano impostazioni e dati gia' presenti; solo una nuova installazione o il reset partono vuoti.
 
 Hermes Native/Responses e' il protocollo preferito. Health, capabilities, archivio, media, voce, jobs e runs passano dal gateway Linux.
 

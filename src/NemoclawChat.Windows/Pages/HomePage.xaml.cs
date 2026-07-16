@@ -2868,7 +2868,6 @@ public sealed partial class HomePage : Page
                 using var downloadTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(30));
                 var settings = AppSettingsStore.Load();
                 var apiKey = GatewayCredentialStore.LoadSecret();
-                if (string.IsNullOrWhiteSpace(apiKey)) apiKey = GatewayCredentialStore.DefaultApiKey;
                 var uri = ResolveMediaUri(value);
                 Exception? lastError = null;
                 foreach (var candidateUri in MediaDownloadUriCandidates(uri, settings))
@@ -3055,7 +3054,6 @@ public sealed partial class HomePage : Page
             : new Uri($"{GatewayService.HermesRoot(settings).TrimEnd('/')}{value}");
 
         var apiKey = GatewayCredentialStore.LoadSecret();
-        if (string.IsNullOrWhiteSpace(apiKey)) apiKey = GatewayCredentialStore.DefaultApiKey;
         if (uri.AbsolutePath.StartsWith("/v1/media/", StringComparison.OrdinalIgnoreCase) &&
             GatewayService.IsTrustedGatewayUri(settings, uri) &&
             !string.IsNullOrWhiteSpace(apiKey))
@@ -3088,12 +3086,7 @@ public sealed partial class HomePage : Page
         }
 
         var suffix = uri.PathAndQuery;
-        var roots = new[]
-        {
-            "http://hermes:8642",
-            "http://100.94.223.14:8642",
-            "http://hermes.local:8642"
-        };
+        var roots = new[] { GatewayService.HermesRoot(settings) };
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { uri.ToString() };
         foreach (var root in roots)
         {

@@ -57,12 +57,6 @@ public static class AppSettingsStore
     {
         var changed = false;
 
-        if (string.IsNullOrWhiteSpace(settings.GatewayUrl))
-        {
-            settings.GatewayUrl = "http://hermes:8642/v1";
-            changed = true;
-        }
-
         if (string.IsNullOrWhiteSpace(settings.PreferredApi))
         {
             settings.PreferredApi = "hermes-native";
@@ -93,24 +87,17 @@ public static class AppSettingsStore
             settings.GatewayUrl = normalizedGateway;
             changed = true;
         }
-        if (string.IsNullOrWhiteSpace(settings.InferenceEndpoint))
+        if (string.IsNullOrWhiteSpace(settings.InferenceEndpoint) && !string.IsNullOrWhiteSpace(settings.GatewayUrl))
         {
             settings.InferenceEndpoint = settings.GatewayUrl;
             changed = true;
         }
-        if (string.IsNullOrWhiteSpace(settings.AdminBridgeUrl))
+        if (string.IsNullOrWhiteSpace(settings.AdminBridgeUrl) && !string.IsNullOrWhiteSpace(settings.GatewayUrl))
         {
             settings.AdminBridgeUrl = GatewayService.HermesRoot(settings);
             changed = true;
         }
-        if (string.IsNullOrWhiteSpace(settings.VideoLibraryPath) ||
-            settings.VideoLibraryPath.EndsWith("/.hermes/media/video", StringComparison.OrdinalIgnoreCase) ||
-            settings.VideoLibraryPath.EndsWith("\\.hermes\\media\\video", StringComparison.OrdinalIgnoreCase))
-        {
-            settings.VideoLibraryPath = "/home/matteo/video";
-            changed = true;
-        }
-        else
+        if (!string.IsNullOrWhiteSpace(settings.VideoLibraryPath))
         {
             var normalizedVideoPath = settings.VideoLibraryPath.Trim();
             if (!string.Equals(settings.VideoLibraryPath, normalizedVideoPath, StringComparison.Ordinal))
@@ -120,14 +107,7 @@ public static class AppSettingsStore
             }
         }
 
-        if (string.IsNullOrWhiteSpace(settings.NewsLibraryPath) ||
-            settings.NewsLibraryPath.EndsWith("/.hermes/media/news", StringComparison.OrdinalIgnoreCase) ||
-            settings.NewsLibraryPath.EndsWith("\\.hermes\\media\\news", StringComparison.OrdinalIgnoreCase))
-        {
-            settings.NewsLibraryPath = "/home/matteo/news";
-            changed = true;
-        }
-        else
+        if (!string.IsNullOrWhiteSpace(settings.NewsLibraryPath))
         {
             var normalizedNewsPath = settings.NewsLibraryPath.Trim();
             if (!string.Equals(settings.NewsLibraryPath, normalizedNewsPath, StringComparison.Ordinal))

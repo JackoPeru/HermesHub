@@ -1,12 +1,10 @@
 package com.nemoclaw.chat
 
-internal const val HERMES_FALLBACK_API_KEY = "hermes-hub"
 internal const val HERMES_HUB_ANDROID_SURFACE = "android-app"
 
 internal fun hermesAuthRetryCandidates(apiKey: String?): List<String> {
     val candidates = linkedSetOf<String>()
     apiKey?.trim()?.takeIf { it.isNotEmpty() }?.let(candidates::add)
-    candidates += HERMES_FALLBACK_API_KEY
     return candidates.toList()
 }
 

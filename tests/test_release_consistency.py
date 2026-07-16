@@ -96,50 +96,37 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn('version "9.2.0"', plugins)
         self.assertIn('version "2.3.21"', plugins)
 
-    def test_only_supported_gateway_fallbacks_are_configured(self) -> None:
+    def test_fresh_install_contains_no_personal_gateway_defaults(self) -> None:
         defaults = json.loads(read("config/hermes-defaults.json"))
-        expected = [
-            "http://hermes:8642/v1",
-            "http://100.94.223.14:8642/v1",
-            "http://hermes.local:8642/v1",
-        ]
-        self.assertEqual(defaults["hermes"]["autoDiscoveryUrls"], expected)
-        self.assertEqual(defaults["hermes"]["apiUrl"], expected[0])
+        self.assertEqual(defaults["hermes"]["autoDiscoveryUrls"], [])
+        self.assertEqual(defaults["hermes"]["apiUrl"], "")
+        self.assertEqual(defaults["hermes"]["healthUrl"], "")
+        self.assertEqual(defaults["hermes"]["detailedHealthUrl"], "")
 
         windows_gateway = read("src/NemoclawChat.Windows/Services/GatewayService.cs")
-        self.assertIn(
-            '[\n        "hermes",\n        "100.94.223.14",\n        "hermes.local"\n    ]',
-            windows_gateway,
-        )
+        self.assertIn("PlugAndPlayGatewayHosts = [];", windows_gateway)
 
-        android_roots = (
-            'listOf(\n    "http://hermes:8642",\n'
-            '    "http://100.94.223.14:8642",\n'
-            '    "http://hermes.local:8642"\n)'
-        )
         android_main = read(
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
         )
         android_stream = read(
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStream.kt"
         )
-        self.assertIn(android_roots, android_main)
-        self.assertIn(android_roots, android_stream)
+        self.assertIn("plugAndPlayGatewayRoots = emptyList<String>()", android_main)
+        self.assertIn("plugAndPlayStreamGatewayRoots = emptyList<String>()", android_stream)
 
-        active_candidates = "\n".join(
+        public_runtime = "\n".join(
             (
+                read("src/NemoclawChat.Windows/Services/AppSettings.cs"),
                 windows_gateway,
-                read("src/NemoclawChat.Windows/Pages/HomePage.xaml.cs"),
+                read("src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/HermesAuth.kt"),
                 android_stream,
+                android_main,
             )
         )
-        for obsolete in ("100.105.46.6", "http://home-server:8642", "http://server:8642"):
-            self.assertNotIn(obsolete, active_candidates)
-
-        self.assertNotIn("http://home-server:8642", android_main)
-        self.assertNotIn("http://server:8642", android_main)
-        self.assertEqual(android_main.count("100.105.46.6"), 1)
-        self.assertIn('gateway.contains("100.105.46.6"', android_main)
+        self.assertNotIn("http://", read("src/NemoclawChat.Windows/Services/AppSettings.cs"))
+        self.assertNotIn("http://", read("src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt").split("private object AppDefaults", 1)[1].split("}", 1)[0])
+        self.assertNotIn("/home/", public_runtime)
 
 
 if __name__ == "__main__":

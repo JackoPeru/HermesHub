@@ -45,11 +45,7 @@ private const val RUN_POLL_MAX_CONSECUTIVE_FAILURES = 5
 private const val INLINE_ATTACHMENT_MAX_BYTES = 8L * 1024 * 1024
 private const val INLINE_ATTACHMENTS_TOTAL_MAX_BYTES = 12L * 1024 * 1024
 private const val SSE_LINE_MAX_BYTES = 256L * 1024L
-private val plugAndPlayStreamGatewayRoots = listOf(
-    "http://hermes:8642",
-    "http://100.94.223.14:8642",
-    "http://hermes.local:8642"
-)
+private val plugAndPlayStreamGatewayRoots = emptyList<String>()
 
 private val streamHttpClient: OkHttpClient = OkHttpClient.Builder()
     .connectTimeout(10, TimeUnit.SECONDS)
@@ -611,7 +607,7 @@ fun streamChatRequest(
         if (lastError != null && !sawActivity) {
             Log.w("ChatStream", "Responses API fallback: $lastError")
             if (nativeMode && isHermesAuthError(lastError)) {
-                emit(ChatStreamEvent.Error("Hermes ha rifiutato l'API key anche dopo retry con key salvata, hermes-hub, no-auth e senza previous_response_id. Ripristina API key in Impostazioni o allinea HERMES_API_KEY sul gateway."))
+                emit(ChatStreamEvent.Error("Hermes ha rifiutato l'API key salvata anche dopo il retry senza autenticazione e senza previous_response_id. Verifica la chiave in Impostazioni e HERMES_API_KEY sul gateway."))
                 return@flow
             }
             if (nativeMode && settings.strictNativeMode) {
@@ -1935,7 +1931,7 @@ private fun visualBlocksMetadataJson(settings: AppSettings, conversationId: Stri
         .put("hub_client", true)
         .put("requested_protocol", settings.preferredApi)
         .put("strict_native_mode", settings.strictNativeMode)
-        .put("profile", "Matteo")
+        .put("profile", "user")
         .put("project_id", settings.activeProjectId)
         .put("project_name", settings.activeProjectName)
         .put("workspace", settings.activeProjectName.ifBlank { "default" })
@@ -1985,7 +1981,7 @@ private fun visualBlocksMetadataJson(settings: AppSettings, conversationId: Stri
             "hub_sections",
             JSONObject()
                 .put("chat", "Conversazione principale Hermes Hub.")
-                .put("video", "Feed personale video: Hermes conosce video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni video creato/scaricato per Matteo deve essere salvato o registrato li, desktop mostra file locali, app salva feedback e metadata.")
+                .put("video", "Feed personale video: Hermes conosce video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni video creato/scaricato per l'utente deve essere salvato o registrato li, desktop mostra file locali, app salva feedback e metadata.")
                 .put("news", "Feed personale articoli: Hermes produce articoli con fonti; se crea HTML/giornale online salva in ${settings.newsLibraryPath} per /v1/news/library; app salva feedback.")
                 .put("notifications", "Inbox notifiche: cron/agenti devono usare POST /v1/hub/notifications per avvisi importanti quando l'app non e' aperta.")
                 .put("jobs", "Coda Hermes Jobs condivisa con CLI/server.")
@@ -1995,7 +1991,7 @@ private fun visualBlocksMetadataJson(settings: AppSettings, conversationId: Stri
             "notification_contract",
             JSONObject()
                 .put("endpoint", "/v1/hub/notifications")
-                .put("required_behavior", "When a cron, monitor or long-running agent finds something Matteo must know, create a notification with title, message, severity, source and conversation_prompt. Keep it concise and self-contained.")
+                .put("required_behavior", "When a cron, monitor or long-running agent finds something the user must know, create a notification with title, message, severity, source and conversation_prompt. Keep it concise and self-contained.")
         )
         .put("news_library_path", settings.newsLibraryPath)
         .put(

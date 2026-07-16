@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hermes.local/schemas/visual-blocks.v1.schema.json",
+  "$id": "https://github.com/JackoPeru/HermesHub/blob/main/config/visual-blocks.schema.json",
   "title": "Hermes Visual Blocks v1",
   "type": "object",
   "additionalProperties": true,

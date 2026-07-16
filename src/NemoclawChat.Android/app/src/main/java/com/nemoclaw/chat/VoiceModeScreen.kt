@@ -195,7 +195,7 @@ internal suspend fun previewVoiceProfile(
         context,
         settings,
         apiKey,
-        "Ciao Matteo, questa e la mia voce.",
+        "Ciao, questa e la mia voce.",
         voice.takeIf { it in SupportedVoiceNames } ?: "if_sara",
         speed.coerceIn(0.75f, 1.35f).toDouble()
     )
@@ -867,14 +867,11 @@ private fun voiceGatewayRoots(settings: AppSettings): List<String> {
     runCatching {
         val uri = URI(settings.gatewayUrl.trim())
         val scheme = uri.scheme ?: "http"
-        val host = uri.host?.takeIf { it.isNotBlank() } ?: "100.94.223.14"
+        val host = uri.host?.takeIf { it.isNotBlank() } ?: error("Configura Hermes API URL")
         val port = if (uri.port > 0) uri.port else 8642
         val path = uri.rawPath?.trimEnd('/')?.takeIf { it.isNotBlank() && it != "/" } ?: "/v1"
         roots += URI(scheme, null, host, port, path, null, null).toString().trimEnd('/')
     }
-    roots += "http://100.94.223.14:8642/v1"
-    roots += "http://hermes:8642/v1"
-    roots += "http://hermes.local:8642/v1"
     return roots.distinctBy { it.lowercase() }
 }
 

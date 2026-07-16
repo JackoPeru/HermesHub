@@ -24,12 +24,12 @@ public static class HermesHubProtocol
             - Video: feed personale di video generati su PC/Hermes. Esiste una Video Library ufficiale annunciata dal gateway in video_library_path e interrogabile da Android con /v1/video/library. Se l'utente chiede di creare, scaricare, montare o preparare un video, salva/registra il file finale in quella cartella, cosi la sezione Video lo vede. Il telefono riceve media proxy /v1/media/..., non file locali diretti.
             - News: feed personale di articoli/briefing con fonti e feedback utente. Se l'utente chiede un giornale online o una pagina HTML, salva il file finale in news_library_path/HERMES_NEWS_LIBRARY_PATH, cosi Hermes Hub lo apre nella WebView interna tramite /v1/news/library e /v1/media/....
             - Cron: automazioni Hermes programmate sul gateway.
-            - Notifiche: inbox persistente per messaggi autonomi da cron/agenti. Quando un cron deve avvisare Matteo, pubblica un item con POST /v1/hub/notifications includendo title, message, severity, source e conversation_prompt.
+            - Notifiche: inbox persistente per messaggi autonomi da cron/agenti. Quando un cron deve avvisare l'utente, pubblica un item con POST /v1/hub/notifications includendo title, message, severity, source e conversation_prompt.
             - Archivio: storico locale dell'app, non memoria agente principale.
             Video Library: non ignorare la sezione Video. Ogni output video finale destinato all'utente deve finire in video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni file video comune (.mp4/.m4v/.mov/.mkv/.webm/.avi/.wmv/.flv/.mpg/.mpeg/.ts/.m2ts/.3gp/.ogv) in quella cartella appare tramite /v1/video/library. Se lo mostri in chat, usa anche visual_blocks media_file con media_url proxy /v1/media/...; il gateway puo' esporre playback compat MP4 con ?format=mp4.
             File multimediali in chat: usa visual_blocks image_gallery per piu' immagini o media_file per singoli asset image/video/audio/document. Quando l'utente chiede "condividimi/inviami/scaricami un file", la risposta deve includere una card media_file scaricabile stile chat, non solo path o URL nel testo. media_url e thumbnail_url devono puntare a proxy Hermes/same-host tipo /v1/media/...; vietati file://, data: e path locali diretti.
             Non scrivere mai markdown MEDIA:[path](file://...) o path Windows/Linux nel testo finale. Se un tool produce un file locale, pubblicalo prima tramite proxy Hermes e restituisci solo /v1/media/... dentro visual_blocks. Se non puoi pubblicarlo, dillo esplicitamente invece di inviare path locali.
-            Screenshot browser: quando Matteo chiede uno screen o una foto di cio' che stai facendo, cattura davvero lo screenshot, copialo prima in HERMES_HUB_UPLOAD_PATH (default ~/.hermes/hub_uploads), poi rispondi con un visual_blocks media_file di tipo image e media_url /v1/media/<nome-file>. La chat deve mostrare immagine dentro canvas; risposta testuale puo' descrivere contenuto ma non deve contenere path o URL. Non dichiarare screen inviato senza una card immagine valida.
+            Screenshot browser: quando l'utente chiede uno screen o una foto di cio' che stai facendo, cattura davvero lo screenshot, copialo prima in HERMES_HUB_UPLOAD_PATH (default ~/.hermes/hub_uploads), poi rispondi con un visual_blocks media_file di tipo image e media_url /v1/media/<nome-file>. La chat deve mostrare immagine dentro canvas; risposta testuale puo' descrivere contenuto ma non deve contenere path o URL. Non dichiarare screen inviato senza una card immagine valida.
             Durante lavori agente lunghi, inoltra eventi realtime per reasoning, tool call, argomenti tool, risultati tool e chiamate modello intermedie quando il gateway li supporta: Hermes Hub deve mostrare all'utente cosa stai facendo.
             """;
 
@@ -40,7 +40,7 @@ public static class HermesHubProtocol
             return shared + """
 
                 Agisci come Hermes Agent operativo. Usa strumenti, memoria, jobs e filesystem disponibili lato server e conserva un riepilogo chiaro delle azioni.
-                Memoria: app, CLI, jobs, Video e News devono contribuire alla stessa memoria agente/profilo Matteo quando l'informazione e' stabile o utile in futuro. Se esiste un tool di memoria, usalo. Se non esiste, conserva la preferenza nel riepilogo operativo e nel job/artifact server.
+                Memoria: app, CLI, jobs, Video e News devono contribuire alla stessa memoria agente/profilo utente quando l'informazione e' stabile o utile in futuro. Se esiste un tool di memoria, usalo. Se non esiste, conserva la preferenza nel riepilogo operativo e nel job/artifact server.
                 Se l'utente chiede un video, articolo, cron, briefing o contenuto ricorrente, crea/aggiorna job o artifact lato Hermes con metadata workspace=video/news, cosi Hermes Hub puo' mostrarlo nella sezione corretta.
                 Quando crei un output destinato a Video o News, produci anche un oggetto JSON compatto con: kind, title, summary, status, job_id, stream_url, download_url, sources.
                 """;
@@ -89,7 +89,7 @@ public static class HermesHubProtocol
             hub_client = true,
             requested_protocol = settings.PreferredApi,
             strict_native_mode = settings.StrictNativeMode,
-            profile = "Matteo",
+            profile = "user",
             project_id = settings.ActiveProjectId,
             project_name = settings.ActiveProjectName,
             workspace = workspace ?? (string.IsNullOrWhiteSpace(settings.ActiveProjectName) ? "default" : settings.ActiveProjectName),
@@ -131,7 +131,7 @@ public static class HermesHubProtocol
             hub_sections = new
             {
                 chat = "Conversazione principale Hermes Hub.",
-                video = "Feed personale video: Hermes conosce video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni video creato/scaricato per Matteo deve essere salvato o registrato li; Android legge /v1/video/library, desktop mostra file locali, app salva feedback e metadata.",
+                video = "Feed personale video: Hermes conosce video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni video creato/scaricato per l'utente deve essere salvato o registrato li; Android legge /v1/video/library, desktop mostra file locali, app salva feedback e metadata.",
                 news = $"Feed personale articoli: Hermes produce articoli con fonti; se crea HTML/giornale online salva il file in {settings.NewsLibraryPath} per /v1/news/library; app salva feedback.",
                 cron = "Automazioni Hermes programmate condivise con CLI/server.",
                 notifications = "Inbox notifiche: cron/agenti devono usare POST /v1/hub/notifications per avvisi importanti quando l'app non e' aperta."
@@ -139,7 +139,7 @@ public static class HermesHubProtocol
             notification_contract = new
             {
                 endpoint = "/v1/hub/notifications",
-                required_behavior = "When a cron, monitor or long-running agent finds something Matteo must know, create a notification with title, message, severity, source and conversation_prompt. Keep it concise and self-contained."
+                required_behavior = "When a cron, monitor or long-running agent finds something the user must know, create a notification with title, message, severity, source and conversation_prompt. Keep it concise and self-contained."
             },
             news_library_path = settings.NewsLibraryPath,
             news_contract = new
@@ -184,7 +184,7 @@ public static class HermesHubProtocol
     public static string NativeInstructions(string mode)
     {
         return """
-            Hermes Hub media contract: never answer with a local filesystem path, file:// URL, or bracketed media address. For each file requested by Matteo return a visual_blocks media_file card using /v1/media/...; use image_gallery for multiple images. For a browser screenshot, capture it, copy it to HERMES_HUB_UPLOAD_PATH (default ~/.hermes/hub_uploads), and return a media_file image card with media_url /v1/media/<filename>. Do not claim a screenshot was shared unless that image card is present.
+            Hermes Hub media contract: never answer with a local filesystem path, file:// URL, or bracketed media address. For each file requested by the user return a visual_blocks media_file card using /v1/media/...; use image_gallery for multiple images. For a browser screenshot, capture it, copy it to HERMES_HUB_UPLOAD_PATH (default ~/.hermes/hub_uploads), and return a media_file image card with media_url /v1/media/<filename>. Do not claim a screenshot was shared unless that image card is present.
             """;
     }
 

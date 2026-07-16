@@ -20,16 +20,16 @@
             Foreground="White"
             Text="Impostazioni" />
         <StackPanel Grid.Row="1" MaxWidth="820" HorizontalAlignment="Stretch" Spacing="16">
-            <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Impostazioni salvate localmente. Hermes Hub invia API key Hermes come Bearer token; default hermes-hub." />
+            <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Impostazioni salvate localmente. Le nuove installazioni non includono endpoint o credenziali preconfigurati." />
 
             <Border Padding="16" Background="{StaticResource SurfaceBrush}" BorderBrush="#FF3A3A3A" BorderThickness="1" CornerRadius="8">
                 <StackPanel Spacing="10">
                     <TextBlock Foreground="White" FontSize="16" FontWeight="SemiBold" Text="Connessione Hermes" />
-                        <TextBox x:Name="GatewayUrlBox" Header="Hermes API URL" PlaceholderText="http://hermes.local:8642/v1" />
-                        <PasswordBox x:Name="ApiKeyBox" Header="API key Hermes" PlaceholderText="hermes-hub" />
+                        <TextBox x:Name="GatewayUrlBox" Header="Hermes API URL" PlaceholderText="http://nome-magicdns:8642/v1" />
+                        <PasswordBox x:Name="ApiKeyBox" Header="API key Hermes" PlaceholderText="Inserisci la chiave del tuo server" />
                         <TextBox x:Name="ActiveProjectNameBox" Header="Progetto attivo (gestisci dalla pagina Progetti)" IsReadOnly="True" />
                         <TextBox x:Name="VideoLibraryPathBox" Header="Cartella video Hermes (sync server)" IsReadOnly="True" PlaceholderText="In attesa di sync da Hermes /health/detailed" />
-                        <TextBox x:Name="NewsLibraryPathBox" Header="Cartella news Hermes" PlaceholderText="/home/matteo/news" />
+                        <TextBox x:Name="NewsLibraryPathBox" Header="Cartella news Hermes" PlaceholderText="~/news" />
                         <NumberBox x:Name="MaxAttachmentMbBox" Header="Limite allegati file (MB)" Minimum="1" Maximum="150" SmallChange="1" LargeChange="10" />
                     </StackPanel>
                 </Border>

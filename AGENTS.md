@@ -22,24 +22,24 @@ Il client non deve sostituire memoria, planning, tool loop o policy di Hermes Ag
 
 - Remoto: `https://github.com/JackoPeru/HermesHub.git`.
 - Branch di release: `main`.
-- Non fare commit, push, tag o release senza richiesta esplicita di Matteo.
+- Non fare commit, push, tag o release senza richiesta esplicita dell'utente.
 - Non sovrascrivere modifiche estranee presenti nel worktree.
 - Ogni release deve incrementare insieme Windows, AdminBridge, Android `versionName` e Android `versionCode`.
 - La cronologia delle release vive in `CHANGELOG.md`, non in questo file.
 
 ## Topologia reale
 
-Ordine endpoint client:
+Endpoint client:
 
-1. `http://hermes:8642/v1`
-2. `http://100.94.223.14:8642/v1`
-3. `http://hermes.local:8642/v1`
+- configurato esplicitamente dall'utente, preferibilmente tramite MagicDNS;
+- nessun hostname, IP o endpoint personale deve essere incluso come default nel repository;
+- gli aggiornamenti devono conservare endpoint e impostazioni gia' salvati.
 
 Valori operativi:
 
 - modello: `hermes-agent`
 - protocollo preferito: `hermes-native`
-- token compat personale: `hermes-hub`
+- token API: configurato dall'utente e conservato nello storage sicuro del dispositivo
 - accesso: Tailnet/LAN, HTTP privato intenzionale
 
 Non aggiungere host generici, localhost o backend paralleli come fallback impliciti.

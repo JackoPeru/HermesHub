@@ -1,8 +1,8 @@
 {
   "hermes": {
-    "apiUrl": "http://hermes:8642/v1",
-    "healthUrl": "http://hermes:8642/health",
-    "detailedHealthUrl": "http://hermes:8642/health/detailed",
+    "apiUrl": "",
+    "healthUrl": "",
+    "detailedHealthUrl": "",
     "capabilitiesPath": "/v1/capabilities",
     "modelsPath": "/v1/models",
     "responsesPath": "/v1/responses",
@@ -12,11 +12,7 @@
     "model": "hermes-agent",
     "preferredApi": "hermes-native",
     "strictNativeMode": false,
-    "autoDiscoveryUrls": [
-      "http://hermes:8642/v1",
-      "http://100.94.223.14:8642/v1",
-      "http://hermes.local:8642/v1"
-    ]
+    "autoDiscoveryUrls": []
   },
   "security": {
     "recommendedAccess": "Tailscale/LAN",

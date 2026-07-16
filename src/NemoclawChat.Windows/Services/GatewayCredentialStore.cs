@@ -8,7 +8,6 @@ public static class GatewayCredentialStore
     private const string LegacyResource = "ChatClaw.OpenClawGateway";
     private const string UserName = "hermes";
     private const string LegacyUserName = "operator";
-    public const string DefaultApiKey = "hermes-hub";
 
     // PasswordVault e' wrapper COM thread-safe: cachiamo singleton invece di allocare per call.
     private static readonly Lazy<PasswordVault> SharedVault = new(() => new PasswordVault());
@@ -33,7 +32,7 @@ public static class GatewayCredentialStore
             return legacySecret;
         }
 
-        return DefaultApiKey;
+        return string.Empty;
     }
 
     public static bool SaveSecret(string secret)
@@ -42,7 +41,12 @@ public static class GatewayCredentialStore
         {
             try
             {
-                var normalized = string.IsNullOrWhiteSpace(secret) ? DefaultApiKey : secret.Trim();
+                if (string.IsNullOrWhiteSpace(secret))
+                {
+                    DeleteSecret();
+                    return true;
+                }
+                var normalized = secret.Trim();
                 var hadPrevious = TryLoadSecret(Resource, UserName, out var previous) ||
                                   TryLoadSecret(LegacyResource, LegacyUserName, out previous);
                 var vault = SharedVault.Value;

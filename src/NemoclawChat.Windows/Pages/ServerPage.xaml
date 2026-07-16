@@ -56,7 +56,7 @@
                         <StackPanel Spacing="8">
                             <TextBlock Foreground="White" FontWeight="SemiBold" Text="Sicurezza" />
                             <TextBlock x:Name="PolicyText" Foreground="White" TextWrapping="Wrap" />
-                            <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="12" Text="API key Hermes lato app: Bearer hermes-hub di default. Esposizione consigliata solo LAN/Tailscale." TextWrapping="Wrap" />
+                            <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="12" Text="API key Hermes lato app: Bearer configurato dall'utente. Esposizione consigliata solo LAN/Tailscale." TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
                 </Grid>

@@ -91,12 +91,15 @@ class ChatStreamProtocolTest {
     fun strictAuthUsesOnlyConfiguredCredential() {
         assertEquals(listOf<String?>("secret"), hermesAuthCandidates(" secret ", allowCompatAuth = false))
         assertEquals(listOf<String?>(null), hermesAuthCandidates(null, allowCompatAuth = false))
-        assertEquals(listOf<String?>("secret", HERMES_FALLBACK_API_KEY, null), hermesAuthCandidates("secret", allowCompatAuth = true))
+        assertEquals(listOf<String?>("secret", null), hermesAuthCandidates("secret", allowCompatAuth = true))
     }
 
     @Test
     fun gatewayOriginUsesTheSuccessfulCandidate() {
-        assertEquals("http://100.94.223.14:8642", gatewayOrigin("http://100.94.223.14:8642/v1/media/upload"))
+        assertEquals(
+            "http://hermes.tailnet-example.ts.net:8642",
+            gatewayOrigin("http://hermes.tailnet-example.ts.net:8642/v1/media/upload")
+        )
     }
 
     @Test
@@ -109,14 +112,9 @@ class ChatStreamProtocolTest {
     }
 
     @Test
-    fun ttsFallbacksPreserveTheDocumentedGatewayOrder() {
+    fun ttsUsesOnlyTheConfiguredGateway() {
         assertEquals(
-            listOf(
-                "http://custom-gateway:8642/v1/audio/speech",
-                "http://hermes:8642/v1/audio/speech",
-                "http://100.94.223.14:8642/v1/audio/speech",
-                "http://hermes.local:8642/v1/audio/speech"
-            ),
+            listOf("http://custom-gateway:8642/v1/audio/speech"),
             ttsUrlCandidates("http://custom-gateway:8642/v1/audio/speech")
         )
     }

@@ -365,9 +365,6 @@ public static class SpeechGatewayService
             roots.Add(builder.Uri.ToString().TrimEnd('/'));
         }
 
-        roots.Add("http://hermes:8642/v1");
-        roots.Add("http://100.94.223.14:8642/v1");
-        roots.Add("http://hermes.local:8642/v1");
         return roots.Distinct(StringComparer.OrdinalIgnoreCase);
     }
 
@@ -379,9 +376,5 @@ public static class SpeechGatewayService
             yield return saved.Trim();
         }
 
-        if (!string.Equals(saved, GatewayCredentialStore.DefaultApiKey, StringComparison.Ordinal))
-        {
-            yield return GatewayCredentialStore.DefaultApiKey;
-        }
     }
 }

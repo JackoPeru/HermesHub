@@ -163,15 +163,9 @@ public sealed record HardwareSnapshot(
 
 public static class GatewayService
 {
-    internal const string HermesFallbackApiKey = GatewayCredentialStore.DefaultApiKey;
     private const int MaxBufferedResponseBytes = 10 * 1024 * 1024;
     private const int MaxErrorResponseBytes = 64 * 1024;
-    private static readonly string[] PlugAndPlayGatewayHosts =
-    [
-        "hermes",
-        "100.94.223.14",
-        "hermes.local"
-    ];
+    private static readonly string[] PlugAndPlayGatewayHosts = [];
     private static readonly JsonSerializerOptions CaseInsensitiveJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -982,7 +976,6 @@ public static class GatewayService
         await EnsureReachableGatewayAsync(settings, cancellationToken);
         using var request = new HttpRequestMessage(HttpMethod.Post, ResolveHermesUri(settings, "/v1/media/upload"));
         var token = GatewayCredentialStore.LoadSecret();
-        if (string.IsNullOrWhiteSpace(token)) token = GatewayCredentialStore.DefaultApiKey;
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
         using var content = new MultipartFormDataContent();
@@ -1007,8 +1000,8 @@ public static class GatewayService
     {
         try
         {
-            var newsPath = string.IsNullOrWhiteSpace(settings.NewsLibraryPath) ? "/home/matteo/news" : settings.NewsLibraryPath.Trim();
-            var pathQuery = $"?path={Uri.EscapeDataString(newsPath)}";
+            var newsPath = settings.NewsLibraryPath?.Trim() ?? string.Empty;
+            var pathQuery = string.IsNullOrWhiteSpace(newsPath) ? string.Empty : $"?path={Uri.EscapeDataString(newsPath)}";
             var response = await SendBufferedAsync(
                 token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, "/v1/news/library" + pathQuery), token),
                 allowCompatAuth: true);
@@ -1734,11 +1727,6 @@ public static class GatewayService
             yield return saved.Trim();
         }
 
-        if (allowCompatAuth && !string.Equals(saved, HermesFallbackApiKey, StringComparison.Ordinal))
-        {
-            yield return HermesFallbackApiKey;
-        }
-
         if (allowCompatAuth)
         {
             yield return null;
@@ -1800,14 +1788,9 @@ public static class GatewayService
 
     private static IEnumerable<string> BuildPlugAndPlayGatewayUrls(string current)
     {
-        Uri? currentUri = null;
-        if (Uri.TryCreate(current, UriKind.Absolute, out var parsed))
+        if (!Uri.TryCreate(current, UriKind.Absolute, out var currentUri))
         {
-            currentUri = parsed;
-        }
-        else
-        {
-            Uri.TryCreate("http://hermes:8642/v1", UriKind.Absolute, out currentUri);
+            yield break;
         }
 
         var scheme = currentUri?.Scheme?.Trim().ToLowerInvariant();

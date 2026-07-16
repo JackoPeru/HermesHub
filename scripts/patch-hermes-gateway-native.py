@@ -1312,7 +1312,6 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
             '        os.environ.get("HERMESAPIKEY", ""),\n'
             '        os.environ.get("HERMES_HUB_API_KEY", ""),\n'
             '        os.environ.get("HERMES_GATEWAY_API_KEY", ""),\n'
-            '        "hermes-hub",\n'
             '    ]:\n'
             '        for part in str(value or "").replace(";", ",").split(","):\n'
             '            key = part.strip()\n'
@@ -2259,7 +2258,7 @@ def _hermes_hub_video_library_payload(request: Optional["web.Request"] = None) -
 
     raw = os.environ.get("HERMES_VIDEO_LIBRARY_PATH")
     if not raw:
-        raw = "/home/matteo/video"
+        raw = str(_Path.home() / "video")
     root = _Path(raw).expanduser()
     extensions = {".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi", ".wmv", ".flv", ".mpg", ".mpeg", ".ts", ".m2ts", ".3gp", ".ogv"}
     items: List[Dict[str, Any]] = []
@@ -2311,9 +2310,9 @@ def _hermes_hub_media_roots() -> List["Path"]:
     from pathlib import Path as _Path
 
     roots: List[_Path] = []
-    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"
+    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or str(_Path.home() / "video")
     raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH") or str(_Path.home() / ".hermes" / "hub_uploads")
-    raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"
+    raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or str(_Path.home() / "news")
     for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):
         if part.strip():
             roots.append(_Path(part.strip()).expanduser())
@@ -2600,9 +2599,9 @@ def _hermes_hub_storage_path(env_name: str, default_name: str) -> "Path":''',
     from pathlib import Path as _Path
 
     roots: List[_Path] = []
-    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"
+    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or str(_Path.home() / "video")
     raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH") or str(_Path.home() / ".hermes" / "hub_uploads")
-    raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"
+    raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or str(_Path.home() / "news")
     for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):
         if part.strip():
             roots.append(_Path(part.strip()).expanduser())
@@ -3283,7 +3282,7 @@ def _hermes_hub_news_library_payload(request: Optional["web.Request"] = None) ->
     query_path = ""
     if request is not None:
         query_path = (request.query.get("path") or request.query.get("library_path") or "").strip()
-    raw = query_path or os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"
+    raw = query_path or os.environ.get("HERMES_NEWS_LIBRARY_PATH") or str(_Path.home() / "news")
     root_query = f"?root={_urlparse.quote(str(_Path(raw).expanduser()), safe='')}" if query_path else ""
     roots: List[_Path] = [_Path(raw).expanduser()]
 
@@ -3354,11 +3353,11 @@ def _hermes_hub_media_roots() -> List["Path"]:''',
 
     if "def _hermes_hub_news_library_payload" in text and "query_path = \"\"" not in text:
         text = text.replace(
-            '    raw = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"\n',
+            '    raw = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or str(_Path.home() / "news")\n',
             '    query_path = ""\n'
             '    if request is not None:\n'
             '        query_path = (request.query.get("path") or request.query.get("library_path") or "").strip()\n'
-            '    raw = query_path or os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"\n'
+            '    raw = query_path or os.environ.get("HERMES_NEWS_LIBRARY_PATH") or str(_Path.home() / "news")\n'
             '    root_query = f"?root={_urlparse.quote(str(_Path(raw).expanduser()), safe=\'\')}" if query_path else ""\n',
             1,
         )
@@ -3391,12 +3390,12 @@ def _hermes_hub_media_roots() -> List["Path"]:''',
         if text != news_before:
             changes.append("news library folder only")
 
-    if 'raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"' not in text and 'raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"' in text:
+    if 'raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or str(_Path.home() / "news")' not in text and 'raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or str(_Path.home() / "video")' in text:
         text = text.replace(
-            '    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"\n'
+            '    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or str(_Path.home() / "video")\n'
             '    for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):\n',
-            '    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"\n'
-            '    raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"\n'
+            '    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or str(_Path.home() / "video")\n'
+            '    raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or str(_Path.home() / "news")\n'
             '    for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):\n',
             1,
         )
@@ -3419,14 +3418,14 @@ def _hermes_hub_media_roots() -> List["Path"]:''',
         media_roots_body = media_roots_match.group("body")
         if (
             'roots.append(_Path(raw_news).expanduser())' in media_roots_body
-            and 'raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"' not in media_roots_body
+            and 'raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or str(_Path.home() / "news")' not in media_roots_body
             and 'raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH")' in media_roots_body
         ):
             start, end = media_roots_match.span("body")
             fixed_body = media_roots_body.replace(
                 '    raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH") or str(_Path.home() / ".hermes" / "hub_uploads")\n',
                 '    raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH") or str(_Path.home() / ".hermes" / "hub_uploads")\n'
-                '    raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or "/home/matteo/news"\n',
+                '    raw_news = os.environ.get("HERMES_NEWS_LIBRARY_PATH") or str(_Path.home() / "news")\n',
                 1,
             )
             if fixed_body != media_roots_body:
@@ -3526,11 +3525,11 @@ def _hermes_hub_media_roots() -> List["Path"]:''',
         )
         changes.append("media proxy upload prefix priority")
 
-    if 'raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH")' not in text and 'raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"' in text:
+    if 'raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH")' not in text and 'raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or str(_Path.home() / "video")' in text:
         text = text.replace(
-            '    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"\n'
+            '    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or str(_Path.home() / "video")\n'
             '    for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):\n',
-            '    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or "/home/matteo/video"\n'
+            '    raw_video = os.environ.get("HERMES_VIDEO_LIBRARY_PATH") or str(_Path.home() / "video")\n'
             '    raw_upload = os.environ.get("HERMES_HUB_UPLOAD_PATH") or str(_Path.home() / ".hermes" / "hub_uploads")\n'
             '    for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):\n',
             1,

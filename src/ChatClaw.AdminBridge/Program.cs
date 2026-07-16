@@ -12,11 +12,16 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 builder.Services.AddCors(options =>
 {
+    var configuredOrigins = (Environment.GetEnvironmentVariable("HERMES_ADMIN_ALLOWED_ORIGINS") ?? string.Empty)
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     options.AddPolicy("default", policy =>
     {
-        policy.WithOrigins("https://hermes.local", "http://hermes.local")
-            .AllowAnyHeader()
-            .AllowAnyMethod();
+        if (configuredOrigins.Length > 0)
+        {
+            policy.WithOrigins(configuredOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+        }
     });
 });
 builder.Services.AddRateLimiter(options =>

@@ -14,11 +14,7 @@ Le preferenze storiche `chatclaw_*` e i dati utente vengono migrati, non azzerat
 
 ## Backend
 
-Ordine endpoint:
-
-1. `http://hermes:8642/v1`
-2. `http://100.94.223.14:8642/v1`
-3. `http://hermes.local:8642/v1`
+L'endpoint non e' preconfigurato: inserisci il nome MagicDNS del tuo server, per esempio `http://<nome-magicdns>:8642/v1`. Gli aggiornamenti conservano impostazioni e dati gia' presenti; solo una nuova installazione o il reset partono vuoti.
 
 La chat usa Hermes Native/Responses e, se consentito, Chat Completions compat. Health, capabilities, archivio, media, STT, TTS, jobs, runs e stato Hub passano dallo stesso gateway.
 

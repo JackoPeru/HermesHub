@@ -40,7 +40,7 @@
                                 Stretch="UniformToFill" />
                         </Border>
                         <StackPanel Grid.Column="1" Spacing="6">
-                            <TextBlock Foreground="White" FontSize="20" FontWeight="SemiBold" Text="Matteo" />
+                            <TextBlock Foreground="White" FontSize="20" FontWeight="SemiBold" Text="Open source" />
                             <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Profilo locale per home-server Hermes Agent." />
                             <TextBlock x:Name="SettingsPathText" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" />
                         </StackPanel>

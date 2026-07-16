@@ -84,15 +84,14 @@ Hermes Hub è un **thin client**. Non sostituisce il loop agente e non duplica m
 - aggiornamenti gateway transazionali con staging, health probe e rollback.
 
 <details>
-<summary><strong>Endpoint predefiniti</strong></summary>
+<summary><strong>Configurazione endpoint</strong></summary>
 
-Il client prova nell'ordine:
+Una nuova installazione non contiene IP, hostname o credenziali. Configura il tuo endpoint, preferibilmente con MagicDNS, ad esempio:
 
-1. `http://hermes:8642/v1`
-2. `http://100.94.223.14:8642/v1`
-3. `http://hermes.local:8642/v1`
+1. `http://<nome-magicdns>:8642/v1` — nome corto MagicDNS;
+2. `http://<host>.<tailnet-name>.ts.net:8642/v1` — FQDN MagicDNS.
 
-HTTP cleartext è una scelta intenzionale esclusivamente per reti private Tailnet/LAN. Le impostazioni salvate dall'utente hanno precedenza sui default.
+Gli aggiornamenti mantengono endpoint, token e dati già salvati dalla versione precedente. Il reset o una nuova installazione partono invece senza dati operativi. HTTP cleartext è una scelta intenzionale esclusivamente per reti private Tailnet/LAN.
 
 </details>
 

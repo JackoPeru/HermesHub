@@ -18,6 +18,7 @@ MAX_ASSET_MB="${HERMES_HUB_UPDATE_MAX_ASSET_MB:-256}"
 PROBE_ATTEMPTS="${HERMES_HUB_UPDATE_PROBE_ATTEMPTS:-30}"
 PROBE_SLEEP_SECONDS="${HERMES_HUB_UPDATE_PROBE_SLEEP_SECONDS:-2}"
 PROBE_URL="${HERMES_HUB_UPDATE_PROBE_URL:-http://127.0.0.1:${HERMES_API_PORT:-8642}/v1/capabilities}"
+API_SERVER_KEY_FILE="${API_SERVER_KEY_FILE:-$HOME/.hermes/api_server.key}"
 
 FORCE=false
 CHECK_ONLY=false
@@ -507,11 +508,20 @@ if [ "$RESTART" = "true" ]; then
   systemctl --user daemon-reload
   systemctl --user restart "$SERVICE_NAME"
 
+  PROBE_API_KEY="${HERMES_HUB_API_KEY:-${HERMES_API_KEY:-}}"
+  if [ -z "$PROBE_API_KEY" ] && [ -s "$API_SERVER_KEY_FILE" ]; then
+    PROBE_API_KEY="$(tr -d '[:space:]' < "$API_SERVER_KEY_FILE")"
+  fi
+  if [ -z "$PROBE_API_KEY" ]; then
+    echo "ERROR: gateway API key missing; configure HERMES_API_KEY or $API_SERVER_KEY_FILE" >&2
+    exit 1
+  fi
+
   probe_ok=false
   for _ in $(seq 1 "$PROBE_ATTEMPTS"); do
     if curl --fail --silent --show-error \
       --connect-timeout 2 --max-time 5 \
-      -H "Authorization: Bearer ${HERMES_HUB_API_KEY:-hermes-hub}" \
+      -H "Authorization: Bearer $PROBE_API_KEY" \
       "$PROBE_URL" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert isinstance(data, dict)' >/dev/null 2>&1; then
       probe_ok=true
       break

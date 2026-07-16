@@ -53,7 +53,7 @@ Verifica:
 
 ```bash
 python3 ~/patch-hermes-gateway-native.py --check
-curl -fsS -H 'Authorization: Bearer hermes-hub' http://127.0.0.1:8642/v1/capabilities
+curl -fsS -H 'Authorization: Bearer <your-api-key>' http://127.0.0.1:8642/v1/capabilities
 ```
 
 ## Store e media

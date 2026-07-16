@@ -202,7 +202,7 @@
                                 FontSize="12"
                                 FontWeight="SemiBold"
                                 Foreground="White"
-                                Text="Matteo" />
+                                Text="Profilo locale" />
                             <TextBlock
                                 FontSize="11"
                                 Foreground="{StaticResource MutedTextBrush}"

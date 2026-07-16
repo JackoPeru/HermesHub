@@ -1172,7 +1172,7 @@ private fun ChatApp() {
                             settings = reset
                             chatScope.launch(Dispatchers.IO) {
                                 saveSettings(context, reset)
-                                saveGatewaySecret(context, HERMES_FALLBACK_API_KEY)
+                                saveGatewaySecret(context, null)
                             }
                         }
                     )
@@ -2236,7 +2236,7 @@ private fun EmptyState(onPrompt: (String) -> Unit) {
         )
         Spacer(modifier = Modifier.height(22.dp))
         Text(
-            text = "Che vuoi fare oggi, Matteo?",
+            text = "Che vuoi fare oggi?",
             color = Color.White,
             fontWeight = FontWeight.SemiBold,
             fontSize = 27.sp,
@@ -2806,7 +2806,7 @@ suspend fun downloadHermesMediaFile(context: Context, url: String, filename: Str
 }
 
 private fun withHermesMediaQueryToken(url: String, apiKey: String?): String {
-    val token = apiKey?.trim()?.takeIf { it.isNotBlank() } ?: HERMES_FALLBACK_API_KEY
+    val token = apiKey?.trim().orEmpty()
     return try {
         val parsed = url.toUri()
         if (!parsed.path.orEmpty().startsWith("/v1/media/", ignoreCase = true)) {
@@ -2954,7 +2954,7 @@ private fun appendFeedbackSnippet(current: String, snippet: String): String {
 }
 
 private fun authHeaders(apiKey: String?): Map<String, String> {
-    val token = apiKey?.trim()?.takeIf { it.isNotBlank() } ?: HERMES_FALLBACK_API_KEY
+    val token = apiKey?.trim().orEmpty()
     return mapOf("Authorization" to "Bearer $token", "User-Agent" to "HermesHub-Android")
 }
 
@@ -4773,7 +4773,7 @@ private fun ServerScreen(context: Context, settings: AppSettings) {
             ServerMetric("API lato server", snapshot.inferenceEndpoint, "Il client parla a Hermes API, non direttamente al runtime modello.")
         }
         item {
-            ServerMetric("Sicurezza", snapshot.policy, "Client usa API key Bearer salvata; default hermes-hub.")
+            ServerMetric("Sicurezza", snapshot.policy, "Client usa solo la API key Bearer salvata dall'utente.")
         }
         item {
             ServerMetric("Cartella video Hermes", snapshot.videoLibraryPath.ifBlank { "In attesa di sync server" }, "Hermes decide path e app lo recepisce da /health/detailed.")
@@ -5371,7 +5371,7 @@ private fun OperatorScreen(context: Context, settings: AppSettings) {
                             runOperatorRpc(scope, context, settings, "POST /v1/runs", "{\"model\":\"hermes-agent\",\"input\":\"${input.jsonEscaped()}\"}", { status = it }, { summary = it }, { raw = it })
                         }) { Text("Avvia lavoro") }
                         Button(onClick = {
-                            val input = "Crea o prepara un video per Matteo. Salva il file finale in /home/matteo/video cosi appare nella sezione Video."
+                            val input = "Crea o prepara un video per l'utente. Salva il file finale nella cartella video configurata sul server cosi appare nella sezione Video."
                             quickRunText = input
                             runOperatorRpc(scope, context, settings, "POST /v1/runs", "{\"model\":\"hermes-agent\",\"input\":\"${input.jsonEscaped()}\"}", { status = it }, { summary = it }, { raw = it })
                         }) { Text("Crea video") }
@@ -6668,7 +6668,7 @@ private fun ProfileScreen(
                             .clip(RoundedCornerShape(18.dp))
                     )
                     Column(modifier = Modifier.padding(start = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Matteo", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Profilo locale", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                         Text("Home-server Hermes Agent locale", color = AppColors.Muted)
                         Text("App: $version", color = AppColors.Muted, fontSize = 12.sp)
                     }
@@ -6888,7 +6888,7 @@ private fun SettingsScreen(
     var visualBlocksMode by remember(settings.visualBlocksMode) { mutableStateOf(settings.visualBlocksMode) }
     var videoLibraryPath by remember(settings.videoLibraryPath) { mutableStateOf(settings.videoLibraryPath) }
     var newsLibraryPath by remember(settings.newsLibraryPath) { mutableStateOf(settings.newsLibraryPath) }
-    var apiKey by remember { mutableStateOf(loadGatewaySecret(context) ?: HERMES_FALLBACK_API_KEY) }
+    var apiKey by remember { mutableStateOf(loadGatewaySecret(context).orEmpty()) }
     var fontScale by remember(settings.fontScale) { mutableFloatStateOf(settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)) }
     var showToolCalls by remember(settings.showToolCalls) { mutableStateOf(settings.showToolCalls) }
     var showMessageMetrics by remember(settings.showMessageMetrics) { mutableStateOf(settings.showMessageMetrics) }
@@ -6952,7 +6952,7 @@ private fun SettingsScreen(
     ) {
         Text("Impostazioni", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(10.dp))
-        Text("Impostazioni salvate sul dispositivo. Hermes Hub invia API key Hermes come Bearer token; default hermes-hub.", color = AppColors.Muted)
+        Text("Impostazioni salvate sul dispositivo. Le nuove installazioni non includono endpoint o credenziali preconfigurati.", color = AppColors.Muted)
         Spacer(modifier = Modifier.height(18.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
@@ -7152,9 +7152,9 @@ private fun SettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Button(onClick = {
-                            apiKey = HERMES_FALLBACK_API_KEY
-                            saveGatewaySecret(context, HERMES_FALLBACK_API_KEY)
-                            status = "API key ripristinata a hermes-hub."
+                            apiKey = ""
+                            saveGatewaySecret(context, null)
+                            status = "API key rimossa."
                         }) {
                             Text("Ripristina API key")
                         }
@@ -7174,8 +7174,8 @@ private fun SettingsScreen(
                             Text("Test Hermes")
                         }
                         Button(onClick = {
-                            saveGatewaySecret(context, HERMES_FALLBACK_API_KEY)
-                            apiKey = HERMES_FALLBACK_API_KEY
+                            saveGatewaySecret(context, null)
+                            apiKey = ""
                             val defaults = VoiceProfile()
                             saveVoiceProfile(context, settings.activeProjectId, defaults)
                             voiceName = defaults.voice
@@ -7397,7 +7397,7 @@ internal fun hermesHubAgentInstructions(): String {
         ${hermesHubSharedContext()}
 
         Agisci come Hermes Agent operativo. Usa strumenti, memoria, jobs e filesystem disponibili lato server e conserva un riepilogo chiaro delle azioni.
-        Memoria: app, CLI, jobs, Video e News devono contribuire alla stessa memoria agente/profilo Matteo quando l'informazione e' stabile o utile in futuro. Se esiste un tool di memoria, usalo. Se non esiste, conserva la preferenza nel riepilogo operativo e nel job/artifact server.
+        Memoria: app, CLI, jobs, Video e News devono contribuire alla stessa memoria agente/profilo utente quando l'informazione e' stabile o utile in futuro. Se esiste un tool di memoria, usalo. Se non esiste, conserva la preferenza nel riepilogo operativo e nel job/artifact server.
         Se l'utente chiede un video, articolo, cron, briefing o contenuto ricorrente, crea/aggiorna job o artifact lato Hermes con metadata workspace=video/news, cosi Hermes Hub puo' mostrarlo nella sezione corretta.
         Quando crei un output destinato a Video o News, produci anche un oggetto JSON compatto con: kind, title, summary, status, job_id, stream_url, download_url, sources.
     """.trimIndent()
@@ -7412,19 +7412,19 @@ internal fun hermesHubSharedContext(): String {
         - Video: feed personale di video generati su PC/Hermes. Esiste una Video Library ufficiale annunciata dal gateway in video_library_path e interrogabile da Android con /v1/video/library. Se l'utente chiede di creare, scaricare, montare o preparare un video, salva/registra il file finale in quella cartella, cosi la sezione Video lo vede. Il telefono riceve media proxy /v1/media/..., non file locali diretti.
         - News: feed personale di articoli/briefing con fonti e feedback utente. Se l'utente chiede un giornale online/HTML, salva il file finale in news_library_path/HERMES_NEWS_LIBRARY_PATH: Hermes Hub lo apre in app tramite /v1/news/library e /v1/media/....
         - Cron: automazioni Hermes programmate sul gateway.
-        - Notifiche: inbox persistente per messaggi autonomi da cron/agenti. Quando un cron deve avvisare Matteo, pubblica un item con POST /v1/hub/notifications includendo title, message, severity, source e conversation_prompt.
+        - Notifiche: inbox persistente per messaggi autonomi da cron/agenti. Quando un cron deve avvisare l'utente, pubblica un item con POST /v1/hub/notifications includendo title, message, severity, source e conversation_prompt.
         - Archivio: storico locale dell'app, non memoria agente principale.
         Video Library: non ignorare la sezione Video. Ogni output video finale destinato all'utente deve finire in video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni file video comune (.mp4/.m4v/.mov/.mkv/.webm/.avi/.wmv/.flv/.mpg/.mpeg/.ts/.m2ts/.3gp/.ogv) in quella cartella appare tramite /v1/video/library. Se lo mostri in chat, usa anche visual_blocks media_file con media_url proxy /v1/media/...; il gateway puo' esporre playback compat MP4 con ?format=mp4.
         File multimediali in chat: usa visual_blocks image_gallery per piu' immagini o media_file per singoli asset image/video/audio/document. Quando l'utente chiede "condividimi/inviami/scaricami un file", la risposta deve includere una card media_file scaricabile stile chat, non solo path o URL nel testo.
         media_url e thumbnail_url devono puntare a proxy Hermes/same-host tipo /v1/media/...; vietati file://, data: e path locali diretti.
         Non scrivere mai markdown `MEDIA:[path](file://...)` o path Windows/Linux nel testo finale. Se un tool produce un file locale, pubblicalo prima tramite proxy Hermes e restituisci solo `/v1/media/...` dentro visual_blocks. Se non puoi pubblicarlo, dillo esplicitamente invece di inviare path locali.
-        Screenshot browser: quando Matteo chiede uno screen o una foto di cio' che stai facendo, cattura davvero lo screenshot, copialo prima in HERMES_HUB_UPLOAD_PATH (default ~/.hermes/hub_uploads), poi rispondi con un visual_blocks media_file di tipo image e media_url /v1/media/<nome-file>. La chat deve mostrare immagine dentro canvas; risposta testuale puo' descrivere contenuto ma non deve contenere path o URL. Non dichiarare screen inviato senza una card immagine valida.
+        Screenshot browser: quando l'utente chiede uno screen o una foto di cio' che stai facendo, cattura davvero lo screenshot, copialo prima in HERMES_HUB_UPLOAD_PATH (default ~/.hermes/hub_uploads), poi rispondi con un visual_blocks media_file di tipo image e media_url /v1/media/<nome-file>. La chat deve mostrare immagine dentro canvas; risposta testuale puo' descrivere contenuto ma non deve contenere path o URL. Non dichiarare screen inviato senza una card immagine valida.
         Durante lavori agente lunghi, inoltra eventi realtime per reasoning, tool call, argomenti tool, risultati tool e chiamate modello intermedie quando il gateway li supporta: Hermes Hub deve mostrare all'utente cosa stai facendo.
     """.trimIndent()
 }
 
 internal fun hermesNativeInstructions(mode: String): String {
-    return "Hermes Hub media contract: never answer with a local filesystem path, file:// URL, or bracketed media address. For each file requested by Matteo return a visual_blocks media_file card using /v1/media/...; use image_gallery for multiple images. For a browser screenshot, capture it, copy it to HERMES_HUB_UPLOAD_PATH (default ~/.hermes/hub_uploads), and return a media_file image card with media_url /v1/media/<filename>. Do not claim a screenshot was shared unless that image card is present."
+    return "Hermes Hub media contract: never answer with a local filesystem path, file:// URL, or bracketed media address. For each file requested by the user return a visual_blocks media_file card using /v1/media/...; use image_gallery for multiple images. For a browser screenshot, capture it, copy it to HERMES_HUB_UPLOAD_PATH (default ~/.hermes/hub_uploads), and return a media_file image card with media_url /v1/media/<filename>. Do not claim a screenshot was shared unless that image card is present."
 }
 
 internal fun projectContextInstructions(settings: AppSettings): String {
@@ -7613,7 +7613,7 @@ private fun visualBlocksMetadata(settings: AppSettings, conversationId: String?)
         .put("client_surface", HERMES_HUB_ANDROID_SURFACE)
         .put("requested_protocol", settings.preferredApi)
         .put("strict_native_mode", settings.strictNativeMode)
-        .put("profile", "Matteo")
+        .put("profile", "user")
         .put("project_id", settings.activeProjectId)
         .put("project_name", settings.activeProjectName)
         .put("workspace", settings.activeProjectName.ifBlank { "default" })
@@ -7659,7 +7659,7 @@ private fun visualBlocksMetadata(settings: AppSettings, conversationId: String?)
             "hub_sections",
             JSONObject()
                 .put("chat", "Conversazione principale Hermes Hub.")
-                .put("video", "Feed personale video: Hermes conosce video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni video creato/scaricato per Matteo deve essere salvato o registrato li; Android legge /v1/video/library, desktop mostra file locali, app salva feedback e metadata.")
+                .put("video", "Feed personale video: Hermes conosce video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni video creato/scaricato per l'utente deve essere salvato o registrato li; Android legge /v1/video/library, desktop mostra file locali, app salva feedback e metadata.")
                 .put("news", "Feed personale articoli: Hermes produce articoli con fonti; se crea HTML/giornale online salva in ${settings.newsLibraryPath} per /v1/news/library; app salva feedback.")
                 .put("cron", "Automazioni Hermes programmate condivise con CLI/server.")
                 .put("notifications", "Inbox notifiche: cron/agenti devono usare POST /v1/hub/notifications per avvisi importanti quando l'app non e' aperta.")
@@ -7668,7 +7668,7 @@ private fun visualBlocksMetadata(settings: AppSettings, conversationId: String?)
             "notification_contract",
             JSONObject()
                 .put("endpoint", "/v1/hub/notifications")
-                .put("required_behavior", "When a cron, monitor or long-running agent finds something Matteo must know, create a notification with title, message, severity, source and conversation_prompt. Keep it concise and self-contained.")
+                .put("required_behavior", "When a cron, monitor or long-running agent finds something the user must know, create a notification with title, message, severity, source and conversation_prompt. Keep it concise and self-contained.")
         )
         .put("news_library_path", settings.newsLibraryPath)
         .put(
@@ -8131,7 +8131,7 @@ private fun workspaceInstructions(settings: AppSettings, kind: String, prompt: S
             Destinazione: Hermes Hub / Video.
             Cartella video monitorata: ${settings.videoLibraryPath}
             Memoria: usa la memoria agente condivisa Hermes/CLI/app per preferenze utente, stile, durata, ritmo, fonti e regole editoriali. Se impari una preferenza stabile, salvala lato Hermes se possibile.
-            Obiettivo: crea o programma un video personale per Matteo. File finale pensato per comparire automaticamente nella cartella video monitorata; il telefono riceve solo metadati, stream_url e download_url opzionale.
+            Obiettivo: crea o programma un video personale per l'utente. File finale pensato per comparire automaticamente nella cartella video monitorata; il telefono riceve solo metadati, stream_url e download_url opzionale.
             Produzione: ricerca tema se necessario, crea script, storyboard, asset plan, eventuale Remotion project/render o pipeline IA se disponibile lato server.
             Feedback: usa feedback precedenti per adattare durata, ritmo, editing, tono, fonti, voce, musica e livello tecnico.
             Output JSON richiesto: {"kind":"Video","title":"...","summary":"...","status":"...","job_id":"...","stream_url":"...","download_url":"...","sources":[]}
@@ -8144,7 +8144,7 @@ private fun workspaceInstructions(settings: AppSettings, kind: String, prompt: S
             Destinazione: Hermes Hub / News.
             Cartella news monitorata: ${settings.newsLibraryPath}
             Memoria: usa la memoria agente condivisa Hermes/CLI/app per interessi, fonti preferite, profondita, tono e filtri di qualita. Se impari una preferenza stabile, salvala lato Hermes se possibile.
-            Obiettivo: crea un articolo/briefing personale per Matteo con fonti verificabili e sintesi ragionata.
+            Obiettivo: crea un articolo/briefing personale per l'utente con fonti verificabili e sintesi ragionata.
             Produzione: cerca notizie rilevanti, filtra per interesse, cita fonti, separa fatti da inferenze e prepara testo leggibile come giornale personale. Se l'utente chiede formato giornale online/HTML, salva il file finale nella cartella news monitorata/news_library_path/HERMES_NEWS_LIBRARY_PATH: Hermes Hub lo legge con /v1/news/library e lo mostra in WebView interna.
             Feedback: usa feedback precedenti per adattare argomenti, profondita, tono, fonti e frequenza.
             Output JSON richiesto: {"kind":"News","title":"...","summary":"...","status":"...","job_id":"...","download_url":"/v1/media/...","sources":[{"title":"...","url":"..."}]}
@@ -8249,11 +8249,7 @@ private fun resolveHermesUrl(settings: AppSettings, path: String): String {
     }
 }
 
-private val plugAndPlayGatewayRoots = listOf(
-    "http://hermes:8642",
-    "http://100.94.223.14:8642",
-    "http://hermes.local:8642"
-)
+private val plugAndPlayGatewayRoots = emptyList<String>()
 
 internal fun plugAndPlayUrlCandidates(url: String): List<String> {
     return try {
@@ -8784,11 +8780,11 @@ private fun resolveTtsSpeechUrl(settings: AppSettings): String {
     return try {
         val uri = URI(settings.gatewayUrl.trim())
         val scheme = uri.scheme ?: "http"
-        val host = uri.host?.takeIf { it.isNotBlank() } ?: "hermes"
+        val host = uri.host?.takeIf { it.isNotBlank() } ?: error("Configura Hermes API URL")
         val port = if (uri.port > 0) uri.port else 8642
         URI(scheme, null, host, port, "/v1/audio/speech", null, null).toString()
     } catch (_: Exception) {
-        "http://hermes:8642/v1/audio/speech"
+        error("Configura Hermes API URL")
     }
 }
 
@@ -8801,12 +8797,7 @@ internal fun ttsUrlCandidates(url: String): List<String> {
         }
         val port = if (uri.port > 0) uri.port else 8642
         val currentRoot = "${uri.scheme}://${uri.host}:$port"
-        val roots = listOf(
-            currentRoot,
-            "http://hermes:8642",
-            "http://100.94.223.14:8642",
-            "http://hermes.local:8642"
-        )
+        val roots = listOf(currentRoot)
         roots.distinctBy { it.lowercase() }.map { it.trimEnd('/') + suffix }
     } catch (_: Exception) {
         listOf(url)
@@ -10225,10 +10216,8 @@ private fun loadSettings(context: Context): AppSettings {
         model = prefs.getString("model", AppDefaults.model) ?: AppDefaults.model,
         accessMode = prefs.getString("accessMode", AppDefaults.accessMode) ?: AppDefaults.accessMode,
         visualBlocksMode = prefs.getString("visualBlocksMode", AppDefaults.visualBlocksMode) ?: AppDefaults.visualBlocksMode,
-        videoLibraryPath = (prefs.getString("videoLibraryPath", AppDefaults.videoLibraryPath) ?: AppDefaults.videoLibraryPath)
-            .let { if (it.isBlank() || it.endsWith("/.hermes/media/video")) AppDefaults.videoLibraryPath else it },
-        newsLibraryPath = (prefs.getString("newsLibraryPath", AppDefaults.newsLibraryPath) ?: AppDefaults.newsLibraryPath)
-            .let { if (it.isBlank() || it.endsWith("/.hermes/media/news")) AppDefaults.newsLibraryPath else it },
+        videoLibraryPath = prefs.getString("videoLibraryPath", AppDefaults.videoLibraryPath) ?: AppDefaults.videoLibraryPath,
+        newsLibraryPath = prefs.getString("newsLibraryPath", AppDefaults.newsLibraryPath) ?: AppDefaults.newsLibraryPath,
         activeProjectId = prefs.getString("activeProjectId", AppDefaults.activeProjectId) ?: AppDefaults.activeProjectId,
         activeProjectName = prefs.getString("activeProjectName", AppDefaults.activeProjectName) ?: AppDefaults.activeProjectName,
         activeProjectWorkspacePath = prefs.getString("activeProjectWorkspacePath", "") ?: "",
@@ -10259,14 +10248,7 @@ private fun normalizePlugAndPlaySettings(context: Context, settings: AppSettings
     var changed = false
 
     val gateway = normalizeUrl(next.gatewayUrl)
-    if (gateway.isBlank() ||
-        gateway.contains("127.0.0.1", ignoreCase = true) ||
-        gateway.contains("localhost", ignoreCase = true) ||
-        gateway.contains("100.105.46.6", ignoreCase = true)
-    ) {
-        next = next.copy(gatewayUrl = AppDefaults.gatewayUrl)
-        changed = true
-    } else if (gateway != next.gatewayUrl) {
+    if (gateway != next.gatewayUrl) {
         next = next.copy(gatewayUrl = gateway)
         changed = true
     }
@@ -10281,12 +10263,18 @@ private fun normalizePlugAndPlaySettings(context: Context, settings: AppSettings
         changed = true
     }
 
-    val root = next.gatewayUrl.removeSuffix("/v1")
-    next = next.copy(
-        inferenceEndpoint = next.gatewayUrl,
-        adminBridgeUrl = root,
-        accessMode = if (next.accessMode.isBlank()) AppDefaults.accessMode else next.accessMode
-    )
+    if (next.inferenceEndpoint.isBlank() && next.gatewayUrl.isNotBlank()) {
+        next = next.copy(inferenceEndpoint = next.gatewayUrl)
+        changed = true
+    }
+    if (next.adminBridgeUrl.isBlank() && next.gatewayUrl.isNotBlank()) {
+        next = next.copy(adminBridgeUrl = next.gatewayUrl.removeSuffix("/v1"))
+        changed = true
+    }
+    if (next.accessMode.isBlank()) {
+        next = next.copy(accessMode = AppDefaults.accessMode)
+        changed = true
+    }
 
     if (changed) {
         saveSettings(context, next)
@@ -10336,12 +10324,12 @@ internal fun loadGatewaySecret(context: Context): String? {
         ?: legacyPrefs.getString(GATEWAY_SECRET_PREF_KEY, null)?.also { legacyValue ->
             prefs.edit { putString(GATEWAY_SECRET_PREF_KEY, legacyValue) }
         }
-        ?: return HERMES_FALLBACK_API_KEY
+        ?: return null
 
     return runCatching {
         val parts = stored.split(':', limit = 2)
         if (parts.size != 2) {
-            val legacyPlaintext = stored.trim().ifBlank { HERMES_FALLBACK_API_KEY }
+            val legacyPlaintext = stored.trim().takeIf { it.isNotBlank() } ?: return@runCatching null
             return@runCatching legacyPlaintext
         }
 
@@ -10350,12 +10338,23 @@ internal fun loadGatewaySecret(context: Context): String? {
         val cipher = Cipher.getInstance(GATEWAY_SECRET_TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, getOrCreateGatewaySecretKey(), GCMParameterSpec(128, iv))
         cipher.updateAAD(GATEWAY_SECRET_AAD.toByteArray(Charsets.UTF_8))
-        String(cipher.doFinal(encrypted), Charsets.UTF_8).trim().ifBlank { HERMES_FALLBACK_API_KEY }
-    }.getOrElse { HERMES_FALLBACK_API_KEY }
+        String(cipher.doFinal(encrypted), Charsets.UTF_8).trim().takeIf { it.isNotBlank() }
+    }.getOrNull()
 }
 
 private fun saveGatewaySecret(context: Context, secret: String?) {
-    val normalized = secret?.trim().takeUnless { it.isNullOrEmpty() } ?: HERMES_FALLBACK_API_KEY
+    val normalized = secret?.trim().takeUnless { it.isNullOrEmpty() }
+    if (normalized == null) {
+        migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS).edit {
+            remove(GATEWAY_SECRET_PREF_KEY)
+            remove("gatewaySecret")
+        }
+        context.applicationContext.getSharedPreferences(LEGACY_SETTINGS_PREFS, Context.MODE_PRIVATE).edit {
+            remove(GATEWAY_SECRET_PREF_KEY)
+            remove("gatewaySecret")
+        }
+        return
+    }
     val encoded = runCatching {
         val cipher = Cipher.getInstance(GATEWAY_SECRET_TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateGatewaySecretKey())
@@ -11646,17 +11645,17 @@ private const val SETTINGS_FIELD_MAX_LENGTH = 2048
 private val gatewaySecretKeyLock = Any()
 
 private object AppDefaults {
-    const val gatewayUrl = "http://hermes:8642/v1"
+    const val gatewayUrl = ""
     const val gatewayWsUrl = ""
-    const val adminBridgeUrl = "http://hermes:8642"
+    const val adminBridgeUrl = ""
     const val provider = "hermes-agent"
-    const val inferenceEndpoint = "http://hermes:8642/v1"
+    const val inferenceEndpoint = ""
     const val preferredApi = "hermes-native"
     const val model = "hermes-agent"
     const val accessMode = "Tailscale/LAN plug-and-play"
     const val visualBlocksMode = "auto"
-    const val videoLibraryPath = "/home/matteo/video"
-    const val newsLibraryPath = "/home/matteo/news"
+    const val videoLibraryPath = ""
+    const val newsLibraryPath = ""
     const val activeProjectId = ""
     const val activeProjectName = ""
     const val fontScale = 1.0f

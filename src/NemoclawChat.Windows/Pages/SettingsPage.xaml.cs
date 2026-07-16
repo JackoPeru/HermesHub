@@ -118,16 +118,16 @@ public sealed partial class SettingsPage : Page
     {
         AppSettingsStore.Reset();
         VoicePreferencesStore.Save(string.Empty, new VoicePreferences());
-        GatewayCredentialStore.SaveSecret(GatewayCredentialStore.DefaultApiKey);
+        GatewayCredentialStore.DeleteSecret();
         LoadSettings();
         StatusText.Text = "Default ripristinati.";
     }
 
     private void ResetApiKey_Click(object sender, RoutedEventArgs e)
     {
-        GatewayCredentialStore.SaveSecret(GatewayCredentialStore.DefaultApiKey);
-        ApiKeyBox.Password = GatewayCredentialStore.DefaultApiKey;
-        StatusText.Text = "API key ripristinata a hermes-hub.";
+        GatewayCredentialStore.DeleteSecret();
+        ApiKeyBox.Password = string.Empty;
+        StatusText.Text = "API key rimossa.";
     }
 
     private void Backup_Click(object sender, RoutedEventArgs e)
@@ -277,7 +277,7 @@ public sealed partial class SettingsPage : Page
         StatusText.Text = "Creo anteprima voce...";
         try
         {
-            _voicePreviewPath = await SpeechGatewayService.SynthesizeToFileAsync(ReadSettings(), "Ciao Matteo, questa è la mia voce.", voice, preferences.Speed);
+            _voicePreviewPath = await SpeechGatewayService.SynthesizeToFileAsync(ReadSettings(), "Ciao, questa è la mia voce.", voice, preferences.Speed);
             var file = await StorageFile.GetFileFromPathAsync(_voicePreviewPath);
             _voicePreviewPlayer = new MediaPlayer { Source = MediaSource.CreateFromStorageFile(file) };
             _voicePreviewPlayer.MediaEnded += (_, _) => DispatcherQueue.TryEnqueue(CleanupVoicePreview);

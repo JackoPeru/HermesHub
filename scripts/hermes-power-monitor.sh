@@ -51,12 +51,19 @@ read_env_value() {
   printf '%s' "$value"
 }
 
-HERMES_API_KEY="${HERMES_API_KEY:-hermes-hub}"
+HERMES_API_KEY="${HERMES_API_KEY:-}"
 if [ -f "$HOME/.hermes/.env" ]; then
   ENV_KEY="$(read_env_value "$HOME/.hermes/.env" HERMES_API_KEY)"
   if [ -n "$ENV_KEY" ]; then
     HERMES_API_KEY="$ENV_KEY"
   fi
+fi
+if [ -z "$HERMES_API_KEY" ] && [ -s "$HOME/.hermes/api_server.key" ]; then
+  HERMES_API_KEY="$(tr -d '[:space:]' < "$HOME/.hermes/api_server.key")"
+fi
+if [ -z "$HERMES_API_KEY" ]; then
+  echo "ERROR: Hermes API key missing" >&2
+  exit 1
 fi
 
 network_reachable() {
