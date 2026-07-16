@@ -15,6 +15,7 @@ public sealed record ChatMessageRecord(
     bool IsBookmarked = false)
 {
     public string Id { get; init; } = Guid.NewGuid().ToString("N");
+    public string Thinking { get; init; } = string.Empty;
 }
 
 public sealed class ConversationRecord

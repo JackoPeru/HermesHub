@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.161"
-EXPECTED_ANDROID_VERSION_CODE = 165
+EXPECTED_VERSION = "0.6.162"
+EXPECTED_ANDROID_VERSION_CODE = 166
 
 
 def read(relative_path: str) -> str:

@@ -37,7 +37,7 @@ public sealed record StreamCancelled : ChatStreamEvent;
 public sealed record StreamStatus(string Message) : ChatStreamEvent;
 public sealed record StreamPromptProgress(
     int Percent,
-    string Label = "llama.cpp: prefill prompt",
+    string Label = "Elaborazione prompt",
     bool Estimated = false,
     int? ProcessedTokens = null,
     int? TotalTokens = null,
@@ -177,7 +177,7 @@ public static class ChatStreamClient
             yield return new StreamStatus(nativeMode
                 ? "Protocollo effettivo: Hermes Native via Responses. Context delegato a Hermes."
                 : "Protocollo effettivo: Hermes Responses compat.");
-            yield return new StreamStatus("llama.cpp: prefill prompt...");
+            yield return new StreamStatus("Preparazione richiesta al modello...");
             var serverConversationId = HermesHubProtocol.ServerConversationId(conversationId);
             string BuildResponsesPayload(string? candidatePreviousResponseId) => JsonSerializer.Serialize(new
             {
@@ -1111,6 +1111,10 @@ public static class ChatStreamClient
 
             if (t.Contains("prompt.progress") || t.Contains("processing.progress"))
             {
+                if (realPromptProgress is not null)
+                {
+                    yield break;
+                }
                 if (GetBool(element, "estimated") == true)
                 {
                     yield break;
@@ -1119,12 +1123,7 @@ public static class ChatStreamClient
                 var percent = GetProgressPercent(element);
                 if (percent is >= 0 and <= 100)
                 {
-                    var rawLabel = GetString(element, "label") ?? string.Empty;
-                    var label = string.IsNullOrWhiteSpace(rawLabel) ||
-                                rawLabel.Contains("processing prompt", StringComparison.OrdinalIgnoreCase)
-                        ? "llama.cpp: prefill prompt"
-                        : rawLabel;
-                    yield return new StreamPromptProgress(percent.Value, label);
+                    yield return new StreamPromptProgress(percent.Value, "Elaborazione prompt");
                 }
                 yield break;
             }
@@ -1494,6 +1493,7 @@ public static class ChatStreamClient
     private static StreamPromptProgress? ExtractPromptProgress(JsonElement element)
     {
         if (element.ValueKind != JsonValueKind.Object ||
+            GetBool(element, "estimated") == true ||
             !element.TryGetProperty("prompt_progress", out var progress) ||
             progress.ValueKind != JsonValueKind.Object)
         {
@@ -1512,7 +1512,7 @@ public static class ChatStreamClient
         var percent = (int)Math.Round(Math.Clamp((processed.Value / (double)total.Value) * 100.0, 0.0, 100.0));
         return new StreamPromptProgress(
             percent,
-            "llama.cpp: prefill prompt",
+            "Elaborazione prompt",
             Estimated: false,
             ProcessedTokens: processed,
             TotalTokens: total,

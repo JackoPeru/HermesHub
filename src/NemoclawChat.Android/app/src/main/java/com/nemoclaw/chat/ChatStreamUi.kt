@@ -90,7 +90,7 @@ internal fun StreamingBubbleView(
                 },
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            val showActivity = !state.isDone || state.hasThinking || (showToolCalls && state.toolCalls.isNotEmpty())
+            val showActivity = !state.isDone || state.hasThinking || state.thinking.isNotBlank() || (showToolCalls && state.toolCalls.isNotEmpty())
             if (showActivity) {
                 HermesActivityExpander(state, showToolCalls, uiTickNs)
             }
@@ -203,10 +203,10 @@ internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolea
             )
         }
 
-        if (state.hasThinking || state.thinking.isNotBlank()) {
+        if (active || state.hasThinking || state.thinking.isNotBlank()) {
             ThinkingExpander(
                 thinking = state.thinking,
-                active = active && state.hasThinking && !state.thinkingFrozen,
+                active = active && !state.thinkingFrozen,
                 elapsedSec = if (state.thinkingElapsedSec > 0) state.thinkingElapsedSec else elapsedSec,
                 expanded = thinkingExpanded,
                 onExpandedChange = { thinkingExpanded = it }
@@ -219,7 +219,7 @@ internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolea
 
         if (active && state.text.isNotBlank()) {
             FlagRow(
-                title = state.status.ifBlank { "Generazione" },
+                title = friendlyActivityStatus(state.status.ifBlank { "Generazione risposta" }),
                 value = activityIndicator(state),
                 shimmer = true
             )
@@ -230,12 +230,23 @@ internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolea
 private fun preGenerationStatusLabel(status: String, progressPercent: Int?, elapsedSec: Double): String {
     val normalized = status.lowercase()
     return when {
-        normalized.contains("connessione") -> "Connessione stream Hermes"
-        normalized.contains("prompt inviato") || normalized.contains("attendo primo token") -> "llama.cpp: attesa primo token"
-        normalized.contains("processing prompt") || progressPercent != null -> "llama.cpp: prefill prompt"
+        normalized.contains("connessione") -> "Connessione a Hermes"
+        progressPercent != null -> "Elaborazione prompt"
+        normalized.contains("prompt inviato") || normalized.contains("attendo primo token") -> "Attesa primo evento dal modello"
+        normalized.contains("processing prompt") || normalized.contains("prefill prompt") || normalized.contains("elaborazione prompt") -> "Attesa progresso reale dal server"
         normalized.contains("responses") || normalized.contains("protocollo") -> "Preparazione sessione Hermes"
-        elapsedSec >= 1.0 -> "llama.cpp: elaborazione prompt"
+        elapsedSec >= 1.0 -> "Attesa risposta dal modello"
         else -> status.ifBlank { "Invio prompt a Hermes" }
+    }
+}
+
+internal fun friendlyActivityStatus(status: String): String {
+    val value = status.trim().replace(Regex("^llama\\.cpp:\\s*", RegexOption.IGNORE_CASE), "")
+    return when {
+        value.contains("prefill prompt", ignoreCase = true) || value.contains("processing prompt", ignoreCase = true) -> "Elaborazione prompt"
+        value.contains("attesa primo token", ignoreCase = true) || value.contains("attendo primo token", ignoreCase = true) -> "Attesa primo token della risposta"
+        value.contains("generazione risposta", ignoreCase = true) -> "Generazione risposta"
+        else -> value
     }
 }
 
@@ -312,16 +323,14 @@ internal fun activityIndicator(state: StreamingState): String {
     if (state.isDone) return "Completato"
     val pendingTool = state.toolCalls.any { inferToolOutcome(it) == ToolOutcome.Pending }
     promptProgressIndicator(state)?.let { return it }
-    if (pendingTool) return "tool…"
+    if (pendingTool) return "tool in corso"
     if (state.text.isNotEmpty()) {
-        val toks = state.text.length / 4
-        return if (toks > 0) "$toks tok" else "…"
+        return "in corso"
     }
     if (state.hasThinking) {
-        val toks = state.thinking.length / 4
-        return if (toks > 0) "reasoning $toks tok" else "reasoning…"
+        return "ragionamento in corso"
     }
-    return "prompt…"
+    return "in attesa"
 }
 
 private fun promptProgressIndicator(state: StreamingState): String? {
@@ -366,13 +375,14 @@ internal fun ThinkingExpander(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (active) {
-                ShimmerText("Sto pensando")
+                ShimmerText("Ragionamento")
                 Spacer(modifier = Modifier.weight(1f))
-                Text(text = "${thinking.length / 4} tok", color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(text = if (thinking.isBlank()) "in attesa dal server" else "in corso", color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             } else {
-                val label = if (elapsedSec >= 1) "Pensato per ${String.format(java.util.Locale.US, "%.1f", elapsedSec)}s" else "Ragionamento"
+                val label = if (thinking.isNotBlank() && elapsedSec >= 1) "Ragionamento · ${String.format(java.util.Locale.US, "%.1f", elapsedSec)}s" else "Ragionamento"
                 Text(text = label, color = AppColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 Spacer(modifier = Modifier.weight(1f))
+                Text(text = if (thinking.isBlank()) "non inviato" else "ricevuto", color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
             Icon(
                 imageVector = if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
@@ -392,7 +402,7 @@ internal fun ThinkingExpander(
                         .heightIn(max = 180.dp)
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 10.dp, vertical = 8.dp),
-                    text = thinking.ifBlank { "Hermes non ha ancora inviato token di reasoning. Se il modello/server li manda, appariranno qui in tempo reale." },
+                    text = thinking.ifBlank { "Hermes non ha inviato contenuto di ragionamento per questa risposta." },
                     color = AppColors.Muted,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp

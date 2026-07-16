@@ -2326,9 +2326,7 @@ private fun MessageBubble(message: ChatMessage, settings: AppSettings) {
                     Box(modifier = Modifier.size(7.dp).background(AppColors.Accent, CircleShape))
                     Text("HERMES", color = AppColors.Faint, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
                 }
-                if (message.thinking.isNotBlank()) {
-                    ThinkingExpander(thinking = message.thinking, active = false, elapsedSec = 0.0)
-                }
+                ThinkingExpander(thinking = message.thinking, active = false, elapsedSec = 0.0)
                 MarkdownText(message.text, color = Color.White, fontSize = 15.sp)
                 if (message.visualBlocks.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2370,10 +2368,8 @@ private fun MessageBubble(message: ChatMessage, settings: AppSettings) {
                     if (message.fromUser || message.isAction) {
                         Text(text = message.text, color = Color.White)
                     } else {
-                        if (message.thinking.isNotBlank()) {
-                            ThinkingExpander(thinking = message.thinking, active = false, elapsedSec = 0.0)
-                            Spacer(modifier = Modifier.height(10.dp))
-                        }
+                        ThinkingExpander(thinking = message.thinking, active = false, elapsedSec = 0.0)
+                        Spacer(modifier = Modifier.height(10.dp))
                         MarkdownText(message.text, color = Color.White)
                     }
                     if (message.visualBlocks.isNotEmpty()) {

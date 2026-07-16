@@ -97,7 +97,7 @@ internal sealed class StreamingBubble
 
         _thinkingText = new TextBlock
         {
-            Text = string.Empty,
+            Text = "In attesa del ragionamento inviato da Hermes...",
             Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
             TextWrapping = TextWrapping.WrapWholeWords,
             FontSize = 12
@@ -115,7 +115,7 @@ internal sealed class StreamingBubble
             Background = new SolidColorBrush(Colors.Transparent),
             BorderThickness = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            Visibility = Visibility.Collapsed
+            Visibility = Visibility.Visible
         };
 
         _content.Children.Add(_thinkingExpander);
@@ -291,11 +291,6 @@ internal sealed class StreamingBubble
             {
                 FreezeThinkingLabel();
             }
-            else
-            {
-                _thinkingExpander.Visibility = Visibility.Collapsed;
-                _shimmerTimer.Stop();
-            }
         }
         ScheduleScroll();
     }
@@ -307,7 +302,7 @@ internal sealed class StreamingBubble
             return;
         }
 
-        _phaseStatusBase = status.Trim();
+        _phaseStatusBase = FriendlyStatus(status);
         _statusText.Text = _phaseStatusBase;
         _statusText.Foreground = _hasText
             ? (Brush)Application.Current.Resources["MutedTextBrush"]
@@ -323,7 +318,7 @@ internal sealed class StreamingBubble
         }
 
         var clamped = Math.Clamp(progress.Percent, 0, 100);
-        var status = string.IsNullOrWhiteSpace(progress.Label) ? "llama.cpp: prefill prompt" : progress.Label.Trim();
+        var status = string.IsNullOrWhiteSpace(progress.Label) ? "Elaborazione prompt" : FriendlyStatus(progress.Label);
         var details = new List<string>();
         if (progress.ProcessedTokens is { } processed && progress.TotalTokens is { } total && total > 0)
         {
@@ -364,6 +359,7 @@ internal sealed class StreamingBubble
         AppendDeduped(_thinkingBuilder, delta);
         _thinkingText.Text = _thinkingBuilder.ToString();
         _hasThinking = true;
+        _thinkingLabel.Text = "Ragionamento · in corso";
         _promptProgressBar.Visibility = Visibility.Collapsed;
         SetStatus("Ragionamento in corso...");
         _thinkingExpander.Visibility = Visibility.Visible;
@@ -375,9 +371,11 @@ internal sealed class StreamingBubble
         _shimmerTimer.Stop();
         var elapsed = (DateTime.UtcNow - _started).TotalSeconds;
         _thinkingLabel.Foreground = (Brush)Application.Current.Resources["MutedTextBrush"];
-        _thinkingLabel.Text = elapsed >= 1
-            ? $"Pensato per {elapsed:0.#}s"
-            : "Ragionamento";
+        _thinkingLabel.Text = _hasThinking
+            ? elapsed >= 1
+                ? $"Ragionamento · {elapsed:0.#}s"
+                : "Ragionamento · ricevuto"
+            : "Ragionamento · non inviato";
     }
 
     public void StartToolCall(string id, string name)
@@ -634,21 +632,7 @@ internal sealed class StreamingBubble
         _renderTimer.Stop();
         _statusText.Visibility = Visibility.Collapsed;
         _promptProgressBar.Visibility = Visibility.Collapsed;
-        if (!_showAdvanced && !_hasThinking)
-        {
-            _thinkingExpander.Visibility = Visibility.Collapsed;
-            _shimmerTimer.Stop();
-            ScheduleScroll();
-        }
-        if (_hasThinking && _shimmerTimer.IsEnabled)
-        {
-            FreezeThinkingLabel();
-        }
-        else if (!_hasThinking)
-        {
-            _thinkingExpander.Visibility = Visibility.Collapsed;
-            _shimmerTimer.Stop();
-        }
+        FreezeThinkingLabel();
 
         if (!_hasText && _textBuilder.Length > 0)
         {
@@ -709,14 +693,7 @@ internal sealed class StreamingBubble
         _shimmerTimer.Stop();
         _promptProgressBar.Visibility = Visibility.Collapsed;
 
-        if (_hasThinking)
-        {
-            FreezeThinkingLabel();
-        }
-        else
-        {
-            _thinkingExpander.Visibility = Visibility.Collapsed;
-        }
+        FreezeThinkingLabel();
 
         if (!_hasText && _textBuilder.Length > 0)
         {
@@ -760,7 +737,7 @@ internal sealed class StreamingBubble
             _thinkingBuilder.Append(finalThinking);
             _thinkingText.Text = finalThinking;
             _hasThinking = _thinkingBuilder.Length > 0;
-            _thinkingExpander.Visibility = _hasThinking ? Visibility.Visible : Visibility.Collapsed;
+            _thinkingExpander.Visibility = Visibility.Visible;
         }
 
         FlushTextPreview();
@@ -776,6 +753,29 @@ internal sealed class StreamingBubble
         {
             _renderTimer.Stop();
         }
+    }
+
+    private static string FriendlyStatus(string status)
+    {
+        var value = status.Trim();
+        if (value.StartsWith("llama.cpp:", StringComparison.OrdinalIgnoreCase))
+        {
+            value = value["llama.cpp:".Length..].Trim();
+        }
+        if (value.Contains("prefill prompt", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("processing prompt", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Elaborazione prompt";
+        }
+        if (value.Contains("attesa primo token", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Attesa primo token della risposta";
+        }
+        if (value.Contains("generazione risposta", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Generazione risposta";
+        }
+        return value;
     }
 
     public void FlushPreview()

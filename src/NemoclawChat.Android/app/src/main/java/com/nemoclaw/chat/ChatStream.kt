@@ -239,7 +239,7 @@ data class StreamingState(
             visualBlocks = mergeVisualBlocks(visualBlocks, event.blocks),
             visualBlocksVersion = event.version
         ).withActivity("Visual blocks ricevuti: ${event.blocks.size}.")
-        is ChatStreamEvent.Status -> copy(status = event.message).withActivity(event.message)
+        is ChatStreamEvent.Status -> copy(status = friendlyActivityStatus(event.message)).withActivity(event.message)
         is ChatStreamEvent.RawHermesEvent -> copy(status = "Evento Hermes: ${event.name}")
             .withActivity("Evento Hermes: ${event.name} ${event.json.take(300)}")
         is ChatStreamEvent.PromptProgress -> copy(
@@ -249,14 +249,14 @@ data class StreamingState(
             promptProgressTotalTokens = event.totalTokens,
             promptProgressCachedTokens = event.cachedTokens,
             promptProgressTimeMs = event.timeMs,
-            status = event.label.ifBlank { "llama.cpp: prefill prompt" }
-        ).withActivity("Prefill prompt ${event.percent}%")
+            status = friendlyActivityStatus(event.label.ifBlank { "Elaborazione prompt" })
+        ).withActivity("Elaborazione prompt ${event.percent}%")
         is ChatStreamEvent.Done -> copy(
             text = stripReasoningArtifacts(text),
             stats = event.stats,
             isDone = true,
             status = "Risposta completata.",
-            promptProgressPercent = 100,
+            promptProgressPercent = null,
             promptProgressEstimated = false,
             promptProgressProcessedTokens = null,
             promptProgressTotalTokens = null,
@@ -346,7 +346,7 @@ sealed class ChatStreamEvent {
     data class ContextUsage(val tokens: Int?, val length: Int?, val percent: Int?) : ChatStreamEvent()
     data class PromptProgress(
         val percent: Int,
-        val label: String = "llama.cpp: prefill prompt",
+        val label: String = "Elaborazione prompt",
         val estimated: Boolean = false,
         val processedTokens: Int? = null,
         val totalTokens: Int? = null,
@@ -558,7 +558,7 @@ fun streamChatRequest(
 
     if (shouldUseResponsesFirst(settings, mode)) {
         emit(ChatStreamEvent.Status(if (nativeMode) "Protocollo effettivo: Hermes Native via Responses. Context delegato a Hermes." else "Invio diretto a Hermes Responses API..."))
-        emit(ChatStreamEvent.Status("llama.cpp: prefill prompt..."))
+        emit(ChatStreamEvent.Status("Preparazione richiesta al modello..."))
 
         fun buildResponsePayload(candidatePreviousResponseId: String?): JSONObject {
             val payload = JSONObject()
@@ -1270,18 +1270,15 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
             return out
         }
         t.contains("prompt.progress") || t.contains("processing.progress") -> {
+            if (out.any { it is ChatStreamEvent.PromptProgress }) {
+                return out
+            }
             if (obj.optBoolean("estimated", false)) {
                 return out
             }
             val percent = obj.optProgressPercent()
             if (percent != null) {
-                val rawLabel = obj.optString("label", "")
-                val label = if (rawLabel.isBlank() || rawLabel.contains("processing prompt", ignoreCase = true)) {
-                    "llama.cpp: prefill prompt"
-                } else {
-                    rawLabel
-                }
-                out += ChatStreamEvent.PromptProgress(percent, label)
+                out += ChatStreamEvent.PromptProgress(percent, "Elaborazione prompt")
             }
             return out
         }
@@ -1900,6 +1897,7 @@ private fun JSONObject.optProgressPercent(): Int? {
 }
 
 private fun JSONObject.promptProgressEventOrNull(): ChatStreamEvent.PromptProgress? {
+    if (optBoolean("estimated", false)) return null
     val progress = optJSONObject("prompt_progress") ?: return null
     val total = progress.optIntOrNull("total")?.takeIf { it > 0 } ?: return null
     val processed = progress.optIntOrNull("processed") ?: return null
@@ -1908,7 +1906,7 @@ private fun JSONObject.promptProgressEventOrNull(): ChatStreamEvent.PromptProgre
     val percent = ((processed.toDouble() / total.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
     return ChatStreamEvent.PromptProgress(
         percent = percent,
-        label = "llama.cpp: prefill prompt",
+        label = "Elaborazione prompt",
         estimated = false,
         processedTokens = processed,
         totalTokens = total,

@@ -835,7 +835,7 @@ public sealed partial class HomePage : Page
                         }
                         bubble.SynchronizeFinalContent(
                             finalTextBuilder.Length == 0 ? null : finalTextBuilder.ToString(),
-                            string.IsNullOrEmpty(done.AccumulatedThinking) ? null : done.AccumulatedThinking);
+                            finalThinkingBuilder.Length == 0 ? null : finalThinkingBuilder.ToString());
                         bubble.Complete(done.Stats);
                         if (IsComposerRunCurrent(composerRunId))
                         {
@@ -855,7 +855,7 @@ public sealed partial class HomePage : Page
                 }
 
                 if ((DateTimeOffset.Now - lastCheckpointAt).TotalMilliseconds >= StreamingCheckpointIntervalMs &&
-                    (finalTextBuilder.Length > 0 || finalBlocks is { Count: > 0 }))
+                    (finalTextBuilder.Length > 0 || finalThinkingBuilder.Length > 0 || finalBlocks is { Count: > 0 }))
                 {
                     lastCheckpointAt = DateTimeOffset.Now;
                     var checkpointText = SnapshotPreview(finalTextBuilder);
@@ -870,6 +870,9 @@ public sealed partial class HomePage : Page
                                 finalBlocks?.ToList(),
                                 null,
                                 rawEvents.ToList())
+                            {
+                                Thinking = finalThinkingBuilder.ToString()
+                            }
                         })
                         .ToList();
                     var checkpoint = await Task.Run(() => ChatArchiveStore.SaveSnapshot(conversationId, sendMode, prompt, partialMessages, "Hermes in corso", finalResponseId ?? previousResponseId));
@@ -942,7 +945,10 @@ public sealed partial class HomePage : Page
                 bubble.Complete(new ChatStreamStats(null, null, null, null, null));
             }
 
-            localHistory.Add(new ChatMessageRecord("Hermes", finalText, DateTimeOffset.Now, finalBlocksVersion, finalBlocks?.ToList(), null, rawEvents));
+            localHistory.Add(new ChatMessageRecord("Hermes", finalText, DateTimeOffset.Now, finalBlocksVersion, finalBlocks?.ToList(), null, rawEvents)
+            {
+                Thinking = finalThinkingBuilder.ToString()
+            });
             if (finalStats is not null)
             {
                 localHistory[^1] = localHistory[^1] with { Stats = finalStats };
@@ -1533,7 +1539,8 @@ public sealed partial class HomePage : Page
                 message.Author == "Tu" ? HorizontalAlignment.Right : HorizontalAlignment.Left,
                 message.VisualBlocks,
                 message.Stats,
-                message.RawEvents);
+                message.RawEvents,
+                message.Thinking);
         }
 
         if (isStreaming && activeStream is not null)
@@ -1564,7 +1571,8 @@ public sealed partial class HomePage : Page
         HorizontalAlignment alignment,
         IReadOnlyList<VisualBlockRecord>? visualBlocks = null,
         ChatStreamStats? stats = null,
-        IReadOnlyList<HermesRawEventRecord>? rawEvents = null)
+        IReadOnlyList<HermesRawEventRecord>? rawEvents = null,
+        string? thinking = null)
     {
         var advanced = AppSettingsStore.Load().AdvancedChatDetails;
         var isUser = string.Equals(author, "Tu", StringComparison.OrdinalIgnoreCase);
@@ -1582,6 +1590,7 @@ public sealed partial class HomePage : Page
         }
         if (isAssistant)
         {
+            content.Children.Add(RenderThinkingExpander(thinking));
             content.Children.Add(MarkdownRenderer.Render(text, Colors.White));
         }
         else
@@ -1628,6 +1637,36 @@ public sealed partial class HomePage : Page
         Messages.Add(new MessageViewModel(bubble));
         _ = MessagesScroll.ChangeView(null, MessagesScroll.ScrollableHeight, null);
         UpdateContextMeter();
+    }
+
+    private static Expander RenderThinkingExpander(string? thinking)
+    {
+        var available = !string.IsNullOrWhiteSpace(thinking);
+        return new Expander
+        {
+            Header = new TextBlock
+            {
+                Text = available ? "Ragionamento · ricevuto" : "Ragionamento · non inviato",
+                FontSize = 14,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = (Brush)Application.Current.Resources["MutedTextBrush"]
+            },
+            Content = new ScrollViewer
+            {
+                MaxHeight = 220,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = new TextBlock
+                {
+                    Text = available ? thinking! : "Hermes non ha inviato contenuto di ragionamento per questa risposta.",
+                    Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
+                    TextWrapping = TextWrapping.WrapWholeWords,
+                    FontSize = 12
+                }
+            },
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
     }
 
     private void AddFooter(StackPanel content, ChatStreamStats? stats, string copyText)

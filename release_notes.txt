@@ -1,16 +1,15 @@
-Hermes Hub 0.6.161 (Voce, chat e Progetti semplificati)
+Hermes Hub 0.6.162 (progresso reale e ragionamento visibile)
 
-- Voce: schermata chiamata pulita su Windows e Android; profilo, velocita, wake word, PTT, trascrizione e Bluetooth spostati nelle Impostazioni.
-- Kokoro: disponibili solo `if_sara` e `im_nicola`; preferenze vecchie o non supportate vengono sanificate senza crash.
-- Chat Android: eliminata la tripla risposta causata dalla concatenazione di delta e snapshot terminali; risposta finale unica.
-- Ragionamento: reasoning separato dalla risposta, persistente e apribile nella tendina dedicata; gateway pronto a inoltrare gli eventi reasoning.
-- Progetti: interfaccia ridotta a nome e system prompt facoltativo; selezione, attivazione e associazione chat automatiche.
-- Titoli chat: Hermes genera una sola volta il titolo in base all'argomento dopo la prima risposta; nessuna copia automatica del primo prompt.
-- Azioni rapide: `Prepara setup Hermes`, `Controlla server` e `Crea ordine agente` ora inviano immediatamente la richiesta.
-- Gateway: accetta solo il system prompt progetto dedicato da metadata, con limite 20.000 caratteri; i system prompt generici del client restano filtrati.
+- Stati chat: rimosso il nome tecnico del backend; ora indicano cosa Hermes sta aspettando o facendo.
+- Elaborazione prompt: percentuale mostrata solo quando il server invia contatori reali `processed/total`; nessuna percentuale stimata.
+- Gateway: richiede `return_progress` e `timings_per_token` nel body del modello e inoltra i metadati reali ai client.
+- Ragionamento live: `reasoning_content` dei chunk modello viene inoltrato come evento Hermes dedicato.
+- Ragionamento UI: voce sempre visibile e cliccabile su Windows e Android; la tendina mostra il contenuto ricevuto o dichiara che il server non lo ha inviato.
+- Archivio Windows: ragionamento salvato, ricaricato e sincronizzato tra dispositivi insieme alla risposta.
+- Android: rimossi conteggi token derivati dalla lunghezza del testo; restano solo metriche effettivamente ricevute.
 - Compatibilita: `applicationId com.nemoclaw.chat`, firma Android, package identity Windows, archivio e impostazioni esistenti preservati.
-- Versioni: Windows/AdminBridge `0.6.161`; Android `versionName 0.6.161`, `versionCode 165`.
-- Asset: `HermesHub-0.6.161-android.apk`, `NemoclawChat.Windows_0.6.161.0_x64.msix`, `HermesHub-0.6.161-linux-gateway.tar.gz`.
-- SHA-256 Android: `B217EEB177751CA0102EB69BBFD79EA96A213D649A262B2A9BC10E56F29D1C7A`.
-- SHA-256 Windows: `D5A937586BED9F36D6C2FE3973F352B0CF439E93BC8722ACC019821BF1B6F9D0`.
-- SHA-256 gateway Linux: `F70F4822E58A27E482D9500B07DD049328388AC42A52288FD1AB14D28FFA5991`.
+- Versioni: Windows/AdminBridge `0.6.162`; Android `versionName 0.6.162`, `versionCode 166`.
+- Asset: `HermesHub-0.6.162-android.apk`, `NemoclawChat.Windows_0.6.162.0_x64.msix`, `HermesHub-0.6.162-linux-gateway.tar.gz`.
+- SHA-256 Android: `FF2BE5DDB61555224333B340D9E20556FFBEFF3FF80F25D551BC80CB5DAB813D`.
+- SHA-256 Windows: `FE2D61ED33B457DAFA5A6A4D2E9E1D519F8B95A72EA10AE06619F39FFB2B4992`.
+- SHA-256 gateway Linux: `A9E725653731896B5F47E7652B02BAD55F60C71AE3738C12CA61B208AE415029`.

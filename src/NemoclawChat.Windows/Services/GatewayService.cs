@@ -1272,6 +1272,7 @@ public static class GatewayService
                         visualBlocksVersion = message.VisualBlocksVersion,
                         visualBlocks = message.VisualBlocks ?? [],
                         stats = message.Stats,
+                        thinking = message.Thinking,
                         rawEvents = message.RawEvents ?? [],
                         bookmarked = message.IsBookmarked
                     })
@@ -1335,7 +1336,8 @@ public static class GatewayService
                                 ReadMessageRawEvents(message),
                                 message.TryGetProperty("bookmarked", out var bookmarked) && bookmarked.ValueKind == JsonValueKind.True)
                             {
-                                Id = ExtractString(message, "id", "messageId", "message_id") ?? Guid.NewGuid().ToString("N")
+                                Id = ExtractString(message, "id", "messageId", "message_id") ?? Guid.NewGuid().ToString("N"),
+                                Thinking = ExtractString(message, "thinking", "reasoning") ?? string.Empty
                             });
                         }
                     }

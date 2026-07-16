@@ -5759,12 +5759,37 @@ def _patch_agent_chat_completion_helpers(text: str) -> tuple[str, list[str]]:
             "        return None\n"
             "\n"
             "\n"
+            "def _hermes_hub_reasoning_text(chunk):\n"
+            "    direct = _hermes_hub_plain(_hermes_hub_chunk_field(chunk, \"reasoning_content\"))\n"
+            "    if isinstance(direct, str) and direct:\n"
+            "        return direct\n"
+            "    choices = _hermes_hub_plain(_hermes_hub_chunk_field(chunk, \"choices\"))\n"
+            "    if not isinstance(choices, list):\n"
+            "        return None\n"
+            "    for choice in choices:\n"
+            "        if not isinstance(choice, dict):\n"
+            "            continue\n"
+            "        delta = choice.get(\"delta\")\n"
+            "        if not isinstance(delta, dict):\n"
+            "            continue\n"
+            "        reasoning = delta.get(\"reasoning_content\") or delta.get(\"reasoning\")\n"
+            "        if isinstance(reasoning, str) and reasoning:\n"
+            "            return reasoning\n"
+            "    return None\n"
+            "\n"
+            "\n"
             "def _hermes_hub_emit_llama_stream_metadata(agent, chunk):\n"
             "    cb = getattr(agent, \"tool_progress_callback\", None)\n"
             "    if cb is None:\n"
             "        return\n"
             "    prompt_progress = _hermes_hub_plain(_hermes_hub_chunk_field(chunk, \"prompt_progress\"))\n"
             "    timings = _hermes_hub_plain(_hermes_hub_chunk_field(chunk, \"timings\"))\n"
+            "    reasoning = _hermes_hub_reasoning_text(chunk)\n"
+            "    if reasoning:\n"
+            "        try:\n"
+            "            cb(\"reasoning.available\", \"_thinking\", reasoning, {})\n"
+            "        except Exception:\n"
+            "            pass\n"
             "    if not prompt_progress and not timings:\n"
             "        return\n"
             "    payload = {\n"
@@ -5782,14 +5807,14 @@ def _patch_agent_chat_completion_helpers(text: str) -> tuple[str, list[str]]:
             "            progress = max(0.0, min(1.0, processed / float(total)))\n"
             "            payload[\"progress\"] = progress\n"
             "            payload[\"percent\"] = round(progress * 100.0)\n"
-            "        payload[\"label\"] = \"llama.cpp: prefill prompt\"\n"
+            "        payload[\"label\"] = \"Elaborazione prompt\"\n"
             "    if isinstance(timings, dict):\n"
             "        payload[\"timings\"] = timings\n"
             "        tps = _hermes_hub_float(timings.get(\"predicted_per_second\") or timings.get(\"tokens_per_second\"))\n"
             "        if tps is not None and tps > 0:\n"
             "            payload[\"tokens_per_second\"] = tps\n"
             "            payload.setdefault(\"phase\", \"generation\")\n"
-            "            payload.setdefault(\"label\", \"llama.cpp: generazione risposta\")\n"
+            "            payload.setdefault(\"label\", \"Generazione risposta\")\n"
             "    try:\n"
             "        cb(\"hermes.processing.progress\", \"llama.cpp\", payload.get(\"label\", \"llama.cpp\"), {}, **payload)\n"
             "    except Exception:\n"
@@ -5800,6 +5825,21 @@ def _patch_agent_chat_completion_helpers(text: str) -> tuple[str, list[str]]:
             "agent helpers llama stream metadata functions",
         )
         changes.append("agent helpers llama stream metadata functions")
+
+    if 'api_kwargs["extra_body"] = _hermes_hub_extra_body' not in text:
+        text, _ = _replace_once(
+            text,
+            "def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=None):\n",
+            "def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=None):\n"
+            "    _hermes_hub_extra_body = api_kwargs.get(\"extra_body\")\n"
+            "    if not isinstance(_hermes_hub_extra_body, dict):\n"
+            "        _hermes_hub_extra_body = {}\n"
+            "    _hermes_hub_extra_body.setdefault(\"return_progress\", True)\n"
+            "    _hermes_hub_extra_body.setdefault(\"timings_per_token\", True)\n"
+            "    api_kwargs[\"extra_body\"] = _hermes_hub_extra_body\n",
+            "agent request real llama prompt progress and timings",
+        )
+        changes.append("agent request real llama prompt progress and timings")
 
     if 'agent._touch_activity("receiving stream response")\n            _hermes_hub_emit_llama_stream_metadata(agent, chunk)' not in text:
         text, _ = _replace_once(

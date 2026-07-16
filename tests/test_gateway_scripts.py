@@ -359,6 +359,44 @@ class GatewayScriptTests(unittest.TestCase):
         self.assertEqual(digests[0], digests[1])
         self.assertEqual(digests[1], digests[2])
 
+    def test_agent_helper_forwards_only_real_prompt_progress_and_reasoning(self):
+        helper = textwrap.dedent(
+            '''
+            def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=None):
+                for chunk in []:
+                    if chunk is not None:
+                        agent._touch_activity("receiving stream response")
+
+                        # Update per-attempt diagnostic counters.
+                        pass
+            '''
+        )
+        patched, changes = self.patcher._patch_agent_chat_completion_helpers(helper)
+        self.assertIn("agent request real llama prompt progress and timings", changes)
+        self.assertIn("agent emit real llama prompt progress and timings", changes)
+        namespace = {}
+        exec(compile(patched, "<patched-agent-helper>", "exec"), namespace)
+        events = []
+        agent = types.SimpleNamespace(
+            tool_progress_callback=lambda event_type, name, preview, args, **kwargs: events.append(
+                (event_type, name, preview, kwargs)
+            )
+        )
+        chunk = types.SimpleNamespace(
+            reasoning_content="Controllo dati.",
+            prompt_progress={"processed": 25, "total": 100, "cache": 5, "time_ms": 1200},
+            timings=None,
+        )
+        namespace["_hermes_hub_emit_llama_stream_metadata"](agent, chunk)
+        self.assertEqual("reasoning.available", events[0][0])
+        self.assertEqual("Controllo dati.", events[0][2])
+        self.assertEqual("hermes.processing.progress", events[1][0])
+        self.assertEqual(25, events[1][3]["percent"])
+        self.assertFalse(events[1][3]["estimated"])
+        second_pass, second_changes = self.patcher._patch_agent_chat_completion_helpers(patched)
+        self.assertEqual([], second_changes)
+        self.assertEqual(patched, second_pass)
+
     def test_hardware_disk_filter_upgrades_old_patched_gateway_and_filters_runtime(self):
         fixture = UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8")
         freshly_patched, _ = self.patcher._patch_text(fixture)

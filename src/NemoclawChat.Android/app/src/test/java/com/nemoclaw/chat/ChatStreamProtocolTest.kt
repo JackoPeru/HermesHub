@@ -49,6 +49,37 @@ class ChatStreamProtocolTest {
     }
 
     @Test
+    fun realPromptProgressKeepsServerCountersWithoutDuplicateEvent() {
+        val events = parseSseData(
+            "hermes.processing.progress",
+            """{"type":"hermes.processing.progress","estimated":false,"percent":25,"prompt_progress":{"processed":25,"total":100,"cache":5,"time_ms":1200}}"""
+        )
+        val progress = events.filterIsInstance<ChatStreamEvent.PromptProgress>()
+        assertEquals(1, progress.size)
+        assertEquals(25, progress.single().percent)
+        assertEquals(25, progress.single().processedTokens)
+        assertEquals(100, progress.single().totalTokens)
+        assertEquals(5, progress.single().cachedTokens)
+        assertEquals(1200.0, progress.single().timeMs ?: -1.0, 0.0)
+        assertFalse(progress.single().estimated)
+    }
+
+    @Test
+    fun estimatedPromptProgressIsNeverShown() {
+        val events = parseSseData(
+            "hermes.processing.progress",
+            """{"type":"hermes.processing.progress","estimated":true,"percent":50}"""
+        )
+        assertTrue(events.none { it is ChatStreamEvent.PromptProgress })
+    }
+
+    @Test
+    fun backendNameIsRemovedFromVisibleStatus() {
+        assertEquals("Elaborazione prompt", friendlyActivityStatus("llama.cpp: prefill prompt"))
+        assertEquals("Attesa primo token della risposta", friendlyActivityStatus("llama.cpp: attesa primo token"))
+    }
+
+    @Test
     fun retryIsAllowedOnlyBeforeAcceptanceForAuthFailures() {
         assertTrue(shouldRetrySseAuth(false, 401, "unauthorized", true))
         assertFalse(shouldRetrySseAuth(true, 401, "unauthorized", true))

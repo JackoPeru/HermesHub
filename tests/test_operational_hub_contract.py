@@ -91,6 +91,9 @@ class OperationalHubContractTests(unittest.TestCase):
 
     def test_reasoning_is_persistent_and_collapsible_on_both_clients(self):
         windows = self.read("src/NemoclawChat.Windows/Pages/StreamingBubble.cs")
+        windows_home = self.read("src/NemoclawChat.Windows/Pages/HomePage.xaml.cs")
+        windows_archive = self.read("src/NemoclawChat.Windows/Services/ChatArchiveStore.cs")
+        windows_gateway = self.read("src/NemoclawChat.Windows/Services/GatewayService.cs")
         android_ui = self.read(
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStreamUi.kt"
         )
@@ -103,6 +106,36 @@ class OperationalHubContractTests(unittest.TestCase):
         self.assertIn("ThinkingExpander(", android_ui)
         self.assertIn("ThinkingSnapshot", android_stream)
         self.assertIn("hermes.reasoning.available", gateway)
+        self.assertIn("_hermes_hub_reasoning_text", gateway)
+        self.assertIn("reasoning.available", gateway)
+        self.assertIn("public string Thinking", windows_archive)
+        self.assertIn("Thinking = finalThinkingBuilder.ToString()", windows_home)
+        self.assertIn("RenderThinkingExpander(thinking)", windows_home)
+        self.assertIn("thinking = message.Thinking", windows_gateway)
+
+    def test_prompt_progress_is_server_reported_and_ui_hides_backend_name(self):
+        windows_stream = self.read("src/NemoclawChat.Windows/Services/ChatStream.cs")
+        windows_ui = self.read("src/NemoclawChat.Windows/Pages/StreamingBubble.cs")
+        android_stream = self.read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStream.kt"
+        )
+        android_ui = self.read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStreamUi.kt"
+        )
+        gateway = self.read("scripts/patch-hermes-gateway-native.py")
+        for source in (windows_stream, windows_ui, android_stream, android_ui):
+            for visible_label in (
+                '"llama.cpp: prefill prompt"',
+                '"llama.cpp: attesa primo token"',
+                '"llama.cpp: elaborazione prompt"',
+                '"llama.cpp: generazione risposta"',
+            ):
+                self.assertNotIn(visible_label, source)
+        self.assertIn("if (progress.Estimated)", windows_ui)
+        self.assertIn("if (state.promptProgressEstimated) return null", android_ui)
+        self.assertIn('setdefault(\\"return_progress\\", True)', gateway)
+        self.assertIn('setdefault(\\"timings_per_token\\", True)', gateway)
+        self.assertIn('payload[\\"percent\\"] = round(progress * 100.0)', gateway)
 
 
 if __name__ == "__main__":
