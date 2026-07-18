@@ -557,7 +557,7 @@ public static class ChatStreamClient
                 string? eventName = null;
                 bool eventOverflow = false;
 
-                while (!reader.EndOfStream)
+                while (!cancellationToken.IsCancellationRequested)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var line = await reader.ReadLineAsync(cancellationToken);
@@ -1182,7 +1182,7 @@ public static class ChatStreamClient
                 yield break;
             }
 
-            if (t.Contains("reasoning") && t.Contains("delta"))
+            if ((t.Contains("reasoning") || t.Contains("analysis")) && t.Contains("delta"))
             {
                 var delta = GetString(element, "delta") ?? GetString(element, "text");
                 if (!string.IsNullOrEmpty(delta))
@@ -1225,7 +1225,8 @@ public static class ChatStreamClient
                 if (element.TryGetProperty("item", out var item) && item.ValueKind == JsonValueKind.Object)
                 {
                     var itemType = GetString(item, "type") ?? string.Empty;
-                    if (itemType.Contains("reasoning", StringComparison.OrdinalIgnoreCase))
+                    if (itemType.Contains("reasoning", StringComparison.OrdinalIgnoreCase) ||
+                        itemType.Contains("analysis", StringComparison.OrdinalIgnoreCase))
                     {
                         var reasoning = ExtractReasoningText(item);
                         if (!string.IsNullOrEmpty(reasoning))
@@ -1329,7 +1330,10 @@ public static class ChatStreamClient
                     {
                         yield return new StreamTextDelta(content);
                     }
-                    var reasoning = GetString(delta, "reasoning") ?? GetString(delta, "reasoning_content");
+                    var reasoning = GetString(delta, "reasoning") ??
+                                    GetString(delta, "reasoning_content") ??
+                                    GetString(delta, "analysis") ??
+                                    GetString(delta, "analysis_content");
                     if (!string.IsNullOrEmpty(reasoning))
                     {
                         yield return new StreamThinkingDelta(reasoning);
@@ -1659,6 +1663,7 @@ public static class ChatStreamClient
     {
         var type = GetString(element, "type") ?? string.Empty;
         if (type.Contains("reasoning", StringComparison.OrdinalIgnoreCase) ||
+            type.Contains("analysis", StringComparison.OrdinalIgnoreCase) ||
             type.Contains("function_call", StringComparison.OrdinalIgnoreCase) ||
             type.Contains("tool", StringComparison.OrdinalIgnoreCase))
         {
@@ -1694,7 +1699,9 @@ public static class ChatStreamClient
         }
 
         var type = GetString(element, "type") ?? string.Empty;
-        var nowInsideReasoning = insideReasoning || type.Contains("reasoning", StringComparison.OrdinalIgnoreCase);
+        var nowInsideReasoning = insideReasoning ||
+                                 type.Contains("reasoning", StringComparison.OrdinalIgnoreCase) ||
+                                 type.Contains("analysis", StringComparison.OrdinalIgnoreCase);
         var output = new StringBuilder();
 
         foreach (var property in element.EnumerateObject())

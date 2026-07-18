@@ -1,11 +1,14 @@
-Hermes Hub 0.6.166 (wake word reale e updater gateway resiliente)
+Hermes Hub 0.6.168 (ragionamento separato, wake word reale e updater resiliente)
 
+- Ragionamento: eventi `analysis`/`reasoning` e blocchi `<think>` finali restano nella sezione dedicata su Windows e Android, senza finire nella risposta.
+- Ragionamento: quando Hermes non espone contenuto, l'interfaccia lo dichiara invece di simularlo.
 - Windows e Android: la frase configurata apre Voce e avvia automaticamente la chiamata quando Hermes Hub è aperto.
 - Voce: dopo l'attivazione la conversazione è continua; non serve ripetere la wake word a ogni turno.
 - Android: ascolto wake word sostenuto da servizio microfono foreground, con richiesta esplicita del permesso audio.
 - Wake word: riavvio affidabile dopo cambi pagina e riconoscimento di prefissi naturali come `Ehi` e `Ok`.
+- Qualita: CI Windows allineata agli analyzer SDK recenti e bootstrap PSGallery affidabile.
 - Gateway: patcher compatibile con callback Responses legacy già modificate.
 - Updater Linux: asset fallito messo in quarantena dopo rollback per evitare blackout ripetuti.
 - Compatibilità: package identity Windows, `applicationId com.nemoclaw.chat`, firme, archivio, endpoint e impostazioni esistenti preservati.
-- Versioni: Windows/AdminBridge `0.6.166`; Android `versionName 0.6.166`, `versionCode 170`.
-- Asset previsti: `HermesHub-0.6.166-android.apk`, `NemoclawChat.Windows_0.6.166.0_x64.msix`, `HermesHub-0.6.166-linux-gateway.tar.gz`.
+- Versioni: Windows/AdminBridge `0.6.168`; Android `versionName 0.6.168`, `versionCode 172`.
+- Asset previsti: `HermesHub-0.6.168-android.apk`, `NemoclawChat.Windows_0.6.168.0_x64.msix`, `HermesHub-0.6.168-linux-gateway.tar.gz`.

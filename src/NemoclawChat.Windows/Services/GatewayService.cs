@@ -1499,7 +1499,7 @@ public static class GatewayService
 
                 await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
                 using var reader = new StreamReader(stream, Encoding.UTF8);
-                while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+                while (!cancellationToken.IsCancellationRequested)
                 {
                     var line = await reader.ReadLineAsync(cancellationToken);
                     if (line is null)

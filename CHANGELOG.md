@@ -2,12 +2,16 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
-## 0.6.166 - 2026-07-18
+## 0.6.168 - 2026-07-18
+
+- Ragionamento separato dalla risposta finale: eventi SSE `analysis`, `reasoning`, `analysis_content` e blocchi `<think>` finali alimentano la sezione dedicata su Windows e Android.
+- Gli item di analisi non contaminano piu' il testo della risposta; se il modello non espone ragionamento, l'interfaccia lo dichiara esplicitamente.
 
 - Wake word trasformata in attivazione reale: quando Hermes Hub è aperto, la frase configurata porta l'app in primo piano, apre Voce e avvia la chiamata su Windows e Android.
 - Dentro una chiamata non serve più ripetere la wake word a ogni intervento; la conversazione resta continua fino alla chiusura.
 - Android mantiene l'ascolto wake word tramite servizio microfono foreground e richiede il permesso audio quando il toggle viene abilitato.
 - Corretto il riavvio del listener dopo stop e cambi pagina; con frase `Hermes` sono accettate anche invocazioni naturali come `Ehi Hermes` e `Ok Hermes`.
+- CI Windows resa affidabile su SDK recenti: corretti analyzer .NET e bootstrap di PSGallery per PSScriptAnalyzer.
 - Patcher gateway compatibile con callback Responses già modificate dalle release precedenti, evitando il crash loop visto durante l'aggiornamento 0.6.164.
 - Updater Linux mette in quarantena lo stesso asset fallito dopo rollback, impedendo nuovi blackout orari finché versione o digest non cambiano.
 

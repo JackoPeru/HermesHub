@@ -15,7 +15,7 @@ public sealed partial class HardwarePage : Page
     private readonly Dictionary<string, List<HardwareSample>> _history = [];
     private AppSettings _settings = new();
     private HardwareSnapshot? _previous;
-    private IReadOnlyList<HardwareComponent> _components = [];
+    private List<HardwareComponent> _components = [];
     private string _selectedComponentId = "cpu";
     private bool _loading;
 
@@ -210,7 +210,7 @@ public sealed partial class HardwarePage : Page
         DetailPanel.Children.Add(StatsGrid(component.Stats));
     }
 
-    private static Border ChartBlock(string title, IReadOnlyList<double?> values, double maxValue, string unit, Brush lineBrush)
+    private static Border ChartBlock(string title, List<double?> values, double maxValue, string unit, Brush lineBrush)
     {
         const double width = 900;
         const double height = 220;
@@ -241,7 +241,7 @@ public sealed partial class HardwarePage : Page
             });
         }
 
-        var plotValues = values.Count == 0 ? Array.Empty<double?>() : values;
+        List<double?> plotValues = values.Count == 0 ? new List<double?>() : values;
         if (plotValues.Any(item => item is not null))
         {
             var points = new PointCollection();

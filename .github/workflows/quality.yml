@@ -89,6 +89,7 @@ jobs:
       - name: Build release
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           dotnet build .\src\NemoclawChat.Windows\NemoclawChat.Windows.csproj -c Release -p:Platform=x64
           dotnet build .\src\ChatClaw.AdminBridge\ChatClaw.AdminBridge.csproj -c Release
 
@@ -101,6 +102,9 @@ jobs:
       - name: PowerShell analysis
         shell: pwsh
         run: |
+          if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+            Register-PSRepository -Default
+          }
           Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
           $results = Invoke-ScriptAnalyzer -Path .\scripts -Recurse -Severity Warning,Error
           $results | Format-Table -AutoSize

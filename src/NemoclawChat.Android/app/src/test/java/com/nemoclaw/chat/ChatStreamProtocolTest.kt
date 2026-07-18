@@ -49,6 +49,23 @@ class ChatStreamProtocolTest {
     }
 
     @Test
+    fun analysisItemsGoToReasoningInsteadOfFinalAnswer() {
+        val events = parseSseData(
+            "response.output_item.done",
+            """{"type":"response.output_item.done","item":{"type":"analysis","content":[{"type":"output_text","text":"Controllo i dati."}]}}"""
+        )
+        assertTrue(events.any { it is ChatStreamEvent.ThinkingSnapshot && it.text == "Controllo i dati." })
+        assertFalse(events.any { it is ChatStreamEvent.TextSnapshot || it is ChatStreamEvent.TextDelta })
+    }
+
+    @Test
+    fun thinkTagsInFinalSnapshotStayOutOfFinalAnswer() {
+        val events = ThinkExtractor().processSnapshot("<think>Controllo i dati.</think>Risposta finale")
+        assertTrue(events.any { it is ChatStreamEvent.ThinkingSnapshot && it.text == "Controllo i dati." })
+        assertTrue(events.any { it is ChatStreamEvent.TextSnapshot && it.text == "Risposta finale" })
+    }
+
+    @Test
     fun realPromptProgressKeepsServerCountersWithoutDuplicateEvent() {
         val events = parseSseData(
             "hermes.processing.progress",

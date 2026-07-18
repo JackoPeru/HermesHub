@@ -1326,7 +1326,7 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
             }
             return out
         }
-        t.contains("reasoning") && t.contains("delta") -> {
+        (t.contains("reasoning") || t.contains("analysis")) && t.contains("delta") -> {
             val delta = obj.optString("delta", obj.optString("text", ""))
             if (delta.isNotEmpty()) out += ChatStreamEvent.ThinkingDelta(delta)
             return out
@@ -1355,7 +1355,7 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
             val item = obj.optJSONObject("item")
             if (item != null) {
                 val itemType = item.optString("type", "")
-                if (itemType.contains("reasoning", ignoreCase = true)) {
+                if (itemType.contains("reasoning", ignoreCase = true) || itemType.contains("analysis", ignoreCase = true)) {
                     val reasoning = extractReasoningText(item)
                     if (reasoning.isNotEmpty()) out += ChatStreamEvent.ThinkingSnapshot(reasoning)
                 } else if (itemType.contains("message", ignoreCase = true)) {
@@ -1429,7 +1429,12 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
             if (delta != null) {
                 val content = delta.optString("content", "")
                 if (content.isNotEmpty()) out += ChatStreamEvent.TextDelta(content)
-                val reasoning = if (delta.has("reasoning")) delta.optString("reasoning", "") else delta.optString("reasoning_content", "")
+                val reasoning = when {
+                    delta.has("reasoning") -> delta.optString("reasoning", "")
+                    delta.has("reasoning_content") -> delta.optString("reasoning_content", "")
+                    delta.has("analysis") -> delta.optString("analysis", "")
+                    else -> delta.optString("analysis_content", "")
+                }
                 if (reasoning.isNotEmpty()) out += ChatStreamEvent.ThinkingDelta(reasoning)
                 val toolCalls = delta.optJSONArray("tool_calls")
                 if (toolCalls != null) {
@@ -1454,6 +1459,9 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
             if (message != null) {
                 extractTextFromAnyJson(message).takeIf { it.isNotEmpty() }?.let {
                     out += ChatStreamEvent.TextSnapshot(it)
+                }
+                extractReasoningText(message).takeIf { it.isNotEmpty() }?.let {
+                    out += ChatStreamEvent.ThinkingSnapshot(it)
                 }
                 out += extractToolEventsFromAnyJson(message)
             }
@@ -1657,6 +1665,7 @@ private suspend fun executeCancellableRequest(request: Request): Pair<Int, Strin
 private fun isNonAssistantTextPayload(obj: JSONObject): Boolean {
     val type = obj.optString("type", "").lowercase()
     if (type.contains("reasoning") ||
+        type.contains("analysis") ||
         type.contains("function_call") ||
         type.contains("tool")
     ) {
@@ -1679,7 +1688,9 @@ private fun extractReasoningText(value: Any?, insideReasoning: Boolean = false):
         }
         is JSONObject -> {
             val type = value.optString("type", "")
-            val nowInsideReasoning = insideReasoning || type.contains("reasoning", ignoreCase = true)
+            val nowInsideReasoning = insideReasoning ||
+                type.contains("reasoning", ignoreCase = true) ||
+                type.contains("analysis", ignoreCase = true)
             buildString {
                 val keys = value.keys()
                 while (keys.hasNext()) {
@@ -2113,6 +2124,19 @@ internal class ThinkExtractor {
     }
 
     fun processSnapshot(snapshot: String): List<ChatStreamEvent> {
-        return flush() + ChatStreamEvent.TextSnapshot(snapshot)
+        val pending = flush()
+        val snapshotExtractor = ThinkExtractor()
+        val parts = snapshotExtractor.process(snapshot) + snapshotExtractor.flush()
+        val answer = buildString {
+            parts.filterIsInstance<ChatStreamEvent.TextDelta>().forEach { append(it.delta) }
+        }
+        val reasoning = buildString {
+            parts.filterIsInstance<ChatStreamEvent.ThinkingDelta>().forEach { append(it.delta) }
+        }
+        return buildList {
+            addAll(pending)
+            if (reasoning.isNotEmpty()) add(ChatStreamEvent.ThinkingSnapshot(reasoning))
+            if (answer.isNotEmpty() || reasoning.isEmpty()) add(ChatStreamEvent.TextSnapshot(answer))
+        }
     }
 }
