@@ -32,6 +32,7 @@ PREVIOUS_TARGET=""
 FINAL_RELEASE_DIR=""
 OLD_VERSION_PRESENT=false
 OLD_VERSION=""
+FAILED_RELEASE_FILE="$INSTALL_DIR/failed-release"
 
 usage() {
   cat <<'EOF'
@@ -145,6 +146,15 @@ write_version() {
   mv -f "$tmp_version" "$INSTALL_DIR/VERSION"
 }
 
+record_failed_release() {
+  if [ -z "${LATEST_VERSION:-}" ] || [ -z "${ASSET_DIGEST:-}" ]; then
+    return
+  fi
+  local tmp_failed="$INSTALL_DIR/.failed-release.new.$$"
+  printf '%s|%s\n' "$LATEST_VERSION" "$ASSET_DIGEST" > "$tmp_failed"
+  mv -f "$tmp_failed" "$FAILED_RELEASE_FILE"
+}
+
 restore_units() {
   local name
   for name in hermes-hub.service hermes-hub-linux-update.service hermes-hub-linux-update.timer hermes-power-monitor.service; do
@@ -182,6 +192,7 @@ rollback() {
       *) echo "WARN: refusing to remove unsafe rollback path: $FINAL_RELEASE_DIR" >&2 ;;
     esac
   fi
+  record_failed_release
 }
 
 cleanup() {
@@ -378,6 +389,12 @@ if [ "$CHECK_ONLY" = "true" ]; then
   exit 0
 fi
 
+FAILED_RELEASE_KEY="${LATEST_VERSION}|${ASSET_DIGEST}"
+if [ "$FORCE" != "true" ] && [ -f "$FAILED_RELEASE_FILE" ] && [ "$(tr -d '\r\n' < "$FAILED_RELEASE_FILE")" = "$FAILED_RELEASE_KEY" ]; then
+  echo "Quarantined failed release: $LATEST_VERSION (use --force to retry)"
+  exit 0
+fi
+
 if [ "$FORCE" != "true" ] && [ -n "$LOCAL_VERSION" ] && [ "$LOCAL_VERSION" = "$LATEST_VERSION" ]; then
   echo "Already installed: $LATEST_VERSION"
   exit 0
@@ -539,6 +556,7 @@ if [ -n "$PREVIOUS_TARGET" ] && [ -d "$PREVIOUS_TARGET" ]; then
   atomic_symlink "$PREVIOUS_TARGET" "$INSTALL_DIR/previous"
 fi
 COMMITTED=true
+rm -f "$FAILED_RELEASE_FILE"
 
 echo "Installed: $LATEST_VERSION"
 echo "Launcher: $HOME/hermes-hub-linux.sh"

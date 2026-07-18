@@ -8,11 +8,18 @@ class VoiceWakeWordTest {
     @Test
     fun stripsConfiguredWakePhraseAndPunctuation() {
         assertEquals("controlla il server", stripWakePhrase("Ehi Hermes, controlla il server", "Ehi Hermes"))
+        assertEquals("", stripWakePhrase("Hermes", "Hermes"))
     }
 
     @Test
     fun acceptsCommonItalianHermesTranscription() {
         assertEquals("apri la chat", stripWakePhrase("Ermes: apri la chat", "Hermes"))
+    }
+
+    @Test
+    fun acceptsNaturalPrefixBeforeConfiguredPhrase() {
+        assertEquals("", stripWakePhrase("Ehi Hermes", "Hermes"))
+        assertEquals("avvia la chiamata", stripWakePhrase("Ok Hermes, avvia la chiamata", "Hermes"))
     }
 
     @Test

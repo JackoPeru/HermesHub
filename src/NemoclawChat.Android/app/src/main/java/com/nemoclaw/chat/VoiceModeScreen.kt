@@ -153,6 +153,15 @@ internal val SupportedParticleShapes = listOf(SphereParticleShape, NeuralCorePar
 internal val SupportedWakePhrases = listOf(DefaultWakePhrase, "Ehi Hermes", "Ok Hermes")
 private val WakeTokenRegex = Regex("[\\p{L}\\p{N}]+")
 
+internal object VoiceProfileEvents {
+    var revision by mutableStateOf(0L)
+        private set
+
+    fun notifyChanged() {
+        revision++
+    }
+}
+
 internal fun particleShapeLabel(shape: String): String = when (shape) {
     NeuralCoreParticleShape -> "Nucleo neurale"
     HermesHeadParticleShape -> "Testa Hermes"
@@ -209,6 +218,7 @@ internal fun saveVoiceProfile(context: Context, projectId: String, profile: Voic
         putBoolean("bluetooth:$keySuffix", profile.bluetooth)
         putString("particles:$keySuffix", safeParticleShape)
     }
+    VoiceProfileEvents.notifyChanged()
 }
 
 internal fun normalizeWakePhrase(value: String?): String {
@@ -220,10 +230,13 @@ internal fun stripWakePhrase(transcript: String, wakePhrase: String?): String? {
     val phraseTokens = WakeTokenRegex.findAll(normalizeWakePhrase(wakePhrase)).toList()
     val transcriptTokens = WakeTokenRegex.findAll(transcript).toList()
     if (phraseTokens.isEmpty() || transcriptTokens.size < phraseTokens.size) return null
-    phraseTokens.indices.forEach { index ->
-        if (!wakeTokensEqual(transcriptTokens[index].value, phraseTokens[index].value)) return null
-    }
-    val end = transcriptTokens[phraseTokens.lastIndex].range.last + 1
+    val matchStart = (0..transcriptTokens.size - phraseTokens.size).firstOrNull { transcriptIndex ->
+        phraseTokens.indices.all { phraseIndex ->
+            wakeTokensEqual(transcriptTokens[transcriptIndex + phraseIndex].value, phraseTokens[phraseIndex].value)
+        }
+    } ?: return null
+    val finalToken = transcriptTokens[matchStart + phraseTokens.lastIndex]
+    val end = finalToken.range.last + 1
     return transcript.substring(end).trimStart(' ', ',', ':', ';', '.', '-', '!', '?')
 }
 
@@ -263,7 +276,7 @@ internal suspend fun previewVoiceProfile(
 }
 
 @Composable
-internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?) {
+internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartToken: Long = 0L) {
     val context = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
@@ -283,6 +296,15 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?) {
             startRequested = true
         } else {
             Toast.makeText(context, "Permesso microfono negato.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    LaunchedEffect(autoStartToken) {
+        if (autoStartToken == 0L || callActive) return@LaunchedEffect
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            startRequested = true
+        } else {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
@@ -311,8 +333,6 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?) {
                     isCallActive = { callActive },
                     setPhase = { phase = it },
                     setStatus = { status = it },
-                    wakeWordEnabled = { voiceProfile.wakeWord },
-                    wakePhrase = { voiceProfile.wakePhrase },
                     voice = { voiceProfile.voice },
                     speed = { voiceProfile.speed.toDouble() }
                 )
@@ -451,12 +471,12 @@ private fun routeVoiceBluetooth(context: Context, enabled: Boolean) {
     }
 }
 
-private fun startVoiceForegroundService(context: Context) {
-    val intent = Intent(context, VoiceCallService::class.java).setAction("start")
+internal fun startVoiceForegroundService(context: Context, mode: String = "call") {
+    val intent = Intent(context, VoiceCallService::class.java).setAction("start").putExtra("mode", mode)
     ContextCompat.startForegroundService(context, intent)
 }
 
-private fun stopVoiceForegroundService(context: Context) {
+internal fun stopVoiceForegroundService(context: Context) {
     context.startService(Intent(context, VoiceCallService::class.java).setAction("stop"))
 }
 
@@ -549,8 +569,6 @@ private suspend fun runVoiceCallLoop(
     isCallActive: () -> Boolean,
     setPhase: (VoiceCallPhase) -> Unit,
     setStatus: (String) -> Unit,
-    wakeWordEnabled: () -> Boolean,
-    wakePhrase: () -> String,
     voice: () -> String,
     speed: () -> Double
 ) {
@@ -568,24 +586,15 @@ private suspend fun runVoiceCallLoop(
             } finally {
                 file.delete()
             }
-            val wakeAdjusted = if (wakeWordEnabled()) {
-                val matched = stripWakePhrase(text, wakePhrase())
-                if (matched == null) {
-                    setPhase(VoiceCallPhase.Listening)
-                    setStatus("In attesa di «${wakePhrase()}».")
-                    continue
-                }
-                matched
-            } else text
             val now = System.currentTimeMillis()
-            if (!isUsefulTranscript(wakeAdjusted) || (wakeAdjusted.equals(lastTranscript, ignoreCase = true) && now - lastTranscriptAt < 8_000)) {
+            if (!isUsefulTranscript(text) || (text.equals(lastTranscript, ignoreCase = true) && now - lastTranscriptAt < 8_000)) {
                 continue
             }
-            lastTranscript = wakeAdjusted
+            lastTranscript = text
             lastTranscriptAt = now
-            setStatus("Tu: ${wakeAdjusted.trimForStatus()}")
+            setStatus("Tu: ${text.trimForStatus()}")
             coroutineScope {
-                val turn = async { runVoiceTurn(context, settings, apiKey, history, voiceConversation, wakeAdjusted, setPhase, setStatus, voice(), speed()) }
+                val turn = async { runVoiceTurn(context, settings, apiKey, history, voiceConversation, text, setPhase, setStatus, voice(), speed()) }
                 VoiceTurnController.job = turn
                 try { turn.await() } catch (_: CancellationException) { if (coroutineContext.isActive) { setPhase(VoiceCallPhase.Listening); setStatus("Interrotto. Ti ascolto.") } } finally { if (VoiceTurnController.job === turn) VoiceTurnController.job = null }
             }
@@ -595,6 +604,31 @@ private suspend fun runVoiceCallLoop(
             setPhase(VoiceCallPhase.Error)
             setStatus("Errore voce: ${ex.message ?: "errore sconosciuto"}")
             kotlinx.coroutines.delay(900)
+        }
+    }
+}
+
+internal suspend fun awaitWakePhrase(
+    context: Context,
+    settings: AppSettings,
+    apiKey: String?,
+    wakePhrase: String
+) {
+    while (coroutineContext.isActive) {
+        try {
+            val file = captureVoiceUtterance(context) ?: continue
+            val transcript = try {
+                transcribeVoiceFile(settings, apiKey, file).trim()
+            } finally {
+                file.delete()
+            }
+            if (stripWakePhrase(transcript, wakePhrase) != null) {
+                return
+            }
+        } catch (ex: CancellationException) {
+            throw ex
+        } catch (_: Exception) {
+            kotlinx.coroutines.delay(2_000)
         }
     }
 }

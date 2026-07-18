@@ -89,10 +89,11 @@ class OperationalHubContractTests(unittest.TestCase):
             self.assertNotIn("Anteprima", source)
         self.assertEqual(android_voice.count('listOf("if_sara", "im_nicola")'), 1)
 
-    def test_wake_phrase_is_configurable_and_used_by_both_voice_loops(self):
+    def test_wake_phrase_is_configurable_and_starts_both_clients(self):
         windows_settings = self.read("src/NemoclawChat.Windows/Pages/SettingsPage.xaml")
         windows_store = self.read("src/NemoclawChat.Windows/Services/VoicePreferencesStore.cs")
-        windows_voice = self.read("src/NemoclawChat.Windows/Pages/VoicePage.xaml.cs")
+        windows_listener = self.read("src/NemoclawChat.Windows/Services/WakeWordListener.cs")
+        windows_shell = self.read("src/NemoclawChat.Windows/MainWindow.xaml.cs")
         android_settings = self.read(
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
         )
@@ -100,10 +101,12 @@ class OperationalHubContractTests(unittest.TestCase):
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/VoiceModeScreen.kt"
         )
         self.assertIn('x:Name="VoiceWakePhraseBox"', windows_settings)
-        self.assertIn("TryStripWakePhrase(text, _wakePhrase", windows_voice)
         self.assertIn("SupportedWakePhrases", windows_store)
+        self.assertIn("TryStripWakePhrase(transcript, profile.WakePhrase", windows_listener)
+        self.assertIn("new VoiceNavigationRequest(AutoStart: true)", windows_shell)
         self.assertIn('SettingsField("Wake word personalizzata"', android_settings)
-        self.assertIn("stripWakePhrase(text, wakePhrase())", android_voice)
+        self.assertIn("awaitWakePhrase(", android_voice)
+        self.assertIn("stripWakePhrase(transcript, wakePhrase)", android_voice)
 
     def test_quick_actions_are_above_or_exclude_empty_message_layers(self):
         windows = self.read("src/NemoclawChat.Windows/Pages/HomePage.xaml")

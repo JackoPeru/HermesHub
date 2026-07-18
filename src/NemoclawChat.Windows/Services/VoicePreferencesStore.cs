@@ -24,6 +24,7 @@ public static class VoicePreferencesStore
     public static readonly string[] SupportedParticleShapes = [SphereShape, NeuralCoreShape, HermesHeadShape];
     public static readonly string[] SupportedWakePhrases = [DefaultWakePhrase, "Ehi Hermes", "Ok Hermes"];
     private static readonly Regex WakeTokenRegex = new(@"[\p{L}\p{N}]+", RegexOptions.Compiled);
+    public static event Action? Changed;
 
     public static VoicePreferences Load(string? projectId)
     {
@@ -81,6 +82,7 @@ public static class VoicePreferencesStore
             preferences.ShowTranscript,
             particleShape,
             wakePhrase);
+        Changed?.Invoke();
     }
 
     public static string NormalizeParticleShape(string? value) =>
@@ -106,15 +108,31 @@ public static class VoicePreferencesStore
             return false;
         }
 
-        for (var index = 0; index < phraseTokens.Count; index++)
+        var matchStart = -1;
+        for (var transcriptIndex = 0; transcriptIndex <= transcriptTokens.Count - phraseTokens.Count; transcriptIndex++)
         {
-            if (!WakeTokensEqual(transcriptTokens[index].Value, phraseTokens[index].Value))
+            var matches = true;
+            for (var phraseIndex = 0; phraseIndex < phraseTokens.Count; phraseIndex++)
             {
-                return false;
+                if (!WakeTokensEqual(transcriptTokens[transcriptIndex + phraseIndex].Value, phraseTokens[phraseIndex].Value))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches)
+            {
+                matchStart = transcriptIndex;
+                break;
             }
         }
+        if (matchStart < 0)
+        {
+            return false;
+        }
 
-        var end = transcriptTokens[phraseTokens.Count - 1].Index + transcriptTokens[phraseTokens.Count - 1].Length;
+        var finalToken = transcriptTokens[matchStart + phraseTokens.Count - 1];
+        var end = finalToken.Index + finalToken.Length;
         command = transcript[end..].TrimStart(' ', ',', ':', ';', '.', '-', '!', '?');
         return true;
     }

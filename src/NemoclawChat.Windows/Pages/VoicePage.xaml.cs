@@ -12,6 +12,7 @@ using Windows.Media.Core;
 using Windows.Media.Playback;
 using Windows.Storage;
 using Windows.System;
+using Microsoft.UI.Xaml.Navigation;
 
 namespace NemoclawChat_Windows.Pages;
 
@@ -42,15 +43,20 @@ public sealed partial class VoicePage : Page
     private string _lastTranscript = string.Empty;
     private string _selectedVoice = "if_sara";
     private double _voiceSpeed = 1.08;
-    private bool _wakeWordEnabled;
-    private string _wakePhrase = VoicePreferencesStore.DefaultWakePhrase;
     private bool _pushToTalkEnabled;
     private bool _showTranscript;
     private string _particleShape = VoicePreferencesStore.SphereShape;
+    private bool _autoStartRequested;
 
     public VoicePage()
     {
         InitializeComponent();
+    }
+
+    protected override void OnNavigatedTo(NavigationEventArgs e)
+    {
+        base.OnNavigatedTo(e);
+        _autoStartRequested = e.Parameter is VoiceNavigationRequest { AutoStart: true };
     }
 
     private void Page_Loaded(object sender, RoutedEventArgs e)
@@ -58,6 +64,11 @@ public sealed partial class VoicePage : Page
         Root.Focus(FocusState.Programmatic);
         ParticleCanvas.Paused = false;
         LoadVoiceProfile();
+        if (_autoStartRequested && !_callActive)
+        {
+            _autoStartRequested = false;
+            _ = StartCallSessionAsync();
+        }
     }
 
     private async void Page_Unloaded(object sender, RoutedEventArgs e)
@@ -237,11 +248,6 @@ public sealed partial class VoicePage : Page
                 SetPhase(VoiceCallPhase.Transcribing, "Trascrivo...");
                 var settings = AppSettingsStore.Load();
                 var text = await SpeechGatewayService.TranscribeFileAsync(settings, path, cancellationToken).ConfigureAwait(false);
-                if (_wakeWordEnabled && !VoicePreferencesStore.TryStripWakePhrase(text, _wakePhrase, out text))
-                {
-                    SetPhase(VoiceCallPhase.Listening, $"In attesa di «{_wakePhrase}».");
-                    continue;
-                }
                 if (!ShouldSendTranscript(text))
                 {
                     continue;
@@ -614,8 +620,6 @@ public sealed partial class VoicePage : Page
         var profile = VoicePreferencesStore.Load(AppSettingsStore.Load().ActiveProjectId);
         _selectedVoice = profile.Voice;
         _voiceSpeed = profile.Speed;
-        _wakeWordEnabled = profile.WakeWord;
-        _wakePhrase = VoicePreferencesStore.NormalizeWakePhrase(profile.WakePhrase);
         _pushToTalkEnabled = profile.PushToTalk;
         _showTranscript = profile.ShowTranscript;
         _particleShape = VoicePreferencesStore.NormalizeParticleShape(profile.ParticleShape);
@@ -937,3 +941,5 @@ public sealed partial class VoicePage : Page
     private readonly record struct ParticleTarget(double X, double Y, double Z);
     private readonly record struct ProjectedParticle(double X, double Y, double Size, double Alpha, bool Hot);
 }
+
+public sealed record VoiceNavigationRequest(bool AutoStart = false);

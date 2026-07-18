@@ -117,6 +117,7 @@ class GatewayScriptTests(unittest.TestCase):
             version_info.mode = 0o644
             archive.addfile(version_info, io.BytesIO(version_bytes))
 
+        asset_digest = f"sha256:{hashlib.sha256(archive_path.read_bytes()).hexdigest()}"
         release_json = root / "release.json"
         release_json.write_text(
             json.dumps(
@@ -130,7 +131,7 @@ class GatewayScriptTests(unittest.TestCase):
                                 "name": archive_path.name,
                                 "browser_download_url": f"https://assets.invalid/{archive_path.name}",
                                 "size": asset_size_override or archive_path.stat().st_size,
-                                "digest": f"sha256:{hashlib.sha256(archive_path.read_bytes()).hexdigest()}",
+                                "digest": asset_digest,
                             }
                         ],
                     }
@@ -254,6 +255,7 @@ class GatewayScriptTests(unittest.TestCase):
         environment.pop("GITHUB_TOKEN", None)
         return {
             "version": version,
+            "asset_digest": asset_digest,
             "home": home,
             "install_dir": install_dir,
             "bin_dir": bin_dir,
@@ -358,6 +360,55 @@ class GatewayScriptTests(unittest.TestCase):
                 self.assertEqual([], changes)
         self.assertEqual(digests[0], digests[1])
         self.assertEqual(digests[1], digests[2])
+
+    def test_gateway_patch_upgrades_legacy_responses_progress_callback(self):
+        patched, _ = self.patcher._patch_text(UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8"))
+        current_callback = textwrap.indent(textwrap.dedent(
+            '''
+            def _on_tool_progress(event_type, name, preview, args, **kwargs):
+                """Forward Responses progress metadata and reasoning."""
+                event_name = str(event_type or "hermes.tool.progress")
+                is_reasoning = "reasoning" in event_name.lower()
+                if str(name).startswith("_") and not is_reasoning:
+                    return
+                payload = {
+                    "type": "hermes.reasoning.available" if is_reasoning else event_name,
+                    "event": "reasoning.available" if is_reasoning else event_name,
+                    "tool": name,
+                    "label": preview,
+                    "reasoning": (preview or "") if is_reasoning else None,
+                    "arguments": args or {},
+                }
+                payload.update(kwargs or {})
+                _stream_q.put(("__hermes_raw_event__", payload))
+            '''
+        ).strip(), "            ")
+        legacy_callback = textwrap.indent(textwrap.dedent(
+            '''
+            def _on_tool_progress(event_type, name, preview, args, **kwargs):
+                """Pass through Hermes-native tool/progress metadata."""
+                if str(name).startswith("_"):
+                    return
+                payload = {
+                    "type": str(event_type or "hermes.tool.progress"),
+                    "event": str(event_type or "hermes.tool.progress"),
+                    "tool": name,
+                    "label": preview,
+                    "arguments": args or {},
+                }
+                payload.update(kwargs or {})
+                _stream_q.put(("__hermes_raw_event__", payload))
+            '''
+        ).strip(), "            ")
+        self.assertEqual(1, patched.count(current_callback))
+        legacy_patched = patched.replace(current_callback, legacy_callback, 1)
+
+        upgraded, changes = self.patcher._patch_text(legacy_patched)
+
+        compile(upgraded, "<legacy-responses-progress-upgrade>", "exec")
+        self.assertIn("responses reasoning passthrough callback", changes)
+        self.assertEqual(1, upgraded.count(current_callback))
+        self.assertNotIn(legacy_callback, upgraded)
 
     def test_agent_helper_forwards_only_real_prompt_progress_and_reasoning(self):
         helper = textwrap.dedent(
@@ -715,6 +766,26 @@ class GatewayScriptTests(unittest.TestCase):
                     "https://probe.invalid/v1/capabilities"
                 ),
             )
+            failed_release = install_dir / "failed-release"
+            self.assertEqual(
+                f'{fixture["version"]}|{fixture["asset_digest"]}',
+                failed_release.read_text(encoding="utf-8").strip(),
+            )
+            curl_before_retry = Path(fixture["curl_log"]).read_text(encoding="utf-8").splitlines()
+            systemctl_before_retry = Path(fixture["systemctl_log"]).read_text(encoding="utf-8")
+
+            retry = self._run_updater(bash, fixture)
+
+            self.assertEqual(0, retry.returncode, retry.stdout + retry.stderr)
+            self.assertIn("Quarantined failed release", retry.stdout)
+            curl_after_retry = Path(fixture["curl_log"]).read_text(encoding="utf-8").splitlines()
+            asset_url = f'https://assets.invalid/HermesHub-{fixture["version"]}-linux-gateway.tar.gz'
+            self.assertEqual(curl_before_retry.count(asset_url), curl_after_retry.count(asset_url))
+            self.assertEqual(
+                curl_before_retry.count("https://probe.invalid/v1/capabilities"),
+                curl_after_retry.count("https://probe.invalid/v1/capabilities"),
+            )
+            self.assertEqual(systemctl_before_retry, Path(fixture["systemctl_log"]).read_text(encoding="utf-8"))
 
     def test_launcher_env_merge_preserves_unowned_keys(self):
         script = (SCRIPTS / "hermes-hub-linux.sh").read_text(encoding="utf-8")

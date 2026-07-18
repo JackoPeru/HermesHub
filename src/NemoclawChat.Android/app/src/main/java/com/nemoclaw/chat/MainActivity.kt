@@ -1012,6 +1012,11 @@ private fun ChatApp() {
         }
     }
     var settings by remember { mutableStateOf(loadSettings(context)) }
+    val voiceProfileRevision = VoiceProfileEvents.revision
+    val wakeVoiceProfile = remember(settings.activeProjectId, voiceProfileRevision) {
+        loadVoiceProfile(context, settings.activeProjectId)
+    }
+    var voiceAutoStartToken by rememberSaveable { mutableStateOf(0L) }
     var pendingPrompt by rememberSaveable { mutableStateOf("") }
     var pendingConversationId by rememberSaveable { mutableStateOf<String?>(null) }
     var sidebarOpen by rememberSaveable { mutableStateOf(false) }
@@ -1031,6 +1036,36 @@ private fun ChatApp() {
         while (chatState.activeStreams.isNotEmpty()) {
             chatState.streamUiTickNs = System.nanoTime()
             delay(500L)
+        }
+    }
+    LaunchedEffect(
+        selectedTab,
+        wakeVoiceProfile.wakeWord,
+        wakeVoiceProfile.wakePhrase,
+        settings.gatewayUrl,
+        voiceProfileRevision
+    ) {
+        if (!wakeVoiceProfile.wakeWord || selectedTab == Tab.Voice) return@LaunchedEffect
+        if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            return@LaunchedEffect
+        }
+
+        var detected = false
+        startVoiceForegroundService(context, mode = "wake")
+        try {
+            awaitWakePhrase(context, settings, loadGatewaySecret(context), wakeVoiceProfile.wakePhrase)
+            detected = true
+            val activity = context as? Activity
+            if (activity != null) {
+                runCatching {
+                    context.getSystemService(android.app.ActivityManager::class.java)
+                        .moveTaskToFront(activity.taskId, android.app.ActivityManager.MOVE_TASK_WITH_HOME)
+                }
+            }
+            voiceAutoStartToken = System.nanoTime()
+            setSelectedTab(Tab.Voice)
+        } finally {
+            if (!detected) stopVoiceForegroundService(context)
         }
     }
     LaunchedEffect(chatState.draft) {
@@ -1101,7 +1136,7 @@ private fun ChatApp() {
                         onOpenSidebar = { sidebarOpen = true },
                         onSwitchTab = { tab -> setSelectedTab(tab) }
                     )
-                    Tab.Voice -> VoiceModeScreen(settings, loadGatewaySecret(context))
+                    Tab.Voice -> VoiceModeScreen(settings, loadGatewaySecret(context), voiceAutoStartToken)
                     Tab.Projects -> ProjectsScreen(
                         context = context,
                         settings = settings,
@@ -6914,6 +6949,14 @@ private fun SettingsScreen(
     var voiceParticleShape by remember(settings.activeProjectId) { mutableStateOf(initialVoiceProfile.particleShape) }
     var status by remember { mutableStateOf("Pronto.") }
     var advancedVisible by rememberSaveable { mutableStateOf(false) }
+    val wakePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        voiceWakeWord = granted
+        status = if (granted) {
+            "Permesso microfono concesso. Premi Salva per attivare la wake word."
+        } else {
+            "Permesso microfono negato: wake word non attivata."
+        }
+    }
 
     fun currentSettings(scale: Float = fontScale): AppSettings {
         return AppSettings(
@@ -7055,9 +7098,15 @@ private fun SettingsScreen(
                             }
                         }
                         SettingsField("Wake word personalizzata", voiceWakePhrase, { voiceWakePhrase = it })
-                        MetricSwitch("Abilita wake word", voiceWakeWord) { voiceWakeWord = it }
+                        MetricSwitch("Abilita wake word", voiceWakeWord) { enabled ->
+                            if (enabled && androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                                wakePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            } else {
+                                voiceWakeWord = enabled
+                            }
+                        }
                         Text(
-                            "Attiva durante una sessione Voce: Hermes risponde solo dopo la frase scelta.",
+                            "Quando Hermes Hub è aperto, la frase scelta porta l'app in primo piano e avvia una chiamata.",
                             color = AppColors.Muted,
                             fontSize = 12.sp
                         )

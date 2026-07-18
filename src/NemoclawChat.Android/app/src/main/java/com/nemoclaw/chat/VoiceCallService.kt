@@ -14,13 +14,14 @@ class VoiceCallService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "stop") { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(); return START_NOT_STICKY }
+        val wakeMode = intent?.getStringExtra("mode") == "wake"
         val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel("hermes_voice_call", "Chiamata Hermes", NotificationManager.IMPORTANCE_LOW))
+        manager.createNotificationChannel(NotificationChannel("hermes_voice_call", "Voce Hermes", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, 8642, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(this, "hermes_voice_call")
             .setSmallIcon(R.drawable.ic_launcher_monochrome)
-            .setContentTitle("Chiamata Hermes attiva")
-            .setContentText("Microfono e risposta vocale continuano in background.")
+            .setContentTitle(if (wakeMode) "Wake word Hermes attiva" else "Chiamata Hermes attiva")
+            .setContentText(if (wakeMode) "Pronuncia la frase scelta per avviare una chiamata." else "Microfono e risposta vocale continuano in background.")
             .setOngoing(true)
             .setContentIntent(open)
             .build()

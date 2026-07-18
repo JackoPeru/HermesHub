@@ -1,12 +1,11 @@
-Hermes Hub 0.6.164 (wake word configurabile e quick actions ripristinate)
+Hermes Hub 0.6.166 (wake word reale e updater gateway resiliente)
 
-- Windows e Android: wake word configurabile per progetto con preset `Hermes`, `Ehi Hermes`, `Ok Hermes` o frase personalizzata.
-- Voce: matching tollerante a maiuscole, accenti, punteggiatura e trascrizione italiana `Ermes`; feedback visibile mentre attende la frase scelta.
-- Chat: corretto il livello trasparente che assorbiva click e tap delle tre operazioni rapide nello stato vuoto.
-- Voce: aggiunta selezione forma particelle tra Sfera, Nucleo neurale e Testa Hermes.
-- Compatibilita: package identity Windows, `applicationId com.nemoclaw.chat`, firme, archivio, endpoint e impostazioni esistenti preservati.
-- Versioni: Windows/AdminBridge `0.6.164`; Android `versionName 0.6.164`, `versionCode 168`.
-- Asset: `HermesHub-0.6.164-android.apk`, `NemoclawChat.Windows_0.6.164.0_x64.msix`, `HermesHub-0.6.164-linux-gateway.tar.gz`.
-- SHA-256 Android: `D60E9EAAD31C4E394022B65B244952F6A7137082D783691B0EA4BA8905277C6D`.
-- SHA-256 Windows: `86EEEB0514C2D882DF74C3CD204BE1BB7A872D30B1C3019818CB61BB6410592E`.
-- SHA-256 gateway Linux: `27F5A92E22376FC57D8E5FB989036A119A3AA3F042FDBC68F840722F21D5299B`.
+- Windows e Android: la frase configurata apre Voce e avvia automaticamente la chiamata quando Hermes Hub è aperto.
+- Voce: dopo l'attivazione la conversazione è continua; non serve ripetere la wake word a ogni turno.
+- Android: ascolto wake word sostenuto da servizio microfono foreground, con richiesta esplicita del permesso audio.
+- Wake word: riavvio affidabile dopo cambi pagina e riconoscimento di prefissi naturali come `Ehi` e `Ok`.
+- Gateway: patcher compatibile con callback Responses legacy già modificate.
+- Updater Linux: asset fallito messo in quarantena dopo rollback per evitare blackout ripetuti.
+- Compatibilità: package identity Windows, `applicationId com.nemoclaw.chat`, firme, archivio, endpoint e impostazioni esistenti preservati.
+- Versioni: Windows/AdminBridge `0.6.166`; Android `versionName 0.6.166`, `versionCode 170`.
+- Asset previsti: `HermesHub-0.6.166-android.apk`, `NemoclawChat.Windows_0.6.166.0_x64.msix`, `HermesHub-0.6.166-linux-gateway.tar.gz`.

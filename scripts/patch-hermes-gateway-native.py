@@ -5235,8 +5235,22 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
 
     responses_reasoning_passthrough = '"""Forward Responses progress metadata and reasoning."""'
     if responses_reasoning_passthrough not in text:
-        text, _ = _replace_once(
-            text,
+        legacy_responses_progress = (
+            '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
+            '                """Pass through Hermes-native tool/progress metadata."""\n'
+            '                if str(name).startswith("_"):\n'
+            '                    return\n'
+            '                payload = {\n'
+            '                    "type": str(event_type or "hermes.tool.progress"),\n'
+            '                    "event": str(event_type or "hermes.tool.progress"),\n'
+            '                    "tool": name,\n'
+            '                    "label": preview,\n'
+            '                    "arguments": args or {},\n'
+            '                }\n'
+            '                payload.update(kwargs or {})\n'
+            '                _stream_q.put(("__hermes_raw_event__", payload))\n'
+        )
+        unpatched_responses_progress = (
             '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
             '                """Queue non-start tool progress events if needed in future.\n'
             '\n'
@@ -5244,7 +5258,16 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             '                and ``tool_complete_callback`` for exact call-id correlation,\n'
             '                so progress events are currently ignored here.\n'
             '                """\n'
-            '                return\n',
+            '                return\n'
+        )
+        responses_progress_source = (
+            legacy_responses_progress
+            if legacy_responses_progress in text
+            else unpatched_responses_progress
+        )
+        text, _ = _replace_once(
+            text,
+            responses_progress_source,
             '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
             '                """Forward Responses progress metadata and reasoning."""\n'
             '                event_name = str(event_type or "hermes.tool.progress")\n'

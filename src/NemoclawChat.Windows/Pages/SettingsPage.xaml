@@ -69,7 +69,7 @@
                     <TextBlock
                         FontSize="12"
                         Foreground="{StaticResource MutedTextBrush}"
-                        Text="Scegli un suggerimento o scrivi una frase personalizzata. La wake word è attiva durante una sessione Voce."
+                        Text="Scegli un suggerimento o scrivi una frase personalizzata. Quando Hermes Hub è aperto, la wake word avvia automaticamente una chiamata."
                         TextWrapping="Wrap" />
                     <ToggleSwitch x:Name="VoicePushToTalkSwitch" Header="Push-to-talk" OffContent="Conversazione continua" OnContent="Barra spaziatrice interrompe Hermes e riapre ascolto" />
                     <ToggleSwitch x:Name="VoiceTranscriptSwitch" Header="Trascrizione durante chiamata" OffContent="Schermata libera" OnContent="Mostra trascrizione" />

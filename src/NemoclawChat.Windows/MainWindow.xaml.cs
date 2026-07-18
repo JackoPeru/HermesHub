@@ -19,6 +19,7 @@ public sealed partial class MainWindow : Window
     private bool _closing;
     private readonly HubNotificationPoller _notificationPoller;
     private readonly ChatArchiveSyncService _archiveSyncService;
+    private readonly WakeWordListener _wakeWordListener;
 
     public MainWindow()
     {
@@ -30,6 +31,9 @@ public sealed partial class MainWindow : Window
         AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Standard;
         AppWindow.SetIcon("Assets/AppIcon.ico");
         RestoreWindowState();
+        _wakeWordListener = new WakeWordListener(DispatcherQueue);
+        _wakeWordListener.Detected += WakeWordListener_Detected;
+        VoicePreferencesStore.Changed += VoicePreferencesStore_Changed;
         ContentFrame.Navigated += ContentFrame_Navigated;
         ContentFrame.Navigate(typeof(HomePage));
         ChatArchiveStore.Changed += RefreshRecentChats;
@@ -38,6 +42,7 @@ public sealed partial class MainWindow : Window
         _notificationPoller.Start();
         _archiveSyncService = new ChatArchiveSyncService();
         _archiveSyncService.Start();
+        RefreshWakeWordListener();
         RefreshRecentChats();
     }
 
@@ -46,8 +51,12 @@ public sealed partial class MainWindow : Window
         if (_closing) return;
         _closing = true;
         ChatArchiveStore.Changed -= RefreshRecentChats;
+        VoicePreferencesStore.Changed -= VoicePreferencesStore_Changed;
+        _wakeWordListener.Detected -= WakeWordListener_Detected;
         ContentFrame.Navigated -= ContentFrame_Navigated;
         _notificationPoller.Stop();
+        try { await _wakeWordListener.DisposeAsync(); }
+        catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"[MainWindow] wake listener cleanup error: {ex}"); }
         try { await _archiveSyncService.StopAsync(); }
         catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"[MainWindow] sync cleanup error: {ex}"); }
         try { SaveWindowState(); }
@@ -157,6 +166,39 @@ public sealed partial class MainWindow : Window
     private void Voice_Click(object sender, RoutedEventArgs e)
     {
         ContentFrame.Navigate(typeof(VoicePage));
+    }
+
+    private void WakeWordListener_Detected()
+    {
+        if (_closing || ContentFrame.CurrentSourcePageType == typeof(VoicePage))
+        {
+            return;
+        }
+
+        _wakeWordListener.Stop();
+        Activate();
+        ContentFrame.Navigate(typeof(VoicePage), new VoiceNavigationRequest(AutoStart: true));
+    }
+
+    private void VoicePreferencesStore_Changed() => RefreshWakeWordListener();
+
+    private void RefreshWakeWordListener()
+    {
+        if (_closing || ContentFrame.CurrentSourcePageType == typeof(VoicePage))
+        {
+            _wakeWordListener.Stop();
+            return;
+        }
+
+        var settings = AppSettingsStore.Load();
+        if (VoicePreferencesStore.Load(settings.ActiveProjectId).WakeWord)
+        {
+            _wakeWordListener.Start();
+        }
+        else
+        {
+            _wakeWordListener.Stop();
+        }
     }
 
     private void Video_Click(object sender, RoutedEventArgs e)
@@ -298,6 +340,7 @@ public sealed partial class MainWindow : Window
         {
             ApplyStandardShell();
         }
+        RefreshWakeWordListener();
     }
 
     private void UpdateShellNavigation(Type pageType)
