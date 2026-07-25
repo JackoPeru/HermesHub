@@ -67,6 +67,7 @@ Le impostazioni salvate dall'utente non vanno sovrascritte durante migrazioni o 
 - In caso di errore: gateway precedente intatto e avvio fallito in modo esplicito.
 - Store Hub: scritture atomiche, lock e limiti configurabili.
 - Upload/STT/TTS/media: timeout e limiti espliciti; mai caricare body grandi interamente senza necessita'.
+- STT e TTS gateway devono completare un warm-up GPU bloccante prima dell'ascolto HTTP; se CUDA o preload falliscono, avvio fail-closed e nessun fallback CPU silenzioso.
 - `HERMES_MEDIA_ROOTS`: directory specifiche prima; `$HERMES_TERMINAL_CWD`/`%h` solo fallback finale.
 - Updater: lock, asset Linux corretto, digest/size/versione, staging, symlink atomico, health probe e rollback.
 - Il timer deve poter completare download, riavvio e probe entro `TimeoutStartSec`.
@@ -148,4 +149,4 @@ Prima della pubblicazione:
 
 ## Release corrente
 
-Versione corrente: `0.6.172`.
+Versione corrente: `0.6.173`.

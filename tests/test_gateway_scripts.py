@@ -827,6 +827,17 @@ class GatewayScriptTests(unittest.TestCase):
         self.assertIn("HERMES_API_KEY=new-key", result)
         self.assertIn('HERMES_HUB_CONVERSATIONS_PATH="/tmp/conversations with spaces.json"', result)
 
+    def test_launcher_requires_resident_gpu_stt_and_tts_by_default(self):
+        script = (SCRIPTS / "hermes-hub-linux.sh").read_text(encoding="utf-8")
+        for expected in (
+            'HERMES_KOKORO_PRELOAD_REQUIRED="${HERMES_KOKORO_PRELOAD_REQUIRED:-1}"',
+            'HERMES_KOKORO_REQUIRE_GPU="${HERMES_KOKORO_REQUIRE_GPU:-1}"',
+            'HERMES_WHISPER_PRELOAD_REQUIRED="${HERMES_WHISPER_PRELOAD_REQUIRED:-1}"',
+            'HERMES_WHISPER_DEVICE="${HERMES_WHISPER_DEVICE:-cuda}"',
+            'HERMES_WHISPER_DEVICE_INDEX="${HERMES_WHISPER_DEVICE_INDEX:-1}"',
+        ):
+            self.assertIn(expected, script)
+
     def test_launcher_restores_persisted_primary_and_legacy_hub_alias(self):
         bash = find_bash()
         if not bash:
@@ -1157,6 +1168,11 @@ class GatewayScriptTests(unittest.TestCase):
         self.assertIn("_hermes_hub_publish_conversation_event_payload(event)", hardened)
         self.assertIn('path.with_suffix(path.suffix + ".corrupt")', hardened)
         self.assertIn("NamedTemporaryFile", hardened)
+        self.assertIn("_hermes_hub_warmup_whisper", hardened)
+        self.assertIn("list(segments)", hardened)
+        self.assertIn("Required Whisper GPU preload failed", hardened)
+        self.assertIn(".result(timeout=timeout)", hardened)
+        self.assertNotIn("Whisper preload scheduled", hardened)
         hardened_again, second_changes = self.patcher._harden_runtime(hardened)
         self.assertEqual(hardened, hardened_again)
         self.assertEqual([], second_changes)
@@ -1164,7 +1180,9 @@ class GatewayScriptTests(unittest.TestCase):
     def test_kokoro_mixed_language_segments_preserve_italian_and_switch_english_terms(self):
         source = UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8")
         patched, _ = self.patcher._patch_text(source)
-        runtime_start = patched.index("# HERMES_HUB_KOKORO_GPU_V6")
+        self.assertIn("Required Kokoro GPU preload failed", patched)
+        self.assertIn("Kokoro CUDA initialization failed and CPU fallback is disabled", patched)
+        runtime_start = patched.index("# HERMES_HUB_KOKORO_GPU_V7")
         runtime_end = patched.index("\ndef _hermes_hub_preload_kokoro():", runtime_start)
         namespace: dict[str, object] = {}
         exec(patched[runtime_start:runtime_end], namespace)

@@ -4,6 +4,9 @@ Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub res
 
 ## Unreleased
 
+## 0.6.173 - 2026-07-25
+
+- Gateway Linux ora completa warm-up reale di Whisper STT e Kokoro TTS su GPU prima di accettare traffico; preload o CUDA mancanti fanno fallire esplicitamente l'avvio, senza fallback CPU silenzioso.
 - Il packaging Android ufficiale e' ora DAT-only e fallisce senza PAT Packages, credenziali Meta reali, classi DAT, `META_DAT_ENABLED=true`, `minSdk 29`, versione e firma storica corrette.
 - Gradle blocca ogni task release senza DAT, salvo override esplicito riservato allo sviluppo; AGENTS e CI usano lo stesso script ufficiale verificabile.
 

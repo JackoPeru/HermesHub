@@ -111,3 +111,13 @@ Il tar deve includere `VERSION`, launcher, patcher, installer, updater, unit/tim
 - update simulato con health probe riuscito e fallito.
 
 Non riavviare il gateway live senza accesso shell e rollback verificato.
+
+## Readiness GPU STT/TTS
+
+Il launcher mantiene Whisper `large-v3-turbo` int8 e Kokoro FP16 sulla GPU 1. Entrambi eseguono inferenza di warm-up bloccante durante l'avvio: la porta gateway non diventa disponibile finche' modelli e workspace CUDA non sono pronti. Con i default ufficiali, preload disabilitato, provider CPU o errore CUDA fanno fallire il processo; systemd lo riavvia senza degradare silenziosamente su CPU.
+
+Override operativi principali:
+
+- `HERMES_WHISPER_PRELOAD_REQUIRED=1`, `HERMES_WHISPER_DEVICE=cuda`, `HERMES_WHISPER_DEVICE_INDEX=1`;
+- `HERMES_KOKORO_PRELOAD_REQUIRED=1`, `HERMES_KOKORO_REQUIRE_GPU=1`, `HERMES_KOKORO_CUDA_DEVICE=1`;
+- `HERMES_WHISPER_PRELOAD_TIMEOUT_SECONDS=300` e `HERMES_KOKORO_PRELOAD_TIMEOUT_SECONDS=180`.

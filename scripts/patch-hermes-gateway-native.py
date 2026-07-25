@@ -316,6 +316,34 @@ def _hermes_hub_ensure_whisper_model():
     return _hermes_hub_whisper_model
 
 
+def _hermes_hub_warmup_whisper():
+    global _hermes_hub_whisper_ready
+    model = _hermes_hub_ensure_whisper_model()
+    if globals().get("_hermes_hub_whisper_ready", False):
+        return model
+    import tempfile as _tempfile
+    import wave as _wave
+    from pathlib import Path as _Path
+
+    warmup_path = None
+    try:
+        with _tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as handle:
+            warmup_path = handle.name
+        with _wave.open(warmup_path, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(16000)
+            wav.writeframes(b"\x00\x00" * 8000)
+        language = os.environ.get("HERMES_WHISPER_LANGUAGE", "it")
+        segments, _ = model.transcribe(warmup_path, beam_size=1, language=language)
+        list(segments)
+        _hermes_hub_whisper_ready = True
+        return model
+    finally:
+        if warmup_path:
+            _Path(warmup_path).unlink(missing_ok=True)
+
+
 def _hermes_hub_transcribe_file(path):
     model = _hermes_hub_ensure_whisper_model()
     language = os.environ.get("HERMES_WHISPER_LANGUAGE", "it")
@@ -460,6 +488,67 @@ def _hermes_hub_prune_media_cache(cache_dir, keep=None):
             raise PatchError("runtime hardening helper anchor not found")
         text = text.replace(anchor, runtime_helpers + anchor, 1)
         changes.append("bounded runtime executors and helpers")
+
+    whisper_runtime = r'''def _hermes_hub_ensure_whisper_model():
+    global _hermes_hub_whisper_model
+    if "_hermes_hub_whisper_model" not in globals():
+        from faster_whisper import WhisperModel
+
+        model = os.environ.get("HERMES_WHISPER_MODEL", "large-v3-turbo")
+        device = os.environ.get("HERMES_WHISPER_DEVICE", "cuda")
+        compute_type = os.environ.get("HERMES_WHISPER_COMPUTE_TYPE", "int8")
+        device_index = _hermes_hub_env_int("HERMES_WHISPER_DEVICE_INDEX", 1, 0, 32)
+        kwargs = {"device": device, "compute_type": compute_type}
+        if device.lower() == "cuda":
+            kwargs["device_index"] = [device_index]
+        _hermes_hub_whisper_model = WhisperModel(model, **kwargs)
+    return _hermes_hub_whisper_model
+
+
+def _hermes_hub_warmup_whisper():
+    global _hermes_hub_whisper_ready
+    model = _hermes_hub_ensure_whisper_model()
+    if globals().get("_hermes_hub_whisper_ready", False):
+        return model
+    import tempfile as _tempfile
+    import wave as _wave
+    from pathlib import Path as _Path
+
+    warmup_path = None
+    try:
+        with _tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as handle:
+            warmup_path = handle.name
+        with _wave.open(warmup_path, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(16000)
+            wav.writeframes(b"\x00\x00" * 8000)
+        language = os.environ.get("HERMES_WHISPER_LANGUAGE", "it")
+        segments, _ = model.transcribe(warmup_path, beam_size=1, language=language)
+        list(segments)
+        _hermes_hub_whisper_ready = True
+        return model
+    finally:
+        if warmup_path:
+            _Path(warmup_path).unlink(missing_ok=True)
+
+
+def _hermes_hub_transcribe_file(path):
+    model = _hermes_hub_ensure_whisper_model()
+    language = os.environ.get("HERMES_WHISPER_LANGUAGE", "it")
+    beam_size = _hermes_hub_env_int("HERMES_WHISPER_BEAM_SIZE", 5, 1, 10)
+    segments, _ = model.transcribe(path, beam_size=beam_size, language=language)
+    return "".join(segment.text for segment in segments).strip()
+'''
+    upgraded_text, count = re.subn(
+        r'(?s)def _hermes_hub_ensure_whisper_model\(\):\n.*?(?=\n\ndef _hermes_hub_cached_hardware_snapshot)',
+        lambda _: whisper_runtime.rstrip(),
+        text,
+        count=1,
+    )
+    if count and upgraded_text != text:
+        text = upgraded_text
+        changes.append("blocking Whisper GPU warmup helper")
 
     safe_name = r'''def _hermes_hub_safe_upload_name(filename: str, mime_type: str) -> str:
     import re as _re
@@ -1175,35 +1264,70 @@ def _hermes_hub_publish_conversation_event(reason: str, result: Optional[Dict[st
         )
         changes.append("strict finite TTS speed validation")
 
-    kokoro_preload = "_hermes_hub_kokoro_executor().submit(_hermes_hub_kokoro_speech_bytes, 'ok', voice, 'it', 1.08).result()"
-    if kokoro_preload in text:
-        text = text.replace(
-            kokoro_preload,
-            "_hermes_hub_kokoro_executor().submit(_hermes_hub_kokoro_speech_bytes, 'ok', voice, 'it', 1.08).result(timeout=_hermes_hub_env_int('HERMES_KOKORO_PRELOAD_TIMEOUT_SECONDS', 120, 10, 900))",
-            1,
-        )
-        changes.append("bounded Kokoro preload timeout")
+    preload_kokoro = r'''def _hermes_hub_preload_kokoro():
+    enabled = str(os.environ.get("HERMES_KOKORO_PRELOAD", "1")).lower() not in {"0", "false", "no"}
+    required = str(os.environ.get("HERMES_KOKORO_PRELOAD_REQUIRED", "1")).lower() not in {"0", "false", "no"}
+    if not enabled:
+        if required:
+            raise RuntimeError("Kokoro GPU preload is required but disabled")
+        return
+    try:
+        voice = os.environ.get("HERMES_KOKORO_TTS_VOICE", "if_sara")
+        timeout = _hermes_hub_env_int("HERMES_KOKORO_PRELOAD_TIMEOUT_SECONDS", 180, 10, 900)
+        _hermes_hub_kokoro_executor().submit(
+            _hermes_hub_kokoro_speech_bytes, "ok", voice, "it", 1.08
+        ).result(timeout=timeout)
+        if required and globals().get("_hermes_hub_kokoro_provider") != "CUDAExecutionProvider":
+            raise RuntimeError("Kokoro preload did not retain a CUDAExecutionProvider session")
+        print("Kokoro TTS GPU warmup completed.", flush=True)
+    except Exception as exc:
+        print("Failed to pre-load Kokoro TTS on GPU:", exc, flush=True)
+        if required:
+            raise RuntimeError("Required Kokoro GPU preload failed") from exc
+
+
+_hermes_hub_preload_kokoro()
+'''
+    upgraded_text, count = re.subn(
+        r'(?s)def _hermes_hub_preload_kokoro\(\):\n.*?_hermes_hub_preload_kokoro\(\)\n?',
+        lambda _: preload_kokoro,
+        text,
+        count=1,
+    )
+    if count and upgraded_text != text:
+        text = upgraded_text
+        changes.append("required blocking Kokoro GPU warmup")
 
     preload_whisper = r'''def _hermes_hub_preload_whisper():
+    enabled = str(os.environ.get("HERMES_WHISPER_PRELOAD", "1")).lower() not in {"0", "false", "no"}
+    required = str(os.environ.get("HERMES_WHISPER_PRELOAD_REQUIRED", "1")).lower() not in {"0", "false", "no"}
+    if not enabled:
+        if required:
+            raise RuntimeError("Whisper GPU preload is required but disabled")
+        return
+    if required and str(os.environ.get("HERMES_WHISPER_DEVICE", "cuda")).lower() != "cuda":
+        raise RuntimeError("Whisper GPU preload requires HERMES_WHISPER_DEVICE=cuda")
     try:
-        enabled = str(os.environ.get("HERMES_WHISPER_PRELOAD", "1")).lower() not in {"0", "false", "no"}
-        if enabled:
-            _hermes_hub_stt_executor().submit(_hermes_hub_ensure_whisper_model)
-            print("Whisper preload scheduled on dedicated executor.")
+        timeout = _hermes_hub_env_int("HERMES_WHISPER_PRELOAD_TIMEOUT_SECONDS", 300, 10, 1200)
+        _hermes_hub_stt_executor().submit(_hermes_hub_warmup_whisper).result(timeout=timeout)
+        print("Whisper STT GPU warmup completed.", flush=True)
     except Exception as exc:
-        print("Failed to schedule Whisper preload:", exc)
+        print("Failed to pre-load Whisper STT on GPU:", exc, flush=True)
+        if required:
+            raise RuntimeError("Required Whisper GPU preload failed") from exc
 
 
 _hermes_hub_preload_whisper()
 '''
-    text, count = re.subn(
+    upgraded_text, count = re.subn(
         r'(?s)def _hermes_hub_preload_whisper\(\):\n.*?_hermes_hub_preload_whisper\(\)\n?',
         lambda _: preload_whisper,
         text,
         count=1,
     )
-    if count:
-        changes.append("non-blocking configurable Whisper preload")
+    if count and upgraded_text != text:
+        text = upgraded_text
+        changes.append("required blocking Whisper GPU warmup")
 
     library_replacements = {
         'for path in sorted(root.rglob("*"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True):':
@@ -7812,7 +7936,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
 
     kokoro_runtime = (
             "\n\n"
-            "# HERMES_HUB_KOKORO_GPU_V6\n"
+            "# HERMES_HUB_KOKORO_GPU_V7\n"
             "def _hermes_hub_kokoro_executor():\n"
             "    from concurrent.futures import ThreadPoolExecutor\n"
             "\n"
@@ -7834,9 +7958,12 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "    gpu_path = Path(os.environ.get('HERMES_KOKORO_GPU_MODEL_PATH', '~/.hermes/kokoro-tts/models/kokoro-v1.0.fp16.onnx')).expanduser()\n"
             "    configured_path = str(os.environ.get('HERMES_KOKORO_MODEL_PATH', '')).strip()\n"
             "    provider = 'CPUExecutionProvider' if force_cpu else str(os.environ.get('HERMES_KOKORO_ONNX_PROVIDER', 'CUDAExecutionProvider')).strip()\n"
+            "    require_gpu = str(os.environ.get('HERMES_KOKORO_REQUIRE_GPU', '1')).lower() not in {'0', 'false', 'no'}\n"
             "    device_id = int(os.environ.get('HERMES_KOKORO_CUDA_DEVICE', '1'))\n"
             "    use_gpu = provider == 'CUDAExecutionProvider' and gpu_path.is_file()\n"
             "    model_path = Path(configured_path).expanduser() if configured_path else (gpu_path if use_gpu else cpu_path)\n"
+            "    if require_gpu and not use_gpu:\n"
+            "        raise RuntimeError('Kokoro GPU is required but CUDAExecutionProvider or the FP16 model is unavailable')\n"
             "    if not model_path.is_file():\n"
             "        raise RuntimeError(f'Kokoro model not found: {model_path}')\n"
             "    if not voices_path.is_file():\n"
@@ -7864,6 +7991,8 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "            gc.collect()\n"
             "            print(f'Kokoro TTS provider: CUDAExecutionProvider device {device_id}, model {model_path.name}')\n"
             "        except Exception as exc:\n"
+            "            if require_gpu:\n"
+            "                raise RuntimeError('Kokoro CUDA initialization failed and CPU fallback is disabled') from exc\n"
             "            print('Kokoro CUDA unavailable, falling back to CPU:', exc)\n"
             "            if not cpu_path.is_file():\n"
             "                raise\n"
@@ -7915,6 +8044,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "\n"
             "def _hermes_hub_kokoro_speech_bytes(text, voice='if_sara', lang='it', speed=1.0):\n"
             "    import io\n"
+            "    import os\n"
             "    import threading\n"
             "\n"
             "    import numpy as _np\n"
@@ -7936,6 +8066,8 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "                provider_failure = any(token in detail for token in ('cuda', 'cudnn', 'cublas', 'onnxruntime', 'execution provider', 'device error'))\n"
             "                if _hermes_hub_kokoro_provider != 'CUDAExecutionProvider' or not provider_failure:\n"
             "                    raise\n"
+            "                if str(os.environ.get('HERMES_KOKORO_REQUIRE_GPU', '1')).lower() not in {'0', 'false', 'no'}:\n"
+            "                    raise RuntimeError('Kokoro CUDA inference failed and CPU fallback is disabled') from exc\n"
             "                print('Kokoro CUDA inference failed, switching to CPU:', exc)\n"
             "                _hermes_hub_kokoro_model, _hermes_hub_kokoro_provider = _hermes_hub_build_kokoro_model(force_cpu=True)\n"
             "                return _hermes_hub_kokoro_model.create(segment_text, voice=segment_voice, lang=segment_lang, speed=float(speed))\n"
@@ -7990,7 +8122,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
     if "def _hermes_hub_kokoro_speech_bytes(" not in text:
         text += kokoro_runtime
         changes.append("kokoro tts runtime helpers")
-    elif "# HERMES_HUB_KOKORO_GPU_V6" not in text:
+    elif "# HERMES_HUB_KOKORO_GPU_V7" not in text:
         runtime_start = text.find("# HERMES_HUB_KOKORO_GPU_")
         if runtime_start < 0:
             runtime_start = text.index("def _hermes_hub_kokoro_speech_bytes(")
@@ -7998,7 +8130,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         if runtime_end < 0:
             raise PatchError("kokoro runtime upgrade anchor not found")
         text = text[:runtime_start] + kokoro_runtime.lstrip("\n") + text[runtime_end:]
-        changes.append("upgrade kokoro tts runtime to mixed-language v6")
+        changes.append("upgrade Kokoro TTS runtime to required GPU v7")
 
     if "def _hermes_hub_preload_kokoro():" not in text:
         text += (
