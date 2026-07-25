@@ -1,12 +1,13 @@
-Hermes Hub 0.6.173 (Meta DAT e audio GPU sempre pronto)
+Hermes Hub 0.6.174 (credenziali protette e sessioni Jarvis robuste)
 
-- L'APK Android ufficiale include sempre Meta Wearables DAT 0.8.0; il packaging fallisce se dipendenze, credenziali, classi DAT, minSdk o firma storica non corrispondono.
-- Gradle impedisce la pubblicazione accidentale di una variante Android standard priva del supporto Ray-Ban Meta.
-- Whisper STT e Kokoro TTS completano un'inferenza di warm-up sulla GPU 1 prima che il gateway accetti traffico.
-- Se CUDA, modello o preload STT/TTS falliscono, il gateway non parte e non degrada silenziosamente su CPU.
-- Aggiunti timeout configurabili, controlli degli indici CUDA, test di idempotenza del patcher e regressioni per la readiness GPU.
-- Versioni: Windows/AdminBridge `0.6.173`; Android `versionName 0.6.173`, `versionCode 177`.
-- Asset previsti: `HermesHub-0.6.173-android.apk`, `NemoclawChat.Windows_0.6.173.0_x64.msix`, `HermesHub-0.6.173-linux-gateway.tar.gz`.
-- SHA-256 Android: `dfb7740bb66d054bea8951810c723a8ce93900425fbfe94f92608a44e81ea49e`.
-- SHA-256 Windows: `8976ab4b133f75fe13beb0752b993a1365a123eece981d3de65a9dd82a5a05b7`.
-- SHA-256 Linux gateway: `30d42e97f9450ef6178eef378f8cc9fd0a2374a8050dd7701ff5bbbd241bf865`.
+- I backup Android escludono API key, token, segreti e credenziali; un errore Android Keystore ora fallisce senza mai salvare la chiave in chiaro.
+- Autenticazione e query token media sono limitati alla stessa origine Hermes configurata; i link copiati su Android e Windows restano puliti.
+- Jarvis Android annulla correttamente gli avvii incompleti, attende la sorgente audio/video e ignora aggiornamenti o feedback di sessioni scadute.
+- Il gateway Jarvis ricontrolla la sessione dopo gli I/O asincroni, bloccando frame, turni e feedback tardivi dopo la chiusura.
+- Request e upload gateway hanno ora default finiti e configurabili; i payload base64 oltre soglia vengono rifiutati prima della decodifica.
+- La sincronizzazione archivio Android resta inattiva su installazioni nuove finche' non esiste un endpoint Hermes assoluto valido.
+- Versioni: Windows/AdminBridge `0.6.174`; Android `versionName 0.6.174`, `versionCode 178`.
+- Asset: `HermesHub-0.6.174-android.apk`, `NemoclawChat.Windows_0.6.174.0_x64.msix`, `HermesHub-0.6.174-linux-gateway.tar.gz`.
+- SHA-256 Android: `f41f473e0545b3044f566a6c35198497b0ab2235a72a32917d14f0f8889e4ff1`.
+- SHA-256 Windows: `459865aea110f8d780bff62ddd111920d429fe078708c7d6c71d7ed58a32d10b`.
+- SHA-256 Linux gateway: `544803426a9df03c5692f0903144fb4db19c4766a9f4653aaf529fb082294227`.

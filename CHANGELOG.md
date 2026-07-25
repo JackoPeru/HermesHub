@@ -4,6 +4,16 @@ Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub res
 
 ## Unreleased
 
+## 0.6.174 - 2026-07-26
+
+- Le credenziali Android non vengono piu' esportate nei backup locali e non possono degradare in chiaro se Android Keystore non e' disponibile.
+- Token e API key Hermes restano confinati all'origine configurata: URL media esterni e link copiati non ricevono piu' Bearer o query token.
+- Jarvis Android annulla in modo deterministico gli avvii incompleti, attende la sorgente prima dello stato attivo e impedisce feedback o aggiornamenti su sessioni scadute.
+- Il gateway Jarvis ricontrolla la sessione dopo ogni I/O asincrono, impedendo frame, turni e feedback tardivi su sessioni eliminate.
+- Le nuove installazioni Android non tentano piu' la sincronizzazione archivio finche' non e' configurato un endpoint Hermes assoluto.
+- Il gateway applica limiti finiti e configurabili a request e upload e rifiuta il base64 sovradimensionato prima della decodifica in memoria.
+- Aggiunti test di regressione per backup, Keystore, origine media, lifecycle Jarvis, concorrenza gateway e configurazione iniziale.
+
 ## 0.6.173 - 2026-07-25
 
 - Gateway Linux ora completa warm-up reale di Whisper STT e Kokoro TTS su GPU prima di accettare traffico; preload o CUDA mancanti fanno fallire esplicitamente l'avvio, senza fallback CPU silenzioso.

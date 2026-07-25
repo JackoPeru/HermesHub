@@ -363,6 +363,12 @@ class GatewayScriptTests(unittest.TestCase):
                 self.assertIn('route["max_iterations"] = max(1, min(120, int(configured_max_iterations)))', patched)
                 self.assertIn('route["max_tokens"] = max(64, min(4096, int(configured_max_tokens)))', patched)
                 self.assertIn('runtime_kwargs["max_tokens"] = int(route["max_tokens"])', patched)
+                self.assertIn('HERMES_GATEWAY_MAX_REQUEST_MB", "256"', patched)
+                self.assertIn("finite configurable gateway body limit", patched)
+                self.assertIn('HERMES_HUB_MAX_UPLOAD_MB", 150, 1, 4096', patched)
+                self.assertIn("if not encoded or estimated > max_bytes + 3:", patched)
+                self.assertIn("for offset in range(0, len(encoded), chunk_chars):", patched)
+                self.assertNotIn("102400) * 1024 * 1024", patched)
                 self.assertIn('"squashfs"', patched)
                 self.assertIn("device.startswith('/dev/loop')", patched)
             else:

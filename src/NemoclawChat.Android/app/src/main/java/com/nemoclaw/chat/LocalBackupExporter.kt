@@ -9,7 +9,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-internal fun exportLocalBackup(context: Context, apiKey: String?): String {
+internal fun exportLocalBackup(context: Context): String {
     val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
     val archivePrefs = sharedPreferencesJson(context, "chatclaw_archive")
     val conversations = archiveJsonArray(archivePrefs)
@@ -23,10 +23,6 @@ internal fun exportLocalBackup(context: Context, apiKey: String?): String {
         .put("conversations", conversations)
         .put("tasks", parseJsonArray(sharedPreferencesJson(context, "chatclaw_tasks").optString("items", "[]")))
         .put("workspace", sharedPreferencesJson(context, "chatclaw_workspace_requests"))
-
-    if (!apiKey.isNullOrBlank()) {
-        backup.put("gatewayApiKey", apiKey.trim())
-    }
 
     val dir = File(context.cacheDir, "exports").apply { mkdirs() }
     val file = File(dir, "HermesHub-backup-$timestamp.json")
@@ -59,6 +55,7 @@ private fun sharedPreferencesJson(context: Context, name: String): JSONObject {
     val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
     val obj = JSONObject()
     prefs.all.toSortedMap().forEach { (key, value) ->
+        if (isSensitiveBackupKey(key)) return@forEach
         when (value) {
             null -> obj.put(key, JSONObject.NULL)
             is String -> obj.put(key, value)
@@ -71,4 +68,10 @@ private fun sharedPreferencesJson(context: Context, name: String): JSONObject {
         }
     }
     return obj
+}
+
+private fun isSensitiveBackupKey(key: String): Boolean {
+    val normalized = key.lowercase(Locale.ROOT).filter(Char::isLetterOrDigit)
+    return listOf("apikey", "token", "secret", "password", "credential", "authorization")
+        .any(normalized::contains)
 }

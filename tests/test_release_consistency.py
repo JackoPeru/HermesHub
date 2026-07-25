@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.173"
-EXPECTED_ANDROID_VERSION_CODE = 177
+EXPECTED_VERSION = "0.6.174"
+EXPECTED_ANDROID_VERSION_CODE = 178
 
 
 def read(relative_path: str) -> str:
@@ -16,6 +16,11 @@ def read(relative_path: str) -> str:
 
 
 class ReleaseConsistencyTests(unittest.TestCase):
+    def test_gateway_launcher_defaults_are_finite(self) -> None:
+        launcher = read("scripts/hermes-hub-linux.sh")
+        self.assertIn('HERMES_GATEWAY_MAX_REQUEST_MB="${HERMES_GATEWAY_MAX_REQUEST_MB:-256}"', launcher)
+        self.assertIn('HERMES_HUB_MAX_UPLOAD_MB="${HERMES_HUB_MAX_UPLOAD_MB:-150}"', launcher)
+
     def test_application_versions_are_aligned(self) -> None:
         windows_project = read("src/NemoclawChat.Windows/NemoclawChat.Windows.csproj")
         admin_project = read("src/ChatClaw.AdminBridge/ChatClaw.AdminBridge.csproj")
@@ -183,6 +188,57 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertNotIn("http://", read("src/NemoclawChat.Windows/Services/AppSettings.cs"))
         self.assertNotIn("http://", read("src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt").split("private object AppDefaults", 1)[1].split("}", 1)[0])
         self.assertNotIn("/home/", public_runtime)
+
+    def test_android_backup_never_exports_credentials(self) -> None:
+        exporter = read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/LocalBackupExporter.kt"
+        )
+        main = read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
+        )
+        self.assertIn("if (isSensitiveBackupKey(key)) return@forEach", exporter)
+        for marker in ("apikey", "token", "secret", "password", "credential", "authorization"):
+            self.assertIn(f'"{marker}"', exporter)
+        self.assertNotIn('.put("gatewayApiKey"', exporter)
+        self.assertNotIn("apiKey: String?", exporter)
+        self.assertIn("exportLocalBackup(context)", main)
+        self.assertNotIn("exportLocalBackup(context, apiKey)", main)
+
+    def test_android_gateway_secret_storage_fails_closed(self) -> None:
+        main = read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
+        )
+        self.assertIn("private fun saveGatewaySecret(context: Context, secret: String?): Boolean", main)
+        self.assertIn("}.getOrNull() ?: return false", main)
+        self.assertIn("if (!saveGatewaySecret(context, apiKey))", main)
+        self.assertIn("Credenziale non scritta in chiaro", main)
+        self.assertNotIn("}.getOrDefault(normalized)", main)
+
+    def test_android_media_auth_is_scoped_to_configured_hermes_origin(self) -> None:
+        main = read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
+        )
+        self.assertIn(
+            "val needsHermesAuth = shouldAuthenticateHermesUrl(settings, candidateUrl)",
+            main,
+        )
+        self.assertIn(
+            "val needsHermesAuth = parsed != null && shouldAuthenticateHermesUrl(settings, url)",
+            main,
+        )
+        self.assertIn(
+            "if (token.isBlank() || !shouldAuthenticateHermesUrl(settings, url))",
+            main,
+        )
+        security = read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/HermesUrlSecurity.kt"
+        )
+        self.assertIn("sameHttpOrigin(target, URI(configured", security)
+        self.assertIn("effectivePort(left) == effectivePort(right)", security)
+        self.assertIn('ClipData.newPlainText("hermes-media-url", url)', main)
+
+        windows_home = read("src/NemoclawChat.Windows/Pages/HomePage.xaml.cs")
+        self.assertIn("ResolveMediaUri(value, includeQueryToken: false)", windows_home)
 
 
 if __name__ == "__main__":

@@ -15,9 +15,11 @@ import com.nemoclaw.chat.stopVoiceForegroundService
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -31,6 +33,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 internal object JarvisSessionController {
     private val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -40,6 +44,8 @@ internal object JarvisSessionController {
     val state: StateFlow<JarvisUiState> = _state.asStateFlow()
 
     private var sessionJob: Job? = null
+    @Volatile
+    private var startupJob: Job? = null
     private var frameUploadJob: Job? = null
     private var speechJob: Job? = null
     private var source: JarvisFrameSource? = null
@@ -59,15 +65,22 @@ internal object JarvisSessionController {
         objective: String,
         preferPhoneDebug: Boolean
     ) {
-        controllerScope.launch {
+        startupJob?.cancel()
+        val job = controllerScope.launch(start = CoroutineStart.LAZY) {
             lifecycleMutex.withLock {
                 stopLocked(context.applicationContext, notifyGateway = true)
                 startLocked(context.applicationContext, settings, apiKey, mode, objective, preferPhoneDebug)
             }
         }
+        startupJob = job
+        job.invokeOnCompletion {
+            if (startupJob === job) startupJob = null
+        }
+        job.start()
     }
 
     fun stop(context: Context) {
+        startupJob?.cancel()
         controllerScope.launch {
             lifecycleMutex.withLock { stopLocked(context.applicationContext, notifyGateway = true) }
         }
@@ -82,6 +95,7 @@ internal object JarvisSessionController {
     }
 
     fun serviceStartFailed(context: Context, error: Throwable) {
+        startupJob?.cancel()
         controllerScope.launch {
             lifecycleMutex.withLock {
                 reportError(error)
@@ -91,6 +105,7 @@ internal object JarvisSessionController {
     }
 
     suspend fun stopAndJoin(context: Context) {
+        startupJob?.cancel()
         lifecycleMutex.withLock { stopLocked(context.applicationContext, notifyGateway = true) }
     }
 
@@ -100,28 +115,45 @@ internal object JarvisSessionController {
     fun setMode(context: Context, mode: JarvisInitiativeMode) {
         controllerScope.launch {
             val sessionId = _state.value.sessionId ?: return@launch
-            runCatching { api?.patchSession(sessionId, mode = mode) }
+            val gateway = api ?: return@launch
+            runCatching { gateway.patchSession(sessionId, mode = mode) }
                 .onSuccess {
+                    if (_state.value.sessionId != sessionId || !_state.value.active) return@onSuccess
                     _state.value = _state.value.copy(initiativeMode = mode, error = null)
                     refreshNotification(context)
                 }
-                .onFailure { reportError(it) }
+                .onFailure {
+                    if (_state.value.sessionId == sessionId) reportError(it)
+                }
         }
     }
 
     fun sendFeedback(helpful: Boolean) {
+        val pending = _state.value
+        val sessionId = pending.sessionId ?: return
+        val eventId = pending.lastInterventionEventId ?: return
+        if (pending.feedbackStatus != null) return
+        _state.value = pending.copy(feedbackStatus = "Invio feedback...")
         controllerScope.launch {
-            val current = _state.value
-            val sessionId = current.sessionId ?: return@launch
-            val eventId = current.lastInterventionEventId ?: return@launch
-            runCatching { api?.sendFeedback(sessionId, eventId, helpful) }
+            val gateway = api
+            if (gateway == null) {
+                clearPendingFeedback(sessionId, eventId)
+                return@launch
+            }
+            runCatching { gateway.sendFeedback(sessionId, eventId, helpful) }
                 .onSuccess {
+                    if (_state.value.sessionId != sessionId ||
+                        _state.value.lastInterventionEventId != eventId
+                    ) return@onSuccess
                     _state.value = _state.value.copy(
                         feedbackStatus = if (helpful) "Segnalato come utile" else "Segnalato come non utile",
                         error = null
                     )
                 }
-                .onFailure { reportError(it) }
+                .onFailure {
+                    clearPendingFeedback(sessionId, eventId)
+                    if (_state.value.sessionId == sessionId) reportError(it)
+                }
         }
     }
 
@@ -157,10 +189,16 @@ internal object JarvisSessionController {
             check(remoteCapabilities.vision) { "Visione Jarvis non disponibile sul gateway." }
             capabilities = remoteCapabilities
             val remote = gateway.createSession(mode, objective)
+            _state.value = _state.value.copy(sessionId = remote.id)
             val frameSource = JarvisFrameSourceFactory.create(context, preferPhoneDebug)
             source = frameSource
             frameSampler.reset()
             rollingFrames.clear()
+            withTimeout(FRAME_SOURCE_START_TIMEOUT_MILLIS) {
+                frameSource.start { jpeg, capturedAt ->
+                    acceptFrame(gateway, remote.id, jpeg, capturedAt)
+                }
+            }
             _state.value = _state.value.copy(
                 phase = JarvisPhase.ACTIVE,
                 active = true,
@@ -180,13 +218,15 @@ internal object JarvisSessionController {
             sessionJob = controllerScope.launch {
                 launch { eventLoop(context, gateway, remote.id, configuredSettings, configuredApiKey) }
                 launch { voiceLoop(context, gateway, remote.id, configuredSettings, configuredApiKey) }
-                launch {
-                    frameSource.start { jpeg, capturedAt -> acceptFrame(gateway, remote.id, jpeg, capturedAt) }
-                }
             }
             refreshNotification(context)
         } catch (error: Throwable) {
-            if (error is CancellationException) throw error
+            if (error is CancellationException) {
+                withContext(NonCancellable) {
+                    stopLocked(context, notifyGateway = true)
+                }
+                throw error
+            }
             reportError(error)
             stopLocked(context, notifyGateway = true, preserveError = true)
         }
@@ -350,17 +390,22 @@ internal object JarvisSessionController {
     private fun updateView(context: Context, paused: Boolean) {
         controllerScope.launch {
             val sessionId = _state.value.sessionId ?: return@launch
+            val gateway = api ?: return@launch
+            val frameSource = source ?: return@launch
             runCatching {
-                api?.patchSession(sessionId, viewPaused = paused, status = if (paused) "paused" else "active")
-                if (paused) source?.pause() else source?.resume()
+                gateway.patchSession(sessionId, viewPaused = paused, status = if (paused) "paused" else "active")
+                if (paused) frameSource.pause() else frameSource.resume()
             }.onSuccess {
+                if (_state.value.sessionId != sessionId || !_state.value.active) return@onSuccess
                 _state.value = _state.value.copy(
                     phase = if (paused) JarvisPhase.PAUSED else JarvisPhase.ACTIVE,
                     visionActive = !paused,
                     error = null
                 )
                 refreshNotification(context)
-            }.onFailure { reportError(it) }
+            }.onFailure {
+                if (_state.value.sessionId == sessionId) reportError(it)
+            }
         }
     }
 
@@ -404,6 +449,16 @@ internal object JarvisSessionController {
         )
     }
 
+    private fun clearPendingFeedback(sessionId: String, eventId: String) {
+        val current = _state.value
+        if (current.sessionId == sessionId &&
+            current.lastInterventionEventId == eventId &&
+            current.feedbackStatus == "Invio feedback..."
+        ) {
+            _state.value = current.copy(feedbackStatus = null)
+        }
+    }
+
     private fun modelLabel(route: String): String = if (capabilities?.singleModel != false) {
         "Modello principale"
     } else if (route == "fast" || route == "observer") {
@@ -423,4 +478,6 @@ internal object JarvisSessionController {
     private fun refreshNotification(context: Context) {
         context.startService(Intent(context, JarvisSessionService::class.java).setAction(JarvisSessionService.ACTION_REFRESH))
     }
+
+    private const val FRAME_SOURCE_START_TIMEOUT_MILLIS = 45_000L
 }

@@ -394,10 +394,12 @@ private object ConversationArchiveAutoSync {
         if (!syncActive.compareAndSet(false, true)) return null
         val appContext = context.applicationContext
         return try {
+            val settings = loadSettings(appContext)
+            if (!hasConfiguredHermesEndpoint(settings)) return null
             applyingRemote.set(true)
             restoreConversationsFromHub(
                 appContext,
-                loadSettings(appContext),
+                settings,
                 loadGatewaySecret(appContext),
                 syncAfterSave = false
             )
@@ -413,7 +415,10 @@ private object ConversationArchiveAutoSync {
             return
         }
         try {
-            syncConversationsToHub(context, loadSettings(context), loadGatewaySecret(context))
+            val settings = loadSettings(context)
+            if (hasConfiguredHermesEndpoint(settings)) {
+                syncConversationsToHub(context, settings, loadGatewaySecret(context))
+            }
         } finally {
             syncActive.set(false)
         }
@@ -421,6 +426,10 @@ private object ConversationArchiveAutoSync {
 
     private suspend fun listenToHubEvents(context: Context) = withContext(Dispatchers.IO) {
         val settings = loadSettings(context)
+        if (!hasConfiguredHermesEndpoint(settings)) {
+            delay(5_000)
+            return@withContext
+        }
         val apiKey = loadGatewaySecret(context)
         var lastError: Exception? = null
         for (candidateUrl in plugAndPlayUrlCandidates(resolveHermesUrl(settings, "/v1/hub/conversations/events"))) {
@@ -2703,7 +2712,7 @@ private fun MediaFileBlock(block: VisualBlock) {
         android.widget.Toast.makeText(context, "Scaricamento: ${sanitizeDownloadFilename(filename)}", android.widget.Toast.LENGTH_SHORT).show()
         scope.launch {
             val message = runCatching {
-                downloadHermesMediaFile(context, url, filename, block.mimeType, loadGatewaySecret(context))
+                downloadHermesMediaFile(context, settings, url, filename, block.mimeType, loadGatewaySecret(context))
             }.getOrElse { "Download fallito: ${it.message ?: "errore sconosciuto"}" }
             isDownloading = false
             android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
@@ -2771,7 +2780,7 @@ private fun MediaFileBlock(block: VisualBlock) {
                         enabled = canOpen,
                         onClick = {
                             val url = resolvedMediaUrl
-                            val viewUrl = withHermesMediaQueryToken(url, loadGatewaySecret(context))
+                            val viewUrl = withHermesMediaQueryToken(settings, url, loadGatewaySecret(context))
                             val intent = Intent(Intent.ACTION_VIEW, viewUrl.toUri())
                             if (block.mimeType.isNotBlank()) {
                                 intent.setDataAndType(viewUrl.toUri(), block.mimeType)
@@ -2798,7 +2807,7 @@ private fun MediaFileBlock(block: VisualBlock) {
                         enabled = canOpen,
                         onClick = {
                             val url = resolvedMediaUrl
-                            clipboard.setPrimaryClip(ClipData.newPlainText("hermes-media-url", withHermesMediaQueryToken(url, loadGatewaySecret(context))))
+                            clipboard.setPrimaryClip(ClipData.newPlainText("hermes-media-url", url))
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = AppColors.Elevated)
                     ) { Text("Copia link") }
@@ -2808,17 +2817,17 @@ private fun MediaFileBlock(block: VisualBlock) {
     }
 }
 
-suspend fun downloadHermesMediaFile(context: Context, url: String, filename: String, mimeType: String, apiKey: String?): String = withContext(Dispatchers.IO) {
+suspend fun downloadHermesMediaFile(context: Context, settings: AppSettings, url: String, filename: String, mimeType: String, apiKey: String?): String = withContext(Dispatchers.IO) {
     val safeName = sanitizeDownloadFilename(filename.ifBlank {
         runCatching { url.toUri().lastPathSegment.orEmpty() }.getOrDefault("").ifBlank { "hermes-file" }
     })
     var lastError = "nessuna risposta"
     for (candidateUrl in plugAndPlayUrlCandidates(url)) {
-        val needsHermesAuth = candidateUrl.toUri().path.orEmpty().startsWith("/v1/media/", ignoreCase = true)
+        val needsHermesAuth = shouldAuthenticateHermesUrl(settings, candidateUrl)
         val candidates = if (needsHermesAuth) hermesAuthCandidates(apiKey) else listOf<String?>(null)
         for (token in candidates) {
             val urls = if (needsHermesAuth && !token.isNullOrBlank()) {
-                listOf(candidateUrl, withHermesMediaQueryToken(candidateUrl, token))
+                listOf(candidateUrl, withHermesMediaQueryToken(settings, candidateUrl, token))
             } else {
                 listOf(candidateUrl)
             }
@@ -2855,11 +2864,11 @@ suspend fun downloadHermesMediaFile(context: Context, url: String, filename: Str
     throw IllegalStateException(lastError)
 }
 
-private fun withHermesMediaQueryToken(url: String, apiKey: String?): String {
+private fun withHermesMediaQueryToken(settings: AppSettings, url: String, apiKey: String?): String {
     val token = apiKey?.trim().orEmpty()
     return try {
         val parsed = url.toUri()
-        if (!parsed.path.orEmpty().startsWith("/v1/media/", ignoreCase = true)) {
+        if (token.isBlank() || !shouldAuthenticateHermesUrl(settings, url)) {
             return url
         }
         if (!parsed.getQueryParameter("hub_token").isNullOrBlank() ||
@@ -3060,15 +3069,6 @@ private fun decodeAttachmentPreview(source: String): Bitmap? {
     }
 }
 
-private fun shouldAuthenticateHermesUrl(settings: AppSettings, url: String): Boolean {
-    return runCatching {
-        val uri = URI(url)
-        val configuredHost = URI(hermesRoot(settings)).host
-        uri.path.orEmpty().startsWith("/v1/") &&
-            (uri.host.equals(configuredHost, ignoreCase = true) || isKnownHermesGatewayHost(uri.host))
-    }.getOrDefault(false)
-}
-
 @Composable
 private fun RemoteGalleryImage(settings: AppSettings, image: VisualGalleryImage, allowExternalImage: Boolean = true) {
     val context = LocalContext.current
@@ -3080,7 +3080,7 @@ private fun RemoteGalleryImage(settings: AppSettings, image: VisualGalleryImage,
     val apiKey = remember { loadGatewaySecret(context) }
 
     val bitmap by produceState<Bitmap?>(initialValue = null, resolved) {
-        value = withContext(Dispatchers.IO) { loadRemoteBitmap(resolved, apiKey) }
+        value = withContext(Dispatchers.IO) { loadRemoteBitmap(settings, resolved, apiKey) }
     }
     val loaded = bitmap
     if (loaded == null) {
@@ -3141,15 +3141,15 @@ private fun resolveMediaUrl(settings: AppSettings, value: String, allowExternalI
 private const val REMOTE_BITMAP_MAX_BYTES = 10L * 1024 * 1024
 private const val REMOTE_BITMAP_MAX_DIMENSION = 2048
 
-private fun loadRemoteBitmap(url: String, apiKey: String?): Bitmap? {
+private fun loadRemoteBitmap(settings: AppSettings, url: String, apiKey: String?): Bitmap? {
     val parsed = runCatching { url.toUri() }.getOrNull()
-    val needsHermesAuth = parsed?.path.orEmpty().startsWith("/v1/media/", ignoreCase = true)
+    val needsHermesAuth = parsed != null && shouldAuthenticateHermesUrl(settings, url)
     val candidates = if (needsHermesAuth) hermesAuthCandidates(apiKey) else listOf<String?>(null)
     val gatewayUrls = if (needsHermesAuth) plugAndPlayUrlCandidates(url) else listOf(url)
     for (gatewayUrl in gatewayUrls) {
         for (token in candidates) {
             val urls = if (needsHermesAuth && !token.isNullOrBlank()) {
-                listOf(gatewayUrl, withHermesMediaQueryToken(gatewayUrl, token))
+                listOf(gatewayUrl, withHermesMediaQueryToken(settings, gatewayUrl, token))
             } else {
                 listOf(gatewayUrl)
             }
@@ -5797,7 +5797,7 @@ private fun VideoThumbnail(settings: AppSettings, item: VideoLibraryItem, apiKey
     }
     val bitmap by produceState<Bitmap?>(initialValue = null, videoUrl, thumbUrl, apiKey) {
         value = withContext(Dispatchers.IO) {
-            thumbUrl?.let { loadRemoteBitmap(it, apiKey) } ?: loadVideoThumbnail(settings, videoUrl, apiKey)
+            thumbUrl?.let { loadRemoteBitmap(settings, it, apiKey) } ?: loadVideoThumbnail(settings, videoUrl, apiKey)
         }
     }
     Box(
@@ -7217,7 +7217,10 @@ private fun SettingsScreen(
                             val candidate = currentSettings()
                             val error = validateSettings(candidate)
                             if (error == null) {
-                                saveGatewaySecret(context, apiKey)
+                                if (!saveGatewaySecret(context, apiKey)) {
+                                    status = "API key non salvata: Android Keystore non disponibile. Credenziale non scritta in chiaro."
+                                    return@Button
+                                }
                                 saveVoiceProfile(
                                     context,
                                     settings.activeProjectId,
@@ -7300,7 +7303,7 @@ private fun SettingsScreen(
                             Text("Reset")
                         }
                         Button(onClick = {
-                            status = runCatching { exportLocalBackup(context, apiKey) }
+                            status = runCatching { exportLocalBackup(context) }
                                 .getOrElse { "Backup non riuscito: ${it.message ?: it.javaClass.simpleName}" }
                         }) {
                             Text("Backup locale")
@@ -9366,6 +9369,14 @@ private fun hermesRoot(settings: AppSettings): String {
     return if (api.endsWith("/v1", ignoreCase = true)) api.removeSuffix("/v1") else api
 }
 
+internal fun hasConfiguredHermesEndpoint(settings: AppSettings): Boolean {
+    return runCatching {
+        val uri = URI(settings.gatewayUrl.trim())
+        (uri.scheme.equals("http", ignoreCase = true) || uri.scheme.equals("https", ignoreCase = true)) &&
+            !uri.host.isNullOrBlank()
+    }.getOrDefault(false)
+}
+
 private val OPERATOR_PRESETS = listOf(
     OperatorPreset("Dashboard", "Health", "GET /health", ""),
     OperatorPreset("Dashboard", "Health detailed", "GET /health/detailed", ""),
@@ -10449,7 +10460,16 @@ internal fun loadGatewaySecret(context: Context): String? {
         val parts = stored.split(':', limit = 2)
         if (parts.size != 2) {
             val legacyPlaintext = stored.trim().takeIf { it.isNotBlank() } ?: return@runCatching null
-            return@runCatching legacyPlaintext
+            if (saveGatewaySecret(context, legacyPlaintext)) return@runCatching legacyPlaintext
+            prefs.edit(commit = true) {
+                remove(GATEWAY_SECRET_PREF_KEY)
+                remove("gatewaySecret")
+            }
+            legacyPrefs.edit(commit = true) {
+                remove(GATEWAY_SECRET_PREF_KEY)
+                remove("gatewaySecret")
+            }
+            return@runCatching null
         }
 
         val iv = Base64.decode(parts[0], Base64.NO_WRAP)
@@ -10461,18 +10481,21 @@ internal fun loadGatewaySecret(context: Context): String? {
     }.getOrNull()
 }
 
-private fun saveGatewaySecret(context: Context, secret: String?) {
+private fun saveGatewaySecret(context: Context, secret: String?): Boolean {
     val normalized = secret?.trim().takeUnless { it.isNullOrEmpty() }
     if (normalized == null) {
-        migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS).edit {
-            remove(GATEWAY_SECRET_PREF_KEY)
-            remove("gatewaySecret")
-        }
-        context.applicationContext.getSharedPreferences(LEGACY_SETTINGS_PREFS, Context.MODE_PRIVATE).edit {
-            remove(GATEWAY_SECRET_PREF_KEY)
-            remove("gatewaySecret")
-        }
-        return
+        val currentRemoved = migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
+            .edit()
+            .remove(GATEWAY_SECRET_PREF_KEY)
+            .remove("gatewaySecret")
+            .commit()
+        val legacyRemoved = context.applicationContext
+            .getSharedPreferences(LEGACY_SETTINGS_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .remove(GATEWAY_SECRET_PREF_KEY)
+            .remove("gatewaySecret")
+            .commit()
+        return currentRemoved && legacyRemoved
     }
     val encoded = runCatching {
         val cipher = Cipher.getInstance(GATEWAY_SECRET_TRANSFORMATION)
@@ -10480,12 +10503,19 @@ private fun saveGatewaySecret(context: Context, secret: String?) {
         cipher.updateAAD(GATEWAY_SECRET_AAD.toByteArray(Charsets.UTF_8))
         val encrypted = cipher.doFinal(normalized.toByteArray(Charsets.UTF_8))
         "${Base64.encodeToString(cipher.iv, Base64.NO_WRAP)}:${Base64.encodeToString(encrypted, Base64.NO_WRAP)}"
-    }.getOrDefault(normalized)
+    }.getOrNull() ?: return false
 
-    migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS).edit {
-        putString(GATEWAY_SECRET_PREF_KEY, encoded)
+    val saved = migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
+        .edit()
+        .putString(GATEWAY_SECRET_PREF_KEY, encoded)
+        .remove("gatewaySecret")
+        .commit()
+    if (!saved) return false
+    context.applicationContext.getSharedPreferences(LEGACY_SETTINGS_PREFS, Context.MODE_PRIVATE).edit(commit = true) {
+        remove(GATEWAY_SECRET_PREF_KEY)
         remove("gatewaySecret")
     }
+    return true
 }
 
 private fun getOrCreateGatewaySecretKey(): SecretKey = synchronized(gatewaySecretKeyLock) {

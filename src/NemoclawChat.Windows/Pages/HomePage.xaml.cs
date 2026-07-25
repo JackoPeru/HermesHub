@@ -2974,7 +2974,7 @@ public sealed partial class HomePage : Page
             }
 
             var package = new DataPackage();
-            package.SetText(ResolveMediaUri(value).ToString());
+            package.SetText(ResolveMediaUri(value, includeQueryToken: false).ToString());
             Clipboard.SetContent(package);
         };
         actions.Children.Add(copy);
@@ -3084,7 +3084,7 @@ public sealed partial class HomePage : Page
         return GatewayService.IsTrustedGatewayUri(AppSettingsStore.Load(), uri);
     }
 
-    private static Uri ResolveMediaUri(string value)
+    private static Uri ResolveMediaUri(string value, bool includeQueryToken = true)
     {
         var settings = AppSettingsStore.Load();
         var uri = Uri.TryCreate(value, UriKind.Absolute, out var parsed)
@@ -3092,7 +3092,8 @@ public sealed partial class HomePage : Page
             : new Uri($"{GatewayService.HermesRoot(settings).TrimEnd('/')}{value}");
 
         var apiKey = GatewayCredentialStore.LoadSecret();
-        if (uri.AbsolutePath.StartsWith("/v1/media/", StringComparison.OrdinalIgnoreCase) &&
+        if (includeQueryToken &&
+            uri.AbsolutePath.StartsWith("/v1/media/", StringComparison.OrdinalIgnoreCase) &&
             GatewayService.IsTrustedGatewayUri(settings, uri) &&
             !string.IsNullOrWhiteSpace(apiKey))
         {

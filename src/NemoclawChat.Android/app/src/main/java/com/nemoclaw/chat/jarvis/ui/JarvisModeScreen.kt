@@ -61,10 +61,25 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
     }
     var preferPhoneDebug by rememberSaveable { mutableStateOf(false) }
     var pendingStart by remember { mutableStateOf(false) }
+    val requiredPermissions = remember {
+        listOf(
+            Manifest.permission.RECORD_AUDIO,
+            // Android requires CAMERA before starting a camera-typed FGS,
+            // including DAT sessions whose frames come from the glasses.
+            Manifest.permission.CAMERA
+        )
+    }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { grants ->
-        if (grants.values.all { it }) pendingStart = true
+    ) {
+        val missing = requiredPermissions.filter { permission ->
+            ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) {
+            pendingStart = true
+        } else {
+            JarvisSessionController.rejectStart("Permessi fotocamera e microfono obbligatori per Jarvis Mode.")
+        }
     }
     val requestedMode = availableModes.firstOrNull { it.name == requestedModeName }
         ?: state.initiativeMode
@@ -296,13 +311,7 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                             JarvisSessionController.rejectStart("Configura Hermes API URL nelle Impostazioni.")
                             return@Button
                         }
-                        val permissions = buildList {
-                            add(Manifest.permission.RECORD_AUDIO)
-                            // Android requires CAMERA before starting a camera-typed FGS,
-                            // including DAT sessions whose frames come from the glasses.
-                            add(Manifest.permission.CAMERA)
-                        }
-                        val missing = permissions.filter {
+                        val missing = requiredPermissions.filter {
                             ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
                         }
                         if (missing.isEmpty()) pendingStart = true

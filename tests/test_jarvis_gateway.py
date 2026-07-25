@@ -301,6 +301,46 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('dir("src/metaDat/java").asFile.absolutePath', gradle)
         self.assertIn("kotlin.directories.add(metaDatSources)", gradle)
 
+    def test_android_jarvis_startup_is_cancellable_and_fail_closed(self):
+        controller = (
+            ROOT
+            / "src"
+            / "NemoclawChat.Android"
+            / "app"
+            / "src"
+            / "main"
+            / "java"
+            / "com"
+            / "nemoclaw"
+            / "chat"
+            / "jarvis"
+            / "JarvisSessionController.kt"
+        ).read_text(encoding="utf-8")
+        self.assertIn("private var startupJob: Job? = null", controller)
+        self.assertGreaterEqual(controller.count("startupJob?.cancel()"), 3)
+        self.assertIn("withContext(NonCancellable)", controller)
+        source_ready = controller.index("withTimeout(FRAME_SOURCE_START_TIMEOUT_MILLIS)")
+        active = controller.index("phase = JarvisPhase.ACTIVE", source_ready)
+        self.assertLess(source_ready, active)
+
+        screen = (
+            ROOT
+            / "src"
+            / "NemoclawChat.Android"
+            / "app"
+            / "src"
+            / "main"
+            / "java"
+            / "com"
+            / "nemoclaw"
+            / "chat"
+            / "jarvis"
+            / "ui"
+            / "JarvisModeScreen.kt"
+        ).read_text(encoding="utf-8")
+        self.assertIn("val missing = requiredPermissions.filter", screen)
+        self.assertNotIn("grants.values.all", screen)
+
     async def test_session_cleanup_cancels_tasks_and_erases_frames(self):
         create = self.runtime["_hermes_hub_jarvis_new_session"]
         drop = self.runtime["_hermes_hub_jarvis_drop_session"]
@@ -317,6 +357,25 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({}, session["frames"])
         self.assertEqual([], list(session["perceptions"]))
         self.assertEqual({}, runtime["sessions"])
+
+    def test_removed_session_is_rejected_after_request_body_io(self):
+        create = self.runtime["_hermes_hub_jarvis_new_session"]
+        is_live = self.runtime["_hermes_hub_jarvis_session_is_live"]
+        session = create({"mode": "assistive"})
+        adapter = types.SimpleNamespace()
+        runtime = self.runtime["_hermes_hub_jarvis_runtime"](adapter)
+        runtime["sessions"][session["id"]] = session
+        self.assertTrue(is_live(adapter, session))
+        runtime["sessions"].pop(session["id"])
+        self.assertFalse(is_live(adapter, session))
+
+        handler_block = self.patched.split("# HERMES_HUB_JARVIS_HANDLERS_BEGIN", 1)[1].split(
+            "# HERMES_HUB_JARVIS_HANDLERS_END", 1
+        )[0]
+        self.assertEqual(
+            4,
+            handler_block.count("if not _hermes_hub_jarvis_session_is_live(self, session):"),
+        )
 
     def test_frame_reader_is_streamed_and_bounded(self):
         self.assertIn('request.content.iter_chunked(64 * 1024)', self.patched)
