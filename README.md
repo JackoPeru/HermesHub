@@ -53,7 +53,7 @@ Interfaccia desktop densa ma pulita: chat, cron, notifiche, server, prestazioni,
 
 ### Android · Jetpack Compose
 
-La stessa esperienza in mobilità, con navigazione pensata per il touch, azioni rapide e modalità Voce immersiva.
+La stessa esperienza in mobilità, con navigazione pensata per il touch, azioni rapide, modalità Voce immersiva e Jarvis Mode vocale-visiva.
 
 <p align="center">
   <img src="docs/media/android-navigation.png" alt="Hermes Hub su Android - Navigazione" width="31%" />
@@ -166,6 +166,7 @@ docs/                       Guide tecniche e operative
 
 - [Guida Windows](docs/windows-desktop-guide.md)
 - [Guida Android](docs/android-app-guide.md)
+- [Hermes Jarvis Mode](docs/jarvis-mode.md)
 - [Gateway Linux](docs/hermes-hub-linux.md)
 - [Hermes Hub e Hermes Native](docs/hermes-hub-vs-hermes-native.md)
 - [Schema Visual Blocks](docs/visual-blocks-schema.md)
@@ -185,4 +186,4 @@ docs/                       Guide tecniche e operative
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-Versione corrente: `0.6.170`.
+Versione corrente: `0.6.171`.

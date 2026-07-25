@@ -18,6 +18,12 @@ L'endpoint non e' preconfigurato: inserisci il nome MagicDNS del tuo server, per
 
 La chat usa Hermes Native/Responses e, se consentito, Chat Completions compat. Health, capabilities, archivio, media, STT, TTS, jobs, runs e stato Hub passano dallo stesso gateway.
 
+## Jarvis Mode
+
+La scheda Jarvis combina voce, frame selezionati e assistenza locale. La sessione è esplicita, temporanea e non entra nell'archivio. È disponibile anche dallo shortcut Android `Jarvis Mode`; notifica e servizio foreground gestiscono pausa, Solo domande, ripresa e termine.
+
+La build standard conserva `minSdk 26` e non contatta GitHub Packages. L'integrazione Ray-Ban Meta DAT 0.8.0 è opt-in e richiede `-PenableMetaDat=true`, PAT `read:packages` e `minSdk 29`. Configurazione completa, mock e contratto: [Hermes Jarvis Mode](jarvis-mode.md).
+
 ## Build e test
 
 ```powershell
@@ -37,7 +43,7 @@ src/NemoclawChat.Android/app/build/outputs/apk/release/app-release.apk
 
 - installare l'APK su emulatore o dispositivo supportato;
 - verificare aggiornamento sopra la release precedente;
-- aprire Chat, Voce, Archivio, Server, Video e Impostazioni;
+- aprire Chat, Voce, Jarvis, Archivio, Server, Video e Impostazioni;
 - inviare e interrompere uno stream reale;
 - verificare allegato, download, STT e TTS;
 - controllare logcat per crash, ANR, leak e violazioni StrictMode;

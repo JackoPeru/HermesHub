@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/JackoPeru/HermesHub/config/jarvis-summary-output.schema.json",
+  "title": "Hermes Jarvis short-term summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "topic",
+    "open_loop",
+    "notable_facts"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1600
+    },
+    "topic": {
+      "type": "string",
+      "maxLength": 240
+    },
+    "open_loop": {
+      "type": "boolean"
+    },
+    "notable_facts": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 240
+      }
+    }
+  }
+}

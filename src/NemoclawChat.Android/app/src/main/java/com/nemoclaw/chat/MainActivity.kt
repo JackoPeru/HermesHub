@@ -225,6 +225,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -335,6 +336,7 @@ private object IncomingIntentBus {
 private enum class Tab(val label: String, val icon: ImageVector) {
     Chat("Chat", Icons.Rounded.ChatBubbleOutline),
     Voice("Voce", Icons.Rounded.Mic),
+    Jarvis("Jarvis", Icons.Rounded.Visibility),
     Projects("Progetti", Icons.Rounded.FolderOpen),
     Artifacts("Artifact", Icons.Rounded.FolderOpen),
     Search("Ricerca", Icons.AutoMirrored.Rounded.ManageSearch),
@@ -1031,7 +1033,14 @@ private fun ChatApp() {
         if (incoming.uri.isNotBlank()) {
             createAttachmentFromUri(context, incoming.uri.toUri(), settings.maxAttachmentMb)?.let { attachment -> chatState.pendingAttachments.add(attachment) }
         }
-        setSelectedTab(if (incoming.tab.equals("voice", true)) Tab.Voice else if (incoming.tab.equals("projects", true)) Tab.Projects else Tab.Chat)
+        setSelectedTab(
+            when {
+                incoming.tab.equals("voice", true) -> Tab.Voice
+                incoming.tab.equals("jarvis", true) -> Tab.Jarvis
+                incoming.tab.equals("projects", true) -> Tab.Projects
+                else -> Tab.Chat
+            }
+        )
     }
     LaunchedEffect(chatState.activeStreams.size) {
         while (chatState.activeStreams.isNotEmpty()) {
@@ -1046,7 +1055,7 @@ private fun ChatApp() {
         settings.gatewayUrl,
         voiceProfileRevision
     ) {
-        if (!wakeVoiceProfile.wakeWord || selectedTab == Tab.Voice) return@LaunchedEffect
+        if (!wakeVoiceProfile.wakeWord || selectedTab == Tab.Voice || selectedTab == Tab.Jarvis) return@LaunchedEffect
         if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             return@LaunchedEffect
         }
@@ -1138,6 +1147,7 @@ private fun ChatApp() {
                         onSwitchTab = { tab -> setSelectedTab(tab) }
                     )
                     Tab.Voice -> VoiceModeScreen(settings, loadGatewaySecret(context), voiceAutoStartToken)
+                    Tab.Jarvis -> JarvisModeScreen(settings, loadGatewaySecret(context))
                     Tab.Projects -> ProjectsScreen(
                         context = context,
                         settings = settings,
@@ -1361,6 +1371,9 @@ private fun HermesSidebar(
                 SidebarTabRow(Tab.Voice, selectedTab == Tab.Voice, onOpenTab)
             }
             item {
+                SidebarTabRow(Tab.Jarvis, selectedTab == Tab.Jarvis, onOpenTab)
+            }
+            item {
                 SidebarTabRow(Tab.Projects, selectedTab == Tab.Projects, onOpenTab)
             }
             item {
@@ -1473,6 +1486,7 @@ private fun SidebarTabRow(tab: Tab, selected: Boolean, onOpenTab: (Tab) -> Unit)
     val subtitle = when (tab) {
         Tab.Chat -> "Conversazione principale"
         Tab.Voice -> "Interazione vocale continua"
+        Tab.Jarvis -> "Vista e assistenza temporanea"
         Tab.Projects -> "Workspace e contesto operativo"
         Tab.Artifacts -> "Output persistenti e versioni"
         Tab.Search -> "Ricerca su tutto Hermes Hub"

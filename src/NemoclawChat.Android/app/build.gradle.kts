@@ -3,16 +3,23 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val enableMetaDat = providers.gradleProperty("enableMetaDat").orNull?.toBooleanStrictOrNull() == true
+val mwdatApplicationId = providers.gradleProperty("mwdatApplicationId").orNull ?: "0"
+val mwdatClientToken = providers.gradleProperty("mwdatClientToken").orNull ?: "0"
+
 android {
     namespace = "com.nemoclaw.chat"
     compileSdk = 36
 
     defaultConfig {
         applicationId = "com.nemoclaw.chat"
-        minSdk = 26
+        minSdk = if (enableMetaDat) 29 else 26
         targetSdk = 36
-        versionCode = 174
-        versionName = "0.6.170"
+        versionCode = 175
+        versionName = "0.6.171"
+        buildConfigField("boolean", "META_DAT_ENABLED", enableMetaDat.toString())
+        manifestPlaceholders["mwdat_application_id"] = mwdatApplicationId
+        manifestPlaceholders["mwdat_client_token"] = mwdatClientToken
     }
 
     buildTypes {
@@ -33,6 +40,12 @@ android {
         buildConfig = true
     }
 
+    if (enableMetaDat) {
+        val metaDatSources = layout.projectDirectory.dir("src/metaDat/java").asFile.absolutePath
+        sourceSets.getByName("main").java.directories.add(metaDatSources)
+        sourceSets.getByName("main").kotlin.directories.add(metaDatSources)
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -42,6 +55,11 @@ android {
         warningsAsErrors = true
         abortOnError = true
         disable += listOf("GradleDependency", "MissingTranslation", "NewerVersionAvailable", "OldTargetApi")
+        if (enableMetaDat) {
+            // DAT requires minSdk 29. Shared sources intentionally retain API 26-28
+            // branches because the standard Hermes Hub artifact still supports minSdk 26.
+            disable += "ObsoleteSdkInt"
+        }
     }
 }
 
@@ -61,4 +79,9 @@ dependencies {
     testImplementation("org.json:json:20250517")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("com.squareup.okhttp3:logging-interceptor:5.3.2")
+    if (enableMetaDat) {
+        implementation("com.meta.wearable:mwdat-core:0.8.0")
+        implementation("com.meta.wearable:mwdat-camera:0.8.0")
+        implementation("com.meta.wearable:mwdat-mockdevice:0.8.0")
+    }
 }

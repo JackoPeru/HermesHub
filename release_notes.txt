@@ -1,14 +1,12 @@
-Hermes Hub 0.6.170 (ragionamento separato, wake word reale e updater resiliente)
+Hermes Hub 0.6.171 (Jarvis Mode single-model per Ray-Ban Meta)
 
-- Ragionamento: eventi `analysis`/`reasoning` e blocchi `<think>` finali restano nella sezione dedicata su Windows e Android, senza finire nella risposta.
-- Ragionamento: quando Hermes non espone contenuto, l'interfaccia lo dichiara invece di simularlo.
-- Windows e Android: la frase configurata apre Voce e avvia automaticamente la chiamata quando Hermes Hub è aperto.
-- Voce: dopo l'attivazione la conversazione è continua; non serve ripetere la wake word a ogni turno.
-- Android: ascolto wake word sostenuto da servizio microfono foreground, con richiesta esplicita del permesso audio.
-- Wake word: riavvio affidabile dopo cambi pagina e riconoscimento di prefissi naturali come `Ehi` e `Ok`.
-- Qualita: CI Windows allineata agli analyzer SDK recenti e bootstrap PSGallery affidabile.
-- Gateway: patcher compatibile con callback Responses legacy già modificate.
-- Updater Linux: asset fallito messo in quarantena dopo rollback per evitare blackout ripetuti.
-- Compatibilità: package identity Windows, `applicationId com.nemoclaw.chat`, firme, archivio, endpoint e impostazioni esistenti preservati.
-- Versioni: Windows/AdminBridge `0.6.170`; Android `versionName 0.6.170`, `versionCode 174`.
-- Asset previsti: `HermesHub-0.6.170-android.apk`, `NemoclawChat.Windows_0.6.170.0_x64.msix`, `HermesHub-0.6.170-linux-gateway.tar.gz`.
+- Android: nuova modalita Jarvis con sessione vocale/visiva, SSE, foreground service e controlli pausa/riprendi/solo domande/termina.
+- Ray-Ban Meta: integrazione DAT 0.8.0 opzionale; la fotocamera telefono resta disponibile nelle build debug.
+- Gateway: sessioni effimere autenticate, frame solo in RAM con TTL, upload limitato, priorita alle domande e cleanup deterministico.
+- Modello: rimosso il modello 0.8B; osservazione e domande usano esclusivamente il modello principale Hermes.
+- Sicurezza iniziativa: l'osservatore passivo non parla direttamente; ogni candidato utile viene verificato dal ragionamento completo con frame originali.
+- Reactor: perception bus effimero, summarizer incrementale, finestra conversazionale, situazione saliente, deduplicazione semantica e feedback utile/non utile, senza interventi forzati a tempo.
+- Benchmark modello principale: osservazione p50 circa 1,74 s, domanda semplice 2,16 s, domanda complessa 27-36 s; TTS 0,13 s e STT 0,62 s. I target di latenza iniziali non sono raggiunti.
+- Compatibilita: package identity Windows, `applicationId com.nemoclaw.chat`, firma storica Android, archivio, endpoint e impostazioni esistenti preservati.
+- Versioni: Windows/AdminBridge `0.6.171`; Android `versionName 0.6.171`, `versionCode 175`.
+- Asset previsti: `HermesHub-0.6.171-android.apk`, `NemoclawChat.Windows_0.6.171.0_x64.msix`, `HermesHub-0.6.171-linux-gateway.tar.gz`.

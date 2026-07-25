@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/JackoPeru/HermesHub/blob/main/config/jarvis-observer-output.schema.json",
+  "title": "Hermes Jarvis observer result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "action",
+    "observation",
+    "reason",
+    "confidence",
+    "importance",
+    "urgency",
+    "utility",
+    "reply",
+    "recommended_frame_ids"
+  ],
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "ignore",
+        "respond_simple",
+        "ask_user",
+        "escalate",
+        "urgent_candidate"
+      ]
+    },
+    "observation": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "importance": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "urgency": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "utility": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "reply": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 1, "maxLength": 320 }
+      ]
+    },
+    "recommended_frame_ids": {
+      "type": "array",
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+      }
+    }
+  }
+}

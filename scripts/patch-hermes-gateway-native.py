@@ -26,6 +26,19 @@ _MODEL_ROUTE_TOOLSETS_MARKER = "# HERMES_HUB_MODEL_ROUTE_TOOLSETS_V1"
 _MODEL_ROUTE_LIMITS_MARKER = "# HERMES_HUB_MODEL_ROUTE_LIMITS_V1"
 _MODEL_ROUTE_MAX_TOKENS_MARKER = "# HERMES_HUB_MODEL_ROUTE_MAX_TOKENS_V1"
 _MODEL_ROUTE_MAX_TOKENS_FIX_MARKER = "# HERMES_HUB_MODEL_ROUTE_MAX_TOKENS_FIX_V1"
+_JARVIS_MARKER = "# HERMES_HUB_JARVIS_MODE_V1"
+_JARVIS_RUNTIME_BEGIN = "# HERMES_HUB_JARVIS_RUNTIME_BEGIN"
+_JARVIS_RUNTIME_END = "# HERMES_HUB_JARVIS_RUNTIME_END"
+_JARVIS_HANDLERS_BEGIN = "    # HERMES_HUB_JARVIS_HANDLERS_BEGIN"
+_JARVIS_HANDLERS_END = "    # HERMES_HUB_JARVIS_HANDLERS_END"
+_JARVIS_CAPABILITIES_BEGIN = "            # HERMES_HUB_JARVIS_CAPABILITIES_BEGIN"
+_JARVIS_CAPABILITIES_END = "            # HERMES_HUB_JARVIS_CAPABILITIES_END"
+_JARVIS_ROUTES_BEGIN = "            # HERMES_HUB_JARVIS_ROUTES_BEGIN"
+_JARVIS_ROUTES_END = "            # HERMES_HUB_JARVIS_ROUTES_END"
+_JARVIS_CLEANUP_BEGIN = "            # HERMES_HUB_JARVIS_CLEANUP_BEGIN"
+_JARVIS_CLEANUP_END = "            # HERMES_HUB_JARVIS_CLEANUP_END"
+_DYNAMIC_ROUTES_BEGIN = "        # HERMES_HUB_DYNAMIC_ROUTES_BEGIN"
+_DYNAMIC_ROUTES_END = "        # HERMES_HUB_DYNAMIC_ROUTES_END"
 _HARDWARE_DISK_BLOCK_V1 = f'''    {_HARDWARE_DISK_FILTER_MARKER}
     disks: List[Dict[str, Any]] = []
     ignored_filesystems = {{
@@ -1218,8 +1231,2096 @@ _hermes_hub_preload_whisper()
     return text, changes if text != initial_text else []
 
 
+def _upsert_versioned_block(
+    text: str,
+    *,
+    begin: str,
+    end: str,
+    block: str,
+    anchor: str,
+    label: str,
+) -> tuple[str, bool]:
+    """Insert or upgrade one generated block while failing closed on torn markers."""
+    begin_count = text.count(begin)
+    end_count = text.count(end)
+    if begin_count != end_count or begin_count > 1:
+        raise PatchError(f"{label} markers are missing, duplicated, or unbalanced")
+
+    normalized = block.rstrip("\n")
+    if begin_count == 1:
+        start = text.index(begin)
+        stop = text.index(end, start) + len(end)
+        current = text[start:stop]
+        if current == normalized:
+            return text, False
+        return text[:start] + normalized + text[stop:], True
+
+    if text.count(anchor) != 1:
+        raise PatchError(f"Patch anchor not found or ambiguous: {label}")
+    return text.replace(anchor, normalized + "\n" + anchor, 1), True
+
+
+def _patch_jarvis_v1(text: str) -> tuple[str, list[str]]:
+    """Inject the bounded, ephemeral Jarvis HTTP/SSE runtime into api_server.py."""
+    changes: list[str] = []
+    runtime = r'''# HERMES_HUB_JARVIS_RUNTIME_BEGIN
+# HERMES_HUB_JARVIS_MODE_V1
+def _hermes_hub_jarvis_env_bool(name: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(name, "1" if default else "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _hermes_hub_jarvis_env_int(
+    name: str,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _hermes_hub_jarvis_env_float(
+    name: str,
+    default: float,
+    minimum: float,
+    maximum: float,
+) -> float:
+    import math as _math
+
+    try:
+        value = float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    if not _math.isfinite(value):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _hermes_hub_jarvis_model_config(kind: str) -> Dict[str, Any]:
+    single_model = _hermes_hub_jarvis_env_bool("HERMES_JARVIS_SINGLE_MODEL", True)
+    effective_kind = "reasoning" if single_model and kind == "fast" else kind
+    prefix = "HERMES_JARVIS_FAST" if effective_kind == "fast" else "HERMES_JARVIS_REASONING"
+    dedicated_base = str(os.environ.get(f"{prefix}_BASE_URL", "")).strip().rstrip("/")
+    shared_base = str(os.environ.get("HERMES_INFERENCE_BASE_URL", "")).strip().rstrip("/")
+    dedicated_model = str(os.environ.get(f"{prefix}_MODEL", "")).strip()
+    shared_model = str(os.environ.get("HERMES_INFERENCE_MODEL", "")).strip()
+    model = dedicated_model if effective_kind == "fast" else (dedicated_model or shared_model)
+    return {
+        "kind": kind,
+        "effective_kind": effective_kind,
+        "single_model": single_model,
+        "base_url": dedicated_base or shared_base,
+        "api_key": str(os.environ.get(f"{prefix}_API_KEY", "")).strip(),
+        "model": model,
+        "provider": str(os.environ.get(f"{prefix}_PROVIDER", "")).strip(),
+        "dedicated": bool(dedicated_base or dedicated_model),
+    }
+
+
+def _hermes_hub_jarvis_capabilities() -> Dict[str, Any]:
+    enabled = _hermes_hub_jarvis_env_bool("HERMES_JARVIS_ENABLED", False)
+    mock_mode = _hermes_hub_jarvis_env_bool("HERMES_JARVIS_MOCK_MODE", False)
+    fast = _hermes_hub_jarvis_model_config("fast")
+    reasoning = _hermes_hub_jarvis_model_config("reasoning")
+    fast_configured = mock_mode or bool(fast["base_url"] and fast["model"])
+    reasoning_configured = mock_mode or bool(reasoning["base_url"] and reasoning["model"])
+    single_model = _hermes_hub_jarvis_env_bool("HERMES_JARVIS_SINGLE_MODEL", True)
+    return {
+        "enabled": enabled,
+        "vision": enabled,
+        "proactive_events": enabled and fast_configured and reasoning_configured,
+        "transport": "http+sse",
+        "architecture": "reactor-v1",
+        "perception_memory": "ephemeral",
+        "incremental_summarizer": True,
+        "single_model": single_model,
+        "direct_questions_route": "adaptive_single_model" if single_model else "adaptive",
+        "observer_model_configured": fast_configured,
+        "fast_model_configured": fast_configured,
+        "reasoning_model_configured": reasoning_configured,
+        "mock_mode": mock_mode,
+        "max_frame_bytes": _hermes_hub_jarvis_env_int(
+            "HERMES_JARVIS_MAX_FRAME_BYTES", 1_000_000, 65_536, 16_777_216
+        ),
+        "max_session_seconds": _hermes_hub_jarvis_env_int(
+            "HERMES_JARVIS_SESSION_TTL_SECONDS", 3600, 60, 86_400
+        ),
+        "modes": ["questions_only", "assistive", "proactive"],
+        "endpoints": {
+            "sessions": "/v1/jarvis/sessions",
+            "session": "/v1/jarvis/sessions/{session_id}",
+            "frames": "/v1/jarvis/sessions/{session_id}/frames",
+            "turns": "/v1/jarvis/sessions/{session_id}/turns",
+            "events": "/v1/jarvis/sessions/{session_id}/events",
+            "feedback": "/v1/jarvis/sessions/{session_id}/feedback",
+        },
+    }
+
+
+def _hermes_hub_jarvis_error(code: str, message: str, status: int = 400) -> "web.Response":
+    return web.json_response({"error": {"code": code, "message": message}}, status=status)
+
+
+def _hermes_hub_jarvis_safe_error(exc: BaseException) -> str:
+    try:
+        value = redact_sensitive_text(str(exc))
+    except Exception:
+        value = str(exc)
+    value = " ".join(value.replace("\r", " ").replace("\n", " ").split())
+    return (value or type(exc).__name__)[:500]
+
+
+def _hermes_hub_jarvis_runtime(adapter: Any) -> Dict[str, Any]:
+    runtime = getattr(adapter, "_hermes_hub_jarvis_runtime_v1", None)
+    if runtime is not None:
+        return runtime
+    from collections import deque as _deque
+
+    runtime = {
+        "sessions": {},
+        "lock": asyncio.Lock(),
+        "fast_sem": asyncio.Semaphore(
+            _hermes_hub_jarvis_env_int("HERMES_JARVIS_MAX_CONCURRENT_FAST", 2, 1, 16)
+        ),
+        "reasoning_sem": asyncio.Semaphore(
+            _hermes_hub_jarvis_env_int("HERMES_JARVIS_MAX_CONCURRENT_REASONING", 1, 1, 4)
+        ),
+        "client": None,
+        "sweeper": None,
+        "recent_metrics": _deque(maxlen=128),
+        "closing": False,
+    }
+    setattr(adapter, "_hermes_hub_jarvis_runtime_v1", runtime)
+    return runtime
+
+
+def _hermes_hub_jarvis_public_session(session: Dict[str, Any]) -> Dict[str, Any]:
+    window = session.get("conversation_window") or {}
+    now = time.time()
+    return {
+        "id": session["id"],
+        "status": session["status"],
+        "mode": session["mode"],
+        "goal": session["goal"],
+        "view_paused": session["view_paused"],
+        "speaking": session["speaking"],
+        "created_at": session["created_at"],
+        "updated_at": session["updated_at"],
+        "expires_at": session["expires_at"],
+        "mute_until": session["mute_until"],
+        "last_observation": session.get("last_observation"),
+        "last_route": session.get("last_route"),
+        "last_latency_ms": session.get("last_latency_ms"),
+        "frame_count": len(session["frames"]),
+        "event_count": len(session["events"]),
+        "perception_count": len(session.get("perceptions") or []),
+        "short_term_summary": session.get("short_term_summary") or None,
+        "summary_version": int(session.get("summary_version") or 0),
+        "situation": session.get("last_situation") or None,
+        "conversation_window": {
+            "active": float(window.get("active_until") or 0.0) > now,
+            "awaiting_followup": bool(window.get("awaiting_followup", False)),
+            "topic": str(window.get("topic") or "")[:240] or None,
+            "turn_count": int(window.get("turn_count") or 0),
+        },
+    }
+
+
+def _hermes_hub_jarvis_new_session(body: Dict[str, Any]) -> Dict[str, Any]:
+    from collections import OrderedDict as _OrderedDict, deque as _deque
+
+    now = time.time()
+    mode = str(body.get("mode") or "assistive").strip().lower()
+    if mode not in {"questions_only", "assistive", "proactive"}:
+        raise ValueError("invalid_mode")
+    goal = str(body.get("goal") or "").strip()[:2000]
+    ttl = _hermes_hub_jarvis_env_int(
+        "HERMES_JARVIS_SESSION_TTL_SECONDS", 3600, 60, 86_400
+    )
+    session_id = uuid.uuid4().hex
+    return {
+        "id": session_id,
+        "status": "active",
+        "mode": mode,
+        "goal": goal,
+        "view_paused": bool(body.get("view_paused", False)),
+        "speaking": False,
+        "created_at": now,
+        "updated_at": now,
+        "expires_at": now + ttl,
+        "mute_until": 0.0,
+        "last_intervention_at": 0.0,
+        "last_observation": None,
+        "last_route": None,
+        "last_latency_ms": None,
+        "frames": _OrderedDict(),
+        "events": _deque(
+            maxlen=_hermes_hub_jarvis_env_int("HERMES_JARVIS_MAX_CONTEXT_EVENTS", 64, 8, 512)
+        ),
+        "transcript": _deque(
+            maxlen=_hermes_hub_jarvis_env_int("HERMES_JARVIS_MAX_CONTEXT_EVENTS", 64, 8, 512)
+        ),
+        "observations": _deque(
+            maxlen=_hermes_hub_jarvis_env_int("HERMES_JARVIS_MAX_CONTEXT_EVENTS", 64, 8, 512)
+        ),
+        "perceptions": _deque(
+            maxlen=_hermes_hub_jarvis_env_int("HERMES_JARVIS_MAX_PERCEPTIONS", 128, 16, 1024)
+        ),
+        "perception_sequence": 0,
+        "short_term_summary": "",
+        "working_facts": _deque(maxlen=16),
+        "summary_cursor": 0,
+        "summary_version": 0,
+        "summary_failures": 0,
+        "summary_retry_after": 0.0,
+        "summarizer_task": None,
+        "summarizer_generation": 0,
+        "summarizer_suspended": False,
+        "last_situation": None,
+        "conversation_window": {
+            "active_until": 0.0,
+            "last_user_at": 0.0,
+            "last_assistant_at": 0.0,
+            "awaiting_followup": False,
+            "turn_count": 0,
+            "topic": goal[:240],
+            "last_trigger": None,
+        },
+        "interventions": _deque(maxlen=32),
+        "feedback_bias": 0.0,
+        "feedback": _deque(maxlen=64),
+        "subscribers": set(),
+        "tasks": set(),
+        "observer_task": None,
+        "observer_generation": 0,
+        "event_sequence": 0,
+        "dedupe": {},
+    }
+
+
+def _hermes_hub_jarvis_publish(
+    session: Dict[str, Any], event_type: str, **payload: Any
+) -> Dict[str, Any]:
+    session["event_sequence"] += 1
+    event = {
+        "id": str(session["event_sequence"]),
+        "type": event_type,
+        "session_id": session["id"],
+        "timestamp": time.time(),
+    }
+    event.update(payload)
+    session["events"].append(event)
+    for queue in list(session["subscribers"]):
+        try:
+            if queue.full():
+                queue.get_nowait()
+            queue.put_nowait(event)
+        except Exception:
+            session["subscribers"].discard(queue)
+    return event
+
+
+async def _hermes_hub_jarvis_cancel_task(task: Any, agent_ref: Optional[List[Any]] = None) -> None:
+    if task is None or task.done():
+        return
+    if agent_ref and agent_ref[0] is not None:
+        try:
+            agent_ref[0].interrupt()
+        except Exception:
+            pass
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        pass
+
+
+async def _hermes_hub_jarvis_drop_session(
+    runtime: Dict[str, Any], session_id: str, reason: str
+) -> bool:
+    session = runtime["sessions"].pop(session_id, None)
+    if session is None:
+        return False
+    session["status"] = "ended"
+    session["updated_at"] = time.time()
+    _hermes_hub_jarvis_publish(session, "session.ended", reason=reason)
+    tasks = set(session["tasks"])
+    observer = session.get("observer_task")
+    if observer is not None:
+        tasks.add(observer)
+    summarizer = session.get("summarizer_task")
+    if summarizer is not None:
+        tasks.add(summarizer)
+    current = asyncio.current_task()
+    tasks.discard(current)
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    session["tasks"].clear()
+    session["frames"].clear()
+    session["transcript"].clear()
+    session["observations"].clear()
+    session["perceptions"].clear()
+    session["interventions"].clear()
+    session["short_term_summary"] = ""
+    session["working_facts"].clear()
+    session["last_situation"] = None
+    for queue in list(session["subscribers"]):
+        try:
+            if queue.full():
+                queue.get_nowait()
+            queue.put_nowait(None)
+        except Exception:
+            pass
+    session["subscribers"].clear()
+    return True
+
+
+async def _hermes_hub_jarvis_sweep(adapter: Any) -> None:
+    runtime = _hermes_hub_jarvis_runtime(adapter)
+    interval = _hermes_hub_jarvis_env_int("HERMES_JARVIS_SWEEP_SECONDS", 15, 2, 300)
+    try:
+        while not runtime["closing"]:
+            await asyncio.sleep(interval)
+            now = time.time()
+            expired = [
+                session_id
+                for session_id, session in list(runtime["sessions"].items())
+                if session["expires_at"] <= now or session["status"] == "ended"
+            ]
+            for session_id in expired:
+                await _hermes_hub_jarvis_drop_session(runtime, session_id, "ttl_expired")
+            for session in runtime["sessions"].values():
+                _hermes_hub_jarvis_prune_frames(session, now)
+    except asyncio.CancelledError:
+        pass
+
+
+def _hermes_hub_jarvis_ensure_sweeper(adapter: Any) -> None:
+    runtime = _hermes_hub_jarvis_runtime(adapter)
+    task = runtime.get("sweeper")
+    if task is None or task.done():
+        runtime["sweeper"] = asyncio.create_task(_hermes_hub_jarvis_sweep(adapter))
+
+
+async def _hermes_hub_jarvis_shutdown(adapter: Any) -> None:
+    runtime = getattr(adapter, "_hermes_hub_jarvis_runtime_v1", None)
+    if runtime is None:
+        return
+    runtime["closing"] = True
+    sweeper = runtime.get("sweeper")
+    if sweeper is not None and not sweeper.done():
+        sweeper.cancel()
+        await asyncio.gather(sweeper, return_exceptions=True)
+    for session_id in list(runtime["sessions"]):
+        await _hermes_hub_jarvis_drop_session(runtime, session_id, "gateway_shutdown")
+    client = runtime.get("client")
+    if client is not None and not client.closed:
+        await client.close()
+    runtime["client"] = None
+
+
+def _hermes_hub_jarvis_prune_frames(session: Dict[str, Any], now: Optional[float] = None) -> None:
+    now = now or time.time()
+    ttl = _hermes_hub_jarvis_env_int("HERMES_JARVIS_FRAME_TTL_SECONDS", 20, 2, 300)
+    stale = [
+        frame_id
+        for frame_id, frame in session["frames"].items()
+        if now - float(frame["received_at"]) > ttl
+    ]
+    for frame_id in stale:
+        session["frames"].pop(frame_id, None)
+    max_frames = _hermes_hub_jarvis_env_int("HERMES_JARVIS_MAX_FRAMES_PER_SESSION", 3, 1, 12)
+    while len(session["frames"]) > max_frames:
+        session["frames"].popitem(last=False)
+
+
+async def _hermes_hub_jarvis_json_body(
+    request: "web.Request", max_bytes: int = 32_768
+) -> Dict[str, Any]:
+    length = request.content_length
+    if length is not None and length > max_bytes:
+        raise OverflowError("json_payload_too_large")
+    data = bytearray()
+    async for chunk in request.content.iter_chunked(8192):
+        data.extend(chunk)
+        if len(data) > max_bytes:
+            raise OverflowError("json_payload_too_large")
+    if not data:
+        return {}
+    try:
+        body = json.loads(bytes(data).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid_json") from exc
+    if not isinstance(body, dict):
+        raise ValueError("invalid_json_object")
+    return body
+
+
+async def _hermes_hub_jarvis_frame_body(
+    request: "web.Request",
+) -> tuple[bytes, str]:
+    allowed = {"image/jpeg", "image/png", "image/webp"}
+    max_bytes = _hermes_hub_jarvis_env_int(
+        "HERMES_JARVIS_MAX_FRAME_BYTES", 1_000_000, 65_536, 16_777_216
+    )
+    length = request.content_length
+    if length is not None and length > max_bytes + 65_536:
+        raise OverflowError("frame_too_large")
+    content_type = str(request.content_type or "").lower()
+    payload = bytearray()
+    mime_type = content_type
+    if content_type.startswith("multipart/"):
+        reader = await request.multipart()
+        field = await reader.next()
+        found = False
+        while field is not None:
+            if field.name in {"frame", "file", "image"}:
+                if found:
+                    raise ValueError("multiple_frames")
+                found = True
+                mime_type = str(field.headers.get("Content-Type", "image/jpeg")).lower()
+                while True:
+                    chunk = await field.read_chunk(size=64 * 1024)
+                    if not chunk:
+                        break
+                    payload.extend(chunk)
+                    if len(payload) > max_bytes:
+                        raise OverflowError("frame_too_large")
+            field = await reader.next()
+    else:
+        async for chunk in request.content.iter_chunked(64 * 1024):
+            payload.extend(chunk)
+            if len(payload) > max_bytes:
+                raise OverflowError("frame_too_large")
+    if not payload:
+        raise ValueError("empty_frame")
+    if mime_type not in allowed:
+        raise TypeError("unsupported_frame_type")
+    return bytes(payload), mime_type
+
+
+def _hermes_hub_jarvis_frame_data_url(frame: Dict[str, Any]) -> str:
+    import base64 as _base64
+
+    encoded = _base64.b64encode(frame["data"]).decode("ascii")
+    return f"data:{frame['mime_type']};base64,{encoded}"
+
+
+def _hermes_hub_jarvis_parse_json_object(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        value = "".join(parts)
+    if not isinstance(value, str):
+        raise ValueError("model_output_not_text")
+    text_value = value.strip()
+    if text_value.startswith("```"):
+        first_newline = text_value.find("\n")
+        if first_newline < 0 or not text_value.endswith("```"):
+            raise ValueError("model_output_invalid_fence")
+        text_value = text_value[first_newline + 1 : -3].strip()
+    parsed = json.loads(text_value)
+    if not isinstance(parsed, dict):
+        raise ValueError("model_output_not_object")
+    return parsed
+
+
+def _hermes_hub_jarvis_number(value: Any, field: str) -> float:
+    import math as _math
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid_{field}") from exc
+    if not _math.isfinite(number) or number < 0.0 or number > 1.0:
+        raise ValueError(f"invalid_{field}")
+    return number
+
+
+def _hermes_hub_jarvis_validate_fast_result(value: Any) -> Dict[str, Any]:
+    raw = _hermes_hub_jarvis_parse_json_object(value)
+    action = str(raw.get("action") or "").strip()
+    allowed = {"ignore", "respond_simple", "ask_user", "escalate", "urgent_candidate"}
+    if action not in allowed:
+        raise ValueError("invalid_action")
+    reply = raw.get("reply")
+    if reply is not None and not isinstance(reply, str):
+        raise ValueError("invalid_reply")
+    reply = reply.strip()[:800] if isinstance(reply, str) else None
+    if action in {"respond_simple", "ask_user"} and not reply:
+        raise ValueError("missing_reply")
+    frame_ids = raw.get("recommended_frame_ids") or []
+    if not isinstance(frame_ids, list):
+        raise ValueError("invalid_recommended_frame_ids")
+    return {
+        "action": action,
+        "observation": str(raw.get("observation") or "").strip()[:1000],
+        "reason": str(raw.get("reason") or "").strip()[:1000],
+        "confidence": _hermes_hub_jarvis_number(raw.get("confidence"), "confidence"),
+        "importance": _hermes_hub_jarvis_number(raw.get("importance"), "importance"),
+        "urgency": _hermes_hub_jarvis_number(raw.get("urgency"), "urgency"),
+        "utility": _hermes_hub_jarvis_number(
+            raw.get("utility", raw.get("importance")), "utility"
+        ),
+        "reply": reply,
+        "recommended_frame_ids": [str(item)[:128] for item in frame_ids[:3]],
+    }
+
+
+def _hermes_hub_jarvis_validate_verification(value: Any) -> Dict[str, Any]:
+    raw = _hermes_hub_jarvis_parse_json_object(value)
+    speak = raw.get("speak")
+    if not isinstance(speak, bool):
+        raise ValueError("invalid_speak")
+    text = raw.get("text")
+    if text is not None and not isinstance(text, str):
+        raise ValueError("invalid_text")
+    text = text.strip()[:1000] if isinstance(text, str) else None
+    if speak and not text:
+        raise ValueError("missing_text")
+    return {
+        "speak": speak,
+        "text": text,
+        "confidence": _hermes_hub_jarvis_number(raw.get("confidence"), "confidence"),
+        "importance": _hermes_hub_jarvis_number(raw.get("importance"), "importance"),
+        "urgency": _hermes_hub_jarvis_number(raw.get("urgency"), "urgency"),
+        "utility": _hermes_hub_jarvis_number(
+            raw.get("utility", raw.get("importance")), "utility"
+        ),
+        "event_key": str(raw.get("event_key") or "").strip().lower()[:200],
+    }
+
+
+def _hermes_hub_jarvis_openai_endpoint(base_url: str) -> str:
+    base = str(base_url or "").strip().rstrip("/")
+    if not base:
+        raise ValueError("model_base_url_missing")
+    if base.endswith("/chat/completions"):
+        return base
+    if base.endswith("/v1"):
+        return base + "/chat/completions"
+    return base + "/v1/chat/completions"
+
+
+async def _hermes_hub_jarvis_http_json(
+    runtime: Dict[str, Any], config: Dict[str, Any], payload: Dict[str, Any], timeout_seconds: float
+) -> Dict[str, Any]:
+    import aiohttp as _aiohttp
+
+    client = runtime.get("client")
+    if client is None or client.closed:
+        client = _aiohttp.ClientSession()
+        runtime["client"] = client
+    headers = {"Content-Type": "application/json"}
+    if config.get("api_key"):
+        headers["Authorization"] = f"Bearer {config['api_key']}"
+    endpoint = _hermes_hub_jarvis_openai_endpoint(config["base_url"])
+    timeout = _aiohttp.ClientTimeout(total=timeout_seconds)
+    async with client.post(endpoint, json=payload, headers=headers, timeout=timeout) as response:
+        data = bytearray()
+        async for chunk in response.content.iter_chunked(16 * 1024):
+            data.extend(chunk)
+            if len(data) > 512 * 1024:
+                raise OverflowError("model_response_too_large")
+        if response.status < 200 or response.status >= 300:
+            raise RuntimeError(f"model_http_{response.status}")
+    try:
+        decoded = json.loads(bytes(data).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid_model_response") from exc
+    if not isinstance(decoded, dict):
+        raise ValueError("invalid_model_response")
+    return decoded
+
+
+def _hermes_hub_jarvis_fast_content(response: Dict[str, Any]) -> Any:
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise ValueError("missing_model_choice")
+    message = choices[0].get("message")
+    if not isinstance(message, dict):
+        raise ValueError("missing_model_message")
+    return message.get("content")
+
+
+def _hermes_hub_jarvis_record_perception(
+    session: Dict[str, Any],
+    source: str,
+    kind: str,
+    text: str,
+    *,
+    importance: float = 0.0,
+    urgency: float = 0.0,
+    frame_id: Optional[str] = None,
+    summarizable: bool = True,
+) -> Dict[str, Any]:
+    session["perception_sequence"] = int(session.get("perception_sequence") or 0) + 1
+    item = {
+        "id": session["perception_sequence"],
+        "timestamp": time.time(),
+        "source": str(source or "system")[:32],
+        "kind": str(kind or "event")[:48],
+        "text": " ".join(str(text or "").split())[:1000],
+        "importance": max(0.0, min(1.0, float(importance))),
+        "urgency": max(0.0, min(1.0, float(urgency))),
+        "frame_id": str(frame_id or "")[:128] or None,
+        "summarizable": bool(summarizable),
+    }
+    session["perceptions"].append(item)
+    session["updated_at"] = time.time()
+    return item
+
+
+def _hermes_hub_jarvis_touch_conversation(
+    session: Dict[str, Any], role: str, text: str, now: Optional[float] = None
+) -> None:
+    now = now or time.time()
+    window = session["conversation_window"]
+    duration = _hermes_hub_jarvis_env_int(
+        "HERMES_JARVIS_CONVERSATION_WINDOW_SECONDS", 120, 15, 1800
+    )
+    window["active_until"] = now + duration
+    if role == "user":
+        window["last_user_at"] = now
+        window["awaiting_followup"] = False
+        window["turn_count"] = int(window.get("turn_count") or 0) + 1
+        if not str(window.get("topic") or "").strip():
+            window["topic"] = " ".join(str(text or "").split())[:240]
+    elif role == "assistant":
+        window["last_assistant_at"] = now
+        window["awaiting_followup"] = True
+
+
+def _hermes_hub_jarvis_set_trigger(
+    session: Dict[str, Any], trigger: Dict[str, Any]
+) -> Dict[str, Any]:
+    normalized = {
+        "type": str(trigger.get("type") or "event")[:64],
+        "source": str(trigger.get("source") or "system")[:32],
+        "target": str(trigger.get("target") or session.get("goal") or "")[:300],
+        "reason": str(trigger.get("reason") or "")[:500],
+        "text": str(trigger.get("text") or "")[:1000],
+        "confidence": max(0.0, min(1.0, float(trigger.get("confidence") or 0.0))),
+        "importance": max(0.0, min(1.0, float(trigger.get("importance") or 0.0))),
+        "urgency": max(0.0, min(1.0, float(trigger.get("urgency") or 0.0))),
+        "timestamp": time.time(),
+    }
+    description = normalized["reason"] or normalized["text"] or normalized["type"]
+    session["last_situation"] = description[:500]
+    session["conversation_window"]["last_trigger"] = normalized
+    return normalized
+
+
+def _hermes_hub_jarvis_conversation_payload(session: Dict[str, Any]) -> Dict[str, Any]:
+    window = session["conversation_window"]
+    return {
+        "active": float(window.get("active_until") or 0.0) > time.time(),
+        "awaiting_followup": bool(window.get("awaiting_followup", False)),
+        "topic": str(window.get("topic") or "")[:240] or None,
+        "turn_count": int(window.get("turn_count") or 0),
+    }
+
+
+def _hermes_hub_jarvis_reactor_context(
+    session: Dict[str, Any], trigger: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    perceptions = []
+    for item in list(session["perceptions"])[-12:]:
+        if not isinstance(item, dict) or not item.get("text"):
+            continue
+        perceptions.append(
+            {
+                "id": item.get("id"),
+                "source": item.get("source"),
+                "kind": item.get("kind"),
+                "text": str(item.get("text") or "")[:500],
+                "importance": item.get("importance"),
+                "urgency": item.get("urgency"),
+            }
+        )
+    dialogue = [
+        {"role": str(item.get("role") or "")[:16], "content": str(item.get("content") or "")[:700]}
+        for item in list(session["transcript"])[-8:]
+        if isinstance(item, dict)
+    ]
+    helpful = sum(1 for item in session["feedback"] if item.get("helpful") is True)
+    unhelpful = sum(1 for item in session["feedback"] if item.get("helpful") is False)
+    situation = trigger or session["conversation_window"].get("last_trigger") or {
+        "type": "observe",
+        "source": "system",
+        "reason": session.get("last_situation") or "No explicit trigger.",
+    }
+    return {
+        "identity": "Hermes, assistente locale dell'utente",
+        "goal": session["goal"],
+        "mode": session["mode"],
+        "short_term_summary": session.get("short_term_summary") or None,
+        "working_facts": list(session.get("working_facts") or []),
+        "conversation_window": _hermes_hub_jarvis_conversation_payload(session),
+        "recent_dialogue": dialogue,
+        "recent_perceptions": perceptions,
+        "feedback": {"helpful": helpful, "unhelpful": unhelpful},
+        "situation": situation,
+    }
+
+
+def _hermes_hub_jarvis_reactor_system_prompt(purpose: str) -> str:
+    base = (
+        "You are Hermes, the user's private local assistant. Remain coherent over time, notice relevant changes, "
+        "and prefer silence over low-value interruption. Treat session observations as temporary context, not durable "
+        "facts. Never invent unseen details. The dynamic SITUATION is the highest-priority current reason for acting."
+    )
+    if purpose == "observer":
+        return base + (
+            " Act as Perceptor and Senser. Return one JSON object only; no markdown. Allowed action: ignore, "
+            "respond_simple, ask_user, escalate, urgent_candidate. Required keys: action, observation, reason, "
+            "confidence, importance, urgency, utility, reply, recommended_frame_ids. All scores are 0..1. For passive "
+            "observation respond_simple is forbidden. Stable or merely descriptive scenes must be ignore. For a direct "
+            "question, respond_simple only for obvious color, count, position, or clearly readable text. Escalate "
+            "ambiguity, safety, money, devices, memory, tools, comparison, diagnosis, or multi-step work."
+        )
+    if purpose == "summarizer":
+        return base + (
+            " Act as short-term memory summarizer. Return one JSON object only with summary, topic, open_loop and "
+            "notable_facts. Preserve unresolved tasks, corrections, changes and user intent. Drop repetition and visual "
+            "noise. open_loop MUST be the JSON boolean true or false, never a string or null. summary and topic MUST "
+            "be strings. notable_facts MUST be a JSON array with at most eight short strings."
+        )
+    return base + (
+        " Act as Reactor. Use original images directly. Put important information first; normally one or two spoken "
+        "sentences. Use Hermes tools and durable memory only when needed."
+    )
+
+
+def _hermes_hub_jarvis_reactor_prompt(
+    session: Dict[str, Any],
+    purpose: str,
+    *,
+    question: Optional[str] = None,
+    trigger: Optional[Dict[str, Any]] = None,
+) -> str:
+    context = _hermes_hub_jarvis_reactor_context(session, trigger)
+    situation = context.pop("situation")
+    return (
+        f"Purpose: {purpose}\nQuestion: {question or ''}\n"
+        f"CONTEXT: {json.dumps(context, ensure_ascii=False, separators=(',', ':'))}\n"
+        f"SITUATION (highest priority): {json.dumps(situation, ensure_ascii=False, separators=(',', ':'))}"
+    )
+
+
+def _hermes_hub_jarvis_context_text(session: Dict[str, Any]) -> str:
+    return json.dumps(
+        _hermes_hub_jarvis_reactor_context(session),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _hermes_hub_jarvis_semantic_similarity(left: str, right: str) -> float:
+    import re as _re, unicodedata as _unicodedata
+
+    def _terms(value: str) -> set[str]:
+        normalized = _unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+        return set(_re.findall(r"[a-z0-9]+", normalized.lower()))
+
+    left_terms, right_terms = _terms(left), _terms(right)
+    if not left_terms or not right_terms:
+        return 0.0
+    return len(left_terms & right_terms) / len(left_terms | right_terms)
+
+
+def _hermes_hub_jarvis_validate_summary(value: Any) -> Dict[str, Any]:
+    raw = _hermes_hub_jarvis_parse_json_object(value)
+    summary = " ".join(str(raw.get("summary") or "").split())[:1600]
+    if not summary:
+        raise ValueError("missing_summary")
+    open_loop = raw.get("open_loop", False)
+    if not isinstance(open_loop, bool):
+        raise ValueError("invalid_open_loop")
+    facts = raw.get("notable_facts") or []
+    if not isinstance(facts, list):
+        raise ValueError("invalid_notable_facts")
+    return {
+        "summary": summary,
+        "topic": " ".join(str(raw.get("topic") or "").split())[:240],
+        "open_loop": open_loop,
+        "notable_facts": [" ".join(str(item).split())[:240] for item in facts[:8] if str(item).strip()],
+    }
+
+
+async def _hermes_hub_jarvis_summarizer_call(
+    adapter: Any, session: Dict[str, Any], perceptions: List[Dict[str, Any]]
+) -> tuple[Dict[str, Any], Dict[str, float]]:
+    runtime = _hermes_hub_jarvis_runtime(adapter)
+    started = time.perf_counter()
+    config = _hermes_hub_jarvis_model_config("fast")
+    if not config["base_url"] or not config["model"]:
+        raise RuntimeError("summarizer_model_unavailable")
+    compact = [
+        {"id": item["id"], "source": item["source"], "kind": item["kind"], "text": item["text"]}
+        for item in perceptions[-20:]
+    ]
+    payload = {
+        "model": config["model"],
+        "messages": [
+            {"role": "system", "content": _hermes_hub_jarvis_reactor_system_prompt("summarizer")},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "previous_summary": session.get("short_term_summary") or None,
+                        "current_goal": session["goal"],
+                        "new_perceptions": compact,
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            },
+        ],
+        "temperature": 0.0,
+        "max_tokens": _hermes_hub_jarvis_env_int(
+            "HERMES_JARVIS_SUMMARY_MAX_TOKENS", 256, 96, 768
+        ),
+        "response_format": {"type": "json_object"},
+        "chat_template_kwargs": {"enable_thinking": False},
+        "stream": False,
+    }
+    timeout = _hermes_hub_jarvis_env_float(
+        "HERMES_JARVIS_SUMMARY_TIMEOUT_SECONDS", 15.0, 1.0, 120.0
+    )
+    queued = time.perf_counter()
+    async with runtime["fast_sem"]:
+        acquired = time.perf_counter()
+        response = await _hermes_hub_jarvis_http_json(runtime, config, payload, timeout)
+    result = _hermes_hub_jarvis_validate_summary(_hermes_hub_jarvis_fast_content(response))
+    return result, {
+        "queue_ms": round((acquired - queued) * 1000, 2),
+        "model_ms": round((time.perf_counter() - acquired) * 1000, 2),
+        "total_ms": round((time.perf_counter() - started) * 1000, 2),
+    }
+
+
+async def _hermes_hub_jarvis_summarize(
+    adapter: Any, session: Dict[str, Any], generation: int
+) -> None:
+    task = asyncio.current_task()
+    session["tasks"].add(task)
+    try:
+        await asyncio.sleep(0.75)
+        cursor = int(session.get("summary_cursor") or 0)
+        items = [
+            item for item in list(session["perceptions"])
+            if item.get("summarizable") and int(item.get("id") or 0) > cursor
+        ]
+        if not items or generation != session.get("summarizer_generation"):
+            return
+        upto = int(items[-1]["id"])
+        result, metrics = await _hermes_hub_jarvis_summarizer_call(adapter, session, items)
+        if generation != session.get("summarizer_generation"):
+            return
+        session["short_term_summary"] = result["summary"]
+        session["working_facts"].clear()
+        session["working_facts"].extend(result["notable_facts"])
+        session["summary_cursor"] = upto
+        session["summary_version"] = int(session.get("summary_version") or 0) + 1
+        session["summary_failures"] = 0
+        session["summary_retry_after"] = 0.0
+        window = session["conversation_window"]
+        if result["topic"]:
+            window["topic"] = result["topic"]
+        window["awaiting_followup"] = result["open_loop"]
+        _hermes_hub_jarvis_publish(
+            session,
+            "memory.summary",
+            summary=result["summary"],
+            topic=result["topic"] or None,
+            open_loop=result["open_loop"],
+            version=session["summary_version"],
+            metrics=metrics,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        failures = int(session.get("summary_failures") or 0) + 1
+        session["summary_failures"] = failures
+        session["summary_retry_after"] = time.time() + min(60.0, float(2 ** min(failures, 5)))
+        _hermes_hub_jarvis_publish(
+            session,
+            "memory.summary_failed",
+            code="summarizer_failed",
+            message=_hermes_hub_jarvis_safe_error(exc),
+            retry_after=session["summary_retry_after"],
+        )
+    finally:
+        session["tasks"].discard(task)
+        if session.get("summarizer_task") is task:
+            session["summarizer_task"] = None
+        _hermes_hub_jarvis_schedule_summarizer(adapter, session)
+
+
+def _hermes_hub_jarvis_schedule_summarizer(adapter: Any, session: Dict[str, Any]) -> None:
+    if session.get("status") == "ended" or session.get("summarizer_suspended"):
+        return
+    if time.time() < float(session.get("summary_retry_after") or 0.0):
+        return
+    threshold = _hermes_hub_jarvis_env_int(
+        "HERMES_JARVIS_SUMMARY_EVERY_EVENTS", 6, 2, 64
+    )
+    cursor = int(session.get("summary_cursor") or 0)
+    pending = sum(
+        1 for item in session["perceptions"]
+        if item.get("summarizable") and int(item.get("id") or 0) > cursor
+    )
+    if pending < threshold:
+        return
+    current = session.get("summarizer_task")
+    if current is not None and not current.done():
+        return
+    session["summarizer_generation"] += 1
+    generation = session["summarizer_generation"]
+    session["summarizer_task"] = asyncio.create_task(
+        _hermes_hub_jarvis_summarize(adapter, session, generation)
+    )
+
+
+async def _hermes_hub_jarvis_fast_call(
+    adapter: Any,
+    session: Dict[str, Any],
+    frame: Dict[str, Any],
+    question: Optional[str],
+) -> tuple[Dict[str, Any], Dict[str, float]]:
+    runtime = _hermes_hub_jarvis_runtime(adapter)
+    started = time.perf_counter()
+    if _hermes_hub_jarvis_env_bool("HERMES_JARVIS_MOCK_MODE", False):
+        result = {
+            "action": "respond_simple" if question else "ignore",
+            "observation": "Mock frame received.",
+            "reason": "Explicit Jarvis mock mode.",
+            "confidence": 0.99,
+            "importance": 0.1,
+            "urgency": 0.0,
+            "utility": 0.1,
+            "reply": "Risposta Jarvis mock." if question else None,
+            "recommended_frame_ids": [frame["id"]],
+        }
+        return result, {"total_ms": round((time.perf_counter() - started) * 1000, 2)}
+
+    config = _hermes_hub_jarvis_model_config("fast")
+    if not config["base_url"] or not config["model"]:
+        raise RuntimeError("fast_model_unavailable")
+    purpose = "direct_question" if question else "passive_observation"
+    input_trigger = {
+        "type": purpose,
+        "source": "speech" if question else "video",
+        "target": session["goal"],
+        "reason": "Explicit user question." if question else "A sampled scene change is ready for evaluation.",
+        "text": question or "",
+    }
+    prompt = _hermes_hub_jarvis_reactor_prompt(
+        session,
+        purpose,
+        question=question,
+        trigger=input_trigger,
+    ) + f"\nFrame id: {frame['id']}. recommended_frame_ids may contain only this id, otherwise []."
+    content = [
+        {"type": "text", "text": prompt},
+        {"type": "image_url", "image_url": {"url": _hermes_hub_jarvis_frame_data_url(frame)}},
+    ]
+    payload = {
+        "model": config["model"],
+        "messages": [
+            {"role": "system", "content": _hermes_hub_jarvis_reactor_system_prompt("observer")},
+            {"role": "user", "content": content},
+        ],
+        "temperature": 0.0,
+        "max_tokens": _hermes_hub_jarvis_env_int("HERMES_JARVIS_FAST_MAX_TOKENS", 256, 64, 512),
+        "response_format": {"type": "json_object"},
+        "chat_template_kwargs": {"enable_thinking": False},
+        "stream": False,
+    }
+    timeout = _hermes_hub_jarvis_env_float(
+        "HERMES_JARVIS_FAST_TIMEOUT_SECONDS", 12.0, 0.5, 120.0
+    )
+    queued = time.perf_counter()
+    async with runtime["fast_sem"]:
+        acquired = time.perf_counter()
+        response = await _hermes_hub_jarvis_http_json(runtime, config, payload, timeout)
+    parsed = _hermes_hub_jarvis_validate_fast_result(
+        _hermes_hub_jarvis_fast_content(response)
+    )
+    if question is None and parsed["action"] == "respond_simple":
+        should_verify = parsed["importance"] >= 0.75 and parsed["utility"] >= 0.70
+        parsed["action"] = "escalate" if should_verify else "ignore"
+        parsed["reply"] = None
+    return parsed, {
+        "queue_ms": round((acquired - queued) * 1000, 2),
+        "model_ms": round((time.perf_counter() - acquired) * 1000, 2),
+        "total_ms": round((time.perf_counter() - started) * 1000, 2),
+    }
+
+
+def _hermes_hub_jarvis_reasoning_route() -> Optional[Dict[str, Any]]:
+    config = _hermes_hub_jarvis_model_config("reasoning")
+    if not config["dedicated"]:
+        return None
+    route: Dict[str, Any] = {"model": config["model"]}
+    if config["base_url"]:
+        route["base_url"] = config["base_url"]
+    if config["api_key"]:
+        route["api_key"] = config["api_key"]
+    if config["provider"]:
+        route["provider"] = config["provider"]
+    route["max_iterations"] = _hermes_hub_jarvis_env_int(
+        "HERMES_JARVIS_REASONING_MAX_ITERATIONS", 12, 1, 60
+    )
+    route["max_tokens"] = _hermes_hub_jarvis_env_int(
+        "HERMES_JARVIS_REASONING_MAX_TOKENS", 96, 64, 2048
+    )
+    return route
+
+
+def _hermes_hub_jarvis_result_text(result: Any) -> str:
+    if isinstance(result, str):
+        return result.strip()
+    if not isinstance(result, dict):
+        return ""
+    for key in ("final_response", "response", "content", "text", "message"):
+        value = result.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            nested = value.get("content") or value.get("text")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    return ""
+
+
+def _hermes_hub_jarvis_selected_frames(
+    session: Dict[str, Any], frame_ids: Optional[List[str]] = None
+) -> List[Dict[str, Any]]:
+    _hermes_hub_jarvis_prune_frames(session)
+    selected: List[Dict[str, Any]] = []
+    requested = [str(item) for item in (frame_ids or [])[:3]]
+    if requested:
+        for frame_id in requested:
+            frame = session["frames"].get(frame_id)
+            if frame is not None:
+                selected.append(frame)
+    else:
+        selected = list(session["frames"].values())[-3:]
+    return selected
+
+
+async def _hermes_hub_jarvis_reasoning_call(
+    adapter: Any,
+    session: Dict[str, Any],
+    prompt: str,
+    frames: List[Dict[str, Any]],
+) -> tuple[str, Dict[str, float]]:
+    runtime = _hermes_hub_jarvis_runtime(adapter)
+    started = time.perf_counter()
+    if _hermes_hub_jarvis_env_bool("HERMES_JARVIS_MOCK_MODE", False):
+        return "Risposta Jarvis reasoning mock.", {
+            "total_ms": round((time.perf_counter() - started) * 1000, 2)
+        }
+    config = _hermes_hub_jarvis_model_config("reasoning")
+    if not config["base_url"] or not config["model"]:
+        raise RuntimeError("reasoning_model_unavailable")
+    content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for frame in frames[:3]:
+        content.append(
+            {"type": "image_url", "image_url": {"url": _hermes_hub_jarvis_frame_data_url(frame)}}
+        )
+    history = [dict(item) for item in list(session["transcript"])[-12:]]
+    agent_ref: List[Any] = [None]
+    timeout = _hermes_hub_jarvis_env_float(
+        "HERMES_JARVIS_REASONING_TIMEOUT_SECONDS", 60.0, 1.0, 600.0
+    )
+    queued = time.perf_counter()
+    async with runtime["reasoning_sem"]:
+        acquired = time.perf_counter()
+        task = asyncio.create_task(
+            adapter._run_agent(
+                user_message=content,
+                conversation_history=history,
+                ephemeral_system_prompt=(
+                    _hermes_hub_jarvis_reactor_system_prompt("reasoning")
+                    + " Jarvis Mode is temporary. Do not persist images or claim certainty not supported by evidence."
+                ),
+                session_id=None,
+                gateway_session_key=None,
+                route=_hermes_hub_jarvis_reasoning_route(),
+                agent_ref=agent_ref,
+            )
+        )
+        try:
+            result, _usage = await asyncio.wait_for(task, timeout=timeout)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            if agent_ref[0] is not None:
+                try:
+                    agent_ref[0].interrupt()
+                except Exception:
+                    pass
+            if not task.done():
+                task.cancel()
+            if isinstance(sys.exc_info()[1], asyncio.CancelledError):
+                raise
+            raise TimeoutError("reasoning_model_timeout")
+    text_value = _hermes_hub_jarvis_result_text(result)
+    if not text_value:
+        raise ValueError("reasoning_model_empty")
+    return text_value[:4000], {
+        "queue_ms": round((acquired - queued) * 1000, 2),
+        "model_ms": round((time.perf_counter() - acquired) * 1000, 2),
+        "total_ms": round((time.perf_counter() - started) * 1000, 2),
+    }
+
+
+def _hermes_hub_jarvis_requires_reasoning(question: str) -> bool:
+    lowered = question.lower()
+    critical = (
+        "sicurezza", "pericol", "corrente", "elettric", "medic", "farmac", "denaro",
+        "password", "cancella", "formatta", "multi-step", "passaggi", "analizza",
+        "verifica", "confronta", "perché", "diagnosi", "rischio", "safe", "danger",
+    )
+    return len(question) > 320 or any(token in lowered for token in critical)
+
+
+def _hermes_hub_jarvis_voice_control(
+    session: Dict[str, Any], question: str
+) -> Optional[str]:
+    lowered = " ".join(question.lower().split())
+    now = time.time()
+    if "termina modalit" in lowered and "jarvis" in lowered:
+        session["status"] = "ended"
+        return "Termino modalità Jarvis."
+    if "parla solo quando" in lowered or "solo domande" in lowered:
+        session["mode"] = "questions_only"
+        return "Modalità Solo domande attiva."
+    if "più proattivo" in lowered or "piu proattivo" in lowered:
+        session["mode"] = "proactive"
+        return "Modalità Proattiva attiva."
+    if "metti in pausa la vista" in lowered or "pausa la vista" in lowered:
+        session["view_paused"] = True
+        return "Vista in pausa."
+    if "riprendi la vista" in lowered:
+        session["view_paused"] = False
+        return "Vista ripresa."
+    if "non interrompermi" in lowered:
+        seconds = 300 if "cinque" in lowered or "5 minut" in lowered else 60
+        session["mute_until"] = now + seconds
+        return f"Non ti interromperò per {seconds // 60} minuti."
+    focus = "concentrati su"
+    if focus in lowered:
+        index = lowered.index(focus) + len(focus)
+        session["goal"] = question[index:].strip()[:2000]
+        return "Obiettivo aggiornato."
+    return None
+
+
+def _hermes_hub_jarvis_initiative_decision(
+    session: Dict[str, Any], proposal: Dict[str, Any], now: Optional[float] = None
+) -> tuple[bool, str, float]:
+    now = now or time.time()
+    mode = session["mode"]
+    if mode == "questions_only":
+        return False, "questions_only", 0.0
+    if session["status"] != "active" or session["view_paused"]:
+        return False, "session_inactive", 0.0
+    urgency = float(proposal["urgency"])
+    if session["speaking"] and urgency < 0.95:
+        return False, "already_speaking", 0.0
+    if now < float(session["mute_until"]) and urgency < 0.95:
+        return False, "muted", 0.0
+    confidence = float(proposal["confidence"])
+    minimum_confidence = 0.88 if mode == "assistive" else 0.72
+    if confidence < minimum_confidence:
+        return False, "low_confidence", 0.0
+    cooldown = _hermes_hub_jarvis_env_float(
+        "HERMES_JARVIS_ASSISTIVE_COOLDOWN_SECONDS" if mode == "assistive" else "HERMES_JARVIS_PROACTIVE_COOLDOWN_SECONDS",
+        30.0 if mode == "assistive" else 12.0,
+        0.0,
+        600.0,
+    )
+    elapsed = now - float(session["last_intervention_at"])
+    if elapsed < cooldown and urgency < 0.95:
+        return False, "cooldown", 0.0
+    event_key = str(proposal.get("event_key") or proposal.get("text") or "").strip().lower()[:200]
+    dedupe_ttl = _hermes_hub_jarvis_env_float(
+        "HERMES_JARVIS_DEDUPE_SECONDS", 300.0, 1.0, 3600.0
+    )
+    session["dedupe"] = {
+        key: timestamp
+        for key, timestamp in session["dedupe"].items()
+        if now - timestamp <= dedupe_ttl
+    }
+    if event_key and event_key in session["dedupe"] and urgency < 0.95:
+        return False, "duplicate", 0.0
+    disturbance = 0.35 if mode == "assistive" else 0.20
+    if _hermes_hub_jarvis_conversation_payload(session)["active"] and urgency < 0.95:
+        disturbance += 0.15
+    score = float(proposal["utility"]) * urgency * confidence - disturbance
+    threshold = _hermes_hub_jarvis_env_float(
+        "HERMES_JARVIS_ASSISTIVE_THRESHOLD" if mode == "assistive" else "HERMES_JARVIS_PROACTIVE_THRESHOLD",
+        0.48,
+        -1.0,
+        1.0,
+    )
+    threshold = max(-1.0, min(1.0, threshold + float(session.get("feedback_bias") or 0.0)))
+    if score < threshold and urgency < 0.95:
+        return False, "below_threshold", score
+    semantic_threshold = _hermes_hub_jarvis_env_float(
+        "HERMES_JARVIS_SEMANTIC_DEDUPE_THRESHOLD", 0.82, 0.5, 1.0
+    )
+    semantic_ttl = _hermes_hub_jarvis_env_float(
+        "HERMES_JARVIS_SEMANTIC_DEDUPE_SECONDS", 600.0, 10.0, 3600.0
+    )
+    proposed_text = str(proposal.get("text") or "")
+    for previous in session.get("interventions") or []:
+        if now - float(previous.get("timestamp") or 0.0) > semantic_ttl:
+            continue
+        if _hermes_hub_jarvis_semantic_similarity(proposed_text, str(previous.get("text") or "")) >= semantic_threshold:
+            return False, "semantic_duplicate", score
+    session["last_intervention_at"] = now
+    if event_key:
+        session["dedupe"][event_key] = now
+    return True, "speak", score
+
+
+def _hermes_hub_jarvis_remember_intervention(
+    session: Dict[str, Any], event_id: str, text: str, event_key: str
+) -> None:
+    session["interventions"].append(
+        {
+            "event_id": str(event_id)[:64],
+            "text": " ".join(str(text or "").split())[:1200],
+            "event_key": str(event_key or "")[:200],
+            "timestamp": time.time(),
+            "helpful": None,
+        }
+    )
+
+
+def _hermes_hub_jarvis_apply_feedback(
+    session: Dict[str, Any], event_id: str, helpful: bool
+) -> float:
+    matching_intervention = next(
+        (
+            item
+            for item in session.get("interventions") or []
+            if str(item.get("event_id") or "") == event_id
+        ),
+        None,
+    )
+    if matching_intervention is None:
+        raise ValueError("intervention_not_found")
+    if matching_intervention.get("helpful") is not None:
+        raise ValueError("feedback_already_recorded")
+    session["feedback"].append(
+        {"event_id": event_id, "helpful": helpful, "timestamp": time.time()}
+    )
+    step = _hermes_hub_jarvis_env_float("HERMES_JARVIS_FEEDBACK_STEP", 0.04, 0.0, 0.2)
+    current_bias = float(session.get("feedback_bias") or 0.0)
+    session["feedback_bias"] = max(
+        -0.2, min(0.3, current_bias - step if helpful else current_bias + step)
+    )
+    matching_intervention["helpful"] = helpful
+    _hermes_hub_jarvis_record_perception(
+        session,
+        "feedback",
+        "intervention_rating",
+        "The user marked the previous intervention as helpful."
+        if helpful
+        else "The user marked the previous intervention as unhelpful.",
+        importance=0.8,
+    )
+    return float(session["feedback_bias"])
+
+
+async def _hermes_hub_jarvis_observe(
+    adapter: Any, session: Dict[str, Any], frame_id: str, generation: int
+) -> None:
+    task = asyncio.current_task()
+    session["tasks"].add(task)
+    try:
+        frame = session["frames"].get(frame_id)
+        if frame is None or session["observer_generation"] != generation:
+            return
+        fast, metrics = await _hermes_hub_jarvis_fast_call(adapter, session, frame, None)
+        if session["observer_generation"] != generation:
+            return
+        session["last_observation"] = fast["observation"] or None
+        session["last_route"] = "fast"
+        session["last_latency_ms"] = metrics.get("total_ms")
+        session["observations"].append(fast)
+        trigger = _hermes_hub_jarvis_set_trigger(
+            session,
+            {
+                "type": fast["action"],
+                "source": "video",
+                "target": session["goal"],
+                "reason": fast["reason"],
+                "text": fast["observation"],
+                "confidence": fast["confidence"],
+                "importance": fast["importance"],
+                "urgency": fast["urgency"],
+            },
+        )
+        _hermes_hub_jarvis_record_perception(
+            session,
+            "video",
+            "observation",
+            fast["observation"] or fast["reason"],
+            importance=fast["importance"],
+            urgency=fast["urgency"],
+            frame_id=frame_id,
+        )
+        _hermes_hub_jarvis_schedule_summarizer(adapter, session)
+        if fast["action"] == "ignore":
+            return
+        _hermes_hub_jarvis_publish(
+            session,
+            "observer.result",
+            action=fast["action"],
+            observation=fast["observation"],
+            situation=session["last_situation"],
+            confidence=fast["confidence"],
+            metrics=metrics,
+        )
+        if fast["action"] not in {"ask_user", "escalate", "urgent_candidate"}:
+            return
+        reasoning = _hermes_hub_jarvis_model_config("reasoning")
+        if not (_hermes_hub_jarvis_env_bool("HERMES_JARVIS_MOCK_MODE", False) or (reasoning["base_url"] and reasoning["model"])):
+            _hermes_hub_jarvis_publish(
+                session,
+                "session.error",
+                code="reasoning_model_unavailable",
+                message="Intervento autonomo disabilitato: modello ragionante non disponibile.",
+            )
+            return
+        _hermes_hub_jarvis_publish(session, "assistant.escalating", route="reasoning")
+        verification_prompt = _hermes_hub_jarvis_reactor_prompt(
+            session,
+            "autonomous_verification",
+            trigger=trigger,
+        ) + (
+            "\nReturn one JSON object only with keys speak(bool), text(string|null), confidence, importance, "
+            "urgency, utility (0..1), event_key(short stable string). Prefer silence. Never speak for a merely "
+            "descriptive observation. Candidate: "
+            + json.dumps(fast, ensure_ascii=False, separators=(",", ":"))
+        )
+        raw, reasoning_metrics = await _hermes_hub_jarvis_reasoning_call(
+            adapter, session, verification_prompt, [frame]
+        )
+        verification = _hermes_hub_jarvis_validate_verification(raw)
+        if not verification["speak"]:
+            return
+        speak, reason, score = _hermes_hub_jarvis_initiative_decision(session, verification)
+        if not speak:
+            _hermes_hub_jarvis_publish(
+                session, "initiative.silent", reason=reason, score=round(score, 4)
+            )
+            return
+        session["last_route"] = "reasoning"
+        session["last_latency_ms"] = reasoning_metrics.get("total_ms")
+        event = _hermes_hub_jarvis_publish(
+            session,
+            "assistant.speak",
+            text=verification["text"],
+            route="reasoning",
+            autonomous=True,
+            metrics=reasoning_metrics,
+        )
+        _hermes_hub_jarvis_remember_intervention(
+            session, event["id"], verification["text"], verification["event_key"]
+        )
+        _hermes_hub_jarvis_touch_conversation(session, "assistant", verification["text"])
+        _hermes_hub_jarvis_record_perception(
+            session,
+            "assistant",
+            "autonomous_intervention",
+            verification["text"],
+            importance=verification["importance"],
+            urgency=verification["urgency"],
+        )
+        _hermes_hub_jarvis_schedule_summarizer(adapter, session)
+    except asyncio.CancelledError:
+        raise
+    except asyncio.TimeoutError:
+        _hermes_hub_jarvis_publish(
+            session, "session.error", code="fast_model_timeout", message="Timeout modello rapido."
+        )
+    except TimeoutError:
+        _hermes_hub_jarvis_publish(
+            session,
+            "session.error",
+            code="reasoning_model_timeout",
+            message="Timeout modello ragionante.",
+        )
+    except Exception as exc:
+        _hermes_hub_jarvis_publish(
+            session,
+            "session.error",
+            code="observer_failed",
+            message=_hermes_hub_jarvis_safe_error(exc),
+        )
+    finally:
+        session["tasks"].discard(task)
+        if session.get("observer_task") is task:
+            session["observer_task"] = None
+
+
+async def _hermes_hub_jarvis_schedule_observer(
+    adapter: Any, session: Dict[str, Any], frame_id: str
+) -> None:
+    previous = session.get("observer_task")
+    if previous is not None and not previous.done():
+        previous.cancel()
+    session["observer_generation"] += 1
+    generation = session["observer_generation"]
+    task = asyncio.create_task(_hermes_hub_jarvis_observe(adapter, session, frame_id, generation))
+    session["observer_task"] = task
+
+
+async def _hermes_hub_jarvis_direct_turn(
+    adapter: Any,
+    session: Dict[str, Any],
+    question: str,
+    frame_ids: Optional[List[str]],
+) -> Dict[str, Any]:
+    task = asyncio.current_task()
+    session["tasks"].add(task)
+    session["summarizer_suspended"] = True
+    try:
+        trigger = _hermes_hub_jarvis_set_trigger(
+            session,
+            {
+                "type": "direct_question",
+                "source": "speech",
+                "target": session["goal"],
+                "reason": "The user is addressing Hermes directly.",
+                "text": question,
+                "confidence": 1.0,
+                "importance": 1.0,
+                "urgency": 0.5,
+            },
+        )
+        _hermes_hub_jarvis_touch_conversation(session, "user", question)
+        _hermes_hub_jarvis_record_perception(
+            session, "speech", "user_utterance", question, importance=1.0, urgency=0.5
+        )
+        summarizer = session.get("summarizer_task")
+        if summarizer is not None and not summarizer.done():
+            summarizer.cancel()
+            await asyncio.gather(summarizer, return_exceptions=True)
+        control_reply = _hermes_hub_jarvis_voice_control(session, question)
+        if control_reply is not None:
+            session["updated_at"] = time.time()
+            session["transcript"].append({"role": "user", "content": question})
+            session["transcript"].append({"role": "assistant", "content": control_reply})
+            _hermes_hub_jarvis_touch_conversation(session, "assistant", control_reply)
+            _hermes_hub_jarvis_record_perception(
+                session, "assistant", "control_reply", control_reply, importance=0.6
+            )
+            event = _hermes_hub_jarvis_publish(
+                session, "assistant.speak", text=control_reply, route="control", autonomous=False
+            )
+            return {"text": control_reply, "route": "control", "event_id": event["id"]}
+
+        observer = session.get("observer_task")
+        if observer is not None and not observer.done():
+            observer.cancel()
+            await asyncio.gather(observer, return_exceptions=True)
+        frames = _hermes_hub_jarvis_selected_frames(session, frame_ids)
+        if not frames:
+            raise ValueError("frame_required")
+        session["transcript"].append({"role": "user", "content": question})
+        reasoning_config = _hermes_hub_jarvis_model_config("reasoning")
+        reasoning_available = _hermes_hub_jarvis_env_bool("HERMES_JARVIS_MOCK_MODE", False) or bool(
+            reasoning_config["base_url"] and reasoning_config["model"]
+        )
+        fast_config = _hermes_hub_jarvis_model_config("fast")
+        fast_available = _hermes_hub_jarvis_env_bool("HERMES_JARVIS_MOCK_MODE", False) or bool(
+            fast_config["base_url"] and fast_config["model"]
+        )
+        route = "reasoning" if _hermes_hub_jarvis_requires_reasoning(question) else "fast"
+        answer: Optional[str] = None
+        metrics: Dict[str, float] = {}
+        fast: Optional[Dict[str, Any]] = None
+        if route == "fast" and fast_available:
+            _hermes_hub_jarvis_publish(session, "assistant.thinking", route="fast")
+            try:
+                fast, metrics = await _hermes_hub_jarvis_fast_call(
+                    adapter, session, frames[-1], question
+                )
+                minimum = _hermes_hub_jarvis_env_float(
+                    "HERMES_JARVIS_SIMPLE_MIN_CONFIDENCE", 0.95, 0.0, 1.0
+                )
+                if fast["action"] in {"respond_simple", "ask_user"} and fast["confidence"] >= minimum:
+                    answer = fast["reply"]
+                else:
+                    route = "reasoning"
+            except asyncio.TimeoutError:
+                route = "reasoning"
+                _hermes_hub_jarvis_publish(
+                    session, "session.error", code="fast_model_timeout", message="Timeout modello rapido."
+                )
+            except Exception as exc:
+                route = "reasoning"
+                _hermes_hub_jarvis_publish(
+                    session,
+                    "session.error",
+                    code="fast_model_invalid_or_unavailable",
+                    message=_hermes_hub_jarvis_safe_error(exc),
+                )
+        elif route == "fast":
+            route = "reasoning"
+
+        if answer is None and route == "reasoning":
+            if not reasoning_available:
+                if fast is not None and fast.get("reply") and fast["confidence"] >= 0.9:
+                    answer = fast["reply"]
+                    route = "fast"
+                else:
+                    raise RuntimeError("reasoning_model_unavailable")
+            else:
+                _hermes_hub_jarvis_publish(session, "assistant.escalating", route="reasoning")
+                prompt = _hermes_hub_jarvis_reactor_prompt(
+                    session,
+                    "direct_reasoning",
+                    question=question,
+                    trigger=trigger,
+                ) + f"\nObserver result: {json.dumps(fast, ensure_ascii=False) if fast else 'not run'}"
+                answer, metrics = await _hermes_hub_jarvis_reasoning_call(
+                    adapter, session, prompt, frames
+                )
+        if not answer:
+            raise ValueError("empty_answer")
+        answer = answer.strip()[:1200]
+        session["transcript"].append({"role": "assistant", "content": answer})
+        _hermes_hub_jarvis_touch_conversation(session, "assistant", answer)
+        _hermes_hub_jarvis_record_perception(
+            session, "assistant", "direct_answer", answer, importance=1.0, urgency=0.5
+        )
+        session["last_route"] = route
+        session["last_latency_ms"] = metrics.get("total_ms")
+        session["updated_at"] = time.time()
+        event = _hermes_hub_jarvis_publish(
+            session,
+            "assistant.speak",
+            text=answer,
+            route=route,
+            autonomous=False,
+            metrics=metrics,
+        )
+        return {"text": answer, "route": route, "metrics": metrics, "event_id": event["id"]}
+    finally:
+        session["summarizer_suspended"] = False
+        _hermes_hub_jarvis_schedule_summarizer(adapter, session)
+        session["tasks"].discard(task)
+
+
+async def _hermes_hub_jarvis_session_or_none(
+    adapter: Any, session_id: str
+) -> Optional[Dict[str, Any]]:
+    runtime = _hermes_hub_jarvis_runtime(adapter)
+    session = runtime["sessions"].get(session_id)
+    if session is None:
+        return None
+    if session["expires_at"] <= time.time() or session["status"] == "ended":
+        await _hermes_hub_jarvis_drop_session(runtime, session_id, "ttl_expired")
+        return None
+    session["updated_at"] = time.time()
+    return session
+# HERMES_HUB_JARVIS_RUNTIME_END'''
+
+    text, changed = _upsert_versioned_block(
+        text,
+        begin=_JARVIS_RUNTIME_BEGIN,
+        end=_JARVIS_RUNTIME_END,
+        block=runtime,
+        anchor='def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Response":',
+        label="Jarvis runtime v1",
+    )
+    if changed:
+        changes.append("Jarvis runtime v1")
+
+    handler_anchor = '    async def _handle_models(self, request: "web.Request") -> "web.Response":'
+    handler_boundary = '''    async def _handle_jarvis_marker_v1(self) -> None:
+        """Stable boundary protecting the generated Jarvis block from legacy handler rewrites."""
+        return None
+
+'''
+    if "async def _handle_jarvis_marker_v1(" not in text:
+        if text.count(handler_anchor) != 1:
+            raise PatchError("Patch anchor not found or ambiguous: Jarvis handler boundary v1")
+        text = text.replace(handler_anchor, handler_boundary + handler_anchor, 1)
+        changes.append("Jarvis handler boundary v1")
+
+    handlers = r'''    # HERMES_HUB_JARVIS_HANDLERS_BEGIN
+    # HERMES_HUB_JARVIS_MODE_V1
+    async def _handle_jarvis_create_session(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        if not _hermes_hub_jarvis_env_bool("HERMES_JARVIS_ENABLED", False):
+            return _hermes_hub_jarvis_error("jarvis_disabled", "Jarvis Mode non abilitato.", 503)
+        try:
+            body = await _hermes_hub_jarvis_json_body(request)
+        except OverflowError:
+            return _hermes_hub_jarvis_error("payload_too_large", "Payload sessione troppo grande.", 413)
+        except ValueError:
+            return _hermes_hub_jarvis_error("invalid_json", "JSON non valido.", 400)
+        runtime = _hermes_hub_jarvis_runtime(self)
+        max_sessions = _hermes_hub_jarvis_env_int("HERMES_JARVIS_MAX_SESSIONS", 4, 1, 32)
+        active = [item for item in runtime["sessions"].values() if item["status"] != "ended"]
+        if len(active) >= max_sessions:
+            return _hermes_hub_jarvis_error("session_limit", "Limite sessioni Jarvis raggiunto.", 429)
+        try:
+            session = _hermes_hub_jarvis_new_session(body)
+        except ValueError:
+            return _hermes_hub_jarvis_error("invalid_mode", "Modalità Jarvis non valida.", 400)
+        runtime["sessions"][session["id"]] = session
+        _hermes_hub_jarvis_ensure_sweeper(self)
+        _hermes_hub_jarvis_publish(session, "session.ready", mode=session["mode"])
+        return web.json_response(_hermes_hub_jarvis_public_session(session), status=201)
+
+    async def _handle_jarvis_get_session(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        session = await _hermes_hub_jarvis_session_or_none(self, request.match_info.get("session_id", ""))
+        if session is None:
+            return _hermes_hub_jarvis_error("session_not_found", "Sessione Jarvis non trovata.", 404)
+        return web.json_response(_hermes_hub_jarvis_public_session(session))
+
+    async def _handle_jarvis_patch_session(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        session = await _hermes_hub_jarvis_session_or_none(self, request.match_info.get("session_id", ""))
+        if session is None:
+            return _hermes_hub_jarvis_error("session_not_found", "Sessione Jarvis non trovata.", 404)
+        try:
+            body = await _hermes_hub_jarvis_json_body(request)
+        except OverflowError:
+            return _hermes_hub_jarvis_error("payload_too_large", "Payload sessione troppo grande.", 413)
+        except ValueError:
+            return _hermes_hub_jarvis_error("invalid_json", "JSON non valido.", 400)
+        if "mode" in body:
+            mode = str(body["mode"]).strip().lower()
+            if mode not in {"questions_only", "assistive", "proactive"}:
+                return _hermes_hub_jarvis_error("invalid_mode", "Modalità Jarvis non valida.", 400)
+            session["mode"] = mode
+        if "goal" in body:
+            session["goal"] = str(body.get("goal") or "").strip()[:2000]
+        if "view_paused" in body:
+            session["view_paused"] = bool(body["view_paused"])
+        if "speaking" in body:
+            session["speaking"] = bool(body["speaking"])
+        if "mute_seconds" in body:
+            try:
+                mute_seconds = max(0, min(3600, int(body["mute_seconds"])))
+            except (TypeError, ValueError):
+                return _hermes_hub_jarvis_error("invalid_mute_seconds", "Durata pausa non valida.", 400)
+            session["mute_until"] = time.time() + mute_seconds
+        status = str(body.get("status") or "").strip().lower()
+        if status:
+            if status not in {"active", "paused", "ended"}:
+                return _hermes_hub_jarvis_error("invalid_status", "Stato Jarvis non valido.", 400)
+            session["status"] = status
+            session["view_paused"] = status == "paused" or session["view_paused"]
+        session["updated_at"] = time.time()
+        if session["status"] == "ended":
+            runtime = _hermes_hub_jarvis_runtime(self)
+            public = _hermes_hub_jarvis_public_session(session)
+            await _hermes_hub_jarvis_drop_session(runtime, session["id"], "client_ended")
+            return web.json_response(public)
+        _hermes_hub_jarvis_publish(session, "session.updated", mode=session["mode"], status=session["status"])
+        return web.json_response(_hermes_hub_jarvis_public_session(session))
+
+    async def _handle_jarvis_delete_session(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        runtime = _hermes_hub_jarvis_runtime(self)
+        session_id = request.match_info.get("session_id", "")
+        if session_id not in runtime["sessions"]:
+            return _hermes_hub_jarvis_error("session_not_found", "Sessione Jarvis non trovata.", 404)
+        await _hermes_hub_jarvis_drop_session(runtime, session_id, "client_deleted")
+        return web.json_response({"id": session_id, "deleted": True})
+
+    async def _handle_jarvis_frame(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        session = await _hermes_hub_jarvis_session_or_none(self, request.match_info.get("session_id", ""))
+        if session is None:
+            return _hermes_hub_jarvis_error("session_not_found", "Sessione Jarvis non trovata.", 404)
+        if session["status"] != "active" or session["view_paused"]:
+            return _hermes_hub_jarvis_error("view_paused", "Vista Jarvis in pausa.", 409)
+        started = time.perf_counter()
+        try:
+            data, mime_type = await _hermes_hub_jarvis_frame_body(request)
+        except OverflowError:
+            return _hermes_hub_jarvis_error("frame_too_large", "Fotogramma oltre limite.", 413)
+        except TypeError:
+            return _hermes_hub_jarvis_error("unsupported_frame_type", "Formato fotogramma non supportato.", 415)
+        except ValueError as exc:
+            return _hermes_hub_jarvis_error(str(exc), "Fotogramma non valido.", 400)
+        import hashlib as _hashlib
+
+        digest = _hashlib.sha256(data).hexdigest()
+        latest = next(reversed(session["frames"].values()), None) if session["frames"] else None
+        duplicate = bool(latest and latest["sha256"] == digest)
+        if duplicate:
+            return web.json_response({"frame_id": latest["id"], "duplicate": True, "accepted": False})
+        frame_id = uuid.uuid4().hex
+        try:
+            captured_at = float(request.query.get("captured_at", time.time()))
+        except (TypeError, ValueError):
+            captured_at = time.time()
+        frame = {
+            "id": frame_id,
+            "data": data,
+            "mime_type": mime_type,
+            "sha256": digest,
+            "received_at": time.time(),
+            "captured_at": captured_at,
+        }
+        session["frames"][frame_id] = frame
+        _hermes_hub_jarvis_prune_frames(session)
+        _hermes_hub_jarvis_record_perception(
+            session,
+            "video",
+            "sampled_frame",
+            "New sampled camera frame accepted.",
+            frame_id=frame_id,
+            summarizable=False,
+        )
+        session["updated_at"] = time.time()
+        autonomous = session["mode"] != "questions_only"
+        if autonomous:
+            await _hermes_hub_jarvis_schedule_observer(self, session, frame_id)
+        return web.json_response(
+            {
+                "frame_id": frame_id,
+                "accepted": True,
+                "duplicate": False,
+                "observer_scheduled": autonomous,
+                "upload_ms": round((time.perf_counter() - started) * 1000, 2),
+            },
+            status=202,
+        )
+
+    async def _handle_jarvis_turn(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        session = await _hermes_hub_jarvis_session_or_none(self, request.match_info.get("session_id", ""))
+        if session is None:
+            return _hermes_hub_jarvis_error("session_not_found", "Sessione Jarvis non trovata.", 404)
+        if session["status"] not in {"active", "paused"}:
+            return _hermes_hub_jarvis_error("session_inactive", "Sessione Jarvis non attiva.", 409)
+        try:
+            body = await _hermes_hub_jarvis_json_body(request, 65_536)
+        except OverflowError:
+            return _hermes_hub_jarvis_error("payload_too_large", "Turno Jarvis troppo grande.", 413)
+        except ValueError:
+            return _hermes_hub_jarvis_error("invalid_json", "JSON non valido.", 400)
+        question = str(body.get("text") or body.get("transcript") or "").strip()
+        if not question:
+            return _hermes_hub_jarvis_error("missing_transcript", "Trascrizione mancante.", 400)
+        if len(question) > 4000:
+            return _hermes_hub_jarvis_error("transcript_too_long", "Trascrizione oltre limite.", 413)
+        frame_ids = body.get("frame_ids")
+        if frame_ids is not None and not isinstance(frame_ids, list):
+            return _hermes_hub_jarvis_error("invalid_frame_ids", "frame_ids deve essere un array.", 400)
+        try:
+            result = await _hermes_hub_jarvis_direct_turn(self, session, question, frame_ids)
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError:
+            return _hermes_hub_jarvis_error("reasoning_model_timeout", "Timeout modello ragionante.", 504)
+        except ValueError as exc:
+            code = str(exc)
+            status = 409 if code == "frame_required" else 502
+            message = "Serve almeno un fotogramma recente." if code == "frame_required" else "Risposta modello non valida."
+            return _hermes_hub_jarvis_error(code, message, status)
+        except RuntimeError as exc:
+            code = str(exc)
+            return _hermes_hub_jarvis_error(code, "Modello Jarvis non disponibile.", 503)
+        except Exception as exc:
+            return _hermes_hub_jarvis_error("turn_failed", _hermes_hub_jarvis_safe_error(exc), 502)
+        if session["status"] == "ended":
+            runtime = _hermes_hub_jarvis_runtime(self)
+            await _hermes_hub_jarvis_drop_session(runtime, session["id"], "voice_control")
+        return web.json_response(result)
+
+    async def _handle_jarvis_events(self, request: "web.Request") -> "web.StreamResponse":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        session = await _hermes_hub_jarvis_session_or_none(self, request.match_info.get("session_id", ""))
+        if session is None:
+            return _hermes_hub_jarvis_error("session_not_found", "Sessione Jarvis non trovata.", 404)
+        queue = asyncio.Queue(
+            maxsize=_hermes_hub_jarvis_env_int("HERMES_JARVIS_SSE_QUEUE_SIZE", 64, 4, 512)
+        )
+        session["subscribers"].add(queue)
+        response = web.StreamResponse(
+            status=200,
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+        await response.prepare(request)
+        last_id = str(request.headers.get("Last-Event-ID", "")).strip()
+        try:
+            last_number = int(last_id) if last_id else 0
+        except ValueError:
+            last_number = 0
+        try:
+            for event in list(session["events"]):
+                if int(event["id"]) > last_number:
+                    await response.write(
+                        f"id: {event['id']}\nevent: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8")
+                    )
+            keepalive = _hermes_hub_jarvis_env_float(
+                "HERMES_JARVIS_SSE_KEEPALIVE_SECONDS", 15.0, 2.0, 60.0
+            )
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=keepalive)
+                except asyncio.TimeoutError:
+                    await response.write(b": keepalive\n\n")
+                    continue
+                if event is None:
+                    break
+                await response.write(
+                    f"id: {event['id']}\nevent: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8")
+                )
+        except (ConnectionResetError, BrokenPipeError, asyncio.CancelledError):
+            pass
+        finally:
+            session["subscribers"].discard(queue)
+            try:
+                await response.write_eof()
+            except Exception:
+                pass
+        return response
+
+    async def _handle_jarvis_feedback(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        session = await _hermes_hub_jarvis_session_or_none(self, request.match_info.get("session_id", ""))
+        if session is None:
+            return _hermes_hub_jarvis_error("session_not_found", "Sessione Jarvis non trovata.", 404)
+        try:
+            body = await _hermes_hub_jarvis_json_body(request)
+        except OverflowError:
+            return _hermes_hub_jarvis_error("payload_too_large", "Feedback troppo grande.", 413)
+        except ValueError:
+            return _hermes_hub_jarvis_error("invalid_json", "JSON non valido.", 400)
+        event_id = str(body.get("event_id") or "").strip()[:64]
+        helpful = body.get("helpful")
+        if not event_id or not isinstance(helpful, bool):
+            return _hermes_hub_jarvis_error("invalid_feedback", "Feedback non valido.", 400)
+        try:
+            initiative_bias = _hermes_hub_jarvis_apply_feedback(session, event_id, helpful)
+        except ValueError as exc:
+            code = str(exc)
+            if code == "intervention_not_found":
+                return _hermes_hub_jarvis_error(
+                    code, "Intervento autonomo non trovato.", 404
+                )
+            if code == "feedback_already_recorded":
+                return _hermes_hub_jarvis_error(
+                    code, "Feedback gia registrato.", 409
+                )
+            return _hermes_hub_jarvis_error(
+                "invalid_feedback", "Feedback non valido.", 400
+            )
+        _hermes_hub_jarvis_schedule_summarizer(self, session)
+        _hermes_hub_jarvis_publish(
+            session,
+            "feedback.updated",
+            event_id=event_id,
+            helpful=helpful,
+            initiative_bias=round(initiative_bias, 4),
+        )
+        return web.json_response(
+            {"accepted": True, "initiative_bias": round(initiative_bias, 4)}
+        )
+
+    async def _handle_jarvis_cleanup(self, _app: "web.Application") -> None:
+        await _hermes_hub_jarvis_shutdown(self)
+    # HERMES_HUB_JARVIS_HANDLERS_END'''
+
+    text, changed = _upsert_versioned_block(
+        text,
+        begin=_JARVIS_HANDLERS_BEGIN,
+        end=_JARVIS_HANDLERS_END,
+        block=handlers,
+        anchor=handler_anchor,
+        label="Jarvis handlers v1",
+    )
+    if changed:
+        changes.append("Jarvis endpoint handlers v1")
+
+    capabilities = r'''            # HERMES_HUB_JARVIS_CAPABILITIES_BEGIN
+            # HERMES_HUB_JARVIS_MODE_V1
+            "jarvis": _hermes_hub_jarvis_capabilities(),
+            # HERMES_HUB_JARVIS_CAPABILITIES_END'''
+    text, changed = _upsert_versioned_block(
+        text,
+        begin=_JARVIS_CAPABILITIES_BEGIN,
+        end=_JARVIS_CAPABILITIES_END,
+        block=capabilities,
+        anchor='            "auth": {',
+        label="Jarvis capabilities v1",
+    )
+    if changed:
+        changes.append("Jarvis capabilities v1")
+
+    dynamic_routes = "def _http_route_table(self)" in text
+    if dynamic_routes:
+        route_begin = "        # HERMES_HUB_JARVIS_ROUTES_BEGIN"
+        route_end = "        # HERMES_HUB_JARVIS_ROUTES_END"
+        routes = r'''        # HERMES_HUB_JARVIS_ROUTES_BEGIN
+        # HERMES_HUB_JARVIS_MODE_V1
+        routes.extend([
+            ("POST", "/v1/jarvis/sessions", self._handle_jarvis_create_session),
+            ("GET", "/v1/jarvis/sessions/{session_id}", self._handle_jarvis_get_session),
+            ("PATCH", "/v1/jarvis/sessions/{session_id}", self._handle_jarvis_patch_session),
+            ("DELETE", "/v1/jarvis/sessions/{session_id}", self._handle_jarvis_delete_session),
+            ("POST", "/v1/jarvis/sessions/{session_id}/frames", self._handle_jarvis_frame),
+            ("POST", "/v1/jarvis/sessions/{session_id}/turns", self._handle_jarvis_turn),
+            ("GET", "/v1/jarvis/sessions/{session_id}/events", self._handle_jarvis_events),
+            ("POST", "/v1/jarvis/sessions/{session_id}/feedback", self._handle_jarvis_feedback),
+        ])
+        # HERMES_HUB_JARVIS_ROUTES_END'''
+        route_anchor = "        if _CRON_AVAILABLE:\n"
+    else:
+        route_begin = _JARVIS_ROUTES_BEGIN
+        route_end = _JARVIS_ROUTES_END
+        routes = r'''            # HERMES_HUB_JARVIS_ROUTES_BEGIN
+            # HERMES_HUB_JARVIS_MODE_V1
+            self._app.on_cleanup.append(self._handle_jarvis_cleanup)
+            self._app.router.add_post("/v1/jarvis/sessions", self._handle_jarvis_create_session)
+            self._app.router.add_get("/v1/jarvis/sessions/{session_id}", self._handle_jarvis_get_session)
+            self._app.router.add_patch("/v1/jarvis/sessions/{session_id}", self._handle_jarvis_patch_session)
+            self._app.router.add_delete("/v1/jarvis/sessions/{session_id}", self._handle_jarvis_delete_session)
+            self._app.router.add_post("/v1/jarvis/sessions/{session_id}/frames", self._handle_jarvis_frame)
+            self._app.router.add_post("/v1/jarvis/sessions/{session_id}/turns", self._handle_jarvis_turn)
+            self._app.router.add_get("/v1/jarvis/sessions/{session_id}/events", self._handle_jarvis_events)
+            self._app.router.add_post("/v1/jarvis/sessions/{session_id}/feedback", self._handle_jarvis_feedback)
+            # HERMES_HUB_JARVIS_ROUTES_END'''
+        route_anchor = '            self._app.router.add_get("/v1/capabilities", self._handle_capabilities)\n'
+    text, changed = _upsert_versioned_block(
+        text,
+        begin=route_begin,
+        end=route_end,
+        block=routes,
+        anchor=route_anchor,
+        label="Jarvis routes v1",
+    )
+    if changed:
+        changes.append("Jarvis routes and cleanup hook v1")
+
+    if dynamic_routes:
+        cleanup = r'''            # HERMES_HUB_JARVIS_CLEANUP_BEGIN
+            self._app.on_cleanup.append(self._handle_jarvis_cleanup)
+            # HERMES_HUB_JARVIS_CLEANUP_END'''
+        text, changed = _upsert_versioned_block(
+            text,
+            begin=_JARVIS_CLEANUP_BEGIN,
+            end=_JARVIS_CLEANUP_END,
+            block=cleanup,
+            anchor='            self._app["api_server_adapter"] = self\n',
+            label="Jarvis cleanup hook v1",
+        )
+        if changed:
+            changes.append("Jarvis cleanup hook v1")
+
+    return text, changes
+
+
+def _route_registered(text: str, method: str, path: str, handler: str) -> bool:
+    """Recognize legacy aiohttp calls and the newer declarative route table."""
+    add_method = method.lower()
+    legacy = f'self._app.router.add_{add_method}("{path}", self.{handler})'
+    declarative = f'("{method.upper()}", "{path}", self.{handler})'
+    return legacy in text or declarative in text
+
+
+def _patch_dynamic_http_routes(text: str) -> tuple[str, bool]:
+    """Add Hermes Hub routes to upstream's multiplex-aware route table."""
+    if "def _http_route_table(self)" not in text:
+        return text, False
+    block = r'''        # HERMES_HUB_DYNAMIC_ROUTES_BEGIN
+        routes.extend([
+            ("POST", "/v1/hermes/native", self._handle_responses),
+            ("GET", "/v1/hub/hardware", self._handle_hub_hardware),
+            ("GET", "/v1/hub/server/control", self._handle_hub_server_control),
+            ("POST", "/v1/hub/server/action", self._handle_hub_server_action),
+            ("POST", "/v1/hub/server/maintenance", self._handle_hub_server_maintenance),
+            ("GET", "/v1/hub/audit", self._handle_get_hub_audit),
+            ("POST", "/v1/hub/audit", self._handle_post_hub_audit),
+            ("GET", "/v1/video/library", self._handle_video_library),
+            ("GET", "/v1/news/library", self._handle_news_library),
+            ("POST", "/v1/media/upload", self._handle_hub_media_upload),
+            ("GET", "/v1/media/{media_id:.*}", self._handle_hub_media),
+            ("GET", "/v1/hub/memory", self._handle_hub_memory),
+            ("PATCH", "/v1/hub/memory", self._handle_patch_hub_memory),
+            ("GET", "/v1/hub/state", self._handle_get_hub_state),
+            ("POST", "/v1/hub/state", self._handle_post_hub_state),
+            ("DELETE", "/v1/hub/state/{state_id}", self._handle_delete_hub_state),
+            ("GET", "/v1/hub/conversations", self._handle_get_hub_conversations),
+            ("GET", "/v1/hub/conversations/events", self._handle_get_hub_conversations_events),
+            ("POST", "/v1/hub/conversations/import", self._handle_post_hub_conversations_import),
+            ("PUT", "/v1/hub/conversations/{conversation_id}", self._handle_put_hub_conversation),
+            ("DELETE", "/v1/hub/conversations/{conversation_id}", self._handle_delete_hub_conversation),
+            ("GET", "/v1/hub/notifications", self._handle_get_hub_notifications),
+            ("POST", "/v1/hub/notifications", self._handle_post_hub_notification),
+            ("PATCH", "/v1/hub/notifications/{notification_id}", self._handle_patch_hub_notification),
+            ("POST", "/v1/audio/transcriptions", self._handle_audio_transcriptions),
+            ("POST", "/v1/audio/speech", self._handle_audio_speech),
+        ])
+        # HERMES_HUB_DYNAMIC_ROUTES_END'''
+    return _upsert_versioned_block(
+        text,
+        begin=_DYNAMIC_ROUTES_BEGIN,
+        end=_DYNAMIC_ROUTES_END,
+        block=block,
+        anchor="        if _CRON_AVAILABLE:\n",
+        label="dynamic HTTP route table",
+    )
+
+
 def _patch_text(text: str) -> tuple[str, list[str]]:
     changes: list[str] = []
+
+    text, dynamic_routes_changed = _patch_dynamic_http_routes(text)
+    if dynamic_routes_changed:
+        changes.append("dynamic HTTP route table")
 
     if _MODEL_ROUTE_TOOLSETS_MARKER not in text:
         old_route_parser = '''        allowed_keys = ("model", "provider", "api_key", "base_url")
@@ -4003,8 +6104,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         changes.append("hermes hub project system prompt helper")
 
     if "accepted_api_keys = _hermes_hub_api_keys(self._api_key)" not in text:
-        text, _ = _replace_once(
-            text,
+        plain_auth = (
             '        if not self._api_key:\n'
             '            return None\n'
             '\n'
@@ -4012,7 +6112,25 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             '        if auth_header.startswith("Bearer "):\n'
             '            token = auth_header[7:].strip()\n'
             '            if hmac.compare_digest(token, self._api_key):\n'
-            '                return None  # Auth OK\n',
+            '                return None  # Auth OK\n'
+        )
+        hardened_auth = (
+            '        if not self._api_key:\n'
+            '            return None\n'
+            '\n'
+            '        auth_header = request.headers.get("Authorization", "")\n'
+            '        if auth_header.startswith("Bearer "):\n'
+            '            token = auth_header[7:].strip()\n'
+            '            # Compare as bytes: ``hmac.compare_digest`` raises TypeError on a\n'
+            '            # str containing non-ASCII characters, and ``token`` is the raw\n'
+            '            # client-supplied header. A stray non-ASCII byte in the key would\n'
+            '            # otherwise crash this handler (500) instead of returning a clean\n'
+            '            # 401. Encoding both sides keeps the timing-safe comparison and\n'
+            "            # matches web_server.py's dashboard-token check.\n"
+            '            if hmac.compare_digest(token.encode(), self._api_key.encode()):\n'
+            '                return None  # Auth OK\n'
+        )
+        replacement = (
             '        accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n'
             '        if not accepted_api_keys:\n'
             '            return None\n'
@@ -4020,10 +6138,16 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             '        auth_header = request.headers.get("Authorization", "")\n'
             '        if auth_header.startswith("Bearer "):\n'
             '            token = auth_header[7:].strip()\n'
-            '            if any(hmac.compare_digest(token, api_key) for api_key in accepted_api_keys):\n'
-            '                return None  # Auth OK\n',
-            "auth accept hermes hub key aliases",
+            '            token_bytes = token.encode()\n'
+            '            if any(hmac.compare_digest(token_bytes, api_key.encode()) for api_key in accepted_api_keys):\n'
+            '                return None  # Auth OK\n'
         )
+        if plain_auth in text:
+            text = text.replace(plain_auth, replacement, 1)
+        elif hardened_auth in text:
+            text = text.replace(hardened_auth, replacement, 1)
+        else:
+            raise PatchError("Patch anchor not found: auth accept hermes hub key aliases")
         changes.append("auth accept hermes hub key aliases")
 
     if "if not _hermes_hub_api_keys(self._api_key):" not in text:
@@ -5535,7 +7659,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("responses tool_complete raw passthrough")
 
-    if 'add_post("/v1/hermes/native", self._handle_responses)' not in text:
+    if not _route_registered(text, "POST", "/v1/hermes/native", "_handle_responses"):
         text, _ = _replace_regex_once(
             text,
             r'(^\s+self\._app\.router\.add_post\("/v1/responses", self\._handle_responses\)\n)(^\s+self\._app\.router\.add_get\("/v1/responses/\{response_id\}", self\._handle_get_response\))',
@@ -5546,7 +7670,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("router hermes_native alias")
 
-    if 'add_get("/v1/hub/hardware", self._handle_hub_hardware)' not in text:
+    if not _route_registered(text, "GET", "/v1/hub/hardware", "_handle_hub_hardware"):
         text, _ = _replace_regex_once(
             text,
             r'(^\s+self\._app\.router\.add_get\("/v1/capabilities", self\._handle_capabilities\)\n)',
@@ -5556,7 +7680,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("router hardware endpoint")
 
-    if 'add_get("/v1/hub/server/control", self._handle_hub_server_control)' not in text:
+    if not _route_registered(text, "GET", "/v1/hub/server/control", "_handle_hub_server_control"):
         text, _ = _replace_regex_once(
             text,
             r'(^\s+self\._app\.router\.add_get\("/v1/hub/hardware", self\._handle_hub_hardware\)\n)',
@@ -5568,7 +7692,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("router server control endpoints")
 
-    if 'add_get("/v1/hub/audit", self._handle_get_hub_audit)' not in text:
+    if not _route_registered(text, "GET", "/v1/hub/audit", "_handle_get_hub_audit"):
         text, _ = _replace_regex_once(
             text,
             r'(^\s+self\._app\.router\.add_get\("/v1/hub/hardware", self\._handle_hub_hardware\)\n)',
@@ -5579,7 +7703,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("router audit endpoints")
 
-    if 'add_get("/v1/video/library", self._handle_video_library)' not in text:
+    if not _route_registered(text, "GET", "/v1/video/library", "_handle_video_library"):
         text, _ = _replace_regex_once(
             text,
             r'(^\s+self\._app\.router\.add_get\("/v1/capabilities", self\._handle_capabilities\)\n)',
@@ -5597,7 +7721,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("router hub support endpoints")
     else:
-        if 'add_post("/v1/media/upload", self._handle_hub_media_upload)' not in text:
+        if not _route_registered(text, "POST", "/v1/media/upload", "_handle_hub_media_upload"):
             text, _ = _replace_regex_once(
                 text,
                 r'(^\s+self\._app\.router\.add_get\("/v1/video/library", self\._handle_video_library\)\n)',
@@ -5607,7 +7731,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             )
             changes.append("router media upload endpoint")
 
-        if 'add_get("/v1/media/{media_id:.*}", self._handle_hub_media)' not in text:
+        if not _route_registered(text, "GET", "/v1/media/{media_id:.*}", "_handle_hub_media"):
             text, _ = _replace_regex_once(
                 text,
                 r'(^\s+self\._app\.router\.add_get\("/v1/video/library", self\._handle_video_library\)\n)',
@@ -5617,7 +7741,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             )
             changes.append("router media proxy endpoint")
 
-        if 'add_get("/v1/news/library", self._handle_news_library)' not in text:
+        if not _route_registered(text, "GET", "/v1/news/library", "_handle_news_library"):
             text, _ = _replace_regex_once(
                 text,
                 r'(^\s+self\._app\.router\.add_get\("/v1/video/library", self\._handle_video_library\)\n)',
@@ -5627,7 +7751,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             )
             changes.append("router news library endpoint")
 
-    if 'add_get("/v1/hub/conversations", self._handle_get_hub_conversations)' not in text:
+    if not _route_registered(text, "GET", "/v1/hub/conversations", "_handle_get_hub_conversations"):
         text, _ = _replace_regex_once(
             text,
             r'(^\s+self\._app\.router\.add_get\("/v1/hub/state", self\._handle_get_hub_state\)\n)',
@@ -5640,7 +7764,9 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "router hub conversations endpoints",
         )
         changes.append("router hub conversations endpoints")
-    elif 'add_get("/v1/hub/conversations/events", self._handle_get_hub_conversations_events)' not in text:
+    elif not _route_registered(
+        text, "GET", "/v1/hub/conversations/events", "_handle_get_hub_conversations_events"
+    ):
         text, _ = _replace_once(
             text,
             '            self._app.router.add_get("/v1/hub/conversations", self._handle_get_hub_conversations)\n',
@@ -5650,7 +7776,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("router hub conversations events endpoint")
 
-    if 'add_get("/v1/hub/notifications", self._handle_get_hub_notifications)' not in text:
+    if not _route_registered(text, "GET", "/v1/hub/notifications", "_handle_get_hub_notifications"):
         text, _ = _replace_regex_once(
             text,
             r'(^\s+self\._app\.router\.add_get\("/v1/hub/state", self\._handle_get_hub_state\)\n)',
@@ -5662,7 +7788,9 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("router hub notifications endpoints")
 
-    if 'add_post("/v1/audio/transcriptions", self._handle_audio_transcriptions)' not in text:
+    if not _route_registered(
+        text, "POST", "/v1/audio/transcriptions", "_handle_audio_transcriptions"
+    ):
         text, _ = _replace_regex_once(
             text,
             r'(^\s+self\._app\.router\.add_get\("/v1/hub/state", self\._handle_get_hub_state\)\n)',
@@ -5672,7 +7800,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("router audio transcriptions endpoints")
 
-    if 'add_post("/v1/audio/speech", self._handle_audio_speech)' not in text:
+    if not _route_registered(text, "POST", "/v1/audio/speech", "_handle_audio_speech"):
         text, _ = _replace_regex_once(
             text,
             r'(^\s+self\._app\.router\.add_get\("/v1/hub/state", self\._handle_get_hub_state\)\n)',
@@ -5918,6 +8046,9 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
 
     text, hardening_changes = _harden_runtime(text)
     changes.extend(hardening_changes)
+
+    text, jarvis_changes = _patch_jarvis_v1(text)
+    changes.extend(jarvis_changes)
     return text, changes
 
 

@@ -68,6 +68,12 @@ Default sotto `~/.hermes`:
 
 Le root media specifiche precedono sempre `$HERMES_TERMINAL_CWD` o `%h`, che restano fallback finali. I mutatori usano lock e replace atomico.
 
+## Jarvis Mode
+
+Il patcher aggiunge le sessioni Jarvis allo stesso processo gateway. Sono autenticate, effimere, bounded e trasportano eventi tramite SSE. Nessun frame, perception bus, sintesi o feedback viene scritto negli store Hub. Il Reactor combina prompt stabile, memoria breve incrementale, finestra conversazionale e trigger corrente. Non esiste un loop periodico che forza interventi. Modelli, concorrenza, timeout e soglie sono configurati con `HERMES_JARVIS_*`; il launcher li conserva atomicamente in `.env` senza stamparne le chiavi.
+
+Contratto, variabili e benchmark: [Hermes Jarvis Mode](jarvis-mode.md).
+
 ## Aggiornamento
 
 ```bash
@@ -99,6 +105,7 @@ Il tar deve includere `VERSION`, launcher, patcher, installer, updater, unit/tim
 - `/v1/capabilities`;
 - chat SSE;
 - `/v1/audio/transcriptions` e `/v1/audio/speech`;
+- sessione/frame/turno/eventi/cleanup Jarvis quando abilitato;
 - archivio e relativo stream eventi;
 - upload/download media;
 - update simulato con health probe riuscito e fallito.

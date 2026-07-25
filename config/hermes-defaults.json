@@ -9,6 +9,7 @@
     "chatCompletionsPath": "/v1/chat/completions",
     "runsPath": "/v1/runs",
     "jobsPath": "/api/jobs",
+    "jarvisSessionsPath": "/v1/jarvis/sessions",
     "model": "hermes-agent",
     "preferredApi": "hermes-native",
     "strictNativeMode": false,

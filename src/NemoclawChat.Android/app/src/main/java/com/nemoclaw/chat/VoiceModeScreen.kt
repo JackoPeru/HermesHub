@@ -138,7 +138,7 @@ private data class VoiceConversationContext(
     var previousResponseId: String? = null
 )
 
-private object VoiceTurnController {
+internal object VoiceTurnController {
     var job: Job? = null
     var player: MediaPlayer? = null
     fun interrupt() { job?.cancel(); job = null; runCatching { player?.stop() }; player?.release(); player = null }
@@ -459,7 +459,7 @@ private suspend fun saveVoiceCall(context: Context, settings: AppSettings, apiKe
     return "Chiamata salvata. ${summary.take(150)}"
 }
 
-private fun routeVoiceBluetooth(context: Context, enabled: Boolean) {
+internal fun routeVoiceBluetooth(context: Context, enabled: Boolean) {
     val audio = context.getSystemService(AudioManager::class.java)
     audio.mode = if (enabled) AudioManager.MODE_IN_COMMUNICATION else AudioManager.MODE_NORMAL
     if (Build.VERSION.SDK_INT >= 31) {
@@ -633,7 +633,7 @@ internal suspend fun awaitWakePhrase(
     }
 }
 
-private suspend fun captureVoiceUtterance(context: Context): File? = withContext(Dispatchers.IO) {
+internal suspend fun captureVoiceUtterance(context: Context): File? = withContext(Dispatchers.IO) {
     if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
         throw SecurityException("Permesso microfono non disponibile.")
     }
@@ -888,7 +888,7 @@ private fun queueSpeechSegment(
     }
 }
 
-private suspend fun synthesizeVoiceFile(
+internal suspend fun synthesizeVoiceFile(
     context: Context,
     settings: AppSettings,
     apiKey: String?,
@@ -944,7 +944,7 @@ private suspend fun synthesizeVoiceFile(
     throw java.io.IOException(lastError)
 }
 
-private suspend fun playVoiceFile(file: File, onPlaybackStarted: () -> Unit): Unit = withContext(Dispatchers.Main) {
+internal suspend fun playVoiceFile(file: File, onPlaybackStarted: () -> Unit): Unit = withContext(Dispatchers.Main) {
     suspendCancellableCoroutine { continuation ->
         val player = MediaPlayer()
         VoiceTurnController.player = player
@@ -1005,7 +1005,7 @@ private suspend fun verifyVoiceGateway(settings: AppSettings, apiKey: String?) =
     throw java.io.IOException(lastError)
 }
 
-private suspend fun transcribeVoiceFile(settings: AppSettings, apiKey: String?, file: File): String = withContext(Dispatchers.IO) {
+internal suspend fun transcribeVoiceFile(settings: AppSettings, apiKey: String?, file: File): String = withContext(Dispatchers.IO) {
     var lastError = "Trascrizione non disponibile."
     for (root in voiceGatewayRoots(settings)) {
         for (token in hermesAuthCandidates(apiKey)) {

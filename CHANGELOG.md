@@ -2,6 +2,16 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.171 - 2026-07-25
+
+- Aggiunta la modalita Jarvis Android: sessione vocale e visiva temporanea, streaming SSE, foreground service, pausa vista, solo domande e cleanup deterministico.
+- Integrata la sorgente Ray-Ban Meta tramite source set DAT 0.8.0 opzionale e la fotocamera telefono per debug, senza archiviare frame o trascrizioni.
+- Gateway esteso con sessioni Jarvis autenticate, upload frame limitato, priorita alle domande, deduplicazione, cooldown e inoltro dei frame originali al ragionamento.
+- Rimossa la dipendenza operativa dal modello 0.8B: osservazione e domande usano soltanto il modello principale; l'osservatore passivo non puo parlare direttamente.
+- Aggiunta l'architettura Reactor: perception bus effimero, memoria breve incrementale, finestra conversazionale, trigger saliente, deduplicazione semantica e feedback utile/non utile.
+- L'iniziativa resta guidata esclusivamente da nuovi eventi rilevanti: nessun messaggio forzato o timer periodico di conversazione.
+- Aggiunti benchmark riproducibile da 50 casi, schemi JSON e test di contratto per gateway, Android e privacy.
+
 ## 0.6.170 - 2026-07-18
 
 - Ragionamento separato dalla risposta finale: eventi SSE `analysis`, `reasoning`, `analysis_content` e blocchi `<think>` finali alimentano la sezione dedicata su Windows e Android.

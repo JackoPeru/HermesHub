@@ -2,6 +2,7 @@
     <string name="app_name">Hermes Hub</string>
     <string name="shortcut_new_chat">Nuova chat</string>
     <string name="shortcut_voice">Voce Hermes</string>
+    <string name="shortcut_jarvis">Jarvis Mode</string>
     <string name="shortcut_scan">Scansiona</string>
     <string name="widget_chat">Chat</string>
     <string name="widget_voice">Voce</string>
