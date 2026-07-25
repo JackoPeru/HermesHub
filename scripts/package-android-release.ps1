@@ -254,15 +254,14 @@ $signatureOutput = (& $apksigner verify --verbose --print-certs $apkPath 2>&1) -
 if ($LASTEXITCODE -ne 0 -or $signatureOutput -notmatch 'Verified using v2 scheme \(APK Signature Scheme v2\): true') {
     throw "Firma APK v2 non valida."
 }
-$certificateMatch = [regex]::Match($signatureOutput, 'Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)')
-if (-not $certificateMatch.Success) {
-    throw "Digest SHA-256 del certificato APK non trovato."
-}
-if (-not $CiValidation -and $certificateMatch.Groups[1].Value.ToLowerInvariant() -ne $expectedCertificateSha256) {
-    throw "Certificato APK diverso dalla firma storica Hermes Hub."
-}
 if ($CiValidation) {
     Write-Warning "CI validation: firma v2 valida; digest storico non richiesto per artefatto non pubblicabile."
+}
+else {
+    $certificateMatch = [regex]::Match($signatureOutput, 'Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)')
+    if (-not $certificateMatch.Success -or $certificateMatch.Groups[1].Value.ToLowerInvariant() -ne $expectedCertificateSha256) {
+        throw "Certificato APK diverso dalla firma storica Hermes Hub."
+    }
 }
 
 $outputRoot = if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
@@ -298,7 +297,10 @@ else {
     Write-Output "APK DAT ufficiale pronto: $target"
 }
 Write-Output "SHA-256: $sourceHash"
-Write-Output "DAT: classi, BuildConfig, minSdk 29, credenziali Meta e firma storica verificati."
 if ($CiValidation) {
+    Write-Output "DAT: classi, BuildConfig, minSdk 29, credenziali Meta e firma v2 verificati."
     Write-Output "ATTENZIONE: asset CI validation-only, non pubblicabile in una release GitHub."
+}
+else {
+    Write-Output "DAT: classi, BuildConfig, minSdk 29, credenziali Meta e firma storica verificati."
 }

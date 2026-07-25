@@ -125,7 +125,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
             package_script,
         )
         self.assertIn(
-            "if (-not $CiValidation -and $certificateMatch.Groups[1].Value.ToLowerInvariant()",
+            "else {\n    $certificateMatch = [regex]::Match($signatureOutput",
             package_script,
         )
         self.assertIn(
