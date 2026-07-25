@@ -124,6 +124,14 @@ class ReleaseConsistencyTests(unittest.TestCase):
             "7be7c380f31c81c050a86ea8cefd4ec3bd41972ddd864a8edb97b1e20c84823f",
             package_script,
         )
+        self.assertIn(
+            "if (-not $CiValidation -and $certificateMatch.Groups[1].Value.ToLowerInvariant()",
+            package_script,
+        )
+        self.assertIn(
+            "digest storico non richiesto per artefatto non pubblicabile",
+            package_script,
+        )
 
         self.assertIn("allowStandardReleaseForDevelopment", android_project)
         self.assertIn("containsReleaseOutput", android_project)
