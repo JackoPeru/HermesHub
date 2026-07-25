@@ -57,21 +57,22 @@ Integrazione verificata staticamente contro Meta Wearables DAT `0.8.0`:
 - repository: `https://maven.pkg.github.com/facebook/meta-wearables-dat-android`;
 - gli AAR dichiarano `minSdk 29`, `targetSdk 33`;
 - Android 12/API 31 soddisfa quindi il requisito SDK;
-- l'app Hermes normale resta `minSdk 26`;
-- la build DAT alza `minSdk` a 29 solo con proprietà esplicita;
+- la variante standard di sviluppo resta `minSdk 26`;
+- ogni APK ufficiale include DAT e usa `minSdk 29`;
 - telemetria DAT disabilitata con `ANALYTICS_OPT_OUT=true`.
 
 Requisiti runtime reali: Meta AI compatibile, Developer Mode o progetto nel Wearables Developer Center, occhiali/firmware supportati, registrazione dell'app e consenso camera tramite Meta AI. DAT resta un Developer Preview: la compatibilita metadata non sostituisce una prova sul telefono e sugli occhiali.
 
 Stato della verifica corrente: dipendenze Meta DAT 0.8.0 risolte da GitHub Packages e source set DAT compilato con `lintRelease`, `testDebugUnitTest` e `assembleRelease`. Su emulatore API 36 la build release inizializza il bridge DAT senza crash; la build debug attiva e abbina il Mock Device Kit con feed fotocamera posteriore. La compatibilita API 31 deriva ancora dai requisiti SDK e non da una prova sul OnePlus 7. Gli occhiali reali restano da verificare sul dispositivo.
 
-Il token Packages non va nel repository. Usa un PAT classic con `read:packages`:
+PAT Packages e credenziali Meta non vanno nel repository. La release ufficiale richiede PAT classic `read:packages`, application ID e client token del progetto Wearables Developer Center:
 
 ```powershell
 $env:GITHUB_TOKEN = "<PAT read:packages>"
 $env:GITHUB_ACTOR = "<utente GitHub>"
-cd .\src\NemoclawChat.Android
-.\gradlew.bat -PenableMetaDat=true lintRelease testDebugUnitTest assembleRelease
+$env:META_DAT_APPLICATION_ID = "<application id Meta>"
+$env:META_DAT_CLIENT_TOKEN = "<client token Meta>"
+.\scripts\package-android-release.ps1
 ```
 
 Alternativa locale ignorata da Git:
@@ -80,16 +81,13 @@ Alternativa locale ignorata da Git:
 # src/NemoclawChat.Android/local.properties
 sdk.dir=C:\\Users\\<utente>\\AppData\\Local\\Android\\Sdk
 githubPackagesToken=<PAT read:packages>
+mwdatApplicationId=<application id Meta>
+mwdatClientToken=<client token Meta>
 ```
 
-Per un canale non-Developer Mode:
+Il packaging fallisce prima della build se una credenziale manca o vale `0`, quindi non puo' produrre silenziosamente un APK privo di registrazione Meta. Verifica inoltre BuildConfig, classi DAT nel DEX, metadata manifest, `minSdk 29`, versione e firma storica. La variante standard e' solo diagnostica: `-PallowStandardReleaseForDevelopment=true`; non va pubblicata.
 
-```powershell
-.\gradlew.bat -PenableMetaDat=true `
-  -PmwdatApplicationId=<id> `
-  -PmwdatClientToken=<token-client> `
-  assembleRelease
-```
+In CI lo stesso script usa `-CiValidation`: le credenziali sono sintetiche e l'output termina in `-DAT-validation-only.apk`. Questo percorso prova DAT end-to-end ma non puo' essere confuso con l'asset ufficiale.
 
 Nella schermata Jarvis, `Configura occhiali Meta` apre registrazione, consenso camera e, in debug, Mock Device Kit. Il mock simula il video DAT; audio e TTS restano quelli Android.
 
@@ -213,8 +211,7 @@ python -m unittest discover -s tests -p "test_*.py"
 python -m py_compile .\scripts\patch-hermes-gateway-native.py
 .\scripts\verify-visual-blocks-contract.ps1
 
-cd .\src\NemoclawChat.Android
-.\gradlew.bat lintRelease testDebugUnitTest assembleRelease
+.\scripts\package-android-release.ps1
 ```
 
 QA runtime richiesta: API 36, API 31, telefono debug, Mock Device Kit, poi occhiali reali. Per ogni percorso controllare start/pause/resume/stop, domanda semplice, escalation con frame originale, intervento autonomo, STT, TTS, riconnessione SSE, logcat e assenza di file residui.
@@ -224,7 +221,7 @@ Verificato in questa implementazione: build standard su emulatore API 36; apertu
 ## Troubleshooting
 
 - `401` da GitHub Packages: il PAT non ha `read:packages`, è scaduto o l'utente non coincide con le credenziali Maven.
-- `Meta DAT non incluso`: ricompilare con `-PenableMetaDat=true`.
+- `Meta DAT non incluso`: l'APK non proviene dal packaging ufficiale; non pubblicarlo e rieseguire `scripts/package-android-release.ps1`.
 - `Jarvis Mode non abilitato`: impostare `HERMES_JARVIS_ENABLED=true` e riavviare il gateway dopo il patcher.
 - `fast_model_unavailable`: in single-model indica che il modello principale non è configurato o raggiungibile.
 - `reasoning_model_unavailable`: domande e iniziativa autonoma restano disabilitate finché il modello principale non torna disponibile.

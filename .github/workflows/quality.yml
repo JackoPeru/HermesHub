@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: quality-${{ github.ref }}
@@ -64,8 +65,13 @@ jobs:
       - name: Verify wrapper
         run: test -x gradlew
 
-      - name: Lint, unit tests and release APK
-        run: ./gradlew --no-daemon lintRelease testDebugUnitTest assembleRelease
+      - name: Package and verify official Meta DAT release APK
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.META_DAT_PACKAGES_TOKEN || github.token }}
+        run: ./scripts/package-android-release.ps1 -CiValidation
 
   windows:
     name: Windows

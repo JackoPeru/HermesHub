@@ -4,8 +4,23 @@ plugins {
 }
 
 val enableMetaDat = providers.gradleProperty("enableMetaDat").orNull?.toBooleanStrictOrNull() == true
+val allowStandardReleaseForDevelopment = providers.gradleProperty("allowStandardReleaseForDevelopment")
+    .orNull?.toBooleanStrictOrNull() == true
 val mwdatApplicationId = providers.gradleProperty("mwdatApplicationId").orNull ?: "0"
 val mwdatClientToken = providers.gradleProperty("mwdatClientToken").orNull ?: "0"
+
+gradle.taskGraph.whenReady {
+    val containsReleaseOutput = allTasks.any { task ->
+        task.project == project && task.name.endsWith("Release", ignoreCase = true)
+    }
+    if (containsReleaseOutput && !enableMetaDat && !allowStandardReleaseForDevelopment) {
+        throw GradleException(
+            "La release ufficiale Hermes Hub richiede Meta DAT. " +
+                "Usa scripts/package-android-release.ps1; per una build standard solo sviluppo passa " +
+                "-PallowStandardReleaseForDevelopment=true. L'APK standard non deve essere pubblicato."
+        )
+    }
+}
 
 android {
     namespace = "com.nemoclaw.chat"

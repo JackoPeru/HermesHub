@@ -96,6 +96,54 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn('version "9.2.0"', plugins)
         self.assertIn('version "2.3.21"', plugins)
 
+    def test_official_android_release_is_meta_dat_only_and_fail_closed(self) -> None:
+        package_script = read("scripts/package-android-release.ps1")
+        android_project = read("src/NemoclawChat.Android/app/build.gradle.kts")
+        workflow = read(".github/workflows/quality.yml")
+        agents = read("AGENTS.md")
+
+        self.assertIn("-PenableMetaDat=true", package_script)
+        self.assertNotIn("allowStandardReleaseForDevelopment", package_script)
+        self.assertIn("[switch]$CiValidation", package_script)
+        self.assertIn("android-DAT-validation-only.apk", package_script)
+        self.assertIn("asset CI validation-only, non pubblicabile", package_script)
+        for required_guard in (
+            "GITHUB_TOKEN",
+            "githubPackagesToken",
+            "META_DAT_APPLICATION_ID",
+            "META_DAT_CLIENT_TOKEN",
+            "META_DAT_ENABLED=true",
+            "minSdkVersion:'29'",
+            "MetaWearablesFrameSource",
+            "MetaWearablesSetupBridgeImpl",
+            "certificate SHA-256 digest",
+            "HermesHub-$Version-android.apk",
+        ):
+            self.assertIn(required_guard, package_script)
+        self.assertIn(
+            "7be7c380f31c81c050a86ea8cefd4ec3bd41972ddd864a8edb97b1e20c84823f",
+            package_script,
+        )
+
+        self.assertIn("allowStandardReleaseForDevelopment", android_project)
+        self.assertIn("containsReleaseOutput", android_project)
+        self.assertIn("!enableMetaDat && !allowStandardReleaseForDevelopment", android_project)
+        self.assertIn("L'APK standard non deve essere pubblicato", android_project)
+
+        self.assertIn("packages: read", workflow)
+        self.assertIn("./scripts/package-android-release.ps1", workflow)
+        self.assertIn("-CiValidation", workflow)
+        self.assertIn("META_DAT_PACKAGES_TOKEN", workflow)
+        self.assertNotIn("META_DAT_APPLICATION_ID:", workflow)
+        self.assertNotIn("META_DAT_CLIENT_TOKEN:", workflow)
+        self.assertNotIn(
+            "run: ./gradlew --no-daemon lintRelease testDebugUnitTest assembleRelease",
+            workflow,
+        )
+
+        self.assertIn(".\\scripts\\package-android-release.ps1", agents)
+        self.assertIn("nessun fallback standard", agents)
+
     def test_fresh_install_contains_no_personal_gateway_defaults(self) -> None:
         defaults = json.loads(read("config/hermes-defaults.json"))
         self.assertEqual(defaults["hermes"]["autoDiscoveryUrls"], [])

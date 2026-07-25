@@ -22,22 +22,29 @@ La chat usa Hermes Native/Responses e, se consentito, Chat Completions compat. H
 
 La scheda Jarvis combina voce, frame selezionati e assistenza locale. La sessione è esplicita, temporanea e non entra nell'archivio. È disponibile anche dallo shortcut Android `Jarvis Mode`; notifica e servizio foreground gestiscono pausa, Solo domande, ripresa e termine.
 
-La build standard conserva `minSdk 26` e non contatta GitHub Packages. L'integrazione Ray-Ban Meta DAT 0.8.0 è opt-in e richiede `-PenableMetaDat=true`, PAT `read:packages` e `minSdk 29`. Configurazione completa, mock e contratto: [Hermes Jarvis Mode](jarvis-mode.md).
+La build standard conserva `minSdk 26` solo per sviluppo esplicito. Ogni APK ufficiale include obbligatoriamente Ray-Ban Meta DAT 0.8.0, usa `minSdk 29` e viene prodotto esclusivamente da `scripts/package-android-release.ps1`. Configurazione completa, mock e contratto: [Hermes Jarvis Mode](jarvis-mode.md).
 
 ## Build e test
 
 ```powershell
 $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
-cd .\src\NemoclawChat.Android
-.\gradlew.bat lintRelease testDebugUnitTest assembleRelease
+$env:GITHUB_TOKEN = "<PAT read:packages>"
+$env:GITHUB_ACTOR = "<utente GitHub>"
+$env:META_DAT_APPLICATION_ID = "<application id Meta>"
+$env:META_DAT_CLIENT_TOKEN = "<client token Meta>"
+.\scripts\package-android-release.ps1
 ```
 
 Output:
 
 ```text
-src/NemoclawChat.Android/app/build/outputs/apk/release/app-release.apk
+artifacts/HermesHub-X.Y.Z-android.apk
 ```
+
+Lo script verifica `META_DAT_ENABLED=true`, classi DAT nel DEX, metadata Meta non-placeholder, `minSdk 29`, versione e firma storica. `assembleRelease` senza DAT viene bloccato; per una build standard solo sviluppo serve `-PallowStandardReleaseForDevelopment=true` e il risultato non e' pubblicabile.
+
+La CI passa `-CiValidation` e produce soltanto `*-DAT-validation-only.apk`, utile per validare compilazione e contenuto ma vietato nelle release. Il nome ufficiale `HermesHub-X.Y.Z-android.apk` viene emesso solo senza tale flag e con credenziali Meta configurate.
 
 ## QA release
 

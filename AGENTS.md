@@ -56,6 +56,7 @@ Le impostazioni salvate dall'utente non vanno sovrascritte durante migrazioni o 
 - Media: token Hermes solo verso endpoint Hermes; URL HTTPS esterni senza Bearer.
 - TTS/STT/Voce: timeout finiti, cleanup deterministico, riproduzione sequenziale.
 - Updater: download parziale separato, verifica dimensione/firma/versione/publisher, installazione solo dopo validazione.
+- L'APK Android ufficiale deve includere Meta Wearables DAT; nessun fallback standard puo' essere pubblicato come asset di release.
 - Errori reali visibili; nessun fallback demo silenzioso.
 - Nessun codice diagnostico, segreto, foto utente, cache o artefatto di build tracciato.
 
@@ -93,9 +94,12 @@ dotnet build .\src\ChatClaw.AdminBridge\ChatClaw.AdminBridge.csproj -c Release
 Android:
 
 ```powershell
-cd .\src\NemoclawChat.Android
-.\gradlew.bat lintRelease testDebugUnitTest assembleRelease
+.\scripts\package-android-release.ps1
 ```
+
+Lo script ufficiale richiede PAT `read:packages`, `mwdatApplicationId` e `mwdatClientToken`, compila con `-PenableMetaDat=true` e verifica classi DAT, `META_DAT_ENABLED=true`, `minSdk 29`, versione e firma storica. Deve fallire senza produrre asset se uno di questi controlli manca. La release standard senza DAT e' consentita solo per sviluppo con `-PallowStandardReleaseForDevelopment=true` e non va mai pubblicata.
+
+La CI usa `package-android-release.ps1 -CiValidation`: compila e verifica DAT con credenziali sintetiche, ma produce esclusivamente `*-DAT-validation-only.apk`, vietato come asset GitHub. Una release ufficiale non deve mai usare `-CiValidation`.
 
 Gateway e contratti:
 
@@ -121,6 +125,7 @@ Su Linux o GitHub Actions eseguire anche `bash -n` e `shellcheck` su tutti gli s
 Per `X.Y.Z`:
 
 ```powershell
+.\scripts\package-android-release.ps1 -Version X.Y.Z
 .\scripts\package-windows-msix.ps1 -Version X.Y.Z -Platform x64
 .\scripts\package-linux-gateway.ps1 -Version X.Y.Z
 ```
@@ -134,6 +139,7 @@ Asset attesi:
 Prima della pubblicazione:
 
 - firme APK/MSIX valide;
+- APK Android prodotto esclusivamente da `package-android-release.ps1`, con DAT e credenziali Meta non-placeholder incorporate e confrontate col manifest compilato;
 - versione e package identity coerenti;
 - hash SHA-256 registrati;
 - tar Linux contiene `VERSION` e soli file previsti;

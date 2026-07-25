@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## Unreleased
+
+- Il packaging Android ufficiale e' ora DAT-only e fallisce senza PAT Packages, credenziali Meta reali, classi DAT, `META_DAT_ENABLED=true`, `minSdk 29`, versione e firma storica corrette.
+- Gradle blocca ogni task release senza DAT, salvo override esplicito riservato allo sviluppo; AGENTS e CI usano lo stesso script ufficiale verificabile.
+
 ## 0.6.172 - 2026-07-25
 
 - Corretto il launcher Linux che ruotava silenziosamente la chiave API a ogni riavvio invece di recuperare i valori gia persistiti in `~/.hermes/.env`.

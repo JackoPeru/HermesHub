@@ -130,12 +130,21 @@ dotnet build .\src\ChatClaw.AdminBridge\ChatClaw.AdminBridge.csproj -c Release
 
 ### Android
 
+La release ufficiale include sempre Meta Wearables DAT. Configura un PAT `read:packages` e le credenziali dell'app registrata nel Wearables Developer Center tramite variabili d'ambiente o `src/NemoclawChat.Android/local.properties`, poi usa esclusivamente lo script di packaging:
+
 ```powershell
 $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
-cd .\src\NemoclawChat.Android
-.\gradlew.bat lintRelease testDebugUnitTest assembleRelease
+$env:GITHUB_TOKEN = "<PAT read:packages>"
+$env:GITHUB_ACTOR = "<utente GitHub>"
+$env:META_DAT_APPLICATION_ID = "<application id Meta>"
+$env:META_DAT_CLIENT_TOKEN = "<client token Meta>"
+.\scripts\package-android-release.ps1
 ```
+
+Lo script fallisce se DAT, credenziali, classi finali, `minSdk 29`, versione o firma storica non sono corretti. La variante senza DAT resta disponibile soltanto per sviluppo esplicito e non deve essere pubblicata.
+
+La CI usa una modalità separata `-CiValidation`, che verifica l'intera compilazione DAT ma genera un file `*-DAT-validation-only.apk`: questo file non è un asset di release valido.
 
 ### Gateway e contratti
 
