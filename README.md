@@ -186,4 +186,4 @@ docs/                       Guide tecniche e operative
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-Versione corrente: `0.6.171`.
+Versione corrente: `0.6.172`.

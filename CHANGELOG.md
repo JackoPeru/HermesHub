@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.172 - 2026-07-25
+
+- Corretto il launcher Linux che ruotava silenziosamente la chiave API a ogni riavvio invece di recuperare i valori gia persistiti in `~/.hermes/.env`.
+- Le chiavi configurate esistenti, incluse quelle legacy piu corte, vengono conservate; le nuove installazioni senza chiave continuano a generarne una casuale forte.
+- L'updater Linux recupera la chiave di probe dal file persistente e privilegia gli alias Hub, evitando rollback o gateway irraggiungibili dopo l'aggiornamento.
+- Aggiunti test di regressione per chiave primaria, alias compatibile e probe post-riavvio.
+
 ## 0.6.171 - 2026-07-25
 
 - Aggiunta la modalita Jarvis Android: sessione vocale e visiva temporanea, streaming SSE, foreground service, pausa vista, solo domande e cleanup deterministico.

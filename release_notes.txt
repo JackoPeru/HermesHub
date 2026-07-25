@@ -1,12 +1,9 @@
-Hermes Hub 0.6.171 (Jarvis Mode single-model per Ray-Ban Meta)
+Hermes Hub 0.6.172 (hotfix autenticazione gateway)
 
-- Android: nuova modalita Jarvis con sessione vocale/visiva, SSE, foreground service e controlli pausa/riprendi/solo domande/termina.
-- Ray-Ban Meta: integrazione DAT 0.8.0 opzionale; la fotocamera telefono resta disponibile nelle build debug.
-- Gateway: sessioni effimere autenticate, frame solo in RAM con TTL, upload limitato, priorita alle domande e cleanup deterministico.
-- Modello: rimosso il modello 0.8B; osservazione e domande usano esclusivamente il modello principale Hermes.
-- Sicurezza iniziativa: l'osservatore passivo non parla direttamente; ogni candidato utile viene verificato dal ragionamento completo con frame originali.
-- Reactor: perception bus effimero, summarizer incrementale, finestra conversazionale, situazione saliente, deduplicazione semantica e feedback utile/non utile, senza interventi forzati a tempo.
-- Benchmark modello principale: osservazione p50 circa 1,74 s, domanda semplice 2,16 s, domanda complessa 27-36 s; TTS 0,13 s e STT 0,62 s. I target di latenza iniziali non sono raggiunti.
-- Compatibilita: package identity Windows, `applicationId com.nemoclaw.chat`, firma storica Android, archivio, endpoint e impostazioni esistenti preservati.
-- Versioni: Windows/AdminBridge `0.6.171`; Android `versionName 0.6.171`, `versionCode 175`.
-- Asset previsti: `HermesHub-0.6.171-android.apk`, `NemoclawChat.Windows_0.6.171.0_x64.msix`, `HermesHub-0.6.171-linux-gateway.tar.gz`.
+- Corretto il launcher Linux che ignorava le chiavi gia persistite e generava una nuova chiave casuale al riavvio, causando `401 Invalid API key` sui client configurati.
+- Le chiavi esplicitamente configurate vengono conservate anche quando sono legacy; una chiave casuale forte viene generata soltanto quando non esiste alcuna configurazione.
+- Chiave primaria e alias Hub/Gateway vengono ripristinati separatamente, permettendo migrazioni compatibili senza perdere la chiave forte principale.
+- L'updater recupera la chiave di readiness probe da `~/.hermes/.env` e privilegia gli alias usati dai client.
+- Aggiunti test di regressione per persistenza, alias e probe post-riavvio.
+- Versioni: Windows/AdminBridge `0.6.172`; Android `versionName 0.6.172`, `versionCode 176`.
+- Asset previsti: `HermesHub-0.6.172-android.apk`, `NemoclawChat.Windows_0.6.172.0_x64.msix`, `HermesHub-0.6.172-linux-gateway.tar.gz`.

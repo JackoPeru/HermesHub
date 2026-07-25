@@ -10,6 +10,38 @@ export PATH="$HOME/.local/bin:$HOME/.hermes/bin:$HOME/.hermes/node/bin:$PATH"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 HERMES_ENV="$HERMES_HOME/.env"
 HERMES_CONFIG="$HERMES_HOME/config.yaml"
+
+read_env_value() {
+  local file="$1"
+  local key="$2"
+  local value first last
+  value="$(awk -v key="$key" 'index($0, key "=") == 1 {sub(/^[^=]*=/, ""); found=$0} END {print found}' "$file" 2>/dev/null || true)"
+  value="${value%$'\r'}"
+  value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  if [ "${#value}" -ge 2 ]; then
+    first="${value:0:1}"
+    last="${value: -1}"
+    if { [ "$first" = '"' ] && [ "$last" = '"' ]; } || { [ "$first" = "'" ] && [ "$last" = "'" ]; }; then
+      value="${value:1:${#value}-2}"
+    fi
+  fi
+  printf '%s' "$value"
+}
+
+# The launcher owns these aliases, but must restore their persisted values
+# before deciding whether to generate a key. Otherwise every service restart
+# silently rotates the bearer token and disconnects already configured clients.
+if [ -s "$HERMES_ENV" ]; then
+  for key_name in API_SERVER_KEY HERMES_API_KEY HERMESAPIKEY HERMES_HUB_API_KEY HERMES_GATEWAY_API_KEY; do
+    if [ -z "${!key_name:-}" ]; then
+      persisted_value="$(read_env_value "$HERMES_ENV" "$key_name")"
+      if [ -n "$persisted_value" ]; then
+        printf -v "$key_name" '%s' "$persisted_value"
+      fi
+    fi
+  done
+fi
+
 HERMES_INFERENCE_PROVIDER="${HERMES_INFERENCE_PROVIDER:-custom}"
 LM_STUDIO_BASE_URL="${LM_STUDIO_BASE_URL:-http://127.0.0.1:1234}"
 VLLM_BASE_URL="${VLLM_BASE_URL:-http://127.0.0.1:8000}"
@@ -21,12 +53,12 @@ HERMES_API_HOST="$API_SERVER_HOST"
 HERMES_API_PORT="$API_SERVER_PORT"
 API_SERVER_KEY_CANDIDATE="${API_SERVER_KEY:-${HERMES_API_KEY:-${HERMESAPIKEY:-}}}"
 API_SERVER_KEY_FILE="${API_SERVER_KEY_FILE:-$HERMES_HOME/api_server.key}"
-if [ -z "$API_SERVER_KEY_CANDIDATE" ] || [ "${#API_SERVER_KEY_CANDIDATE}" -lt 16 ]; then
+if [ -z "$API_SERVER_KEY_CANDIDATE" ]; then
   if [ -s "$API_SERVER_KEY_FILE" ]; then
     API_SERVER_KEY_CANDIDATE="$(tr -d '[:space:]' < "$API_SERVER_KEY_FILE")"
   fi
 fi
-if [ -z "$API_SERVER_KEY_CANDIDATE" ] || [ "${#API_SERVER_KEY_CANDIDATE}" -lt 16 ]; then
+if [ -z "$API_SERVER_KEY_CANDIDATE" ]; then
   mkdir -p "$HERMES_HOME"
   umask 077
   if command -v openssl >/dev/null 2>&1; then
@@ -40,8 +72,8 @@ PY
   API_SERVER_KEY_CANDIDATE="$(tr -d '[:space:]' < "$API_SERVER_KEY_FILE")"
 fi
 API_SERVER_KEY="$API_SERVER_KEY_CANDIDATE"
-HERMES_API_KEY="$API_SERVER_KEY"
-HERMESAPIKEY="$API_SERVER_KEY"
+HERMES_API_KEY="${HERMES_API_KEY:-$API_SERVER_KEY}"
+HERMESAPIKEY="${HERMESAPIKEY:-$API_SERVER_KEY}"
 HERMES_HUB_API_KEY="${HERMES_HUB_API_KEY:-$API_SERVER_KEY}"
 HERMES_GATEWAY_API_KEY="${HERMES_GATEWAY_API_KEY:-$HERMES_HUB_API_KEY}"
 HERMES_MAX_ITERATIONS="${HERMES_MAX_ITERATIONS:-120}"

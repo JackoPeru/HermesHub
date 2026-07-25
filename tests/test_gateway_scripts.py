@@ -827,6 +827,89 @@ class GatewayScriptTests(unittest.TestCase):
         self.assertIn("HERMES_API_KEY=new-key", result)
         self.assertIn('HERMES_HUB_CONVERSATIONS_PATH="/tmp/conversations with spaces.json"', result)
 
+    def test_launcher_restores_persisted_primary_and_legacy_hub_alias(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        script = (SCRIPTS / "hermes-hub-linux.sh").read_text(encoding="utf-8")
+        start = script.index('HERMES_HOME="')
+        end = script.index('\nHERMES_MAX_ITERATIONS=', start)
+        auth_preamble = script[start:end]
+        with tempfile.TemporaryDirectory() as temporary:
+            hermes_home = Path(temporary) / ".hermes"
+            hermes_home.mkdir()
+            primary = "a" * 64
+            (hermes_home / ".env").write_text(
+                f"API_SERVER_KEY={primary}\n"
+                f"HERMES_API_KEY={primary}\n"
+                f"HERMESAPIKEY={primary}\n"
+                "HERMES_HUB_API_KEY=hermes-hub\n"
+                "HERMES_GATEWAY_API_KEY=hermes-hub\n",
+                encoding="utf-8",
+            )
+            environment = os.environ.copy()
+            for key in (
+                "API_SERVER_KEY",
+                "HERMES_API_KEY",
+                "HERMESAPIKEY",
+                "HERMES_HUB_API_KEY",
+                "HERMES_GATEWAY_API_KEY",
+            ):
+                environment.pop(key, None)
+            environment["HERMES_HOME"] = bash_path(bash, hermes_home)
+            command = auth_preamble + "\nprintf '%s|%s|%s' \"$API_SERVER_KEY\" \"$HERMES_HUB_API_KEY\" \"$HERMES_GATEWAY_API_KEY\""
+            result = subprocess.run(
+                [bash, "-c", command],
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertEqual(f"{primary}|hermes-hub|hermes-hub", result.stdout)
+            self.assertFalse((hermes_home / "api_server.key").exists())
+
+    def test_launcher_preserves_explicit_legacy_short_primary_key(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        script = (SCRIPTS / "hermes-hub-linux.sh").read_text(encoding="utf-8")
+        start = script.index('HERMES_HOME="')
+        end = script.index('\nHERMES_MAX_ITERATIONS=', start)
+        auth_preamble = script[start:end]
+        with tempfile.TemporaryDirectory() as temporary:
+            hermes_home = Path(temporary) / ".hermes"
+            hermes_home.mkdir()
+            (hermes_home / ".env").write_text("HERMES_API_KEY=hermes-hub\n", encoding="utf-8")
+            environment = os.environ.copy()
+            for key in (
+                "API_SERVER_KEY",
+                "HERMES_API_KEY",
+                "HERMESAPIKEY",
+                "HERMES_HUB_API_KEY",
+                "HERMES_GATEWAY_API_KEY",
+            ):
+                environment.pop(key, None)
+            environment["HERMES_HOME"] = bash_path(bash, hermes_home)
+            command = auth_preamble + "\nprintf '%s|%s|%s' \"$API_SERVER_KEY\" \"$HERMES_API_KEY\" \"$HERMES_HUB_API_KEY\""
+            result = subprocess.run(
+                [bash, "-c", command],
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertEqual("hermes-hub|hermes-hub|hermes-hub", result.stdout)
+            self.assertFalse((hermes_home / "api_server.key").exists())
+
+    def test_updater_probe_restores_hub_key_from_persisted_env(self):
+        script = (SCRIPTS / "hermes-hub-linux-update.sh").read_text(encoding="utf-8")
+        self.assertIn('HERMES_ENV_FILE="${HERMES_ENV_FILE:-$HOME/.hermes/.env}"', script)
+        probe_start = script.index('  PROBE_API_KEY="${HERMES_HUB_API_KEY:-${HERMES_API_KEY:-}}"')
+        probe_end = script.index('\n  if [ -z "$PROBE_API_KEY" ]; then', probe_start)
+        probe_source = script[probe_start:probe_end]
+        self.assertIn('read_env_value "$HERMES_ENV_FILE" "$key_name"', probe_source)
+        self.assertLess(probe_source.index("HERMES_HUB_API_KEY HERMES_GATEWAY_API_KEY"), probe_source.index("API_SERVER_KEY HERMES_API_KEY"))
+
     def test_media_roots_keep_broad_terminal_root_last(self):
         launcher = (SCRIPTS / "hermes-hub-linux.sh").read_text(encoding="utf-8")
         service = (SCRIPTS / "hermes-hub-linux.service").read_text(encoding="utf-8")

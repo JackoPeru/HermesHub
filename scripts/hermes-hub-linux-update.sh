@@ -19,6 +19,7 @@ PROBE_ATTEMPTS="${HERMES_HUB_UPDATE_PROBE_ATTEMPTS:-30}"
 PROBE_SLEEP_SECONDS="${HERMES_HUB_UPDATE_PROBE_SLEEP_SECONDS:-2}"
 PROBE_URL="${HERMES_HUB_UPDATE_PROBE_URL:-http://127.0.0.1:${HERMES_API_PORT:-8642}/v1/capabilities}"
 API_SERVER_KEY_FILE="${API_SERVER_KEY_FILE:-$HOME/.hermes/api_server.key}"
+HERMES_ENV_FILE="${HERMES_ENV_FILE:-$HOME/.hermes/.env}"
 
 FORCE=false
 CHECK_ONLY=false
@@ -72,6 +73,23 @@ need_cmd() {
     echo "ERROR: missing required command: $1" >&2
     exit 1
   fi
+}
+
+read_env_value() {
+  local file="$1"
+  local key="$2"
+  local value first last
+  value="$(awk -v key="$key" 'index($0, key "=") == 1 {sub(/^[^=]*=/, ""); found=$0} END {print found}' "$file" 2>/dev/null || true)"
+  value="${value%$'\r'}"
+  value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  if [ "${#value}" -ge 2 ]; then
+    first="${value:0:1}"
+    last="${value: -1}"
+    if { [ "$first" = '"' ] && [ "$last" = '"' ]; } || { [ "$first" = "'" ] && [ "$last" = "'" ]; }; then
+      value="${value:1:${#value}-2}"
+    fi
+  fi
+  printf '%s' "$value"
 }
 
 is_uint() {
@@ -526,6 +544,14 @@ if [ "$RESTART" = "true" ]; then
   systemctl --user restart "$SERVICE_NAME"
 
   PROBE_API_KEY="${HERMES_HUB_API_KEY:-${HERMES_API_KEY:-}}"
+  if [ -z "$PROBE_API_KEY" ] && [ -s "$HERMES_ENV_FILE" ]; then
+    for key_name in HERMES_HUB_API_KEY HERMES_GATEWAY_API_KEY API_SERVER_KEY HERMES_API_KEY HERMESAPIKEY; do
+      PROBE_API_KEY="$(read_env_value "$HERMES_ENV_FILE" "$key_name")"
+      if [ -n "$PROBE_API_KEY" ]; then
+        break
+      fi
+    done
+  fi
   if [ -z "$PROBE_API_KEY" ] && [ -s "$API_SERVER_KEY_FILE" ]; then
     PROBE_API_KEY="$(tr -d '[:space:]' < "$API_SERVER_KEY_FILE")"
   fi
