@@ -4,6 +4,12 @@ Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub res
 
 ## Unreleased
 
+## 0.6.178 - 2026-07-26
+
+- Il gateway Linux cerca aggiornamenti ogni due minuti e, dopo un aggiornamento riuscito, ricarica anche il timer per applicare subito la nuova cadenza.
+- Android riconosce il rate-limit restituito da gateway privi delle route wellbeing anche quando il codice HTTP non e' `429`, indicando l'aggiornamento del gateway invece di mantenere il retry.
+- Aggiunti test di regressione per timer, riavvio del timer e diagnosi Health Connect/gateway.
+
 ## 0.6.177 - 2026-07-26
 
 - Aggiunta sezione Android Salute con dati letti direttamente da Health Connect: valori di oggi e grafici degli ultimi sette giorni per passi, sonno, allenamenti e frequenza cardiaca aggregata.

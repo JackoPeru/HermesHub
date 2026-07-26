@@ -15,9 +15,9 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>0.6.177</Version>
-    <AssemblyVersion>0.6.177.0</AssemblyVersion>
-    <FileVersion>0.6.177.0</FileVersion>
+    <Version>0.6.178</Version>
+    <AssemblyVersion>0.6.178.0</AssemblyVersion>
+    <FileVersion>0.6.178.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>

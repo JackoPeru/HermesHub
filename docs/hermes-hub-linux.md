@@ -83,7 +83,7 @@ Contratto, variabili e benchmark: [Hermes Jarvis Mode](jarvis-mode.md).
 
 L'updater cerca la release piu' recente che contenga un asset Linux, verifica versione, dimensione e SHA-256, estrae su staging, aggiorna il symlink `current`, riavvia e fa health probe. Se il probe fallisce ripristina la release precedente.
 
-Il timer controlla gli aggiornamenti ogni ora. Non ridurre `TimeoutStartSec` sotto il budget complessivo di download, avvio e probe.
+Il timer controlla gli aggiornamenti ogni due minuti. Quando trova una release piu' recente, l'aggiorna automaticamente, riavvia il gateway e completa l'health probe con rollback in caso di errore. Non ridurre `TimeoutStartSec` sotto il budget complessivo di download, avvio e probe.
 
 ## Packaging
 

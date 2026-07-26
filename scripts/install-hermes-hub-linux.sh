@@ -28,7 +28,7 @@ Installs:
   ~/.config/systemd/user/hermes-hub.service
 
 Optional:
-  --enable-auto-update installs/enables the hourly user timer.
+  --enable-auto-update installs/enables the user timer that checks every two minutes.
   --enable-power-monitor installs/enables UPS save power monitor service.
 EOF
 }

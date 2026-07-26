@@ -87,6 +87,7 @@ class WellbeingGatewayPatchTests(unittest.TestCase):
         self.assertIn("HealthEraseResult.Success", source)
         self.assertIn("HealthHistoryResult", source)
         self.assertIn("Rate limited request quota", source)
+        self.assertNotIn("error.code == 429 && error.body.contains", source)
         self.assertIn("Gateway Hermes senza endpoint Salute", source)
         self.assertIn("HealthDashboardScreen", activity)
         self.assertIn("Passi · ultimi 7 giorni", activity)

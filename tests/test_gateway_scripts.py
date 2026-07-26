@@ -90,6 +90,17 @@ class GatewayScriptTests(unittest.TestCase):
     def setUpClass(cls):
         cls.patcher = load_patcher()
 
+    def test_auto_update_timer_runs_every_two_minutes_and_restarts_gateway(self):
+        timer = (SCRIPTS / "hermes-hub-linux-update.timer").read_text(encoding="utf-8")
+        service = (SCRIPTS / "hermes-hub-linux-update.service").read_text(encoding="utf-8")
+        updater = (SCRIPTS / "hermes-hub-linux-update.sh").read_text(encoding="utf-8")
+
+        self.assertIn("OnBootSec=2min", timer)
+        self.assertIn("OnUnitActiveSec=2min", timer)
+        self.assertIn("AccuracySec=1s", timer)
+        self.assertIn("ExecStart=%h/.local/bin/hermes-hub-linux-update --restart", service)
+        self.assertIn("systemctl --user restart hermes-hub-linux-update.timer", updater)
+
     def _prepare_updater_fixture(
         self,
         root: Path,

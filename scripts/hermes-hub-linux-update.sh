@@ -575,6 +575,10 @@ if [ "$RESTART" = "true" ]; then
     echo "ERROR: gateway readiness probe failed after restart: $PROBE_URL" >&2
     exit 1
   fi
+
+  if systemctl --user is-active --quiet hermes-hub-linux-update.timer; then
+    systemctl --user restart hermes-hub-linux-update.timer
+  fi
 fi
 
 write_version "$LATEST_VERSION"

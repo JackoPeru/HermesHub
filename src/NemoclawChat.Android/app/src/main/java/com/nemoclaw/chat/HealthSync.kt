@@ -153,7 +153,7 @@ internal object HealthSync {
         } catch (error: WellbeingGatewayException) {
             when {
                 error.code in setOf(404, 405) ||
-                    (error.code == 429 && error.body.contains("Rate limited request quota", ignoreCase = true)) -> {
+                    error.body.contains("Rate limited request quota", ignoreCase = true) -> {
                     HealthSyncResult.Permanent("Gateway Hermes senza endpoint Salute. Aggiorna il gateway Linux a Hermes Hub 0.6.176 o successivo, poi riprova.")
                 }
                 error.code == 429 -> HealthSyncResult.Transient("Gateway Hermes ha applicato un rate limit. Attendi e riprova: ${error.body}")
