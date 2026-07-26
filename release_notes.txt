@@ -1,9 +1,10 @@
-Hermes Hub 0.6.178 (gateway Salute e updater ogni 2 minuti)
+Hermes Hub 0.6.179 (sincronizzazione Health Connect affidabile)
 
-- Gateway Linux: verifica release ogni due minuti; dopo update riuscito ricarica il timer, riavvia il gateway, esegue health probe e rollback se necessario.
-- Android: `Rate limited request quota` identifica sempre un gateway privo delle route wellbeing, anche con codice HTTP diverso da `429`.
-- Versioni: Windows/AdminBridge `0.6.178`; Android `versionName 0.6.178`, `versionCode 182`.
-- Asset: `HermesHub-0.6.178-android.apk`, `NemoclawChat.Windows_0.6.178.0_x64.msix`, `HermesHub-0.6.178-linux-gateway.tar.gz`.
-- SHA-256 Android: `e46044593c91c5a17445e0b5fd56ff5264d0abc170fc163fe5da5ee237682704`.
-- SHA-256 Windows: `c13c13e21c1db8ebb319097d7c9044d09947d5010c0da4304ff4ad8e845069d6`.
-- SHA-256 Linux gateway: `c3b636f81f98d60d6e81c1fca9007828791064664fc16af38a6414dcaab83517`.
+- Android: usa il provider Health Connect di sistema per stato, consenso e lettura; sui telefoni recenti non mostra piu' il falso avviso di installazione.
+- Salute: una lettura aggregata sostituisce le richieste ripetute per giorno e categoria; cache, serializzazione e cooldown impediscono l'esaurimento ricorrente della quota.
+- Diagnosi: distingue la quota Health Connect dagli errori Hermes e normalizza l'endpoint wellbeing anche quando l'URL configurato include una route API completa.
+- Versioni: Windows/AdminBridge `0.6.179`; Android `versionName 0.6.179`, `versionCode 183`.
+- Asset: `HermesHub-0.6.179-android.apk`, `NemoclawChat.Windows_0.6.179.0_x64.msix`, `HermesHub-0.6.179-linux-gateway.tar.gz`.
+- SHA-256 Android: `e5c3ee9536b9db8fde25b25cce53a58adc63ae805ed1fd18c56c3d022da7ea63`.
+- SHA-256 Windows: `f708a19c6150dffb28179034dcbcd139536fde8864f3e5e3b8806f9de974f18c`.
+- SHA-256 Linux gateway: `493eddf1ee7597694d787226539813d216932fa77d2a7487368196da665eb5d3`.

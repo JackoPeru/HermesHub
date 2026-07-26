@@ -4,6 +4,14 @@ Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub res
 
 ## Unreleased
 
+## 0.6.179 - 2026-07-26
+
+- Android usa il provider Health Connect predefinito di sistema sia per disponibilita', autorizzazione e lettura, eliminando il falso invito ad aggiornare Health Connect sui telefoni recenti.
+- Dashboard e sincronizzazione aggregano i dati in una sola lettura per intervallo; lo storico settimanale non esegue piu' una serie di richieste complete per ogni giorno e categoria.
+- Aggiunti cache breve, mutua esclusione e cooldown esplicito per evitare di riesaurire la quota Health Connect con tap, navigazione o worker concorrenti.
+- Gli errori quota vengono attribuiti a Health Connect prima di contattare Hermes; l'URL wellbeing viene ricostruito correttamente anche da endpoint completi o reverse proxy.
+- Aggiunti test Android e di contratto per provider, rate limit, aggregazione e normalizzazione URL.
+
 ## 0.6.178 - 2026-07-26
 
 - Il gateway Linux cerca aggiornamenti ogni due minuti e, dopo un aggiornamento riuscito, ricarica anche il timer per applicare subito la nuova cadenza.
