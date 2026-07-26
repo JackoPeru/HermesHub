@@ -39,6 +39,10 @@ _JARVIS_CLEANUP_BEGIN = "            # HERMES_HUB_JARVIS_CLEANUP_BEGIN"
 _JARVIS_CLEANUP_END = "            # HERMES_HUB_JARVIS_CLEANUP_END"
 _DYNAMIC_ROUTES_BEGIN = "        # HERMES_HUB_DYNAMIC_ROUTES_BEGIN"
 _DYNAMIC_ROUTES_END = "        # HERMES_HUB_DYNAMIC_ROUTES_END"
+_WELLBEING_RUNTIME_BEGIN = "# WELLBEING_HERMES_HUB_RUNTIME_BEGIN"
+_WELLBEING_RUNTIME_END = "# WELLBEING_HERMES_HUB_RUNTIME_END"
+_WELLBEING_HANDLERS_BEGIN = "    # HERMES_HUB_WELLBEING_HANDLERS_BEGIN"
+_WELLBEING_HANDLERS_END = "    # HERMES_HUB_WELLBEING_HANDLERS_END"
 _HARDWARE_DISK_BLOCK_V1 = f'''    {_HARDWARE_DISK_FILTER_MARKER}
     disks: List[Dict[str, Any]] = []
     ignored_filesystems = {{
@@ -3433,6 +3437,11 @@ def _patch_dynamic_http_routes(text: str) -> tuple[str, bool]:
             ("GET", "/v1/hub/state", self._handle_get_hub_state),
             ("POST", "/v1/hub/state", self._handle_post_hub_state),
             ("DELETE", "/v1/hub/state/{state_id}", self._handle_delete_hub_state),
+            ("GET", "/v1/hub/wellbeing", self._handle_get_hub_wellbeing),
+            ("DELETE", "/v1/hub/wellbeing", self._handle_delete_hub_wellbeing),
+            ("GET", "/v1/hub/wellbeing/daily/{date}", self._handle_get_hub_wellbeing_daily),
+            ("PUT", "/v1/hub/wellbeing/daily/{date}", self._handle_put_hub_wellbeing_daily),
+            ("DELETE", "/v1/hub/wellbeing/daily/{date}", self._handle_delete_hub_wellbeing_daily),
             ("GET", "/v1/hub/conversations", self._handle_get_hub_conversations),
             ("GET", "/v1/hub/conversations/events", self._handle_get_hub_conversations_events),
             ("POST", "/v1/hub/conversations/import", self._handle_post_hub_conversations_import),
@@ -3453,6 +3462,301 @@ def _patch_dynamic_http_routes(text: str) -> tuple[str, bool]:
         anchor="        if _CRON_AVAILABLE:\n",
         label="dynamic HTTP route table",
     )
+
+
+def _patch_wellbeing_v1(text: str) -> tuple[str, list[str]]:
+    """Inject bounded daily wellbeing storage; never persist sensor-level records."""
+    changes: list[str] = []
+    runtime = r'''# WELLBEING_HERMES_HUB_RUNTIME_BEGIN
+def _hermes_hub_wellbeing_date(value: Any) -> str:
+    import re as _re
+    date = str(value or "").strip()
+    if not _re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        raise ValueError("date must use YYYY-MM-DD")
+    return date
+
+
+def _hermes_hub_wellbeing_number(value: Any, low: float, high: float) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("wellbeing values must be numeric")
+    number = float(value)
+    if number != number or number in (float("inf"), float("-inf")) or number < low or number > high:
+        raise ValueError("wellbeing value out of range")
+    return number
+
+
+def _hermes_hub_normalize_wellbeing(date: str, raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError("JSON body must be an object")
+    if raw.get("raw_records") not in (None, [], {}):
+        raise ValueError("raw_records are not accepted; send daily aggregates only")
+    requested = str(raw.get("date") or date).strip()
+    if requested != date:
+        raise ValueError("body date does not match route date")
+    summary = raw.get("summary")
+    if not isinstance(summary, dict):
+        raise ValueError("summary must be an object")
+    heart = summary.get("heart_rate_bpm")
+    if heart is None:
+        heart = {}
+    if not isinstance(heart, dict):
+        raise ValueError("heart_rate_bpm must be an object")
+    steps = _hermes_hub_wellbeing_number(summary.get("steps"), 0, 2_000_000)
+    calories = _hermes_hub_wellbeing_number(summary.get("active_calories_kcal"), 0, 100_000)
+    sleep = _hermes_hub_wellbeing_number(summary.get("sleep_minutes"), 0, 2_400)
+    workout_minutes = _hermes_hub_wellbeing_number(summary.get("workout_minutes"), 0, 2_400)
+    workout_count = _hermes_hub_wellbeing_number(summary.get("workout_count"), 0, 100)
+    average = _hermes_hub_wellbeing_number(heart.get("average"), 10, 300)
+    minimum = _hermes_hub_wellbeing_number(heart.get("min"), 10, 300)
+    maximum = _hermes_hub_wellbeing_number(heart.get("max"), 10, 300)
+    if average is not None and minimum is not None and average < minimum:
+        raise ValueError("heart rate average cannot be lower than minimum")
+    if average is not None and maximum is not None and average > maximum:
+        raise ValueError("heart rate average cannot exceed maximum")
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise ValueError("heart rate minimum cannot exceed maximum")
+    return {
+        "date": date,
+        "zone_id": str(raw.get("zone_id") or "")[:128],
+        "collected_at": str(raw.get("collected_at") or "")[:128],
+        "source": str(raw.get("source") or "health_connect")[:80],
+        "summary": {
+            "steps": int(steps) if steps is not None else None,
+            "active_calories_kcal": calories,
+            "sleep_minutes": int(sleep) if sleep is not None else None,
+            "workout_minutes": int(workout_minutes) if workout_minutes is not None else None,
+            "workout_count": int(workout_count) if workout_count is not None else None,
+            "heart_rate_bpm": {"average": average, "min": minimum, "max": maximum},
+        },
+        "wellness_only": True,
+        "updated_at": time.time(),
+    }
+
+
+def _hermes_hub_wellbeing_payload(days: int = 30) -> Dict[str, Any]:
+    path = _hermes_hub_storage_path("HERMES_HUB_WELLBEING_PATH", "hub_wellbeing.json")
+    payload = _hermes_hub_read_json(path, {"items": []})
+    items = [item for item in payload.get("items", []) if isinstance(item, dict)]
+    retention_days = _hermes_hub_env_int("HERMES_HUB_WELLBEING_RETENTION_DAYS", 90, 1, 3650)
+    cutoff = time.time() - retention_days * 86400
+    items = [item for item in items if float(item.get("updated_at") or 0) >= cutoff]
+    items.sort(key=lambda item: str(item.get("date") or ""), reverse=True)
+    return {"object": "hermes.hub.wellbeing", "status": "ok", "wellness_only": True, "items": items[:max(1, min(days, 366))]}
+
+
+def _hermes_hub_put_wellbeing(date: str, raw: Any) -> Dict[str, Any]:
+    item = _hermes_hub_normalize_wellbeing(date, raw)
+    current = _hermes_hub_wellbeing_payload(3660)
+    by_date = {str(existing.get("date")): existing for existing in current.get("items", []) if isinstance(existing, dict)}
+    by_date[date] = item
+    items = sorted(by_date.values(), key=lambda existing: str(existing.get("date") or ""), reverse=True)
+    _hermes_hub_write_json(
+        _hermes_hub_storage_path("HERMES_HUB_WELLBEING_PATH", "hub_wellbeing.json"),
+        {"items": items, "updated_at": time.time()},
+    )
+    _hermes_hub_audit_event({"event": "hub.wellbeing.upsert", "summary": f"daily aggregate {date}", "device": "android", "risk": "sensitive", "metadata": {"date": date}})
+    return {"object": "hermes.hub.wellbeing.daily", "status": "ok", "item": item}
+
+
+def _hermes_hub_delete_wellbeing(date: str) -> Dict[str, Any]:
+    current = _hermes_hub_wellbeing_payload(3660)
+    items = [item for item in current.get("items", []) if str(item.get("date") or "") != date]
+    _hermes_hub_write_json(
+        _hermes_hub_storage_path("HERMES_HUB_WELLBEING_PATH", "hub_wellbeing.json"),
+        {"items": items, "updated_at": time.time()},
+    )
+    _hermes_hub_audit_event({"event": "hub.wellbeing.delete", "summary": f"daily aggregate {date}", "device": "android", "risk": "sensitive", "metadata": {"date": date}})
+    return {"object": "hermes.hub.wellbeing.daily.delete", "status": "ok", "deleted": True, "date": date}
+
+
+def _hermes_hub_delete_all_wellbeing() -> Dict[str, Any]:
+    _hermes_hub_write_json(
+        _hermes_hub_storage_path("HERMES_HUB_WELLBEING_PATH", "hub_wellbeing.json"),
+        {"items": [], "updated_at": time.time()},
+    )
+    _hermes_hub_audit_event({"event": "hub.wellbeing.delete_all", "summary": "all daily aggregates", "device": "android", "risk": "sensitive"})
+    return {"object": "hermes.hub.wellbeing.delete", "status": "ok", "deleted_all": True}
+
+
+def _hermes_hub_wellbeing_io(action: str, date: str = "", payload: Any = None) -> Dict[str, Any]:
+    import threading as _threading
+
+    global _hermes_hub_wellbeing_io_lock
+    if "_hermes_hub_wellbeing_io_lock" not in globals():
+        _hermes_hub_wellbeing_io_lock = _threading.RLock()
+    with _hermes_hub_wellbeing_io_lock:
+        if action == "list":
+            return _hermes_hub_wellbeing_payload(int(payload or 30))
+        if action == "get":
+            current = _hermes_hub_wellbeing_payload(3660)
+            item = next((entry for entry in current.get("items", []) if str(entry.get("date") or "") == date), None)
+            if item is None:
+                raise KeyError(date)
+            return {"object": "hermes.hub.wellbeing.daily", "status": "ok", "item": item}
+        if action == "put":
+            return _hermes_hub_put_wellbeing(date, payload)
+        if action == "delete":
+            return _hermes_hub_delete_wellbeing(date)
+        if action == "delete_all":
+            return _hermes_hub_delete_all_wellbeing()
+        raise ValueError("unsupported wellbeing operation")
+# WELLBEING_HERMES_HUB_RUNTIME_END'''
+    text, changed = _upsert_versioned_block(
+        text,
+        begin=_WELLBEING_RUNTIME_BEGIN,
+        end=_WELLBEING_RUNTIME_END,
+        block=runtime,
+        anchor="def _hermes_hub_number(value: Any, fallback: float = 0.0) -> float:\n",
+        label="wellbeing daily aggregate storage v1",
+    )
+    if changed:
+        changes.append("wellbeing daily aggregate storage v1")
+
+    handlers = r'''    # HERMES_HUB_WELLBEING_HANDLERS_BEGIN
+    async def _handle_get_hub_wellbeing(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            days = int(request.query.get("days", "30"))
+            loop = asyncio.get_running_loop()
+            payload = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_wellbeing_io, "list", "", days),
+                timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 30, 2, 300),
+            )
+            return web.json_response(payload)
+        except ValueError:
+            return web.json_response({"error": "days must be an integer"}, status=400)
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Wellbeing store timed out"}, status=504)
+        except Exception as exc:
+            return web.json_response({"error": "Wellbeing store unavailable", "detail": str(exc)}, status=500)
+
+    async def _handle_delete_hub_wellbeing(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            loop = asyncio.get_running_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_wellbeing_io, "delete_all"),
+                timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 30, 2, 300),
+            )
+            return web.json_response(result)
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Wellbeing store timed out"}, status=504)
+        except Exception as exc:
+            return web.json_response({"error": "Wellbeing delete failed", "detail": str(exc)}, status=500)
+
+    async def _handle_get_hub_wellbeing_daily(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            date = _hermes_hub_wellbeing_date(request.match_info.get("date"))
+            loop = asyncio.get_running_loop()
+            payload = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_wellbeing_io, "get", date),
+                timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 30, 2, 300),
+            )
+            return web.json_response(payload)
+        except KeyError:
+            return web.json_response({"error": "Wellbeing day not found", "date": date}, status=404)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Wellbeing store timed out"}, status=504)
+        except Exception as exc:
+            return web.json_response({"error": "Wellbeing store unavailable", "detail": str(exc)}, status=500)
+
+    async def _handle_put_hub_wellbeing_daily(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        if request.content_length is None:
+            return web.json_response({"error": "Content-Length required for wellbeing payload"}, status=411)
+        if request.content_length > 64 * 1024:
+            return web.json_response({"error": "Wellbeing payload too large"}, status=413)
+        try:
+            date = _hermes_hub_wellbeing_date(request.match_info.get("date"))
+            body = await request.json()
+            loop = asyncio.get_running_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_wellbeing_io, "put", date, body),
+                timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 30, 2, 300),
+            )
+            return web.json_response(result)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Wellbeing store timed out"}, status=504)
+        except Exception as exc:
+            return web.json_response({"error": "Wellbeing update failed", "detail": str(exc)}, status=500)
+
+    async def _handle_delete_hub_wellbeing_daily(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            date = _hermes_hub_wellbeing_date(request.match_info.get("date"))
+            loop = asyncio.get_running_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_wellbeing_io, "delete", date),
+                timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 30, 2, 300),
+            )
+            return web.json_response(result)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Wellbeing store timed out"}, status=504)
+        except Exception as exc:
+            return web.json_response({"error": "Wellbeing delete failed", "detail": str(exc)}, status=500)
+    # HERMES_HUB_WELLBEING_HANDLERS_END'''
+    text, changed = _upsert_versioned_block(
+        text,
+        begin=_WELLBEING_HANDLERS_BEGIN,
+        end=_WELLBEING_HANDLERS_END,
+        block=handlers,
+        anchor='    async def _handle_models(self, request: "web.Request") -> "web.Response":',
+        label="wellbeing authenticated handlers v1",
+    )
+    if changed:
+        changes.append("wellbeing authenticated handlers v1")
+
+    if '"hub_wellbeing": {"method": "GET/PUT/DELETE", "path": "/v1/hub/wellbeing"}' not in text:
+        text, _ = _replace_regex_once(
+            text,
+            r'(^\s+"hub_state": \{"method": "GET/POST", "path": "/v1/hub/state"\},\n)',
+            r'\1                "hub_wellbeing": {"method": "GET/PUT/DELETE", "path": "/v1/hub/wellbeing"},' "\n",
+            "capabilities wellbeing endpoint",
+        )
+        changes.append("capabilities wellbeing endpoint")
+
+    if not _route_registered(text, "GET", "/v1/hub/wellbeing", "_handle_get_hub_wellbeing"):
+        text, _ = _replace_regex_once(
+            text,
+            r'(^\s+self\._app\.router\.add_get\("/v1/hub/state", self\._handle_get_hub_state\)\n)',
+            r'\1'
+            r'            self._app.router.add_get("/v1/hub/wellbeing", self._handle_get_hub_wellbeing)' "\n"
+            r'            self._app.router.add_delete("/v1/hub/wellbeing", self._handle_delete_hub_wellbeing)' "\n"
+            r'            self._app.router.add_get("/v1/hub/wellbeing/daily/{date}", self._handle_get_hub_wellbeing_daily)' "\n"
+            r'            self._app.router.add_put("/v1/hub/wellbeing/daily/{date}", self._handle_put_hub_wellbeing_daily)' "\n"
+            r'            self._app.router.add_delete("/v1/hub/wellbeing/daily/{date}", self._handle_delete_hub_wellbeing_daily)' "\n",
+            "router wellbeing endpoints",
+        )
+        changes.append("router wellbeing endpoints")
+    elif not _route_registered(text, "DELETE", "/v1/hub/wellbeing", "_handle_delete_hub_wellbeing"):
+        text, _ = _replace_once(
+            text,
+            '            self._app.router.add_get("/v1/hub/wellbeing", self._handle_get_hub_wellbeing)\n',
+            '            self._app.router.add_get("/v1/hub/wellbeing", self._handle_get_hub_wellbeing)\n'
+            '            self._app.router.add_delete("/v1/hub/wellbeing", self._handle_delete_hub_wellbeing)\n',
+            "router wellbeing collection delete endpoint",
+        )
+        changes.append("router wellbeing collection delete endpoint")
+    return text, changes
 
 
 def _patch_text(text: str) -> tuple[str, list[str]]:
@@ -8204,6 +8508,8 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
 
     text, jarvis_changes = _patch_jarvis_v1(text)
     changes.extend(jarvis_changes)
+    text, wellbeing_changes = _patch_wellbeing_v1(text)
+    changes.extend(wellbeing_changes)
     return text, changes
 
 

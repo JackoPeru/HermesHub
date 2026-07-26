@@ -4,6 +4,14 @@ Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub res
 
 ## Unreleased
 
+## 0.6.176 - 2026-07-26
+
+- Android integra Health Connect per ricevere, previo consenso, i dati che Galaxy Watch 7 sincronizza tramite Samsung Health: passi e calorie, sonno, allenamenti e frequenza cardiaca aggregata.
+- La sincronizzazione invia soltanto riepiloghi giornalieri scelti dall'utente; nessun campione, battito grezzo o dato medico viene conservato nel gateway.
+- Il gateway aggiunge endpoint autenticati `GET/PUT/DELETE /v1/hub/wellbeing`, validazione stretta, retention configurabile, scrittura atomica e cancellazione completa dal client.
+- La lettura in background richiede il permesso separato di Health Connect; una revoca interrompe il lavoro periodico senza ritentare silenziosamente.
+- Aggiunti test di contratto per privacy, payload, autenticazione, limiti, lock e idempotenza del patcher.
+
 ## 0.6.175 - 2026-07-26
 
 - Ripristinati i default illimitati per request e upload file del gateway (`0`); restano configurabili limiti espliciti per installazioni che li richiedono.

@@ -1,12 +1,12 @@
-Hermes Hub 0.6.175 (trasferimenti gateway senza nuovi limiti)
+Hermes Hub 0.6.176 (riepiloghi salute Galaxy Watch)
 
-- Ripristinati i default precedenti: `HERMES_GATEWAY_MAX_REQUEST_MB=0` e `HERMES_HUB_MAX_UPLOAD_MB=0`.
-- Rimossi i limiti predefiniti da 256 MB per le request e 150 MB per gli upload introdotti in 0.6.174.
-- Il patcher converte automaticamente anche gateway gia' configurati con i default finiti di 0.6.174.
-- La capability `max_upload_mb` torna a `0`, mantenendo configurabili limiti espliciti solo quando scelti dall'amministratore.
-- Aggiunti test di regressione per launcher, output patchato, idempotenza e migrazione da 0.6.174.
-- Versioni: Windows/AdminBridge `0.6.175`; Android `versionName 0.6.175`, `versionCode 179`.
-- Asset: `HermesHub-0.6.175-android.apk`, `NemoclawChat.Windows_0.6.175.0_x64.msix`, `HermesHub-0.6.175-linux-gateway.tar.gz`.
-- SHA-256 Android: `d7ab463c32de6924120d5f9f25b4dbadac06edcc1b6d72e687c36de821ebf93e`.
-- SHA-256 Windows: `380191452acdd2511c4452b66b163984dcb3bd25bb20866034f11f2c79ba7b38`.
-- SHA-256 Linux gateway: `98c275a148f675abf3d24c5dc709724d58e36100c301fd8a47e87c9a6144b01c`.
+- Android usa Health Connect, con consenso esplicito, per inviare a Hermes i riepiloghi giornalieri provenienti da Galaxy Watch tramite Samsung Health.
+- Dati selezionabili: passi e calorie attive, sonno, allenamenti e frequenza cardiaca aggregata. Non vengono inviati o salvati campioni, battiti grezzi o dati diagnostici.
+- La sincronizzazione in background richiede un'autorizzazione distinta; la revoca ferma il lavoro periodico. L'utente puo' cancellare tutti i riepiloghi dal client, disattivando anche la sincronizzazione.
+- Il gateway espone endpoint autenticati `GET/PUT/DELETE /v1/hub/wellbeing`, accetta un payload massimo di 64 KiB, applica validazione e retention configurabile e usa scritture atomiche protette da lock.
+- Aggiunti test per idempotenza del patcher, privacy dei payload, autenticazione, limiti, lock e contratti Android.
+- Versioni: Windows/AdminBridge `0.6.176`; Android `versionName 0.6.176`, `versionCode 180`.
+- Asset: `HermesHub-0.6.176-android.apk`, `NemoclawChat.Windows_0.6.176.0_x64.msix`, `HermesHub-0.6.176-linux-gateway.tar.gz`.
+- SHA-256 Android: `170ab53dde94814ffe51059b1a7c37b4697ecaa678f3c5ec22ca4f6416eb9380`.
+- SHA-256 Windows: `264e936cca7cd2e64d46985ce3e14f2beee0dd5a1a802e259932e8d450dc0d11`.
+- SHA-256 Linux gateway: `dc3fc165b95425481480f353132cd7376e25ed23873f52941f987a2f1b0d8ce7`.

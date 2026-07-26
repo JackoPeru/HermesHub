@@ -63,6 +63,10 @@ La stessa esperienza in mobilità, con navigazione pensata per il touch, azioni 
 
 <p align="center"><sub>Navigazione globale, workspace Progetti e modalità Voce nella release Android 0.6.162.</sub></p>
 
+### Salute Galaxy Watch
+
+Il telefono puo' inviare a Hermes i riepiloghi giornalieri scelti dall'utente: passi e calorie attive, sonno, allenamenti e frequenza cardiaca aggregata. Il percorso e' `Galaxy Watch -> Samsung Health -> Health Connect -> Hermes`; Health Connect richiede un consenso esplicito, la sincronizzazione in background e' opzionale e il gateway conserva solo aggregati giornalieri, mai campioni o battiti grezzi. Dalle Impostazioni Android e' possibile sincronizzare subito oppure eliminare tutti i riepiloghi gia' inviati, disattivando anche la sincronizzazione.
+
 ## Come funziona
 
 ```mermaid
@@ -195,4 +199,4 @@ docs/                       Guide tecniche e operative
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-Versione corrente: `0.6.175`.
+Versione corrente: `0.6.176`.

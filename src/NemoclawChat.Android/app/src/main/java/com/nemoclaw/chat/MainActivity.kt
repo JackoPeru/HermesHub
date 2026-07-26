@@ -701,7 +701,12 @@ data class AppSettings(
     val metricDuration: Boolean = AppDefaults.metricDuration,
     val maxAttachmentMb: Int = AppDefaults.maxAttachmentMb,
     val strictNativeMode: Boolean = AppDefaults.strictNativeMode,
-    val demoMode: Boolean = AppDefaults.demoMode
+    val demoMode: Boolean = AppDefaults.demoMode,
+    val healthSyncEnabled: Boolean = AppDefaults.healthSyncEnabled,
+    val healthIncludeSteps: Boolean = AppDefaults.healthIncludeSteps,
+    val healthIncludeSleep: Boolean = AppDefaults.healthIncludeSleep,
+    val healthIncludeWorkouts: Boolean = AppDefaults.healthIncludeWorkouts,
+    val healthIncludeHeartRate: Boolean = AppDefaults.healthIncludeHeartRate
 )
 
 internal fun AppSettings.metricFilter(): MetricDisplayFilter = MetricDisplayFilter(
@@ -6952,6 +6957,11 @@ private fun SettingsScreen(
     var maxAttachmentMb by remember(settings.maxAttachmentMb) { mutableIntStateOf(settings.maxAttachmentMb.coerceIn(1, 150)) }
     var strictNativeMode by remember(settings.strictNativeMode) { mutableStateOf(settings.strictNativeMode) }
     var demoMode by remember(settings.demoMode) { mutableStateOf(settings.demoMode) }
+    var healthSyncEnabled by remember(settings.healthSyncEnabled) { mutableStateOf(settings.healthSyncEnabled) }
+    var healthIncludeSteps by remember(settings.healthIncludeSteps) { mutableStateOf(settings.healthIncludeSteps) }
+    var healthIncludeSleep by remember(settings.healthIncludeSleep) { mutableStateOf(settings.healthIncludeSleep) }
+    var healthIncludeWorkouts by remember(settings.healthIncludeWorkouts) { mutableStateOf(settings.healthIncludeWorkouts) }
+    var healthIncludeHeartRate by remember(settings.healthIncludeHeartRate) { mutableStateOf(settings.healthIncludeHeartRate) }
     val initialVoiceProfile = remember(settings.activeProjectId) {
         loadVoiceProfile(context, settings.activeProjectId)
     }
@@ -6964,6 +6974,7 @@ private fun SettingsScreen(
     var voiceBluetooth by remember(settings.activeProjectId) { mutableStateOf(initialVoiceProfile.bluetooth) }
     var voiceParticleShape by remember(settings.activeProjectId) { mutableStateOf(initialVoiceProfile.particleShape) }
     var status by remember { mutableStateOf("Pronto.") }
+    var showEraseHealthConfirm by remember { mutableStateOf(false) }
     var advancedVisible by rememberSaveable { mutableStateOf(false) }
     val wakePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         voiceWakeWord = granted
@@ -7001,7 +7012,57 @@ private fun SettingsScreen(
             metricDuration = metricDuration,
             maxAttachmentMb = maxAttachmentMb.coerceIn(1, 150),
             strictNativeMode = strictNativeMode,
-            demoMode = demoMode
+            demoMode = demoMode,
+            healthSyncEnabled = healthSyncEnabled,
+            healthIncludeSteps = healthIncludeSteps,
+            healthIncludeSleep = healthIncludeSleep,
+            healthIncludeWorkouts = healthIncludeWorkouts,
+            healthIncludeHeartRate = healthIncludeHeartRate
+        )
+    }
+
+    val healthPermissionLauncher = rememberLauncherForActivityResult(HealthSync.permissionRequestContract()) { granted ->
+        val candidate = currentSettings().copy(healthSyncEnabled = true)
+        if (granted.containsAll(HealthSync.requiredPermissions(candidate))) {
+            HealthSync.recordBackgroundGrant(context, granted)
+            healthSyncEnabled = true
+            onSave(candidate)
+            HealthSync.schedule(context, candidate)
+            status = "Dati salute autorizzati. Prima sincronizzazione in corso..."
+            scope.launch {
+                status = when (val result = HealthSync.sync(context)) {
+                    is HealthSyncResult.Success -> "Riepilogo salute ${result.summary.date} inviato a Hermes."
+                    is HealthSyncResult.Permanent -> result.message
+                    is HealthSyncResult.Transient -> "Sincronizzazione da riprovare: ${result.message}"
+                    HealthSyncResult.Disabled -> "Sincronizzazione salute disattivata."
+                }
+            }
+        } else {
+            healthSyncEnabled = false
+            status = "Permessi salute incompleti: nessun dato inviato a Hermes."
+        }
+    }
+
+    if (showEraseHealthConfirm) {
+        AlertDialog(
+            onDismissRequest = { showEraseHealthConfirm = false },
+            title = { Text("Eliminare riepiloghi salute?") },
+            text = { Text("Verranno eliminati dal gateway Hermes tutti i riepiloghi salute sincronizzati. I dati in Samsung Health e Health Connect non vengono toccati.") },
+            confirmButton = {
+                Button(onClick = {
+                    showEraseHealthConfirm = false
+                    scope.launch {
+                        when (val result = HealthSync.eraseAllFromHermes(context)) {
+                            HealthEraseResult.Success -> {
+                                healthSyncEnabled = false
+                                status = "Riepiloghi salute eliminati da Hermes. Sincronizzazione disattivata."
+                            }
+                            is HealthEraseResult.Failed -> status = result.message
+                        }
+                    }
+                }) { Text("Elimina da Hermes") }
+            },
+            dismissButton = { Button(onClick = { showEraseHealthConfirm = false }) { Text("Annulla") } }
         )
     }
 
@@ -7200,6 +7261,59 @@ private fun SettingsScreen(
             }
             item {
                 PremiumPanel {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                        Text("Salute Galaxy Watch", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Watch → Samsung Health → Health Connect → Hermes. Solo riepiloghi giornalieri; nessun battito grezzo viene salvato o inviato.",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp
+                        )
+                        MetricSwitch("Sincronizzazione salute", healthSyncEnabled) { enabled -> healthSyncEnabled = enabled }
+                        MetricSwitch("Passi e calorie attive", healthIncludeSteps) { healthIncludeSteps = it }
+                        MetricSwitch("Sonno", healthIncludeSleep) { healthIncludeSleep = it }
+                        MetricSwitch("Allenamenti", healthIncludeWorkouts) { healthIncludeWorkouts = it }
+                        MetricSwitch("Frequenza cardiaca aggregata", healthIncludeHeartRate) { healthIncludeHeartRate = it }
+                        Text(HealthSync.sdkStatus(context), color = AppColors.Muted, fontSize = 12.sp)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                val candidate = currentSettings().copy(healthSyncEnabled = true)
+                                val error = validateHttpUrl(candidate.gatewayUrl, "Hermes API URL")
+                                if (error != null) {
+                                    status = error
+                                } else if (!HealthSync.sdkStatus(context).startsWith("Health Connect disponibile")) {
+                                    status = HealthSync.sdkStatus(context)
+                                } else {
+                                    healthPermissionLauncher.launch(HealthSync.permissionsForRequest(context, candidate))
+                                }
+                            }) { Text("Collega e autorizza") }
+                            Button(onClick = {
+                                if (!HealthSync.openSettings(context)) status = "Impossibile aprire Health Connect."
+                            }) { Text("Gestisci accesso") }
+                            Button(onClick = {
+                                val candidate = currentSettings()
+                                if (!candidate.healthSyncEnabled) {
+                                    status = "Attiva e autorizza prima la sincronizzazione salute."
+                                } else {
+                                    onSave(candidate)
+                                    HealthSync.schedule(context, candidate)
+                                    status = "Sincronizzazione salute in corso..."
+                                    scope.launch {
+                                        status = when (val result = HealthSync.sync(context)) {
+                                            is HealthSyncResult.Success -> "Riepilogo salute ${result.summary.date} inviato a Hermes."
+                                            is HealthSyncResult.Permanent -> result.message
+                                            is HealthSyncResult.Transient -> "Sincronizzazione da riprovare: ${result.message}"
+                                            HealthSyncResult.Disabled -> "Sincronizzazione salute disattivata."
+                                        }
+                                    }
+                                }
+                            }) { Text("Sincronizza ora") }
+                            Button(onClick = { showEraseHealthConfirm = true }) { Text("Elimina da Hermes") }
+                        }
+                    }
+                }
+            }
+            item {
+                PremiumPanel {
                     Text(
                         modifier = Modifier.padding(14.dp),
                         text = status,
@@ -7236,6 +7350,7 @@ private fun SettingsScreen(
                                     )
                                 )
                                 onSave(candidate)
+                                HealthSync.schedule(context, candidate)
                                 status = "Impostazioni e profilo voce salvati."
                             } else {
                                 status = error
@@ -7527,6 +7642,7 @@ internal fun hermesHubSharedContext(): String {
         - Video: feed personale di video generati su PC/Hermes. Esiste una Video Library ufficiale annunciata dal gateway in video_library_path e interrogabile da Android con /v1/video/library. Se l'utente chiede di creare, scaricare, montare o preparare un video, salva/registra il file finale in quella cartella, cosi la sezione Video lo vede. Il telefono riceve media proxy /v1/media/..., non file locali diretti.
         - News: feed personale di articoli/briefing con fonti e feedback utente. Se l'utente chiede un giornale online/HTML, salva il file finale in news_library_path/HERMES_NEWS_LIBRARY_PATH: Hermes Hub lo apre in app tramite /v1/news/library e /v1/media/....
         - Cron: automazioni Hermes programmate sul gateway.
+        - Salute: riepiloghi giornalieri volontari da Galaxy Watch, passati dal telefono via Samsung Health/Health Connect e salvati nel gateway. Consulta GET /v1/hub/wellbeing o GET /v1/hub/wellbeing/daily/{data} soltanto se l'utente chiede informazioni su attivita', sonno, passi o trend. Non usare questi dati per diagnosi, emergenze o decisioni mediche; non richiedere dati grezzi.
         - Notifiche: inbox persistente per messaggi autonomi da cron/agenti. Quando un cron deve avvisare l'utente, pubblica un item con POST /v1/hub/notifications includendo title, message, severity, source e conversation_prompt.
         - Archivio: storico locale dell'app, non memoria agente principale.
         Video Library: non ignorare la sezione Video. Ogni output video finale destinato all'utente deve finire in video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni file video comune (.mp4/.m4v/.mov/.mkv/.webm/.avi/.wmv/.flv/.mpg/.mpeg/.ts/.m2ts/.3gp/.ogv) in quella cartella appare tramite /v1/video/library. Se lo mostri in chat, usa anche visual_blocks media_file con media_url proxy /v1/media/...; il gateway puo' esporre playback compat MP4 con ?format=mp4.
@@ -7777,6 +7893,7 @@ private fun visualBlocksMetadata(settings: AppSettings, conversationId: String?)
                 .put("video", "Feed personale video: Hermes conosce video_library_path/HERMES_VIDEO_LIBRARY_PATH; ogni video creato/scaricato per l'utente deve essere salvato o registrato li; Android legge /v1/video/library, desktop mostra file locali, app salva feedback e metadata.")
                 .put("news", "Feed personale articoli: Hermes produce articoli con fonti; se crea HTML/giornale online salva in ${settings.newsLibraryPath} per /v1/news/library; app salva feedback.")
                 .put("cron", "Automazioni Hermes programmate condivise con CLI/server.")
+                .put("wellbeing", "Riepiloghi giornalieri volontari da Health Connect/Galaxy Watch. Consulta GET /v1/hub/wellbeing o /v1/hub/wellbeing/daily/{date} solo se l'utente chiede salute, attivita', sonno o trend; dati wellness, non medici.")
                 .put("notifications", "Inbox notifiche: cron/agenti devono usare POST /v1/hub/notifications per avvisi importanti quando l'app non e' aperta.")
         )
         .put(
@@ -10327,7 +10444,7 @@ private fun formatWatts(value: Double?): String {
     return if (value != null) "${String.format(java.util.Locale.US, "%.0f", value)} W" else "n/d"
 }
 
-private fun loadSettings(context: Context): AppSettings {
+internal fun loadSettings(context: Context): AppSettings {
     val prefs = migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
     val settings = AppSettings(
         gatewayUrl = prefs.getString("gatewayUrl", AppDefaults.gatewayUrl) ?: AppDefaults.gatewayUrl,
@@ -10360,7 +10477,12 @@ private fun loadSettings(context: Context): AppSettings {
         metricDuration = prefs.getBoolean("metricDuration", AppDefaults.metricDuration),
         maxAttachmentMb = prefs.getInt("maxAttachmentMb", AppDefaults.maxAttachmentMb).let { if (it <= 0 || it == 6) 150 else it }.coerceIn(1, 150),
         strictNativeMode = prefs.getBoolean("strictNativeMode", AppDefaults.strictNativeMode),
-        demoMode = prefs.getBoolean("demoMode", AppDefaults.demoMode)
+        demoMode = prefs.getBoolean("demoMode", AppDefaults.demoMode),
+        healthSyncEnabled = prefs.getBoolean("healthSyncEnabled", AppDefaults.healthSyncEnabled),
+        healthIncludeSteps = prefs.getBoolean("healthIncludeSteps", AppDefaults.healthIncludeSteps),
+        healthIncludeSleep = prefs.getBoolean("healthIncludeSleep", AppDefaults.healthIncludeSleep),
+        healthIncludeWorkouts = prefs.getBoolean("healthIncludeWorkouts", AppDefaults.healthIncludeWorkouts),
+        healthIncludeHeartRate = prefs.getBoolean("healthIncludeHeartRate", AppDefaults.healthIncludeHeartRate)
     )
     return normalizePlugAndPlaySettings(context, settings)
 }
@@ -10411,7 +10533,7 @@ private fun normalizePlugAndPlaySettings(context: Context, settings: AppSettings
     return next
 }
 
-private fun saveSettings(context: Context, settings: AppSettings) {
+internal fun saveSettings(context: Context, settings: AppSettings) {
     context.getSharedPreferences(CURRENT_SETTINGS_PREFS, Context.MODE_PRIVATE).edit {
         putString("gatewayUrl", normalizeUrl(settings.gatewayUrl))
         putString("gatewayWsUrl", normalizeUrl(settings.gatewayWsUrl))
@@ -10444,6 +10566,11 @@ private fun saveSettings(context: Context, settings: AppSettings) {
         putInt("maxAttachmentMb", settings.maxAttachmentMb.coerceIn(1, 150))
         putBoolean("strictNativeMode", settings.strictNativeMode)
         putBoolean("demoMode", settings.demoMode)
+        putBoolean("healthSyncEnabled", settings.healthSyncEnabled)
+        putBoolean("healthIncludeSteps", settings.healthIncludeSteps)
+        putBoolean("healthIncludeSleep", settings.healthIncludeSleep)
+        putBoolean("healthIncludeWorkouts", settings.healthIncludeWorkouts)
+        putBoolean("healthIncludeHeartRate", settings.healthIncludeHeartRate)
     }
 }
 
@@ -11820,6 +11947,11 @@ private object AppDefaults {
     const val maxAttachmentMb = 150
     const val strictNativeMode = false
     const val demoMode = false
+    const val healthSyncEnabled = false
+    const val healthIncludeSteps = true
+    const val healthIncludeSleep = true
+    const val healthIncludeWorkouts = true
+    const val healthIncludeHeartRate = false
     const val releasesPage = "https://github.com/JackoPeru/HermesHub/releases"
     const val latestReleaseApi = "https://api.github.com/repos/JackoPeru/HermesHub/releases/latest"
 }

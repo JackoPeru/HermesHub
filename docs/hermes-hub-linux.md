@@ -103,6 +103,7 @@ Il tar deve includere `VERSION`, launcher, patcher, installer, updater, unit/tim
 
 - `/health` e `/health/detailed`;
 - `/v1/capabilities`;
+- `GET/PUT/DELETE /v1/hub/wellbeing` per i riepiloghi salute giornalieri (solo aggregati, autenticati);
 - chat SSE;
 - `/v1/audio/transcriptions` e `/v1/audio/speech`;
 - sessione/frame/turno/eventi/cleanup Jarvis quando abilitato;
