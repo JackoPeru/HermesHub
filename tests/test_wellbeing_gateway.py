@@ -78,12 +78,19 @@ class WellbeingGatewayPatchTests(unittest.TestCase):
     def test_android_contract_uses_health_connect_background_permission_and_no_raw_upload(self):
         manifest = (ROOT / "src" / "NemoclawChat.Android" / "app" / "src" / "main" / "AndroidManifest.xml").read_text(encoding="utf-8")
         source = (ROOT / "src" / "NemoclawChat.Android" / "app" / "src" / "main" / "java" / "com" / "nemoclaw" / "chat" / "HealthSync.kt").read_text(encoding="utf-8")
+        activity = (ROOT / "src" / "NemoclawChat.Android" / "app" / "src" / "main" / "java" / "com" / "nemoclaw" / "chat" / "MainActivity.kt").read_text(encoding="utf-8")
         self.assertIn("READ_HEALTH_DATA_IN_BACKGROUND", manifest)
         self.assertIn("HealthPermission.getReadPermission", source)
         self.assertIn('"raw_records", JSONArray()', source)
         self.assertIn('"${wellbeingCollectionUrl(settings)}/daily/$date"', source)
         self.assertIn("HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND", source)
         self.assertIn("HealthEraseResult.Success", source)
+        self.assertIn("HealthHistoryResult", source)
+        self.assertIn("Rate limited request quota", source)
+        self.assertIn("Gateway Hermes senza endpoint Salute", source)
+        self.assertIn("HealthDashboardScreen", activity)
+        self.assertIn("Passi · ultimi 7 giorni", activity)
+        self.assertIn("Watch → Samsung Health → Health Connect → Hermes", activity)
 
 
 if __name__ == "__main__":

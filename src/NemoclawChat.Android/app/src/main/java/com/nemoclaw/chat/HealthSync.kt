@@ -134,6 +134,7 @@ internal object HealthSync {
 
         val client = HealthConnectClient.getOrCreate(appContext)
         val required = requiredPermissions(settings)
+        if (required.isEmpty()) return@withContext HealthSyncResult.Permanent("Seleziona almeno una categoria salute prima della sincronizzazione.")
         val granted = client.permissionController.getGrantedPermissions()
         if (!granted.containsAll(required)) return@withContext HealthSyncResult.Permanent("Permessi Health Connect mancanti.")
         if (requireBackgroundPermission && HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND !in granted) {
@@ -141,17 +142,26 @@ internal object HealthSync {
         }
 
         try {
-            val summary = readDailySummary(client, settings)
+            val zone = ZoneId.systemDefault()
+            val summary = readDailySummary(client, settings, java.time.LocalDate.now(zone), zone)
             upload(settings, loadGatewaySecret(appContext), summary)
             appContext.getSharedPreferences(HEALTH_PREFS, Context.MODE_PRIVATE).edit {
                 putLong("last_success_at", System.currentTimeMillis())
                 putString("last_date", summary.date)
             }
             HealthSyncResult.Success(summary)
+        } catch (error: WellbeingGatewayException) {
+            when {
+                error.code in setOf(404, 405) ||
+                    (error.code == 429 && error.body.contains("Rate limited request quota", ignoreCase = true)) -> {
+                    HealthSyncResult.Permanent("Gateway Hermes senza endpoint Salute. Aggiorna il gateway Linux a Hermes Hub 0.6.176 o successivo, poi riprova.")
+                }
+                error.code == 429 -> HealthSyncResult.Transient("Gateway Hermes ha applicato un rate limit. Attendi e riprova: ${error.body}")
+                error.code in 400..499 -> HealthSyncResult.Permanent("Gateway rifiuta dati salute: HTTP ${error.code} ${error.body}")
+                else -> HealthSyncResult.Transient("Gateway salute HTTP ${error.code}: ${error.body}")
+            }
         } catch (error: SecurityException) {
             HealthSyncResult.Permanent(error.message ?: "Permesso Health Connect revocato.")
-        } catch (error: IllegalStateException) {
-            HealthSyncResult.Permanent(error.message ?: "Gateway rifiuta i dati salute.")
         } catch (error: IOException) {
             HealthSyncResult.Transient(error.message ?: "Rete Hermes non disponibile.")
         } catch (error: Exception) {
@@ -159,10 +169,43 @@ internal object HealthSync {
         }
     }
 
-    private suspend fun readDailySummary(client: HealthConnectClient, settings: AppSettings): DailyWellbeingSummary {
-        val zone = ZoneId.systemDefault()
-        val start = java.time.LocalDate.now(zone).atStartOfDay(zone).toInstant()
-        val end = Instant.now()
+    suspend fun readHistory(context: Context, settings: AppSettings, days: Int = 7): HealthHistoryResult = withContext(Dispatchers.IO) {
+        val appContext = context.applicationContext
+        if (Build.VERSION.SDK_INT < 28 || HealthConnectClient.getSdkStatus(appContext, PROVIDER_PACKAGE) != HealthConnectClient.SDK_AVAILABLE) {
+            return@withContext HealthHistoryResult.Unavailable(sdkStatus(appContext))
+        }
+        try {
+            val client = HealthConnectClient.getOrCreate(appContext)
+            val required = requiredPermissions(settings)
+            if (required.isEmpty()) {
+                return@withContext HealthHistoryResult.Unavailable("Seleziona almeno una categoria salute nelle Impostazioni.")
+            }
+            if (!client.permissionController.getGrantedPermissions().containsAll(required)) {
+                return@withContext HealthHistoryResult.Unavailable("Autorizza Health Connect per visualizzare i dati dell'orologio.")
+            }
+            val zone = ZoneId.systemDefault()
+            val today = java.time.LocalDate.now(zone)
+            val history = (days.coerceIn(1, 30) - 1 downTo 0).map { offset ->
+                readDailySummary(client, settings, today.minusDays(offset.toLong()), zone)
+            }
+            HealthHistoryResult.Success(history)
+        } catch (error: SecurityException) {
+            HealthHistoryResult.Unavailable(error.message ?: "Permesso Health Connect revocato.")
+        } catch (error: IOException) {
+            HealthHistoryResult.Unavailable("Health Connect non disponibile: ${error.message ?: error.javaClass.simpleName}")
+        } catch (error: Exception) {
+            HealthHistoryResult.Unavailable(error.message ?: error.javaClass.simpleName)
+        }
+    }
+
+    private suspend fun readDailySummary(
+        client: HealthConnectClient,
+        settings: AppSettings,
+        day: java.time.LocalDate,
+        zone: ZoneId
+    ): DailyWellbeingSummary {
+        val start = day.atStartOfDay(zone).toInstant()
+        val end = minOf(day.plusDays(1).atStartOfDay(zone).toInstant(), Instant.now())
         val range = TimeRangeFilter.between(start, end)
         var steps: Long? = null
         var calories: Double? = null
@@ -180,7 +223,7 @@ internal object HealthSync {
         val activeMinutes = workouts.sumOf { java.time.Duration.between(it.startTime, it.endTime).toMinutes() }
         val samples = heartRate.flatMap { it.samples }.map { it.beatsPerMinute.toDouble() }
         return DailyWellbeingSummary(
-            date = DateTimeFormatter.ISO_LOCAL_DATE.format(java.time.LocalDate.now(zone)),
+            date = DateTimeFormatter.ISO_LOCAL_DATE.format(day),
             zoneId = zone.id,
             collectedAt = Instant.now().toString(),
             steps = steps,
@@ -221,8 +264,7 @@ internal object HealthSync {
         httpClient.newCall(request).execute().use { response ->
             if (response.isSuccessful) return
             val body = response.body.string().take(500)
-            if (response.code in 400..499) throw IllegalStateException("Gateway rifiuta dati salute: HTTP ${response.code} $body")
-            throw IOException("Gateway salute HTTP ${response.code}: $body")
+            throw WellbeingGatewayException(response.code, body)
         }
     }
 
@@ -247,6 +289,13 @@ internal sealed interface HealthSyncResult {
     data class Permanent(val message: String) : HealthSyncResult
     data class Transient(val message: String) : HealthSyncResult
 }
+
+internal sealed interface HealthHistoryResult {
+    data class Success(val items: List<DailyWellbeingSummary>) : HealthHistoryResult
+    data class Unavailable(val message: String) : HealthHistoryResult
+}
+
+private class WellbeingGatewayException(val code: Int, val body: String) : IOException("Gateway salute HTTP $code: $body")
 
 internal sealed interface HealthEraseResult {
     data object Success : HealthEraseResult

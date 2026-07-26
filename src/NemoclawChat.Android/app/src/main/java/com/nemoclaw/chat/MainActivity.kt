@@ -110,6 +110,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.ManageSearch
@@ -347,6 +348,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     Audit("Audit", Icons.Rounded.TaskAlt),
     Server("Server", Icons.Rounded.Dns),
     Hardware("Hardware", Icons.Rounded.Memory),
+    Health("Salute", Icons.Rounded.FavoriteBorder),
     Video("Video", Icons.Rounded.PlayCircle),
     News("News", Icons.AutoMirrored.Rounded.Article),
     Settings("Impostazioni", Icons.Rounded.Tune),
@@ -1213,6 +1215,7 @@ private fun ChatApp() {
                     Tab.Audit -> AuditScreen(context, settings)
                     Tab.Server -> ServerScreen(context, settings)
                     Tab.Hardware -> HardwareScreen(context, settings)
+                    Tab.Health -> HealthDashboardScreen(context, settings) { setSelectedTab(Tab.Settings) }
                     Tab.Video -> VideoScreen(context, settings) { prompt ->
                         pendingPrompt = prompt
                         setSelectedTab(Tab.Chat)
@@ -1402,7 +1405,7 @@ private fun HermesSidebar(
             item {
                 SidebarSectionLabel("CONTROLLO")
             }
-            items(listOf(Tab.Server, Tab.Hardware, Tab.Cron, Tab.Notifications, Tab.Continuity, Tab.Audit), key = { "control-${it.name}" }) { tab ->
+            items(listOf(Tab.Server, Tab.Hardware, Tab.Health, Tab.Cron, Tab.Notifications, Tab.Continuity, Tab.Audit), key = { "control-${it.name}" }) { tab ->
                 SidebarTabRow(tab, selectedTab == tab, onOpenTab)
             }
             item {
@@ -1509,6 +1512,7 @@ private fun SidebarTabRow(tab: Tab, selected: Boolean, onOpenTab: (Tab) -> Unit)
         Tab.Audit -> "Timeline operazioni e rischio"
         Tab.Server -> "Gateway e diagnostica"
         Tab.Hardware -> "Metriche del server"
+        Tab.Health -> "Dati Galaxy Watch e trend"
         Tab.Cron -> "Automazioni programmate"
         Tab.Notifications -> "Avvisi Hermes"
         Tab.News -> "Articoli generati"
@@ -6919,6 +6923,208 @@ private fun ProfileScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HealthDashboardScreen(context: Context, settings: AppSettings, onOpenSettings: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var refreshRevision by remember { mutableIntStateOf(0) }
+    var history by remember { mutableStateOf<HealthHistoryResult?>(null) }
+    var loading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(
+        settings.healthIncludeSteps,
+        settings.healthIncludeSleep,
+        settings.healthIncludeWorkouts,
+        settings.healthIncludeHeartRate,
+        refreshRevision
+    ) {
+        loading = true
+        history = HealthSync.readHistory(context, settings)
+        loading = false
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("Salute", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "Dati letti dal telefono tramite Samsung Health e Health Connect. Riepiloghi wellness, non diagnosi mediche.",
+                    color = AppColors.Muted,
+                    fontSize = 13.sp
+                )
+            }
+        }
+        item {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { refreshRevision++ }, enabled = !loading) { Text(if (loading) "Aggiornamento..." else "Aggiorna") }
+                Button(onClick = onOpenSettings) { Text("Impostazioni salute") }
+            }
+        }
+        when (val current = history) {
+            null -> item { HealthLoadingPanel() }
+            is HealthHistoryResult.Unavailable -> item {
+                PremiumPanel {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Dati non disponibili", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(current.message, color = AppColors.Muted, fontSize = 13.sp)
+                        Text("Apri Impostazioni salute, collega Health Connect e abilita almeno una categoria.", color = AppColors.Faint, fontSize = 12.sp)
+                        Button(onClick = onOpenSettings) { Text("Collega Health Connect") }
+                    }
+                }
+            }
+            is HealthHistoryResult.Success -> {
+                val items = current.items
+                val today = items.lastOrNull()
+                if (today == null) {
+                    item { HealthLoadingPanel() }
+                } else {
+                    item { HealthTodayPanel(today) }
+                    item {
+                        WellbeingBarChart(
+                            title = "Passi · ultimi 7 giorni",
+                            unit = "passi",
+                            items = items,
+                            color = AppColors.Accent,
+                            value = { it.steps?.toFloat() }
+                        )
+                    }
+                    item {
+                        WellbeingBarChart(
+                            title = "Sonno · ultimi 7 giorni",
+                            unit = "minuti",
+                            items = items,
+                            color = Color(0xFF7C8CFF),
+                            value = { it.sleepMinutes?.toFloat() }
+                        )
+                    }
+                    item {
+                        WellbeingBarChart(
+                            title = "Allenamento · ultimi 7 giorni",
+                            unit = "minuti",
+                            items = items,
+                            color = Color(0xFF4DD6A7),
+                            value = { it.workoutMinutes?.toFloat() }
+                        )
+                    }
+                    if (items.any { it.heartRateAverage != null }) {
+                        item {
+                            WellbeingBarChart(
+                                title = "Frequenza cardiaca media · ultimi 7 giorni",
+                                unit = "bpm",
+                                items = items,
+                                color = Color(0xFFFF6B82),
+                                value = { it.heartRateAverage?.toFloat() }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HealthLoadingPanel() {
+    PremiumPanel {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            LinearProgressIndicator(modifier = Modifier.width(84.dp), color = AppColors.Accent, trackColor = AppColors.Border)
+            Text("Lettura dati Health Connect...", color = AppColors.Muted, fontSize = 13.sp)
+        }
+    }
+}
+
+@Composable
+private fun HealthTodayPanel(summary: DailyWellbeingSummary) {
+    PremiumPanel {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text("Oggi · ${summary.date}", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HealthMetric("Passi", summary.steps?.toString() ?: "—", Modifier.weight(1f))
+                HealthMetric("Calorie", summary.activeCaloriesKcal?.let { String.format(java.util.Locale.ITALY, "%.0f kcal", it) } ?: "—", Modifier.weight(1f))
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HealthMetric("Sonno", summary.sleepMinutes?.let { "${it / 60}h ${it % 60}m" } ?: "—", Modifier.weight(1f))
+                HealthMetric("Allenamento", summary.workoutMinutes?.let { "${it} min" } ?: "—", Modifier.weight(1f))
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HealthMetric("Sessioni", summary.workoutCount?.toString() ?: "—", Modifier.weight(1f))
+                HealthMetric("FC media", summary.heartRateAverage?.let { String.format(java.util.Locale.ITALY, "%.0f bpm", it) } ?: "—", Modifier.weight(1f))
+            }
+            summary.heartRateMin?.let { min ->
+                Text(
+                    "Frequenza cardiaca oggi: ${String.format(java.util.Locale.ITALY, "%.0f", min)}–${String.format(java.util.Locale.ITALY, "%.0f", summary.heartRateMax ?: min)} bpm",
+                    color = AppColors.Muted,
+                    fontSize = 12.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HealthMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .background(AppColors.Background, RoundedCornerShape(12.dp))
+            .border(1.dp, AppColors.Border, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        Text(label, color = AppColors.Faint, fontSize = 11.sp)
+        Text(value, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+    }
+}
+
+@Composable
+private fun WellbeingBarChart(
+    title: String,
+    unit: String,
+    items: List<DailyWellbeingSummary>,
+    color: Color,
+    value: (DailyWellbeingSummary) -> Float?
+) {
+    val values = items.map { value(it)?.coerceAtLeast(0f) ?: 0f }
+    val peak = (values.maxOrNull() ?: 0f).coerceAtLeast(1f)
+    PremiumPanel {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text("max ${String.format(java.util.Locale.ITALY, "%.0f", peak)} $unit", color = AppColors.Faint, fontSize = 11.sp)
+            }
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(132.dp)
+                    .background(AppColors.Background, RoundedCornerShape(10.dp))
+                    .border(1.dp, AppColors.Border, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 8.dp, vertical = 10.dp)
+            ) {
+                val gap = 8.dp.toPx()
+                val width = ((size.width - gap * (values.size - 1)) / values.size.coerceAtLeast(1)).coerceAtLeast(2.dp.toPx())
+                values.forEachIndexed { index, current ->
+                    val height = if (current <= 0f) 2.dp.toPx() else (current / peak) * size.height
+                    val left = index * (width + gap)
+                    drawRect(
+                        color = if (current <= 0f) AppColors.Border else color,
+                        topLeft = Offset(left, size.height - height),
+                        size = Size(width, height)
+                    )
+                }
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                items.forEach { item -> Text(item.date.takeLast(2), color = AppColors.Faint, fontSize = 10.sp) }
             }
         }
     }

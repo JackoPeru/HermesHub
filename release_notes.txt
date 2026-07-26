@@ -1,12 +1,10 @@
-Hermes Hub 0.6.176 (riepiloghi salute Galaxy Watch)
+Hermes Hub 0.6.177 (dashboard Salute e diagnosi gateway)
 
-- Android usa Health Connect, con consenso esplicito, per inviare a Hermes i riepiloghi giornalieri provenienti da Galaxy Watch tramite Samsung Health.
-- Dati selezionabili: passi e calorie attive, sonno, allenamenti e frequenza cardiaca aggregata. Non vengono inviati o salvati campioni, battiti grezzi o dati diagnostici.
-- La sincronizzazione in background richiede un'autorizzazione distinta; la revoca ferma il lavoro periodico. L'utente puo' cancellare tutti i riepiloghi dal client, disattivando anche la sincronizzazione.
-- Il gateway espone endpoint autenticati `GET/PUT/DELETE /v1/hub/wellbeing`, accetta un payload massimo di 64 KiB, applica validazione e retention configurabile e usa scritture atomiche protette da lock.
-- Aggiunti test per idempotenza del patcher, privacy dei payload, autenticazione, limiti, lock e contratti Android.
-- Versioni: Windows/AdminBridge `0.6.176`; Android `versionName 0.6.176`, `versionCode 180`.
-- Asset: `HermesHub-0.6.176-android.apk`, `NemoclawChat.Windows_0.6.176.0_x64.msix`, `HermesHub-0.6.176-linux-gateway.tar.gz`.
-- SHA-256 Android: `170ab53dde94814ffe51059b1a7c37b4697ecaa678f3c5ec22ca4f6416eb9380`.
-- SHA-256 Windows: `264e936cca7cd2e64d46985ce3e14f2beee0dd5a1a802e259932e8d450dc0d11`.
-- SHA-256 Linux gateway: `dc3fc165b95425481480f353132cd7376e25ed23873f52941f987a2f1b0d8ce7`.
+- Nuova sezione Android Salute: valori giornalieri e grafici a sette giorni per passi, calorie, sonno, allenamenti e frequenza cardiaca aggregata da Health Connect.
+- La dashboard legge dal dispositivo e resta disponibile quando la sincronizzazione Hermes non riesce; nessun campione cardiaco o record grezzo viene salvato.
+- Il messaggio `Rate limited request quota` ora identifica un gateway Linux senza endpoint wellbeing e indica l'aggiornamento necessario, invece di suggerire un problema Health Connect.
+- Versioni: Windows/AdminBridge `0.6.177`; Android `versionName 0.6.177`, `versionCode 181`.
+- Asset: `HermesHub-0.6.177-android.apk`, `NemoclawChat.Windows_0.6.177.0_x64.msix`, `HermesHub-0.6.177-linux-gateway.tar.gz`.
+- SHA-256 Android: `61d177473e1dffc2eb2a5b0bef8239904692dcd550ba1b7c2d4c32f2c3f7a37d`.
+- SHA-256 Windows: `f49a33ca06eabb0d15a59383ab8482b45a6933d7d88d130102db8d8c9b696387`.
+- SHA-256 Linux gateway: `16b6d0db5ccb468d852e29f04a15243dca798ddf100ca7d3685a54fe33646ca0`.
