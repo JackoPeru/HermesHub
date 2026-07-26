@@ -4,6 +4,12 @@ Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub res
 
 ## Unreleased
 
+## 0.6.175 - 2026-07-26
+
+- Ripristinati i default illimitati per request e upload file del gateway (`0`); restano configurabili limiti espliciti per installazioni che li richiedono.
+- Il patcher converte anche gateway gia' aggiornati alla configurazione finita di 0.6.174, riportando capability e default al comportamento precedente.
+- Aggiunti test di regressione per launcher, patch su upstream puro, idempotenza e migrazione da 0.6.174.
+
 ## 0.6.174 - 2026-07-26
 
 - Le credenziali Android non vengono piu' esportate nei backup locali e non possono degradare in chiaro se Android Keystore non e' disponibile.

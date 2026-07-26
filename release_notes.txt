@@ -1,13 +1,12 @@
-Hermes Hub 0.6.174 (credenziali protette e sessioni Jarvis robuste)
+Hermes Hub 0.6.175 (trasferimenti gateway senza nuovi limiti)
 
-- I backup Android escludono API key, token, segreti e credenziali; un errore Android Keystore ora fallisce senza mai salvare la chiave in chiaro.
-- Autenticazione e query token media sono limitati alla stessa origine Hermes configurata; i link copiati su Android e Windows restano puliti.
-- Jarvis Android annulla correttamente gli avvii incompleti, attende la sorgente audio/video e ignora aggiornamenti o feedback di sessioni scadute.
-- Il gateway Jarvis ricontrolla la sessione dopo gli I/O asincroni, bloccando frame, turni e feedback tardivi dopo la chiusura.
-- Request e upload gateway hanno ora default finiti e configurabili; i payload base64 oltre soglia vengono rifiutati prima della decodifica.
-- La sincronizzazione archivio Android resta inattiva su installazioni nuove finche' non esiste un endpoint Hermes assoluto valido.
-- Versioni: Windows/AdminBridge `0.6.174`; Android `versionName 0.6.174`, `versionCode 178`.
-- Asset: `HermesHub-0.6.174-android.apk`, `NemoclawChat.Windows_0.6.174.0_x64.msix`, `HermesHub-0.6.174-linux-gateway.tar.gz`.
-- SHA-256 Android: `f41f473e0545b3044f566a6c35198497b0ab2235a72a32917d14f0f8889e4ff1`.
-- SHA-256 Windows: `459865aea110f8d780bff62ddd111920d429fe078708c7d6c71d7ed58a32d10b`.
-- SHA-256 Linux gateway: `544803426a9df03c5692f0903144fb4db19c4766a9f4653aaf529fb082294227`.
+- Ripristinati i default precedenti: `HERMES_GATEWAY_MAX_REQUEST_MB=0` e `HERMES_HUB_MAX_UPLOAD_MB=0`.
+- Rimossi i limiti predefiniti da 256 MB per le request e 150 MB per gli upload introdotti in 0.6.174.
+- Il patcher converte automaticamente anche gateway gia' configurati con i default finiti di 0.6.174.
+- La capability `max_upload_mb` torna a `0`, mantenendo configurabili limiti espliciti solo quando scelti dall'amministratore.
+- Aggiunti test di regressione per launcher, output patchato, idempotenza e migrazione da 0.6.174.
+- Versioni: Windows/AdminBridge `0.6.175`; Android `versionName 0.6.175`, `versionCode 179`.
+- Asset: `HermesHub-0.6.175-android.apk`, `NemoclawChat.Windows_0.6.175.0_x64.msix`, `HermesHub-0.6.175-linux-gateway.tar.gz`.
+- SHA-256 Android: `d7ab463c32de6924120d5f9f25b4dbadac06edcc1b6d72e687c36de821ebf93e`.
+- SHA-256 Windows: `380191452acdd2511c4452b66b163984dcb3bd25bb20866034f11f2c79ba7b38`.
+- SHA-256 Linux gateway: `98c275a148f675abf3d24c5dc709724d58e36100c301fd8a47e87c9a6144b01c`.

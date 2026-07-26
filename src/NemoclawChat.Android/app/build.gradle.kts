@@ -30,8 +30,8 @@ android {
         applicationId = "com.nemoclaw.chat"
         minSdk = if (enableMetaDat) 29 else 26
         targetSdk = 36
-        versionCode = 178
-        versionName = "0.6.174"
+        versionCode = 179
+        versionName = "0.6.175"
         buildConfigField("boolean", "META_DAT_ENABLED", enableMetaDat.toString())
         manifestPlaceholders["mwdat_application_id"] = mwdatApplicationId
         manifestPlaceholders["mwdat_client_token"] = mwdatClientToken

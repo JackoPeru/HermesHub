@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.174"
-EXPECTED_ANDROID_VERSION_CODE = 178
+EXPECTED_VERSION = "0.6.175"
+EXPECTED_ANDROID_VERSION_CODE = 179
 
 
 def read(relative_path: str) -> str:
@@ -16,10 +16,10 @@ def read(relative_path: str) -> str:
 
 
 class ReleaseConsistencyTests(unittest.TestCase):
-    def test_gateway_launcher_defaults_are_finite(self) -> None:
+    def test_gateway_launcher_file_transfer_defaults_are_unlimited(self) -> None:
         launcher = read("scripts/hermes-hub-linux.sh")
-        self.assertIn('HERMES_GATEWAY_MAX_REQUEST_MB="${HERMES_GATEWAY_MAX_REQUEST_MB:-256}"', launcher)
-        self.assertIn('HERMES_HUB_MAX_UPLOAD_MB="${HERMES_HUB_MAX_UPLOAD_MB:-150}"', launcher)
+        self.assertIn('HERMES_GATEWAY_MAX_REQUEST_MB="${HERMES_GATEWAY_MAX_REQUEST_MB:-0}"', launcher)
+        self.assertIn('HERMES_HUB_MAX_UPLOAD_MB="${HERMES_HUB_MAX_UPLOAD_MB:-0}"', launcher)
 
     def test_application_versions_are_aligned(self) -> None:
         windows_project = read("src/NemoclawChat.Windows/NemoclawChat.Windows.csproj")

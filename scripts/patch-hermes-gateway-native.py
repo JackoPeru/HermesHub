@@ -585,11 +585,11 @@ def _hermes_hub_transcribe_file(path):
     meta, encoded = raw.split(",", 1)
     detected_mime = meta[5:].split(";", 1)[0].strip() or str(mime_type or "application/octet-stream")
     mime = str(mime_type or detected_mime or "application/octet-stream")
-    max_mb = _hermes_hub_env_int("HERMES_HUB_MAX_UPLOAD_MB", 150, 1, 4096)
+    max_mb = _hermes_hub_env_int("HERMES_HUB_JSON_UPLOAD_MAX_MB", 64, 1, 1024)
     max_bytes = max_mb * 1024 * 1024
     estimated = (len(encoded) * 3) // 4
     if not encoded or estimated > max_bytes + 3:
-        raise ValueError(f"upload empty or over limit ({max_mb} MB)")
+        raise ValueError(f"upload empty or over JSON upload limit ({max_mb} MB)")
 
     root = _hermes_hub_upload_root()
     safe = _hermes_hub_safe_upload_name(filename, mime)
@@ -608,7 +608,7 @@ def _hermes_hub_transcribe_file(path):
                     raise ValueError(f"invalid base64 upload: {exc}") from exc
                 size += len(decoded)
                 if size > max_bytes:
-                    raise ValueError(f"upload over limit ({max_mb} MB)")
+                    raise ValueError(f"upload over JSON upload limit ({max_mb} MB)")
                 digest.update(decoded)
                 handle.write(decoded)
             handle.flush()
@@ -966,12 +966,12 @@ def _hermes_hub_transcribe_file(path):
         auth_error = self._check_auth(request)
         if auth_error is not None:
             return auth_error
-        max_mb = _hermes_hub_env_int("HERMES_HUB_MAX_UPLOAD_MB", 150, 1, 4096)
+        max_mb = _hermes_hub_env_int("HERMES_HUB_JSON_UPLOAD_MAX_MB", 64, 1, 1024)
         encoded_limit = ((max_mb * 1024 * 1024 + 2) // 3) * 4 + 1024 * 1024
         if request.content_length is None:
             return web.json_response({"error": "Content-Length required for JSON media upload"}, status=411)
         if request.content_length > encoded_limit:
-            return web.json_response({"error": f"Media upload over limit ({max_mb} MB decoded)"}, status=413)
+            return web.json_response({"error": f"JSON media upload over limit ({max_mb} MB decoded)"}, status=413)
         try:
             body = await request.json()
             if not isinstance(body, dict):
@@ -3723,20 +3723,20 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
         text, _ = _replace_regex_once(
             text,
             r'^MAX_REQUEST_BYTES\s*=\s*[0-9_]+\s*#.*$',
-            '_HERMES_GATEWAY_MAX_REQUEST_MB = int(os.environ.get("HERMES_GATEWAY_MAX_REQUEST_MB", "256"))\nif _HERMES_GATEWAY_MAX_REQUEST_MB <= 0:\n    _HERMES_GATEWAY_MAX_REQUEST_MB = 256\nMAX_REQUEST_BYTES = min(_HERMES_GATEWAY_MAX_REQUEST_MB, 4096) * 1024 * 1024  # finite configurable gateway body limit',
+            '_HERMES_GATEWAY_MAX_REQUEST_MB = int(os.environ.get("HERMES_GATEWAY_MAX_REQUEST_MB", "0"))\nMAX_REQUEST_BYTES = (_HERMES_GATEWAY_MAX_REQUEST_MB if _HERMES_GATEWAY_MAX_REQUEST_MB > 0 else 102400) * 1024 * 1024  # 0 maps to a 100GB practical ceiling for aiohttp',
             "gateway max request bytes env",
         )
         changes.append("gateway max request bytes env")
 
-    request_limit_block = '_HERMES_GATEWAY_MAX_REQUEST_MB = int(os.environ.get("HERMES_GATEWAY_MAX_REQUEST_MB", "256"))\nif _HERMES_GATEWAY_MAX_REQUEST_MB <= 0:\n    _HERMES_GATEWAY_MAX_REQUEST_MB = 256\nMAX_REQUEST_BYTES = min(_HERMES_GATEWAY_MAX_REQUEST_MB, 4096) * 1024 * 1024  # finite configurable gateway body limit'
-    legacy_request_limits = (
+    unlimited_request_limit_block = '_HERMES_GATEWAY_MAX_REQUEST_MB = int(os.environ.get("HERMES_GATEWAY_MAX_REQUEST_MB", "0"))\nMAX_REQUEST_BYTES = (_HERMES_GATEWAY_MAX_REQUEST_MB if _HERMES_GATEWAY_MAX_REQUEST_MB > 0 else 102400) * 1024 * 1024  # 0 maps to a 100GB practical ceiling for aiohttp'
+    finite_request_limits = (
+        '_HERMES_GATEWAY_MAX_REQUEST_MB = int(os.environ.get("HERMES_GATEWAY_MAX_REQUEST_MB", "256"))\nif _HERMES_GATEWAY_MAX_REQUEST_MB <= 0:\n    _HERMES_GATEWAY_MAX_REQUEST_MB = 256\nMAX_REQUEST_BYTES = min(_HERMES_GATEWAY_MAX_REQUEST_MB, 4096) * 1024 * 1024  # finite configurable gateway body limit',
         'MAX_REQUEST_BYTES = int(os.environ.get("HERMES_GATEWAY_MAX_REQUEST_MB", "0")) * 1024 * 1024  # 0 disables gateway body limit',
-        '_HERMES_GATEWAY_MAX_REQUEST_MB = int(os.environ.get("HERMES_GATEWAY_MAX_REQUEST_MB", "0"))\nMAX_REQUEST_BYTES = (_HERMES_GATEWAY_MAX_REQUEST_MB if _HERMES_GATEWAY_MAX_REQUEST_MB > 0 else 102400) * 1024 * 1024  # 0 maps to a 100GB practical ceiling for aiohttp',
     )
-    for legacy_request_limit in legacy_request_limits:
-        if legacy_request_limit in text:
-            text = text.replace(legacy_request_limit, request_limit_block, 1)
-            changes.append("finite gateway request limit")
+    for finite_request_limit in finite_request_limits:
+        if finite_request_limit in text:
+            text = text.replace(finite_request_limit, unlimited_request_limit_block, 1)
+            changes.append("unlimited gateway request default")
 
     if "if MAX_REQUEST_BYTES > 0 and int(cl) > MAX_REQUEST_BYTES:" not in text:
         text = text.replace(
@@ -3773,36 +3773,20 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
         )
         changes.append("hermes hub api key aliases")
 
-    if 'os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "0")' in text:
+    if 'os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "150")' in text:
         text = text.replace(
-            'os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "0")',
             'os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "150")',
+            'os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "0")',
         )
-        changes.append("finite hub upload default")
+        changes.append("unlimited hub upload default")
 
-    if "if not payload or (max_bytes > 0 and len(payload) > max_bytes):" in text:
+    if "if not payload or len(payload) > max_bytes:" in text:
         text = text.replace(
-            "if not payload or (max_bytes > 0 and len(payload) > max_bytes):",
             "if not payload or len(payload) > max_bytes:",
+            "if not payload or (max_bytes > 0 and len(payload) > max_bytes):",
             1,
         )
-        changes.append("finite hub upload guard")
-
-    legacy_upload_decode = '''    payload = _base64.b64decode(encoded, validate=False)
-    max_bytes = int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "150")) * 1024 * 1024
-    if not payload or len(payload) > max_bytes:
-        raise ValueError("upload empty or over max size")'''
-    finite_upload_decode = '''    max_mb = _hermes_hub_env_int("HERMES_HUB_MAX_UPLOAD_MB", 150, 1, 4096)
-    max_bytes = max_mb * 1024 * 1024
-    max_encoded_bytes = ((max_bytes + 2) // 3) * 4 + 16
-    if len(encoded) > max_encoded_bytes:
-        raise ValueError("upload empty or over max size")
-    payload = _base64.b64decode(encoded, validate=False)
-    if not payload or len(payload) > max_bytes:
-        raise ValueError("upload empty or over max size")'''
-    if legacy_upload_decode in text:
-        text = text.replace(legacy_upload_decode, finite_upload_decode, 1)
-        changes.append("predecode hub upload limit")
+        changes.append("unlimited hub upload guard")
 
     if "def _hermes_hub_save_upload" not in text:
         text, _ = _replace_once(
@@ -3846,13 +3830,9 @@ def _hermes_hub_save_upload(filename: str, mime_type: str, data_url: str) -> Dic
     meta, encoded = raw.split(",", 1)
     detected_mime = meta[5:].split(";", 1)[0].strip() or str(mime_type or "application/octet-stream")
     mime = str(mime_type or detected_mime or "application/octet-stream")
-    max_mb = _hermes_hub_env_int("HERMES_HUB_MAX_UPLOAD_MB", 150, 1, 4096)
-    max_bytes = max_mb * 1024 * 1024
-    max_encoded_bytes = ((max_bytes + 2) // 3) * 4 + 16
-    if len(encoded) > max_encoded_bytes:
-        raise ValueError("upload empty or over max size")
     payload = _base64.b64decode(encoded, validate=False)
-    if not payload or len(payload) > max_bytes:
+    max_bytes = int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "0")) * 1024 * 1024
+    if not payload or (max_bytes > 0 and len(payload) > max_bytes):
         raise ValueError("upload empty or over max size")
 
     root = _hermes_hub_upload_root()
@@ -6505,22 +6485,22 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             text,
             r'(^\s+"features": \{\n)',
             r'\1'
-            r'                "max_upload_mb": _hermes_hub_env_int("HERMES_HUB_MAX_UPLOAD_MB", 150, 1, 4096),' "\n",
+            r'                "max_upload_mb": int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "0")),' "\n",
             "capabilities max upload mb",
         )
         changes.append("capabilities max upload mb")
 
-    for legacy_max_upload in (
-        '"max_upload_mb": int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "0")),',
+    for finite_max_upload in (
         '"max_upload_mb": int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "150")),',
+        '"max_upload_mb": _hermes_hub_env_int("HERMES_HUB_MAX_UPLOAD_MB", 150, 1, 4096),',
     ):
-        if legacy_max_upload in text:
+        if finite_max_upload in text:
             text = text.replace(
-                legacy_max_upload,
-                '"max_upload_mb": _hermes_hub_env_int("HERMES_HUB_MAX_UPLOAD_MB", 150, 1, 4096),',
+                finite_max_upload,
+                '"max_upload_mb": int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "0")),',
                 1,
             )
-            changes.append("capabilities finite upload limit")
+            changes.append("capabilities unlimited upload default")
 
     if "_RUN_STREAM_TTL = 21600" not in text:
         patched = text.replace("_RUN_STREAM_TTL = 300", "_RUN_STREAM_TTL = 21600", 1)

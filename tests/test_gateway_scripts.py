@@ -363,18 +363,56 @@ class GatewayScriptTests(unittest.TestCase):
                 self.assertIn('route["max_iterations"] = max(1, min(120, int(configured_max_iterations)))', patched)
                 self.assertIn('route["max_tokens"] = max(64, min(4096, int(configured_max_tokens)))', patched)
                 self.assertIn('runtime_kwargs["max_tokens"] = int(route["max_tokens"])', patched)
-                self.assertIn('HERMES_GATEWAY_MAX_REQUEST_MB", "256"', patched)
-                self.assertIn("finite configurable gateway body limit", patched)
-                self.assertIn('HERMES_HUB_MAX_UPLOAD_MB", 150, 1, 4096', patched)
+                self.assertIn('HERMES_GATEWAY_MAX_REQUEST_MB", "0"', patched)
+                self.assertIn("0 maps to a 100GB practical ceiling for aiohttp", patched)
+                self.assertIn('HERMES_HUB_MAX_UPLOAD_MB", "0"', patched)
                 self.assertIn("if not encoded or estimated > max_bytes + 3:", patched)
                 self.assertIn("for offset in range(0, len(encoded), chunk_chars):", patched)
-                self.assertNotIn("102400) * 1024 * 1024", patched)
+                self.assertIn('"max_upload_mb": int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "0"))', patched)
                 self.assertIn('"squashfs"', patched)
                 self.assertIn("device.startswith('/dev/loop')", patched)
             else:
                 self.assertEqual([], changes)
         self.assertEqual(digests[0], digests[1])
         self.assertEqual(digests[1], digests[2])
+
+    def test_gateway_patch_reverts_06174_finite_transfer_defaults(self):
+        patched, _ = self.patcher._patch_text(
+            UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8")
+        )
+        unlimited_request = (
+            '_HERMES_GATEWAY_MAX_REQUEST_MB = int(os.environ.get("HERMES_GATEWAY_MAX_REQUEST_MB", "0"))\n'
+            'MAX_REQUEST_BYTES = (_HERMES_GATEWAY_MAX_REQUEST_MB if _HERMES_GATEWAY_MAX_REQUEST_MB > 0 else 102400) '
+            '* 1024 * 1024  # 0 maps to a 100GB practical ceiling for aiohttp'
+        )
+        finite_request = (
+            '_HERMES_GATEWAY_MAX_REQUEST_MB = int(os.environ.get("HERMES_GATEWAY_MAX_REQUEST_MB", "256"))\n'
+            'if _HERMES_GATEWAY_MAX_REQUEST_MB <= 0:\n'
+            '    _HERMES_GATEWAY_MAX_REQUEST_MB = 256\n'
+            'MAX_REQUEST_BYTES = min(_HERMES_GATEWAY_MAX_REQUEST_MB, 4096) * 1024 * 1024  '
+            '# finite configurable gateway body limit'
+        )
+        unlimited_capability = (
+            '"max_upload_mb": int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "0")),'
+        )
+        finite_capability = (
+            '"max_upload_mb": _hermes_hub_env_int("HERMES_HUB_MAX_UPLOAD_MB", 150, 1, 4096),'
+        )
+        finite = patched.replace(unlimited_request, finite_request, 1).replace(
+            unlimited_capability,
+            finite_capability,
+            1,
+        )
+        self.assertNotEqual(patched, finite)
+
+        reverted, changes = self.patcher._patch_text(finite)
+
+        self.assertIn(unlimited_request, reverted)
+        self.assertIn(unlimited_capability, reverted)
+        self.assertNotIn(finite_request, reverted)
+        self.assertNotIn(finite_capability, reverted)
+        self.assertIn("unlimited gateway request default", changes)
+        self.assertIn("capabilities unlimited upload default", changes)
 
     def test_gateway_patch_upgrades_legacy_responses_progress_callback(self):
         patched, _ = self.patcher._patch_text(UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8"))
