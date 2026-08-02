@@ -22,6 +22,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 PATCHER_PATH = SCRIPTS / "patch-hermes-gateway-native.py"
 UPSTREAM_GATEWAY_FIXTURE = ROOT / "tests" / "fixtures" / "hermes-agent-v2026.7.7.2-api_server.py"
+CURRENT_UPSTREAM_GATEWAY_FIXTURE = (
+    ROOT / "tests" / "fixtures" / "hermes-agent-0a62610f1-api_server.py"
+)
 UPDATER_REQUIRED_FILES = (
     "hermes-hub-linux.sh",
     "patch-hermes-gateway-native.py",
@@ -386,6 +389,26 @@ class GatewayScriptTests(unittest.TestCase):
                 self.assertEqual([], changes)
         self.assertEqual(digests[0], digests[1])
         self.assertEqual(digests[1], digests[2])
+
+    def test_current_upstream_gateway_patch_is_compilable_and_idempotent(self):
+        fixture_bytes = CURRENT_UPSTREAM_GATEWAY_FIXTURE.read_bytes()
+        self.assertEqual(
+            "1299cbb9019d1cf9e4bcaf931162956a56f0fb4656f2af6efd6da641b2b37966",
+            hashlib.sha256(fixture_bytes).hexdigest(),
+        )
+        patched, changes = self.patcher._patch_text(fixture_bytes.decode("utf-8"))
+        compile(patched, "<current-upstream-pass-1>", "exec")
+        self.assertTrue(changes)
+        self.assertIn(self.patcher._MODEL_ROUTE_MAX_TOKENS_MARKER, patched)
+        self.assertIn(self.patcher._MODEL_ROUTE_MAX_TOKENS_FIX_MARKER, patched)
+        self.assertIn("# HERMES_HUB_AUTH_KEY_ALIASES_V2", patched)
+        self.assertIn('"max_iterations": max_iterations', patched)
+        self.assertIn('runtime_kwargs["max_tokens"] = int(route["max_tokens"])', patched)
+
+        second, second_changes = self.patcher._patch_text(patched)
+        compile(second, "<current-upstream-pass-2>", "exec")
+        self.assertEqual([], second_changes)
+        self.assertEqual(patched, second)
 
     def test_gateway_patch_reverts_06174_finite_transfer_defaults(self):
         patched, _ = self.patcher._patch_text(

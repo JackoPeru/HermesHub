@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.182"
-EXPECTED_ANDROID_VERSION_CODE = 186
+EXPECTED_VERSION = "0.6.183"
+EXPECTED_ANDROID_VERSION_CODE = 187
 
 
 def read(relative_path: str) -> str:
@@ -250,6 +250,24 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn("if (!saveGatewaySecret(context, apiKey))", main)
         self.assertIn("Credenziale non scritta in chiaro", main)
         self.assertNotIn("}.getOrDefault(normalized)", main)
+
+    def test_android_network_badge_requires_real_gateway_probe(self) -> None:
+        main = read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
+        )
+        self.assertIn("probeHermesGateway(settings, loadGatewaySecret(context))", main)
+        self.assertIn('resolveHermesUrl(settings, "/v1/capabilities")', main)
+        self.assertIn("if (!isValidGatewayProbeUrl(url)) return false", main)
+        self.assertIn("connected = gatewayAvailable", main)
+        self.assertNotIn("connected = online", main)
+        self.assertIn(
+            'if (connected) "Gateway disponibile" else "Rete non disponibile"',
+            main,
+        )
+        self.assertIn(
+            "if (connected) AppColors.Success else AppColors.Error",
+            main,
+        )
 
     def test_android_media_auth_is_scoped_to_configured_hermes_origin(self) -> None:
         main = read(

@@ -1569,7 +1569,22 @@ private fun ChatScreen(
     }
 
     val haptics = LocalHapticFeedback.current
-    val online by rememberOnlineState(context)
+    val networkOnline by rememberOnlineState(context)
+    var gatewayAvailable by remember(settings.gatewayUrl, settings.inferenceEndpoint) {
+        mutableStateOf(false)
+    }
+    LaunchedEffect(networkOnline, settings.gatewayUrl, settings.inferenceEndpoint) {
+        if (!networkOnline) {
+            gatewayAvailable = false
+            return@LaunchedEffect
+        }
+        while (true) {
+            gatewayAvailable = withContext(Dispatchers.IO) {
+                probeHermesGateway(settings, loadGatewaySecret(context))
+            }
+            delay(if (gatewayAvailable) 15_000L else 5_000L)
+        }
+    }
     val isStreaming = state.streamingState != null
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
@@ -1648,7 +1663,7 @@ private fun ChatScreen(
     ) {
         TopBar(
             contextUsage = contextUsage,
-            connected = online,
+            connected = gatewayAvailable,
             onNewChat = { state.resetForNewChat() },
             onOpenSidebar = onOpenSidebar,
             onOpenArchive = { onSwitchTab(Tab.Archive) }
@@ -1705,7 +1720,7 @@ private fun ChatScreen(
                 )
             }
         }
-        if (!online) {
+        if (!networkOnline) {
             Surface(color = Color(0xFF7A3E00), modifier = Modifier.fillMaxWidth()) {
                 Text(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
@@ -2175,10 +2190,10 @@ private fun TopBar(
                     Box(
                         modifier = Modifier
                             .size(6.dp)
-                            .background(if (connected) AppColors.Success else AppColors.Warning, CircleShape)
+                            .background(if (connected) AppColors.Success else AppColors.Error, CircleShape)
                     )
                     Text(
-                        if (connected) "Rete disponibile" else "Rete non validata",
+                        if (connected) "Gateway disponibile" else "Rete non disponibile",
                         color = AppColors.Faint,
                         fontSize = 10.sp
                     )
@@ -9078,6 +9093,54 @@ private val apiHttpClient: OkHttpClient by lazy {
         .build()
 }
 
+private val gatewayProbeHttpClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
+        .writeTimeout(3, TimeUnit.SECONDS)
+        .callTimeout(4, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(false)
+        .build()
+}
+
+internal fun isSuccessfulGatewayProbe(statusCode: Int): Boolean = statusCode in 200..299
+
+internal fun isValidGatewayProbeUrl(url: String): Boolean {
+    return try {
+        val uri = URI(url)
+        val scheme = uri.scheme.orEmpty().lowercase()
+        (scheme == "http" || scheme == "https") && !uri.host.isNullOrBlank()
+    } catch (_: Exception) {
+        false
+    }
+}
+
+private fun probeHermesGateway(settings: AppSettings, apiKey: String?): Boolean {
+    val url = resolveHermesUrl(settings, "/v1/capabilities")
+    if (!isValidGatewayProbeUrl(url)) return false
+    for (token in hermesAuthCandidates(apiKey)) {
+        val request = try {
+            Request.Builder()
+                .url(url)
+                .header("Accept", "application/json")
+                .header("User-Agent", "HermesHub-Android-Reachability")
+                .apply { token?.let { header("Authorization", "Bearer $it") } }
+                .get()
+                .build()
+        } catch (_: Exception) {
+            return false
+        }
+        val statusCode = try {
+            gatewayProbeHttpClient.newCall(request).execute().use { it.code }
+        } catch (_: Exception) {
+            return false
+        }
+        if (isSuccessfulGatewayProbe(statusCode)) return true
+        if (statusCode != 401) return false
+    }
+    return false
+}
+
 private val voiceNoteHttpClient: OkHttpClient by lazy {
     OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -12177,6 +12240,7 @@ internal object AppColors {
     val Accent = Color(0xFFF5A524)
     val Success = Color(0xFF65D38E)
     val Warning = Color(0xFFFFB24A)
+    val Error = Color(0xFFFF6B82)
     val NavIndicator = Color(0xFF302517)
     val Border = Color(0xFF292E37)
 }

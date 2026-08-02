@@ -3973,24 +3973,7 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
             new_token_parser,
             "model route max tokens parser",
         )
-        old_agent_limits = '''            max_iterations=max_iterations,
-            quiet_mode=True,
-'''
-        new_agent_limits = '''            max_iterations=max_iterations,
-            max_tokens=(
-                int(route["max_tokens"])
-                if route and not session_override and route.get("max_tokens") is not None
-                else None
-            ),
-            quiet_mode=True,
-'''
-        text, _ = _replace_once(
-            text,
-            old_agent_limits,
-            new_agent_limits,
-            "model route max tokens agent",
-        )
-        changes.append("per-model-route output token limit")
+        changes.append("per-model-route output token parser")
 
     if _MODEL_ROUTE_MAX_TOKENS_FIX_MARKER not in text:
         old_explicit_max_tokens = '''            max_iterations=max_iterations,
@@ -4004,12 +3987,13 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
         new_agent_limits = '''            max_iterations=max_iterations,
             quiet_mode=True,
 '''
-        text, _ = _replace_once(
-            text,
-            old_explicit_max_tokens,
-            new_agent_limits,
-            "remove duplicate model route max tokens argument",
-        )
+        if old_explicit_max_tokens in text:
+            text, _ = _replace_once(
+                text,
+                old_explicit_max_tokens,
+                new_agent_limits,
+                "remove duplicate model route max tokens argument",
+            )
         old_route_base_url = '''            if route.get("base_url"):
                 runtime_kwargs["base_url"] = route["base_url"]
             logger.debug(
@@ -4021,12 +4005,32 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
                 runtime_kwargs["max_tokens"] = int(route["max_tokens"])
             logger.debug(
 '''
-        text, _ = _replace_once(
-            text,
-            old_route_base_url,
-            new_route_base_url,
-            "model route max tokens runtime override",
-        )
+        if old_route_base_url in text:
+            text, _ = _replace_once(
+                text,
+                old_route_base_url,
+                new_route_base_url,
+                "model route max tokens runtime override",
+            )
+        else:
+            # Newer Hermes Agent builds construct AIAgent through an
+            # ``agent_kwargs`` mapping and resolve route transport values in a
+            # different branch. Keep the route token limit in runtime_kwargs so
+            # it neither collides with nor depends on the constructor shape.
+            new_route_log = '''            if route:
+                logger.debug(
+'''
+            new_route_tokens = f'''            {_MODEL_ROUTE_MAX_TOKENS_FIX_MARKER}
+            if route and not session_override and route.get("max_tokens") is not None:
+                runtime_kwargs["max_tokens"] = int(route["max_tokens"])
+            if route:
+                logger.debug(
+'''
+            if text.count(new_route_log) != 1:
+                raise RuntimeError(
+                    "Patch anchor not found or ambiguous: model route max tokens runtime override"
+                )
+            text = text.replace(new_route_log, new_route_tokens, 1)
         changes.append("fix per-model-route max tokens runtime override")
 
     cleanup_patterns = [
@@ -6613,7 +6617,10 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("hermes hub project system prompt helper")
 
-    if "accepted_api_keys = _hermes_hub_api_keys(self._api_key)" not in text:
+    if (
+        "accepted_api_keys = _hermes_hub_api_keys(self._api_key)" not in text
+        and "# HERMES_HUB_AUTH_KEY_ALIASES_V2" not in text
+    ):
         plain_auth = (
             '        if not self._api_key:\n'
             '            return None\n'
@@ -6656,6 +6663,35 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             text = text.replace(plain_auth, replacement, 1)
         elif hardened_auth in text:
             text = text.replace(hardened_auth, replacement, 1)
+        elif (
+            '        expected_key = self._expected_api_key()\n        if not expected_key:\n' in text
+            and '            if hmac.compare_digest(token.encode(), expected_key.encode()):\n' in text
+        ):
+            # Profile-aware upstream: global Hermes Hub aliases are valid only
+            # on the default listener. Named profiles must retain their own
+            # isolated API_SERVER_KEY scope.
+            text, _ = _replace_once(
+                text,
+                '        expected_key = self._expected_api_key()\n        if not expected_key:\n',
+                '        expected_key = self._expected_api_key()\n'
+                '        # HERMES_HUB_AUTH_KEY_ALIASES_V2\n'
+                '        accepted_api_keys = (\n'
+                '            [expected_key] if is_named_profile and expected_key\n'
+                '            else _hermes_hub_api_keys(expected_key)\n'
+                '        )\n'
+                '        if not accepted_api_keys:\n',
+                "profile-aware auth accept hermes hub key aliases",
+            )
+            text, _ = _replace_once(
+                text,
+                '            if hmac.compare_digest(token.encode(), expected_key.encode()):\n',
+                '            token_bytes = token.encode()\n'
+                '            if any(\n'
+                '                hmac.compare_digest(token_bytes, api_key.encode())\n'
+                '                for api_key in accepted_api_keys\n'
+                '            ):\n',
+                "profile-aware auth compare hermes hub key aliases",
+            )
         else:
             raise PatchError("Patch anchor not found: auth accept hermes hub key aliases")
         changes.append("auth accept hermes hub key aliases")

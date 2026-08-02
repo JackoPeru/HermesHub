@@ -4,6 +4,13 @@ Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub res
 
 ## Unreleased
 
+## 0.6.183 - 2026-08-02
+
+- Il patcher gateway supporta il nuovo upstream Hermes Agent basato su `agent_kwargs` e autenticazione profile-aware, evitando il crash-loop `model route max tokens agent`.
+- Gli alias API Hermes Hub restano validi sul listener predefinito senza indebolire l'isolamento delle chiavi dei profili nominati.
+- Android mostra il gateway verde soltanto dopo un probe autenticato reale a `/v1/capabilities`; gateway irraggiungibile o non autenticato produce pallino rosso e `Rete non disponibile`.
+- Aggiunta fixture dell'upstream Hermes Agent `0a62610f1` con test di compilazione, idempotenza e compatibilita' del patcher.
+
 ## 0.6.182 - 2026-08-02
 
 - Ray-Ban Meta DAT acquisisce a 7 FPS e filtra i cambiamenti sul piano luminanza prima della compressione JPEG.

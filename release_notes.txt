@@ -1,12 +1,11 @@
-Hermes Hub 0.6.182 (pipeline Jarvis a bassa latenza)
+Hermes Hub 0.6.183 (gateway upstream e stato rete reale)
 
-- Meta DAT: acquisizione ridotta a 7 FPS, campionamento luminanza prima del JPEG e coda latest-frame senza cancellare inferenze gia' avviate.
-- Modello: percorso comune con una sola chiamata multimodale compatta sul modello principale; Hermes Agent completo soltanto quando `needs_agent=true`.
-- Memoria: aggiornamento breve inline, senza Summarizer LLM separato; domande dirette prioritarie rispetto all'osservazione passiva.
-- Voce: STT Jarvis `beam_size=1`, fine-frase a 420 ms e TTS WAV a segmenti con riproduzione progressiva e rilevamento stream troncato.
-- Versioni: Windows/AdminBridge `0.6.182`; Android `versionName 0.6.182`, `versionCode 186`.
-- Asset: `HermesHub-0.6.182-android.apk`, `NemoclawChat.Windows_0.6.182.0_x64.msix`, `HermesHub-0.6.182-linux-gateway.tar.gz`.
-- SHA-256 Android: `b9e7c9fca5759390c1dde9e58db848d4aa2d7f552c05c543d8318cc65af7a384`.
-- SHA-256 Windows: `3f36a165e85ef050eae31bec16eb0b7f456690c5c64a7493c5664d6a1c7def12`.
-- SHA-256 Linux gateway: `3a593a4c87ae3ab3f3e79de5513a735ecf616b059dceb6c5dc3d8817f22ec844`.
-- Verifica fisica richiesta: questa build modifica Reactor e pipeline voce/video; stabilita' e latenza vanno confermate sui Ray-Ban Meta dell'utente.
+- Gateway: compatibilita' con Hermes Agent `0a62610f1`, inclusi `agent_kwargs`, limite token per route e autenticazione profile-aware.
+- Affidabilita': eliminato il crash-loop del patcher; patch transazionale, compilabile e idempotente su upstream precedente e corrente.
+- Android: indicatore rete basato su probe autenticato `/v1/capabilities`, con stato rosso quando il gateway non risponde o rifiuta la credenziale.
+- Versioni: Windows/AdminBridge `0.6.183`; Android `versionName 0.6.183`, `versionCode 187`.
+- Asset: `HermesHub-0.6.183-android.apk`, `NemoclawChat.Windows_0.6.183.0_x64.msix`, `HermesHub-0.6.183-linux-gateway.tar.gz`.
+- SHA-256 Android: `5d58ddc59f561b427ed903a3ae587dfe02153a231c9260575e9d782e88c52d93`.
+- SHA-256 Windows: `ee0ee572af97140c481fa0deca4898cfa36999dd2cb19a2b9d3f1c2183eff9e4`.
+- SHA-256 Linux gateway: `9fb4deaa5405839ddd991c7448a08426897af4081f934656f8040cd2e72af36a`.
+- Verifica live: gateway `0.6.182` hotfix attivo con capabilities, TTS streaming e STT verificati; updater mantiene rollback `0.6.179`.
