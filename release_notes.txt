@@ -1,10 +1,11 @@
-Hermes Hub 0.6.179 (sincronizzazione Health Connect affidabile)
+Hermes Hub 0.6.180 (avvio DAT Ray-Ban corretto)
 
-- Android: usa il provider Health Connect di sistema per stato, consenso e lettura; sui telefoni recenti non mostra piu' il falso avviso di installazione.
-- Salute: una lettura aggregata sostituisce le richieste ripetute per giorno e categoria; cache, serializzazione e cooldown impediscono l'esaurimento ricorrente della quota.
-- Diagnosi: distingue la quota Health Connect dagli errori Hermes e normalizza l'endpoint wellbeing anche quando l'URL configurato include una route API completa.
-- Versioni: Windows/AdminBridge `0.6.179`; Android `versionName 0.6.179`, `versionCode 183`.
-- Asset: `HermesHub-0.6.179-android.apk`, `NemoclawChat.Windows_0.6.179.0_x64.msix`, `HermesHub-0.6.179-linux-gateway.tar.gz`.
-- SHA-256 Android: `e5c3ee9536b9db8fde25b25cce53a58adc63ae805ed1fd18c56c3d022da7ea63`.
-- SHA-256 Windows: `f708a19c6150dffb28179034dcbcd139536fde8864f3e5e3b8806f9de974f18c`.
-- SHA-256 Linux gateway: `493eddf1ee7597694d787226539813d216932fa77d2a7487368196da665eb5d3`.
+- Meta DAT: usa una sola sessione, attende `DeviceSession.STARTED` e considera il video pronto soltanto a `StreamState.STREAMING`; eliminato il retry-loop entra/esci.
+- Android: aggiunti permessi Bluetooth completi, DAM esplicito e controllo preventivo del permesso fotocamera degli occhiali.
+- Diagnosi: errori di registrazione, sessione e stream vengono propagati senza duplicati; disponibile il collegamento per aggiornare DAT sugli occhiali.
+- UI: stato del modello principale corretto quando e' disponibile uno dei percorsi del modello singolo.
+- Versioni: Windows/AdminBridge `0.6.180`; Android `versionName 0.6.180`, `versionCode 184`.
+- Asset: `HermesHub-0.6.180-android.apk`, `NemoclawChat.Windows_0.6.180.0_x64.msix`.
+- SHA-256 Android: `9ab425771ea4b7cfea0f790ac64eb9493b840c4590b0283ba0e3c3ccf397f675`.
+- SHA-256 Windows: `7a56cc3f6876258ec4f0b14f3538b91282f91c862870d105ec50106456ddeb01`.
+- Nota runtime: build, firma e contratti DAT verificati; streaming su Ray-Ban fisici da confermare dopo installazione sul dispositivo dell'utente.

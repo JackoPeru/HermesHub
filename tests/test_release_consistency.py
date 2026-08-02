@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.179"
-EXPECTED_ANDROID_VERSION_CODE = 183
+EXPECTED_VERSION = "0.6.180"
+EXPECTED_ANDROID_VERSION_CODE = 184
 
 
 def read(relative_path: str) -> str:
@@ -104,6 +104,10 @@ class ReleaseConsistencyTests(unittest.TestCase):
     def test_official_android_release_is_meta_dat_only_and_fail_closed(self) -> None:
         package_script = read("scripts/package-android-release.ps1")
         android_project = read("src/NemoclawChat.Android/app/build.gradle.kts")
+        android_manifest = read("src/NemoclawChat.Android/app/src/main/AndroidManifest.xml")
+        dat_frame_source = read(
+            "src/NemoclawChat.Android/app/src/metaDat/java/com/nemoclaw/chat/jarvis/meta/MetaWearablesFrameSource.kt"
+        )
         workflow = read(".github/workflows/quality.yml")
         agents = read("AGENTS.md")
 
@@ -142,6 +146,17 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn("containsReleaseOutput", android_project)
         self.assertIn("!enableMetaDat && !allowStandardReleaseForDevelopment", android_project)
         self.assertIn("L'APK standard non deve essere pubblicato", android_project)
+        for required_dat_manifest_entry in (
+            'android.permission.BLUETOOTH"',
+            'android.permission.BLUETOOTH_CONNECT"',
+            'com.meta.wearable.mwdat.DAM_ENABLED',
+        ):
+            self.assertIn(required_dat_manifest_entry, android_manifest)
+        self.assertIn("Wearables.checkPermissionStatus(Permission.CAMERA)", dat_frame_source)
+        self.assertIn("createdStream.errorStream.collect", dat_frame_source)
+        self.assertIn("StreamState.STREAMING", dat_frame_source)
+        self.assertNotIn("STARTUP_ATTEMPTS", dat_frame_source)
+        self.assertNotIn("STARTUP_RETRY_DELAY_MILLIS", dat_frame_source)
 
         self.assertIn("packages: read", workflow)
         self.assertIn("./scripts/package-android-release.ps1", workflow)

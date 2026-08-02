@@ -49,6 +49,11 @@ internal class JarvisMetaSetupActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth(),
                         enabled = bridge != null
                     ) { Text("Consenti fotocamera occhiali") }
+                    Button(
+                        onClick = { bridge?.openDatGlassesAppUpdate(this@JarvisMetaSetupActivity) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = bridge != null
+                    ) { Text("Aggiorna DAT sugli occhiali") }
                     if (BuildConfig.DEBUG) {
                         Button(
                             onClick = { bridge?.enableMockPhoneCamera(this@JarvisMetaSetupActivity) },

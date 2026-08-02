@@ -3,6 +3,7 @@ package com.nemoclaw.chat.jarvis.meta
 import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
 import com.meta.wearable.dat.core.Wearables
+import com.meta.wearable.dat.core.types.DeviceIdentifier
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.mockdevice.MockDeviceKit
@@ -18,9 +19,14 @@ import kotlinx.coroutines.launch
 
 internal class MetaWearablesSetupBridgeImpl : MetaWearablesSetupBridge {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var monitor: Job? = null
+    private var registrationMonitor: Job? = null
+    private var registrationErrorMonitor: Job? = null
+    private var devicesMonitor: Job? = null
+    private val deviceMetadataMonitors = mutableMapOf<DeviceIdentifier, Job>()
     private var permissionLauncher: ActivityResultLauncher<Permission>? = null
     private var statusCallback: ((String) -> Unit)? = null
+    private var registrationStatus = "In attesa"
+    private val deviceStatuses = linkedMapOf<DeviceIdentifier, String>()
 
     override fun initialize(activity: ComponentActivity, onStatus: (String) -> Unit) {
         statusCallback = onStatus
@@ -29,15 +35,57 @@ internal class MetaWearablesSetupBridgeImpl : MetaWearablesSetupBridge {
             onStatus(if (value == PermissionStatus.Granted) "Permesso fotocamera occhiali concesso." else "Permesso fotocamera occhiali negato.")
         }
         Wearables.initialize(activity.applicationContext)
-        monitor?.cancel()
-        monitor = scope.launch {
-            Wearables.registrationState.collect { state -> onStatus("Registrazione Meta: $state") }
+        registrationMonitor?.cancel()
+        registrationMonitor = scope.launch {
+            Wearables.registrationState.collect { state ->
+                registrationStatus = state.toString()
+                publishStatus()
+            }
+        }
+        registrationErrorMonitor?.cancel()
+        registrationErrorMonitor = scope.launch {
+            Wearables.registrationErrorStream.collect { error ->
+                publishStatus("Errore registrazione Meta: ${error.getLocalizedDescription(activity)}")
+            }
+        }
+        devicesMonitor?.cancel()
+        devicesMonitor = scope.launch {
+            Wearables.devices.collect { deviceIds ->
+                val removedDeviceIds = deviceMetadataMonitors.keys.filter { it !in deviceIds }
+                removedDeviceIds.forEach { deviceId ->
+                    deviceMetadataMonitors.remove(deviceId)?.cancel()
+                    deviceStatuses.remove(deviceId)
+                }
+                if (deviceIds.isEmpty()) {
+                    deviceStatuses.clear()
+                    publishStatus()
+                }
+                deviceIds.forEach { deviceId ->
+                    if (deviceId in deviceMetadataMonitors) return@forEach
+                    val metadata = Wearables.devicesMetadata[deviceId]
+                    if (metadata == null) {
+                        deviceStatuses[deviceId] = "metadati in attesa"
+                        publishStatus()
+                        return@forEach
+                    }
+                    deviceMetadataMonitors[deviceId] = scope.launch {
+                        metadata.collect { device ->
+                            deviceStatuses[deviceId] = "${device.name}: ${device.linkState} (${device.compatibility})"
+                            publishStatus()
+                        }
+                    }
+                }
+            }
         }
     }
 
     override fun startRegistration(activity: ComponentActivity) {
+        if (registrationStatus.equals("REGISTERED", ignoreCase = true)) {
+            publishStatus("App gia registrata. Meta AI non apre un secondo flusso.")
+            return
+        }
         Wearables.startRegistration(activity)
-        statusCallback?.invoke("Apro Meta AI per la registrazione...")
+        publishStatus("Apro Meta AI per la registrazione...")
     }
 
     override fun requestCameraPermission() {
@@ -49,6 +97,12 @@ internal class MetaWearablesSetupBridgeImpl : MetaWearablesSetupBridge {
             } else {
                 launcher.launch(Permission.CAMERA)
             }
+        }
+    }
+
+    override fun openDatGlassesAppUpdate(activity: ComponentActivity) {
+        Wearables.openDATGlassesAppUpdate(activity).onFailure { error, _ ->
+            publishStatus("Impossibile aprire l'aggiornamento DAT: ${error.description}")
         }
     }
 
@@ -69,10 +123,29 @@ internal class MetaWearablesSetupBridgeImpl : MetaWearablesSetupBridge {
     }
 
     override fun close() {
-        monitor?.cancel()
-        monitor = null
+        registrationMonitor?.cancel()
+        registrationMonitor = null
+        registrationErrorMonitor?.cancel()
+        registrationErrorMonitor = null
+        devicesMonitor?.cancel()
+        devicesMonitor = null
+        deviceMetadataMonitors.values.forEach(Job::cancel)
+        deviceMetadataMonitors.clear()
+        deviceStatuses.clear()
         permissionLauncher = null
         statusCallback = null
         scope.cancel()
+    }
+
+    private fun publishStatus(prefix: String? = null) {
+        val devices = if (deviceStatuses.isEmpty()) {
+            "nessun Ray-Ban esposto dal DAT"
+        } else {
+            deviceStatuses.values.joinToString(separator = " | ")
+        }
+        statusCallback?.invoke(
+            listOfNotNull(prefix, "Registrazione Meta: $registrationStatus", "Occhiali DAT: $devices")
+                .joinToString(separator = "\n")
+        )
     }
 }

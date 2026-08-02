@@ -3,6 +3,7 @@ package com.nemoclaw.chat.jarvis.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -62,12 +63,15 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
     var preferPhoneDebug by rememberSaveable { mutableStateOf(false) }
     var pendingStart by remember { mutableStateOf(false) }
     val requiredPermissions = remember {
-        listOf(
-            Manifest.permission.RECORD_AUDIO,
+        buildList {
+            add(Manifest.permission.RECORD_AUDIO)
             // Android requires CAMERA before starting a camera-typed FGS,
             // including DAT sessions whose frames come from the glasses.
-            Manifest.permission.CAMERA
-        )
+            add(Manifest.permission.CAMERA)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+        }
     }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -78,7 +82,9 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
         if (missing.isEmpty()) {
             pendingStart = true
         } else {
-            JarvisSessionController.rejectStart("Permessi fotocamera e microfono obbligatori per Jarvis Mode.")
+            JarvisSessionController.rejectStart(
+                "Permessi fotocamera, microfono e Bluetooth obbligatori per Jarvis Mode."
+            )
         }
     }
     val requestedMode = availableModes.firstOrNull { it.name == requestedModeName }
@@ -137,7 +143,7 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                 if (state.singleModel) {
                     JarvisStatusRow(
                         "Modello principale",
-                        availabilityLabel(state.fastModelAvailable && state.reasoningModelAvailable)
+                        availabilityLabel(state.fastModelAvailable || state.reasoningModelAvailable)
                     )
                 } else {
                     JarvisStatusRow("Osservatore rapido", availabilityLabel(state.fastModelAvailable))

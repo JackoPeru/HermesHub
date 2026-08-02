@@ -39,7 +39,10 @@ internal class PhoneCameraFrameSource(private val context: Context) : JarvisFram
     private var onFrame: (suspend (ByteArray, Long) -> Unit)? = null
 
     @SuppressLint("MissingPermission")
-    override suspend fun start(onFrame: suspend (ByteArray, Long) -> Unit) {
+    override suspend fun start(
+        onFrame: suspend (ByteArray, Long) -> Unit,
+        onError: (Throwable) -> Unit
+    ) {
         check(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             "Permesso fotocamera non disponibile."
         }

@@ -4,7 +4,10 @@ import android.content.Context
 
 internal interface JarvisFrameSource {
     val label: String
-    suspend fun start(onFrame: suspend (ByteArray, Long) -> Unit)
+    suspend fun start(
+        onFrame: suspend (ByteArray, Long) -> Unit,
+        onError: (Throwable) -> Unit
+    )
     suspend fun pause()
     suspend fun resume()
     suspend fun stop()
@@ -24,7 +27,10 @@ internal object JarvisFrameSourceFactory {
 
 private class UnavailableMetaFrameSource : JarvisFrameSource {
     override val label: String = "Meta DAT non incluso"
-    override suspend fun start(onFrame: suspend (ByteArray, Long) -> Unit) {
+    override suspend fun start(
+        onFrame: suspend (ByteArray, Long) -> Unit,
+        onError: (Throwable) -> Unit
+    ) {
         error("Meta DAT non incluso. Usa una build -PenableMetaDat=true oppure il fallback telefono debug.")
     }
     override suspend fun pause() = Unit

@@ -195,9 +195,19 @@ internal object JarvisSessionController {
             frameSampler.reset()
             rollingFrames.clear()
             withTimeout(FRAME_SOURCE_START_TIMEOUT_MILLIS) {
-                frameSource.start { jpeg, capturedAt ->
-                    acceptFrame(gateway, remote.id, jpeg, capturedAt)
-                }
+                frameSource.start(
+                    onFrame = { jpeg, capturedAt ->
+                        acceptFrame(gateway, remote.id, jpeg, capturedAt)
+                    },
+                    onError = { frameError ->
+                        controllerScope.launch {
+                            lifecycleMutex.withLock {
+                                reportError(frameError)
+                                stopLocked(context, notifyGateway = true, preserveError = true)
+                            }
+                        }
+                    }
+                )
             }
             _state.value = _state.value.copy(
                 phase = JarvisPhase.ACTIVE,

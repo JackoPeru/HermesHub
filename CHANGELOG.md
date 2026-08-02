@@ -4,6 +4,14 @@ Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub res
 
 ## Unreleased
 
+## 0.6.180 - 2026-08-02
+
+- Android allinea avvio e streaming Ray-Ban Meta al ciclo di vita ufficiale DAT: una sola sessione, attesa di `STARTED`, creazione dello stream e stato attivo soltanto dopo `STREAMING`.
+- Rimossi retry automatici e suggerimenti di riavvio Bluetooth che potevano produrre il ciclo sonoro entra/esci sugli occhiali.
+- Aggiunti permessi Bluetooth completi, DAM esplicito, controllo preventivo del permesso fotocamera degli occhiali e accesso all'aggiornamento DAT.
+- Errori di registrazione, sessione e stream vengono osservati e propagati una sola volta; Jarvis non resta piu' falsamente attivo dopo una chiusura del dispositivo.
+- Aggiunti contratti di release per impedire regressioni su manifest, permessi, stato `STREAMING` e assenza del retry-loop.
+
 ## 0.6.179 - 2026-07-26
 
 - Android usa il provider Health Connect predefinito di sistema sia per disponibilita', autorizzazione e lettura, eliminando il falso invito ad aggiornare Health Connect sui telefoni recenti.
