@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.180"
-EXPECTED_ANDROID_VERSION_CODE = 184
+EXPECTED_VERSION = "0.6.181"
+EXPECTED_ANDROID_VERSION_CODE = 185
 
 
 def read(relative_path: str) -> str:
@@ -108,6 +108,12 @@ class ReleaseConsistencyTests(unittest.TestCase):
         dat_frame_source = read(
             "src/NemoclawChat.Android/app/src/metaDat/java/com/nemoclaw/chat/jarvis/meta/MetaWearablesFrameSource.kt"
         )
+        dat_setup_bridge = read(
+            "src/NemoclawChat.Android/app/src/metaDat/java/com/nemoclaw/chat/jarvis/meta/MetaWearablesSetupBridgeImpl.kt"
+        )
+        dat_runtime = read(
+            "src/NemoclawChat.Android/app/src/metaDat/java/com/nemoclaw/chat/jarvis/meta/MetaWearablesRuntime.kt"
+        )
         workflow = read(".github/workflows/quality.yml")
         agents = read("AGENTS.md")
 
@@ -157,6 +163,22 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn("StreamState.STREAMING", dat_frame_source)
         self.assertNotIn("STARTUP_ATTEMPTS", dat_frame_source)
         self.assertNotIn("STARTUP_RETRY_DELAY_MILLIS", dat_frame_source)
+        self.assertIn("MetaWearablesRuntime.initialize(appContext)", dat_frame_source)
+        self.assertIn("MetaWearablesRuntime.initialize(activity.applicationContext)", dat_setup_bridge)
+        self.assertIn("WearablesError.ALREADY_INITIALIZED", dat_runtime)
+        self.assertIn("AtomicBoolean(false)", dat_runtime)
+        meta_dat_root = ROOT / "src/NemoclawChat.Android/app/src/metaDat/java"
+        initialize_callers = sorted(
+            path.relative_to(ROOT).as_posix()
+            for path in meta_dat_root.rglob("*.kt")
+            if "Wearables.initialize(" in path.read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [
+                "src/NemoclawChat.Android/app/src/metaDat/java/com/nemoclaw/chat/jarvis/meta/MetaWearablesRuntime.kt"
+            ],
+            initialize_callers,
+        )
 
         self.assertIn("packages: read", workflow)
         self.assertIn("./scripts/package-android-release.ps1", workflow)

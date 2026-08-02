@@ -61,7 +61,7 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
         this.onFrame = onFrame
         this.onError = onError
         withContext(Dispatchers.Main.immediate) {
-            Wearables.initialize(appContext).getOrThrow()
+            MetaWearablesRuntime.initialize(appContext)
         }
 
         val deviceId = awaitAvailableDevice()

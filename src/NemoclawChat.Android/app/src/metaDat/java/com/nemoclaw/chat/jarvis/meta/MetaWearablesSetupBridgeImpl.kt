@@ -34,7 +34,12 @@ internal class MetaWearablesSetupBridgeImpl : MetaWearablesSetupBridge {
             val value = result.getOrDefault(PermissionStatus.Denied)
             onStatus(if (value == PermissionStatus.Granted) "Permesso fotocamera occhiali concesso." else "Permesso fotocamera occhiali negato.")
         }
-        Wearables.initialize(activity.applicationContext)
+        try {
+            MetaWearablesRuntime.initialize(activity.applicationContext)
+        } catch (error: Throwable) {
+            onStatus("Inizializzazione Meta DAT fallita: ${error.message.orEmpty()}")
+            return
+        }
         registrationMonitor?.cancel()
         registrationMonitor = scope.launch {
             Wearables.registrationState.collect { state ->

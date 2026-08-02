@@ -4,6 +4,12 @@ Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub res
 
 ## Unreleased
 
+## 0.6.181 - 2026-08-02
+
+- Meta DAT viene inizializzato una sola volta per processo e condivide lo stesso runtime tra configurazione occhiali e avvio Jarvis.
+- `WearablesError.ALREADY_INITIALIZED` viene riconosciuto come stato valido invece di interrompere immediatamente la sessione.
+- Aggiunto contratto di release che impedisce nuove inizializzazioni DAT dirette fuori dal coordinatore process-wide.
+
 ## 0.6.180 - 2026-08-02
 
 - Android allinea avvio e streaming Ray-Ban Meta al ciclo di vita ufficiale DAT: una sola sessione, attesa di `STARTED`, creazione dello stream e stato attivo soltanto dopo `STREAMING`.

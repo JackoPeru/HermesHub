@@ -1,11 +1,10 @@
-Hermes Hub 0.6.180 (avvio DAT Ray-Ban corretto)
+Hermes Hub 0.6.181 (hotfix inizializzazione Meta DAT)
 
-- Meta DAT: usa una sola sessione, attende `DeviceSession.STARTED` e considera il video pronto soltanto a `StreamState.STREAMING`; eliminato il retry-loop entra/esci.
-- Android: aggiunti permessi Bluetooth completi, DAM esplicito e controllo preventivo del permesso fotocamera degli occhiali.
-- Diagnosi: errori di registrazione, sessione e stream vengono propagati senza duplicati; disponibile il collegamento per aggiornare DAT sugli occhiali.
-- UI: stato del modello principale corretto quando e' disponibile uno dei percorsi del modello singolo.
-- Versioni: Windows/AdminBridge `0.6.180`; Android `versionName 0.6.180`, `versionCode 184`.
-- Asset: `HermesHub-0.6.180-android.apk`, `NemoclawChat.Windows_0.6.180.0_x64.msix`.
-- SHA-256 Android: `9ab425771ea4b7cfea0f790ac64eb9493b840c4590b0283ba0e3c3ccf397f675`.
-- SHA-256 Windows: `7a56cc3f6876258ec4f0b14f3538b91282f91c862870d105ec50106456ddeb01`.
-- Nota runtime: build, firma e contratti DAT verificati; streaming su Ray-Ban fisici da confermare dopo installazione sul dispositivo dell'utente.
+- Meta DAT: configurazione occhiali e Jarvis condividono un coordinatore unico, inizializzato una sola volta per processo.
+- Hotfix: `WearablesError.ALREADY_INITIALIZED` non viene piu' trasformato nell'errore visibile `Wearables has been already initialized.`.
+- Regressione: contratto statico vieta nuove chiamate `Wearables.initialize()` fuori dal coordinatore DAT.
+- Versioni: Windows/AdminBridge `0.6.181`; Android `versionName 0.6.181`, `versionCode 185`.
+- Asset: `HermesHub-0.6.181-android.apk`, `NemoclawChat.Windows_0.6.181.0_x64.msix`.
+- SHA-256 Android: `13ac25a5771e9770267e6a69f2f727b1c2968ba9c8b134e5bbee8a3ad4320cff`.
+- SHA-256 Windows: `fd2b1abd4e2aef9b1723ffe889a938891d4f54afb41b7a8e4b20c13be8d18d52`.
+- Nota runtime: errore di doppia inizializzazione corretto; streaming su Ray-Ban fisici da confermare dopo installazione sul dispositivo dell'utente.
