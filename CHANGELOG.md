@@ -4,6 +4,15 @@ Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub res
 
 ## Unreleased
 
+## 0.6.182 - 2026-08-02
+
+- Ray-Ban Meta DAT acquisisce a 7 FPS e filtra i cambiamenti sul piano luminanza prima della compressione JPEG.
+- L'observer usa un solo worker latest-frame: completa l'inferenza corrente, scarta i frame intermedi e adatta la cadenza alla latenza del modello.
+- Il percorso comune usa una sola inferenza multimodale compatta sul modello principale; Hermes Agent completo viene riservato a tool, memoria durevole, verifiche critiche e ragionamento complesso.
+- Memoria breve aggiornata nello stesso output strutturato, senza un Summarizer LLM separato; domande vocali prioritarie sulle osservazioni passive.
+- Jarvis usa STT con `beam_size=1`, rilevamento fine-frase piu' rapido e TTS WAV a segmenti riprodotti mentre il gateway genera i successivi.
+- Aggiunti contratti, test comportamentali e direttive permanenti per impedire regressioni sulla pipeline DAT/Jarvis.
+
 ## 0.6.181 - 2026-08-02
 
 - Meta DAT viene inizializzato una sola volta per processo e condivide lo stesso runtime tra configurazione occhiali e avvio Jarvis.

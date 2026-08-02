@@ -60,6 +60,25 @@ Le impostazioni salvate dall'utente non vanno sovrascritte durante migrazioni o 
 - Errori reali visibili; nessun fallback demo silenzioso.
 - Nessun codice diagnostico, segreto, foto utente, cache o artefatto di build tracciato.
 
+### Meta Wearables DAT / Jarvis Mode
+
+- Inizializzare Meta Wearables una sola volta per processo tramite `MetaWearablesRuntime`; nessun'altra classe deve chiamare direttamente `Wearables.initialize(...)`.
+- L'inizializzazione deve essere thread-safe e idempotente; `WearablesError.ALREADY_INITIALIZED` indica runtime gia' valido, non un errore di avvio.
+- Configurazione Meta e sessione Jarvis devono condividere lo stesso runtime DAT. Non registrare nuovamente un'app gia' `REGISTERED` e non resettare il runtime durante un normale avvio sessione.
+- Selezionare solo un device DAT con `LinkState.CONNECTED`, verificare `Permission.CAMERA`, creare la sessione con `SpecificDeviceSelector` e aggiungere lo stream solo dopo `DeviceSessionState.STARTED`.
+- Dichiarare Jarvis attivo solo dopo `StreamState.STREAMING`; monitorare errori e chiusure sia della sessione sia dello stream e propagare una sola causa terminale visibile.
+- Un tap su Avvia deve produrre un solo tentativo deterministico. Vietati loop entra/esci, retry DAT concorrenti e workaround automatici su Bluetooth.
+- Stop, errore e cancellazione devono chiudere nell'ordine: raccolta frame, stream, sessione DAT, job Android, sessione gateway; cleanup ripetuto deve restare sicuro.
+- Non rimuovere da manifest `INTERNET`, `BLUETOOTH`, `BLUETOOTH_CONNECT`, `CAMERA` o `com.meta.wearable.mwdat.DAT_ENABLED=true`.
+- `tests/test_release_consistency.py` deve continuare a impedire inizializzazioni DAT multiple e release APK prive di DAT.
+- Evidenza fisica: `0.6.181` testata su Ray-Ban Meta reali; registrazione, avvio, stream video e sessione stabile. Modifiche future al lifecycle DAT richiedono nuovo test su hardware prima della release.
+- Richiedere al DAT `7 FPS`; calcolare cambiamento scena sul piano luminanza e comprimere JPEG solo dopo il campionamento, per ridurre consumo occhiali e telefono.
+- Una nuova immagine non deve cancellare un'inferenza visiva in corso: un worker unico termina il frame attivo e conserva soltanto il frame pendente piu' recente, con cadenza adattiva alla latenza.
+- In `HERMES_JARVIS_SINGLE_MODEL=true`, observer compatto ed escalation condividono un solo semaforo GPU. Il percorso normale deve usare una sola chiamata diretta con prompt Jarvis minimo; `_run_agent` e il system prompt Hermes completo sono riservati a `needs_agent=true`.
+- La memoria breve deve aggiornarsi nello stesso output strutturato dell'observer; vietato reintrodurre un Summarizer LLM periodico separato sul modello principale.
+- Le domande vocali hanno priorita' sulle nuove osservazioni passive. STT Jarvis usa `beam_size=1` e fine-frase breve; non simulare streaming Whisper ripetendo trascrizioni sovrapposte.
+- TTS Jarvis deve riprodurre segmenti validati appena disponibili; mantenere fallback WAV non-streaming per gateway precedenti e non ripetere una richiesta dopo l'inizio della riproduzione.
+
 ## Invarianti gateway Linux
 
 - Il patcher deve essere idempotente su upstream puro e su versioni gia' patchate.
@@ -149,4 +168,4 @@ Prima della pubblicazione:
 
 ## Release corrente
 
-Versione corrente: `0.6.181`.
+Versione corrente: `0.6.182`.

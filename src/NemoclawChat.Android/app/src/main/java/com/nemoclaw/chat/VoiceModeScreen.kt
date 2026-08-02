@@ -110,7 +110,7 @@ private const val VoiceSampleRate = 16_000
 private const val VoiceFrameMillis = 20
 private const val VoiceFrameBytes = VoiceSampleRate * VoiceFrameMillis / 1000 * 2
 private const val VoicePreRollFrames = 15
-private const val VoiceEndSilenceMillis = 680L
+private const val VoiceEndSilenceMillis = 420L
 private const val VoiceMaxUtteranceMillis = 18_000L
 
 private val voiceHttpClient: OkHttpClient by lazy {
@@ -944,6 +944,112 @@ internal suspend fun synthesizeVoiceFile(
     throw java.io.IOException(lastError)
 }
 
+internal suspend fun synthesizeAndPlayVoiceStream(
+    context: Context,
+    settings: AppSettings,
+    apiKey: String?,
+    text: String,
+    voice: String = "if_sara",
+    speed: Double = 1.08,
+    onPlaybackStarted: () -> Unit
+): Unit = withContext(Dispatchers.IO) {
+    val payload = JSONObject()
+        .put("input", text.trim())
+        .put("voice", voice.takeIf { it in SupportedVoiceNames } ?: "if_sara")
+        .put("lang", "it")
+        .put("speed", speed.coerceIn(0.75, 1.35))
+        .put("response_format", "wav")
+        .put("stream", true)
+        .toString()
+        .toRequestBody("application/json; charset=utf-8".toMediaType())
+    var lastError = "Sintesi vocale streaming non disponibile."
+    for (root in voiceGatewayRoots(settings)) {
+        for (token in hermesAuthCandidates(apiKey)) {
+            val request = Request.Builder()
+                .url("$root/audio/speech")
+                .header("Accept", "application/vnd.hermes.framed-wav, audio/wav")
+                .header("User-Agent", "HermesHub-Android-Jarvis")
+                .apply { token?.let { header("Authorization", "Bearer $it") } }
+                .post(payload)
+                .build()
+            val response = try {
+                voiceHttpClient.newCall(request).execute()
+            } catch (ex: Exception) {
+                lastError = ex.message ?: ex.javaClass.simpleName
+                continue
+            }
+            var playedAny = false
+            response.use {
+                val body = it.body
+                if (!it.isSuccessful) {
+                    lastError = "HTTP ${it.code}: ${body.byteStream().readUtf8Bounded().take(160)}"
+                    if (it.code != 401) break
+                    return@use
+                }
+                try {
+                    val contentType = body.contentType()?.toString()?.substringBefore(';').orEmpty()
+                    if (contentType == "application/vnd.hermes.framed-wav") {
+                        val source = body.source()
+                        var totalBytes = 0L
+                        var completed = false
+                        while (!source.exhausted()) {
+                            val length = source.readInt()
+                            if (length == 0) {
+                                completed = true
+                                break
+                            }
+                            if (length < 44 || length.toLong() > MAX_TTS_AUDIO_BYTES) {
+                                throw java.io.IOException("Segmento TTS non valido: $length byte")
+                            }
+                            totalBytes += length
+                            if (totalBytes > MAX_TTS_AUDIO_BYTES) {
+                                throw PayloadTooLargeException("Stream TTS oltre limite")
+                            }
+                            val bytes = source.readByteArray(length.toLong())
+                            val file = streamWavToTempFile(
+                                directory = File(context.cacheDir, "voice-tts"),
+                                prefix = "jarvis-tts-",
+                                input = java.io.ByteArrayInputStream(bytes),
+                                contentLength = bytes.size.toLong()
+                            )
+                            try {
+                                playVoiceFile(file) {
+                                    if (!playedAny) onPlaybackStarted()
+                                    playedAny = true
+                                }
+                            } finally {
+                                file.delete()
+                            }
+                        }
+                        check(playedAny) { "Stream TTS vuoto." }
+                        check(completed) { "Stream TTS interrotto prima del completamento." }
+                    } else {
+                        val file = streamWavToTempFile(
+                            directory = File(context.cacheDir, "voice-tts"),
+                            prefix = "jarvis-tts-",
+                            input = body.byteStream(),
+                            contentLength = body.contentLength()
+                        )
+                        try {
+                            playVoiceFile(file) {
+                                playedAny = true
+                                onPlaybackStarted()
+                            }
+                        } finally {
+                            file.delete()
+                        }
+                    }
+                    return@withContext
+                } catch (ex: Exception) {
+                    lastError = ex.message ?: ex.javaClass.simpleName
+                    if (playedAny) throw ex
+                }
+            }
+        }
+    }
+    throw java.io.IOException(lastError)
+}
+
 internal suspend fun playVoiceFile(file: File, onPlaybackStarted: () -> Unit): Unit = withContext(Dispatchers.Main) {
     suspendCancellableCoroutine { continuation ->
         val player = MediaPlayer()
@@ -1005,12 +1111,18 @@ private suspend fun verifyVoiceGateway(settings: AppSettings, apiKey: String?) =
     throw java.io.IOException(lastError)
 }
 
-internal suspend fun transcribeVoiceFile(settings: AppSettings, apiKey: String?, file: File): String = withContext(Dispatchers.IO) {
+internal suspend fun transcribeVoiceFile(
+    settings: AppSettings,
+    apiKey: String?,
+    file: File,
+    beamSize: Int? = null
+): String = withContext(Dispatchers.IO) {
     var lastError = "Trascrizione non disponibile."
     for (root in voiceGatewayRoots(settings)) {
         for (token in hermesAuthCandidates(apiKey)) {
             val body = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
+                .apply { beamSize?.let { addFormDataPart("beam_size", it.coerceIn(1, 10).toString()) } }
                 .addFormDataPart("file", file.name, file.asRequestBody("audio/wav".toMediaType()))
                 .build()
             val request = Request.Builder()

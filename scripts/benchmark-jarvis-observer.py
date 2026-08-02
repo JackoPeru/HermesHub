@@ -161,8 +161,8 @@ def invoke(case: dict[str, Any], rendered: list[tuple[dict[str, Any], bytes]], a
         "type": "text",
         "text": (
             "You are Hermes Jarvis visual observer and router. Return one JSON object only; no markdown. "
-            "Required keys: action, observation, reason, confidence, importance, urgency, "
-            "utility, reply, recommended_frame_ids. Allowed actions: ignore, respond_simple, ask_user, escalate, "
+            "Required keys: action, observation, reason, confidence, importance, urgency, utility, reply, "
+            "needs_agent, event_key, memory_update, recommended_frame_ids. Allowed actions: ignore, respond_simple, ask_user, escalate, "
             "urgent_candidate. Scores are 0..1. If Question is empty: respond_simple is forbidden; questions_only "
             "always means ignore; stable or merely descriptive scenes must be ignore. Speak only for a new goal-relevant "
             "change, ambiguity, or credible error. If Question is present: respond_simple only for obvious color, count, "

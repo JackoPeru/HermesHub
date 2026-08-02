@@ -62,6 +62,33 @@
         { "type": "string", "minLength": 1, "maxLength": 320 }
       ]
     },
+    "needs_agent": {
+      "type": "boolean"
+    },
+    "event_key": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "memory_update": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["summary", "topic", "open_loop", "notable_facts"],
+          "properties": {
+            "summary": { "type": "string", "minLength": 1, "maxLength": 1600 },
+            "topic": { "type": "string", "maxLength": 240 },
+            "open_loop": { "type": "boolean" },
+            "notable_facts": {
+              "type": "array",
+              "maxItems": 8,
+              "items": { "type": "string", "minLength": 1, "maxLength": 240 }
+            }
+          }
+        }
+      ]
+    },
     "recommended_frame_ids": {
       "type": "array",
       "maxItems": 3,

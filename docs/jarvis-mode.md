@@ -5,39 +5,25 @@ Jarvis Mode aggiunge a Hermes Hub Android una sessione vocale e visiva temporane
 ## Architettura
 
 ```text
-Ray-Ban Meta DAT / fotocamera debug         microfono -> STT
-                 |                                  |
-                 v                                  v
-         FrameSampler -> Perceptor --------> perception bus RAM
-                                                |
-                         Senser <---------------+------> Summarizer incrementale
-                           |                                |
-                           +---------- trigger ------------+ memoria breve
-                                                |
-                                                v
-              soul stabile + contesto + SITUATION -> Reactor -> Hermes Agent
-                                                        |
-                                      Android <- SSE <- decisione -> TTS
+Ray-Ban DAT 7 FPS -> campionamento luminanza -> JPEG selezionato
+                                              |
+microfono -> VAD -> STT beam 1 ----------> perception bus RAM
+                                              |
+                                   Reactor multimodale compatto
+                                   | risposta + memoria inline
+                                   |
+                                   +-- needs_agent=true --> Hermes Agent
+                                              |
+                               SSE -> TTS a segmenti -> Android
 ```
 
-Lo stesso modello principale esegue due percorsi distinti. Le osservazioni passive e le domande visive elementari usano un turno breve, senza ragionamento visibile, e restituiscono JSON validato; l'osservatore passivo non può parlare direttamente. Le domande complesse e ogni intervento candidato usano Hermes Agent completo con fino a tre JPEG originali recenti. Il motore di iniziativa, separato dai prompt, applica modalita utente, confidenza, utilita, urgenza, cooldown, deduplicazione e stato di riproduzione.
+Con modello unico, percorso comune usa una sola inferenza diretta con prompt Jarvis compatto. Output validato contiene osservazione, risposta, punteggi, aggiornamento memoria breve e `needs_agent`. Hermes Agent completo entra solo per tool, memoria durevole, verifiche critiche o ragionamento multi-step.
 
-Le osservazioni passive usano una politica latest-event-wins. Una domanda esplicita cancella l'osservazione obsoleta e ha priorita. Osservazione e ragionamento hanno semafori e timeout distinti anche se condividono il modello.
+Osservazione passiva usa un worker unico. Inferenza attiva non viene cancellata: frame intermedi vengono scartati e resta soltanto ultimo frame. Cadenza successiva si adatta alla latenza misurata. Domanda esplicita blocca nuove osservazioni e ottiene priorita appena termina unica inferenza gia in corso. In single-model, percorso compatto ed escalation condividono stesso semaforo GPU.
 
-### Reactor e memoria breve
+Memoria breve viene aggiornata nello stesso output compatto; nessuna inferenza Summarizer separata. Motore iniziativa resta deterministico: modalita, confidenza, utilita, urgenza, cooldown, deduplicazione, feedback e stato riproduzione decidono se parlare.
 
-Il flusso riprende la separazione Perceptor/Senser/Summarizer/Reactor dell'architettura Minnarone, adattata a un assistente reale:
-
-- il perception bus unifica parlato, osservazioni, risposte, interventi e feedback in eventi strutturati, bounded e solo RAM;
-- il Summarizer usa lo stesso modello principale, senza thinking, ogni sei percezioni significative e aggiorna sintesi, argomento, fatti operativi e richieste ancora aperte;
-- il Reactor riceve un prompt stabile di identita e policy, poi goal, memoria breve, finestra conversazionale, dialogo e percezioni recenti;
-- `SITUATION` e il trigger corrente sono posti per ultimi nel prompt dinamico, così il motivo dell'azione resta saliente;
-- la finestra conversazionale evita interruzioni mentre e attivo uno scambio e mantiene l'eventuale follow-up aperto;
-- deduplicazione esatta e semantica impediscono di ripetere lo stesso avviso;
-- `Utile` e `Non utile` regolano gradualmente la soglia di iniziativa della sola sessione.
-
-Non esiste un timer che forza Hermes a parlare. Il sistema valuta solo domande esplicite o nuove percezioni campionate; in assenza di un evento rilevante resta silenzioso.
-
+Non esiste timer che forza interventi. Sistema valuta domande o nuove percezioni; altrimenti resta silenzioso.
 ## Differenza da Voce
 
 | Voce | Jarvis Mode |
@@ -63,7 +49,7 @@ Integrazione verificata staticamente contro Meta Wearables DAT `0.8.0`:
 
 Requisiti runtime reali: Meta AI compatibile, Developer Mode o progetto nel Wearables Developer Center, occhiali/firmware supportati, registrazione dell'app e consenso camera tramite Meta AI. DAT resta un Developer Preview: la compatibilita metadata non sostituisce una prova sul telefono e sugli occhiali.
 
-Stato della verifica corrente: dipendenze Meta DAT 0.8.0 risolte da GitHub Packages e source set DAT compilato con `lintRelease`, `testDebugUnitTest` e `assembleRelease`. Su emulatore API 36 la build release inizializza il bridge DAT senza crash; la build debug attiva e abbina il Mock Device Kit con feed fotocamera posteriore. La compatibilita API 31 deriva ancora dai requisiti SDK e non da una prova sul OnePlus 7. Gli occhiali reali restano da verificare sul dispositivo.
+Stato verifica corrente: versione `0.6.181` registrata e provata su Ray-Ban Meta reali; inizializzazione DAT, sessione, stream video e uso continuativo risultano stabili. Dipendenze Meta DAT 0.8.0 e packaging DAT restano verificati anche staticamente e in CI. Reactor v2 richiede nuova prova fisica prima della prossima release.
 
 PAT Packages e credenziali Meta non vanno nel repository. La release ufficiale richiede PAT classic `read:packages`, application ID e client token del progetto Wearables Developer Center:
 
@@ -132,7 +118,7 @@ Turno:
 {"transcript":"Questo è il connettore corretto?","frame_ids":["facoltativo"]}
 ```
 
-Eventi SSE principali: `session.ready`, `session.updated`, `observer.result`, `memory.summary`, `memory.summary_failed`, `assistant.thinking`, `assistant.escalating`, `assistant.speak`, `initiative.silent`, `feedback.updated`, `session.error`, `session.ended`. Un errore del summarizer e non fatale e usa backoff; le percezioni restano disponibili al tentativo successivo. `Last-Event-ID` riproduce gli eventi ancora nel buffer limitato; keepalive e code client sono bounded.
+Eventi SSE principali: `session.ready`, `session.updated`, `observer.result`, `memory.summary`, `assistant.thinking`, `assistant.escalating`, `assistant.speak`, `initiative.silent`, `feedback.updated`, `session.error`, `session.ended`. `memory.summary` deriva dall'output compatto gia in corso e non avvia inferenze aggiuntive. `Last-Event-ID` riproduce eventi ancora nel buffer limitato; keepalive e code client sono bounded.
 
 Il feedback accetta soltanto l'`event_id` di un intervento autonomo esistente e una sola valutazione per intervento.
 
@@ -156,25 +142,25 @@ HERMES_JARVIS_MAX_CONTEXT_EVENTS=64
 HERMES_JARVIS_MAX_PERCEPTIONS=128
 HERMES_JARVIS_FAST_TIMEOUT_SECONDS=12
 HERMES_JARVIS_REASONING_TIMEOUT_SECONDS=60
-HERMES_JARVIS_SUMMARY_TIMEOUT_SECONDS=15
 HERMES_JARVIS_FAST_MAX_TOKENS=256
 HERMES_JARVIS_REASONING_MAX_TOKENS=96
-HERMES_JARVIS_SUMMARY_MAX_TOKENS=256
-HERMES_JARVIS_MAX_CONCURRENT_FAST=2
+HERMES_JARVIS_MAX_CONCURRENT_FAST=1
 HERMES_JARVIS_MAX_CONCURRENT_REASONING=1
-HERMES_JARVIS_SUMMARY_EVERY_EVENTS=6
+HERMES_JARVIS_OBSERVER_LATENCY_MULTIPLIER=0.25
+HERMES_JARVIS_OBSERVER_MIN_GAP_SECONDS=0.75
+HERMES_JARVIS_OBSERVER_MAX_GAP_SECONDS=8
 HERMES_JARVIS_CONVERSATION_WINDOW_SECONDS=120
 HERMES_JARVIS_SEMANTIC_DEDUPE_THRESHOLD=0.82
 HERMES_JARVIS_SEMANTIC_DEDUPE_SECONDS=600
 HERMES_JARVIS_FEEDBACK_STEP=0.04
-HERMES_JARVIS_SIMPLE_MIN_CONFIDENCE=0.95
 HERMES_JARVIS_ASSISTIVE_THRESHOLD=0.48
 HERMES_JARVIS_PROACTIVE_THRESHOLD=0.48
+HERMES_KOKORO_STREAM_CHUNK_CHARS=220
 ```
 
-Con `HERMES_JARVIS_SINGLE_MODEL=true`, osservazione e ragionamento usano il modello principale configurato da `HERMES_JARVIS_REASONING_*` o, se vuoto, da `HERMES_INFERENCE_*`. Le variabili `FAST_*` regolano ancora timeout, token e concorrenza del percorso osservatore; URL e modello `FAST_*` restano solo per un eventuale opt-in esplicito a due modelli. Non esiste fallback cloud implicito.
+Con `HERMES_JARVIS_SINGLE_MODEL=true`, osservazione, risposta compatta ed eventuale escalation usano modello principale configurato da `HERMES_JARVIS_REASONING_*` o `HERMES_INFERENCE_*`. Percorso comune esegue una sola chiamata diretta. `FAST_*` regola timeout e token del prompt compatto; URL e modello `FAST_*` restano per opt-in esplicito a due modelli. Nessun fallback cloud implicito.
 
-Le soglie incluse derivano dal benchmark live descritto sotto e restano conservative: non sono una garanzia di accuratezza su scene reali.
+Soglie restano conservative e vanno ricalibrate con benchmark reale dopo nuova build.
 
 ## Privacy e cleanup
 
@@ -201,7 +187,7 @@ python .\scripts\benchmark-jarvis-observer.py `
 
 Il report misura JSON valido, accuracy azione, falsi positivi/negativi, silenzio, precisione risposte semplici, escalation e latenza p50/p95. Calibrazione e holdout sono separati. Il report propone soglie gateway; va applicato solo dopo controllo dell'holdout.
 
-Misura live del 25 luglio 2026 sul modello principale: latenza osservatore p50 1.743 ms, p95 2.440 ms e media 1.792 ms. Nel gateway completo una domanda visiva semplice ha richiesto 2.161 ms; due prove complesse con Hermes Agent hanno richiesto 27.532 e 36.258 ms. TTS su frase breve: 129 ms; STT sul WAV generato: 624 ms. I target iniziali di 1,5/3 secondi non sono quindi raggiunti. Il gateway forza al silenzio le risposte passive semplici e invia al ragionamento completo solo candidati con importanza e utilità elevate. Le domande visive semplici possono usare il percorso breve dello stesso modello solo con confidenza alta; tutte le altre passano a Hermes Agent completo.
+Misura live del 25 luglio 2026, precedente a Reactor v2: osservatore p50 1.743 ms, p95 2.440 ms, media 1.792 ms; domanda visiva semplice 2.161 ms; due prove Hermes Agent 27.532 e 36.258 ms; TTS breve 129 ms; STT 624 ms. Dati usati come baseline, non come prova delle nuove ottimizzazioni. Reactor v2 elimina restart continui, doppia inferenza comune e Summarizer separato. TTS invia WAV incorniciati e Android riproduce primo segmento mentre server genera successivi. Jarvis richiede STT `beam_size=1` e usa 420 ms di silenzio finale.
 
 ## Test
 
@@ -216,7 +202,7 @@ python -m py_compile .\scripts\patch-hermes-gateway-native.py
 
 QA runtime richiesta: API 36, API 31, telefono debug, Mock Device Kit, poi occhiali reali. Per ogni percorso controllare start/pause/resume/stop, domanda semplice, escalation con frame originale, intervento autonomo, STT, TTS, riconnessione SSE, logcat e assenza di file residui.
 
-Verificato in questa implementazione: build standard su emulatore API 36; apertura della schermata release e guardia configurazione senza crash; build debug con fotocamera telefono, sessione HTTP/SSE, upload JPEG, foreground service, pausa senza nuovi upload, ripresa, DELETE e cleanup; compilazione completa della variante Meta DAT; bridge DAT release e Mock Device Kit debug su emulatore API 36. Non verificati: runtime API 31 e Ray-Ban reali.
+Verificato prima di Reactor v2: build standard API 36, fotocamera telefono, HTTP/SSE, upload JPEG, lifecycle servizio, packaging DAT e Ray-Ban Meta reali su `0.6.181`. Reactor v2 richiede nuova build e nuova prova fisica prima della release.
 
 ## Troubleshooting
 

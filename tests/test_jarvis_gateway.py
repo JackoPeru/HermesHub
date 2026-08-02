@@ -149,10 +149,67 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
     def test_structured_observer_disables_thinking_budget(self):
         self.assertIn('"chat_template_kwargs": {"enable_thinking": False}', self.patched)
 
-    def test_single_model_uses_adaptive_paths_on_the_same_model_and_never_speaks_passive_reply(self):
-        self.assertIn('route = "reasoning" if _hermes_hub_jarvis_requires_reasoning(question) else "fast"', self.patched)
+    def test_single_model_uses_one_compact_call_before_rare_agent_escalation(self):
+        self.assertIn('route = "compact" if single_model or not _hermes_hub_jarvis_requires_reasoning(question)', self.patched)
+        self.assertIn('if fast.get("reply") and not fast.get("needs_agent"):', self.patched)
+        self.assertIn('"single_model_sem": asyncio.Semaphore(1)', self.patched)
         self.assertIn('if question is None and parsed["action"] == "respond_simple":', self.patched)
         self.assertIn('parsed["reply"] = None', self.patched)
+        self.assertNotIn("previous.cancel()", self.patched)
+
+    async def test_simple_direct_question_uses_exactly_one_compact_call(self):
+        create = self.runtime["_hermes_hub_jarvis_new_session"]
+        direct = self.runtime["_hermes_hub_jarvis_direct_turn"]
+        session = create({"mode": "assistive"})
+        session["frames"]["f1"] = {
+            "id": "f1",
+            "jpeg": b"jpeg",
+            "captured_at": time.time(),
+            "received_at": time.time(),
+        }
+        calls = {"compact": 0, "agent": 0}
+
+        async def fake_compact(_adapter, _session, _frame, _question):
+            calls["compact"] += 1
+            return (
+                {
+                    "action": "respond_simple",
+                    "observation": "La vite e' allineata.",
+                    "reason": "Risposta visiva diretta.",
+                    "confidence": 0.95,
+                    "importance": 0.5,
+                    "urgency": 0.1,
+                    "utility": 0.9,
+                    "reply": "Si, e' allineata.",
+                    "needs_agent": False,
+                    "event_key": "vite-allineata",
+                    "memory_update": None,
+                    "recommended_frame_ids": ["f1"],
+                },
+                {"total_ms": 10.0},
+            )
+
+        async def fail_agent(*_args, **_kwargs):
+            calls["agent"] += 1
+            raise AssertionError("Hermes Agent non doveva essere chiamato")
+
+        original_compact = self.runtime["_hermes_hub_jarvis_fast_call"]
+        original_agent = self.runtime["_hermes_hub_jarvis_reasoning_call"]
+        self.runtime["_hermes_hub_jarvis_fast_call"] = fake_compact
+        self.runtime["_hermes_hub_jarvis_reasoning_call"] = fail_agent
+        try:
+            with mock.patch.dict(
+                os.environ,
+                {"HERMES_JARVIS_MOCK_MODE": "1", "HERMES_JARVIS_SINGLE_MODEL": "1"},
+                clear=False,
+            ):
+                result = await direct(types.SimpleNamespace(), session, "Questa vite e' allineata?", ["f1"])
+        finally:
+            self.runtime["_hermes_hub_jarvis_fast_call"] = original_compact
+            self.runtime["_hermes_hub_jarvis_reasoning_call"] = original_agent
+        self.assertEqual("compact", result["route"])
+        self.assertEqual("Si, e' allineata.", result["text"])
+        self.assertEqual({"compact": 1, "agent": 0}, calls)
 
     def test_initiative_policy_enforces_mode_cooldown_and_deduplication(self):
         create = self.runtime["_hermes_hub_jarvis_new_session"]
@@ -204,10 +261,12 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
 
     def test_incremental_summary_schema_and_semantic_intervention_dedupe(self):
         create = self.runtime["_hermes_hub_jarvis_new_session"]
-        validate_summary = self.runtime["_hermes_hub_jarvis_validate_summary"]
+        apply_memory = self.runtime["_hermes_hub_jarvis_apply_memory_update"]
         decide = self.runtime["_hermes_hub_jarvis_initiative_decision"]
         remember = self.runtime["_hermes_hub_jarvis_remember_intervention"]
-        summary = validate_summary(
+        session = create({"mode": "assistive"})
+        summary = apply_memory(
+            session,
             {
                 "summary": "L'utente sta montando la scheda madre.",
                 "topic": "Montaggio PC",
@@ -217,6 +276,8 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(summary["open_loop"])
         self.assertEqual(1, len(summary["notable_facts"]))
+        self.assertEqual(summary["summary"], session["short_term_summary"])
+        self.assertEqual("memory.summary", session["events"][-1]["type"])
         proposal = {
             "confidence": 0.99,
             "importance": 1.0,
@@ -242,6 +303,27 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(blocked[0])
         self.assertEqual("semantic_duplicate", blocked[1])
 
+    def test_invalid_inline_memory_does_not_discard_compact_reply(self):
+        validate = self.runtime["_hermes_hub_jarvis_validate_fast_result"]
+        result = validate(
+            {
+                "action": "respond_simple",
+                "observation": "La vite e' allineata.",
+                "reason": "Risposta visiva diretta.",
+                "confidence": 0.9,
+                "importance": 0.5,
+                "urgency": 0.1,
+                "utility": 0.8,
+                "reply": "Si, e' allineata.",
+                "needs_agent": False,
+                "event_key": "vite-allineata",
+                "memory_update": {"open_loop": "non valido"},
+                "recommended_frame_ids": [],
+            }
+        )
+        self.assertEqual("Si, e' allineata.", result["reply"])
+        self.assertIsNone(result["memory_update"])
+
     def test_summary_json_schema_matches_runtime_contract(self):
         schema = json.loads(
             (ROOT / "config" / "jarvis-summary-output.schema.json").read_text(encoding="utf-8")
@@ -257,14 +339,60 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
         invalid = dict(valid, open_loop="yes", unexpected=True)
         self.assertGreaterEqual(len(list(validator.iter_errors(invalid))), 2)
 
-    def test_summary_failure_uses_backoff_instead_of_hot_retry(self):
+    def test_memory_update_is_inline_and_has_no_extra_summarizer_inference(self):
         jarvis = self.patched.split("# HERMES_HUB_JARVIS_RUNTIME_BEGIN", 1)[1].split(
             "# HERMES_HUB_JARVIS_RUNTIME_END", 1
         )[0]
-        self.assertIn('"memory.summary_failed"', jarvis)
-        self.assertIn('session["summary_retry_after"] = time.time() + min(60.0', jarvis)
-        self.assertIn('time.time() < float(session.get("summary_retry_after") or 0.0)', jarvis)
-        self.assertIn("open_loop MUST be the JSON boolean true or false", jarvis)
+        self.assertIn("_hermes_hub_jarvis_apply_memory_update", jarvis)
+        self.assertIn('fast.get("memory_update")', jarvis)
+        self.assertNotIn("_hermes_hub_jarvis_summarizer", jarvis)
+        self.assertNotIn("SUMMARY_TIMEOUT_SECONDS", jarvis)
+
+    async def test_observer_worker_finishes_current_inference_then_processes_only_latest_frame(self):
+        create = self.runtime["_hermes_hub_jarvis_new_session"]
+        runtime_for = self.runtime["_hermes_hub_jarvis_runtime"]
+        schedule = self.runtime["_hermes_hub_jarvis_schedule_observer"]
+        drop = self.runtime["_hermes_hub_jarvis_drop_session"]
+        adapter = types.SimpleNamespace()
+        runtime = runtime_for(adapter)
+        session = create({"mode": "assistive"})
+        runtime["sessions"][session["id"]] = session
+        started = asyncio.Event()
+        release = asyncio.Event()
+        seen = []
+
+        async def fake_observe(_adapter, _session, frame_id):
+            seen.append(frame_id)
+            if len(seen) == 1:
+                started.set()
+                await release.wait()
+            return {"total_ms": 1.0}
+
+        original = self.runtime["_hermes_hub_jarvis_observe"]
+        self.runtime["_hermes_hub_jarvis_observe"] = fake_observe
+        environment = {
+            "HERMES_JARVIS_OBSERVER_LATENCY_MULTIPLIER": "0",
+            "HERMES_JARVIS_OBSERVER_MIN_GAP_SECONDS": "0",
+            "HERMES_JARVIS_OBSERVER_MAX_GAP_SECONDS": "0",
+        }
+        try:
+            with mock.patch.dict(os.environ, environment, clear=False):
+                await schedule(adapter, session, "f1")
+                await asyncio.wait_for(started.wait(), timeout=1)
+                first_task = session["observer_task"]
+                await schedule(adapter, session, "f2")
+                await schedule(adapter, session, "f3")
+                self.assertIs(first_task, session["observer_task"])
+                self.assertFalse(first_task.cancelled())
+                release.set()
+                for _ in range(100):
+                    if seen == ["f1", "f3"]:
+                        break
+                    await asyncio.sleep(0.01)
+            self.assertEqual(["f1", "f3"], seen)
+        finally:
+            self.runtime["_hermes_hub_jarvis_observe"] = original
+            await drop(runtime, session["id"], "test")
 
     def test_feedback_requires_a_real_unrated_autonomous_intervention(self):
         create = self.runtime["_hermes_hub_jarvis_new_session"]
@@ -322,6 +450,26 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
         source_ready = controller.index("withTimeout(FRAME_SOURCE_START_TIMEOUT_MILLIS)")
         active = controller.index("phase = JarvisPhase.ACTIVE", source_ready)
         self.assertLess(source_ready, active)
+        self.assertIn("private const val JARVIS_STT_BEAM_SIZE = 1", controller)
+        self.assertIn("synthesizeAndPlayVoiceStream", controller)
+        self.assertNotIn("frameUploadJob?.cancelAndJoin()\n        frameUploadJob = controllerScope.launch", controller)
+
+        voice = (
+            ROOT
+            / "src"
+            / "NemoclawChat.Android"
+            / "app"
+            / "src"
+            / "main"
+            / "java"
+            / "com"
+            / "nemoclaw"
+            / "chat"
+            / "VoiceModeScreen.kt"
+        ).read_text(encoding="utf-8")
+        self.assertIn("VoiceEndSilenceMillis = 420L", voice)
+        self.assertIn('.put("stream", true)', voice)
+        self.assertIn("application/vnd.hermes.framed-wav", voice)
 
         screen = (
             ROOT
@@ -340,6 +488,24 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("val missing = requiredPermissions.filter", screen)
         self.assertNotIn("grants.values.all", screen)
+
+        dat_source = (
+            ROOT
+            / "src"
+            / "NemoclawChat.Android"
+            / "app"
+            / "src"
+            / "metaDat"
+            / "java"
+            / "com"
+            / "nemoclaw"
+            / "chat"
+            / "jarvis"
+            / "meta"
+            / "MetaWearablesFrameSource.kt"
+        ).read_text(encoding="utf-8")
+        self.assertIn("const val DAT_FRAME_RATE = 7", dat_source)
+        self.assertLess(dat_source.index("frame.lumaSignature()"), dat_source.index("frame.toJpeg(76)"))
 
     async def test_session_cleanup_cancels_tasks_and_erases_frames(self):
         create = self.runtime["_hermes_hub_jarvis_new_session"]
@@ -398,9 +564,11 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
             "HERMES_JARVIS_MAX_CONCURRENT_FAST",
             "HERMES_JARVIS_MAX_CONCURRENT_REASONING",
             "HERMES_JARVIS_MAX_PERCEPTIONS",
-            "HERMES_JARVIS_SUMMARY_EVERY_EVENTS",
             "HERMES_JARVIS_CONVERSATION_WINDOW_SECONDS",
             "HERMES_JARVIS_SEMANTIC_DEDUPE_THRESHOLD",
+            "HERMES_JARVIS_OBSERVER_LATENCY_MULTIPLIER",
+            "HERMES_JARVIS_OBSERVER_MIN_GAP_SECONDS",
+            "HERMES_JARVIS_OBSERVER_MAX_GAP_SECONDS",
         ):
             self.assertGreaterEqual(launcher.count(key), 3, key)
 

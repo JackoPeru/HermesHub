@@ -1,10 +1,12 @@
-Hermes Hub 0.6.181 (hotfix inizializzazione Meta DAT)
+Hermes Hub 0.6.182 (pipeline Jarvis a bassa latenza)
 
-- Meta DAT: configurazione occhiali e Jarvis condividono un coordinatore unico, inizializzato una sola volta per processo.
-- Hotfix: `WearablesError.ALREADY_INITIALIZED` non viene piu' trasformato nell'errore visibile `Wearables has been already initialized.`.
-- Regressione: contratto statico vieta nuove chiamate `Wearables.initialize()` fuori dal coordinatore DAT.
-- Versioni: Windows/AdminBridge `0.6.181`; Android `versionName 0.6.181`, `versionCode 185`.
-- Asset: `HermesHub-0.6.181-android.apk`, `NemoclawChat.Windows_0.6.181.0_x64.msix`.
-- SHA-256 Android: `13ac25a5771e9770267e6a69f2f727b1c2968ba9c8b134e5bbee8a3ad4320cff`.
-- SHA-256 Windows: `fd2b1abd4e2aef9b1723ffe889a938891d4f54afb41b7a8e4b20c13be8d18d52`.
-- Nota runtime: errore di doppia inizializzazione corretto; streaming su Ray-Ban fisici da confermare dopo installazione sul dispositivo dell'utente.
+- Meta DAT: acquisizione ridotta a 7 FPS, campionamento luminanza prima del JPEG e coda latest-frame senza cancellare inferenze gia' avviate.
+- Modello: percorso comune con una sola chiamata multimodale compatta sul modello principale; Hermes Agent completo soltanto quando `needs_agent=true`.
+- Memoria: aggiornamento breve inline, senza Summarizer LLM separato; domande dirette prioritarie rispetto all'osservazione passiva.
+- Voce: STT Jarvis `beam_size=1`, fine-frase a 420 ms e TTS WAV a segmenti con riproduzione progressiva e rilevamento stream troncato.
+- Versioni: Windows/AdminBridge `0.6.182`; Android `versionName 0.6.182`, `versionCode 186`.
+- Asset: `HermesHub-0.6.182-android.apk`, `NemoclawChat.Windows_0.6.182.0_x64.msix`, `HermesHub-0.6.182-linux-gateway.tar.gz`.
+- SHA-256 Android: `b9e7c9fca5759390c1dde9e58db848d4aa2d7f552c05c543d8318cc65af7a384`.
+- SHA-256 Windows: `3f36a165e85ef050eae31bec16eb0b7f456690c5c64a7493c5664d6a1c7def12`.
+- SHA-256 Linux gateway: `3a593a4c87ae3ab3f3e79de5513a735ecf616b059dceb6c5dc3d8817f22ec844`.
+- Verifica fisica richiesta: questa build modifica Reactor e pipeline voce/video; stabilita' e latenza vanno confermate sui Ray-Ban Meta dell'utente.

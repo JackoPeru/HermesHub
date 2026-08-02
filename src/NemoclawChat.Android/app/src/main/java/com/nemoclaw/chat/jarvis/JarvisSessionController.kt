@@ -7,9 +7,8 @@ import com.nemoclaw.chat.AppSettings
 import com.nemoclaw.chat.VoiceTurnController
 import com.nemoclaw.chat.captureVoiceUtterance
 import com.nemoclaw.chat.loadVoiceProfile
-import com.nemoclaw.chat.playVoiceFile
 import com.nemoclaw.chat.routeVoiceBluetooth
-import com.nemoclaw.chat.synthesizeVoiceFile
+import com.nemoclaw.chat.synthesizeAndPlayVoiceStream
 import com.nemoclaw.chat.transcribeVoiceFile
 import com.nemoclaw.chat.stopVoiceForegroundService
 import java.io.File
@@ -23,6 +22,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,6 +48,7 @@ internal object JarvisSessionController {
     @Volatile
     private var startupJob: Job? = null
     private var frameUploadJob: Job? = null
+    private var frameUploadChannel: Channel<SampledFrame>? = null
     private var speechJob: Job? = null
     private var source: JarvisFrameSource? = null
     private var api: JarvisGatewayApi? = null
@@ -194,10 +196,24 @@ internal object JarvisSessionController {
             source = frameSource
             frameSampler.reset()
             rollingFrames.clear()
+            val uploadChannel = Channel<SampledFrame>(
+                capacity = 1,
+                onBufferOverflow = BufferOverflow.DROP_OLDEST
+            )
+            frameUploadChannel = uploadChannel
+            frameUploadJob = controllerScope.launch {
+                for (frame in uploadChannel) {
+                    runCatching {
+                        gateway.uploadFrame(remote.id, frame.jpeg, frame.capturedAtMillis)
+                    }.onFailure {
+                        if (currentCoroutineContext().isActive) reportError(it)
+                    }
+                }
+            }
             withTimeout(FRAME_SOURCE_START_TIMEOUT_MILLIS) {
                 frameSource.start(
                     onFrame = { jpeg, capturedAt ->
-                        acceptFrame(gateway, remote.id, jpeg, capturedAt)
+                        acceptFrame(jpeg, capturedAt)
                     },
                     onError = { frameError ->
                         controllerScope.launch {
@@ -243,8 +259,6 @@ internal object JarvisSessionController {
     }
 
     private suspend fun acceptFrame(
-        gateway: JarvisGatewayApi,
-        sessionId: String,
         jpeg: ByteArray,
         capturedAtMillis: Long
     ) {
@@ -256,11 +270,7 @@ internal object JarvisSessionController {
         val signature = perceptualSignature(jpeg)
         if (!frameSampler.shouldAccept(capturedAtMillis, signature)) return
         rollingFrames.add(SampledFrame(jpeg, capturedAtMillis, signature))
-        frameUploadJob?.cancelAndJoin()
-        frameUploadJob = controllerScope.launch {
-            runCatching { gateway.uploadFrame(sessionId, jpeg, capturedAtMillis) }
-                .onFailure { if (currentCoroutineContext().isActive) reportError(it) }
-        }
+        frameUploadChannel?.trySend(SampledFrame(jpeg, capturedAtMillis, signature))
     }
 
     private suspend fun eventLoop(
@@ -344,7 +354,12 @@ internal object JarvisSessionController {
                 recording = capture.await()
                 if (VoiceTurnController.job === capture) VoiceTurnController.job = null
                 if (recording == null) continue
-                val transcript = transcribeVoiceFile(configuredSettings, configuredApiKey, recording)
+                val transcript = transcribeVoiceFile(
+                    configuredSettings,
+                    configuredApiKey,
+                    recording,
+                    beamSize = JARVIS_STT_BEAM_SIZE
+                )
                 if (transcript.isBlank()) continue
                 _state.value = _state.value.copy(transcript = transcript, currentModel = "Routing", error = null)
                 val turn = gateway.sendTurn(sessionId, transcript)
@@ -379,19 +394,18 @@ internal object JarvisSessionController {
         VoiceTurnController.job?.cancel()
         runCatching { gateway.patchSession(sessionId, speaking = true) }
         val profile = loadVoiceProfile(context, configuredSettings.activeProjectId)
-        var audio: File? = null
         try {
-            audio = synthesizeVoiceFile(
+            synthesizeAndPlayVoiceStream(
                 context,
                 configuredSettings,
                 configuredApiKey,
                 text,
                 profile.voice,
                 profile.speed.toDouble()
-            )
-            playVoiceFile(audio) { _state.value = _state.value.copy(currentModel = "TTS") }
+            ) {
+                _state.value = _state.value.copy(currentModel = "TTS")
+            }
         } finally {
-            audio?.delete()
             runCatching { gateway.patchSession(sessionId, speaking = false) }
             speaking.set(false)
         }
@@ -427,6 +441,8 @@ internal object JarvisSessionController {
         val old = _state.value
         if (old.active) _state.value = old.copy(phase = JarvisPhase.STOPPING, visionActive = false)
         VoiceTurnController.interrupt()
+        frameUploadChannel?.close()
+        frameUploadChannel = null
         frameUploadJob?.cancelAndJoin()
         frameUploadJob = null
         speechJob?.cancelAndJoin()
@@ -490,4 +506,5 @@ internal object JarvisSessionController {
     }
 
     private const val FRAME_SOURCE_START_TIMEOUT_MILLIS = 45_000L
+    private const val JARVIS_STT_BEAM_SIZE = 1
 }

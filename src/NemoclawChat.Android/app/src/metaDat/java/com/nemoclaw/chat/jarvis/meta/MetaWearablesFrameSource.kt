@@ -20,6 +20,7 @@ import com.meta.wearable.dat.core.types.DeviceSessionError
 import com.meta.wearable.dat.core.types.LinkState
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
+import com.nemoclaw.chat.jarvis.FrameSampler
 import com.nemoclaw.chat.jarvis.JarvisFrameSource
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
@@ -42,6 +43,7 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
     private val closed = AtomicBoolean(false)
     private val streamStarting = AtomicBoolean(false)
     private val failureDelivered = AtomicBoolean(false)
+    private val rawFrameSampler = FrameSampler()
     private var session: DeviceSession? = null
     private var stream: Stream? = null
     private var sessionStateJob: Job? = null
@@ -60,6 +62,7 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
         check(!closed.get()) { "Sessione DAT gia chiusa." }
         this.onFrame = onFrame
         this.onError = onError
+        rawFrameSampler.reset()
         withContext(Dispatchers.Main.immediate) {
             MetaWearablesRuntime.initialize(appContext)
         }
@@ -129,7 +132,7 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
     private suspend fun startStream(activeSession: DeviceSession) {
         withContext(Dispatchers.Main.immediate) {
             activeSession.addStream(
-                StreamConfiguration(videoQuality = VideoQuality.MEDIUM, frameRate = 24)
+                StreamConfiguration(videoQuality = VideoQuality.MEDIUM, frameRate = DAT_FRAME_RATE)
             ).onSuccess { createdStream ->
                 stream = createdStream
                 monitorStream(createdStream)
@@ -148,8 +151,10 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
         videoJob?.cancel()
         videoJob = workerScope.launch {
             createdStream.videoStream.collect { frame ->
+                val capturedAt = System.currentTimeMillis()
+                if (!rawFrameSampler.shouldAccept(capturedAt, frame.lumaSignature())) return@collect
                 val jpeg = frame.toJpeg(76) ?: return@collect
-                onFrame?.invoke(jpeg, System.currentTimeMillis())
+                onFrame?.invoke(jpeg, capturedAt)
             }
         }
         streamErrorJob?.cancel()
@@ -214,6 +219,7 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
     override suspend fun resume() {
         val active = session ?: return
         if (stream == null && streamStarting.compareAndSet(false, true)) {
+            rawFrameSampler.reset()
             ready = CompletableDeferred()
             startStream(active)
             ready.await()
@@ -242,6 +248,7 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
     private companion object {
         const val DEVICE_DISCOVERY_ATTEMPTS = 48
         const val DEVICE_DISCOVERY_DELAY_MILLIS = 250L
+        const val DAT_FRAME_RATE = 7
     }
 }
 
@@ -273,4 +280,25 @@ private fun VideoFrame.toJpeg(quality: Int): ByteArray? {
         if (!image.compressToJpeg(Rect(0, 0, width, height), quality.coerceIn(45, 90), output)) null
         else output.toByteArray()
     }
+}
+
+private fun VideoFrame.lumaSignature(): Long {
+    if (width <= 0 || height <= 0) return 0L
+    val ySize = width * height
+    if (buffer.remaining() < ySize) return 0L
+    val source = buffer.duplicate().apply { rewind() }
+    val values = IntArray(64)
+    for (cellY in 0 until 8) {
+        val y = ((cellY + 0.5) * height / 8.0).toInt().coerceIn(0, height - 1)
+        for (cellX in 0 until 8) {
+            val x = ((cellX + 0.5) * width / 8.0).toInt().coerceIn(0, width - 1)
+            values[cellY * 8 + cellX] = source.get(y * width + x).toInt() and 0xff
+        }
+    }
+    val average = values.average()
+    var signature = 0L
+    values.forEachIndexed { index, value ->
+        if (value >= average) signature = signature or (1L shl index)
+    }
+    return signature
 }
