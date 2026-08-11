@@ -22,6 +22,7 @@ Installs:
   ~/hermes-hub-linux.sh
   ~/patch-hermes-gateway-native.py
   ~/.local/bin/hermes-hub-linux-update
+  ~/.local/bin/hermes-hub-agent-update
   ~/.local/bin/hermes-wait-tailscale.sh
   ~/.local/bin/hermes-wait-llama.sh
   ~/.local/bin/hermes-power-monitor.sh
@@ -79,7 +80,10 @@ require_file() {
 require_file hermes-hub-linux.sh
 require_file patch-hermes-gateway-native.py
 require_file hermes-hub-linux-update.sh
+require_file hermes-hub-agent-update.sh
 require_file hermes-hub-linux.service
+require_file hermes-hub-agent-update.service
+require_file hermes-hub-agent-update.timer
 require_file hermes-wait-tailscale.sh
 require_file hermes-wait-llama.sh
 
@@ -87,6 +91,7 @@ mkdir -p "$RELEASE_DIR" "$BIN_DIR" "$SERVICE_DIR"
 install -m 0755 "$SCRIPT_DIR/hermes-hub-linux.sh" "$RELEASE_DIR/hermes-hub-linux.sh"
 install -m 0644 "$SCRIPT_DIR/patch-hermes-gateway-native.py" "$RELEASE_DIR/patch-hermes-gateway-native.py"
 install -m 0755 "$SCRIPT_DIR/hermes-hub-linux-update.sh" "$RELEASE_DIR/hermes-hub-linux-update.sh"
+install -m 0755 "$SCRIPT_DIR/hermes-hub-agent-update.sh" "$RELEASE_DIR/hermes-hub-agent-update.sh"
 install -m 0755 "$SCRIPT_DIR/install-hermes-hub-linux.sh" "$RELEASE_DIR/install-hermes-hub-linux.sh"
 install -m 0644 "$SCRIPT_DIR/hermes-hub-linux.service" "$RELEASE_DIR/hermes-hub-linux.service"
 install -m 0755 "$SCRIPT_DIR/hermes-wait-tailscale.sh" "$RELEASE_DIR/hermes-wait-tailscale.sh"
@@ -109,6 +114,7 @@ ln -sfn "$RELEASE_DIR" "$INSTALL_DIR/current"
 ln -sfn "$INSTALL_DIR/current/hermes-hub-linux.sh" "$HOME/hermes-hub-linux.sh"
 ln -sfn "$INSTALL_DIR/current/patch-hermes-gateway-native.py" "$HOME/patch-hermes-gateway-native.py"
 ln -sfn "$INSTALL_DIR/current/hermes-hub-linux-update.sh" "$BIN_DIR/hermes-hub-linux-update"
+ln -sfn "$INSTALL_DIR/current/hermes-hub-agent-update.sh" "$BIN_DIR/hermes-hub-agent-update"
 ln -sfn "$INSTALL_DIR/current/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-tailscale.sh"
 ln -sfn "$INSTALL_DIR/current/hermes-wait-llama.sh" "$BIN_DIR/hermes-wait-llama.sh"
 ln -sfn "$INSTALL_DIR/current/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-tailscale"
@@ -126,6 +132,8 @@ fi
 if [ -f "$SCRIPT_DIR/hermes-hub-linux-update.timer" ]; then
   cp "$SCRIPT_DIR/hermes-hub-linux-update.timer" "$SERVICE_DIR/hermes-hub-linux-update.timer"
 fi
+cp "$SCRIPT_DIR/hermes-hub-agent-update.service" "$SERVICE_DIR/hermes-hub-agent-update.service"
+cp "$SCRIPT_DIR/hermes-hub-agent-update.timer" "$SERVICE_DIR/hermes-hub-agent-update.timer"
 if [ -f "$SCRIPT_DIR/hermes-power-monitor.service" ]; then
   cp "$SCRIPT_DIR/hermes-power-monitor.service" "$SERVICE_DIR/hermes-power-monitor.service"
 fi
@@ -144,6 +152,7 @@ if command -v systemctl >/dev/null 2>&1; then
   fi
   if [ "$ENABLE_AUTO_UPDATE" = "true" ]; then
     systemctl --user enable --now hermes-hub-linux-update.timer
+    systemctl --user enable --now hermes-hub-agent-update.timer
   fi
   if [ "$ENABLE_POWER_MONITOR" = "true" ]; then
     systemctl --user enable --now hermes-power-monitor.service

@@ -58,6 +58,7 @@ Le impostazioni salvate dall'utente non vanno sovrascritte durante migrazioni o 
 - Updater: download parziale separato, verifica dimensione/firma/versione/publisher, installazione solo dopo validazione.
 - L'APK Android ufficiale deve includere Meta Wearables DAT; nessun fallback standard puo' essere pubblicato come asset di release.
 - Errori reali visibili; nessun fallback demo silenzioso.
+- Android: se gateway non e' raggiungibile, etichetta esatta `Rete non disponibile` e' intenzionale. Non cambiarla in messaggio diverso o trattarla come difetto.
 - Nessun codice diagnostico, segreto, foto utente, cache o artefatto di build tracciato.
 
 ### Meta Wearables DAT / Jarvis Mode
@@ -69,7 +70,7 @@ Le impostazioni salvate dall'utente non vanno sovrascritte durante migrazioni o 
 - Dichiarare Jarvis attivo solo dopo `StreamState.STREAMING`; monitorare errori e chiusure sia della sessione sia dello stream e propagare una sola causa terminale visibile.
 - Un tap su Avvia deve produrre un solo tentativo deterministico. Vietati loop entra/esci, retry DAT concorrenti e workaround automatici su Bluetooth.
 - Stop, errore e cancellazione devono chiudere nell'ordine: raccolta frame, stream, sessione DAT, job Android, sessione gateway; cleanup ripetuto deve restare sicuro.
-- Non rimuovere da manifest `INTERNET`, `BLUETOOTH`, `BLUETOOTH_CONNECT`, `CAMERA` o `com.meta.wearable.mwdat.DAT_ENABLED=true`.
+- Non rimuovere da manifest `INTERNET`, `BLUETOOTH`, `BLUETOOTH_CONNECT`, `CAMERA` o integrazione Meta DAT. Per il percorso camera-only Ray-Ban con DAT 0.8 usare esplicitamente `com.meta.wearable.mwdat.DAM_ENABLED=false`: DAM e' per Display e il suo probe non va avviato su occhiali non-display.
 - `tests/test_release_consistency.py` deve continuare a impedire inizializzazioni DAT multiple e release APK prive di DAT.
 - Evidenza fisica: `0.6.181` testata su Ray-Ban Meta reali; registrazione, avvio, stream video e sessione stabile. Modifiche future al lifecycle DAT richiedono nuovo test su hardware prima della release.
 - Richiedere al DAT `7 FPS`; calcolare cambiamento scena sul piano luminanza e comprimere JPEG solo dopo il campionamento, per ridurre consumo occhiali e telefono.
@@ -168,4 +169,4 @@ Prima della pubblicazione:
 
 ## Release corrente
 
-Versione corrente: `0.6.183`.
+Versione corrente: `0.6.184`.

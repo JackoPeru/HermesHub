@@ -44,6 +44,7 @@ public sealed partial class HomePage : Page
     private const int MaxQueuedAttachments = 8;
     private const long MaxMediaDownloadBytes = 20L * 1024 * 1024 * 1024;
     private const long DownloadDiskReserveBytes = 256L * 1024 * 1024;
+    private static readonly JsonSerializerOptions IndentedActivityJsonOptions = new() { WriteIndented = true };
 
     public ObservableCollection<MessageViewModel> Messages { get; } = [];
     private string _mode = "Chat";
@@ -736,13 +737,15 @@ public sealed partial class HomePage : Page
                     return;
                 }
 
-                rawEvents.Add(new HermesRawEventRecord(name, json, DateTimeOffset.Now));
+                var safeEvent = AssistantActivityRedaction.RedactRawEvent(
+                    new HermesRawEventRecord(name, json, DateTimeOffset.Now));
+                rawEvents.Add(safeEvent);
                 if (rawEvents.Count > 200)
                 {
                     rawEvents.RemoveRange(0, rawEvents.Count - 200);
                 }
 
-                bubble.AddRawEvent(name, json);
+                bubble.AddRawEvent(safeEvent.Name, safeEvent.Json);
             }
 
             await foreach (var ev in streamEvents.ReadAllAsync())
@@ -863,7 +866,7 @@ public sealed partial class HomePage : Page
                 }
 
                 if ((DateTimeOffset.Now - lastCheckpointAt).TotalMilliseconds >= StreamingCheckpointIntervalMs &&
-                    (finalTextBuilder.Length > 0 || finalThinkingBuilder.Length > 0 || finalBlocks is { Count: > 0 }))
+                    (bubble.ActivityTimeline.Count > 0 || finalTextBuilder.Length > 0 || finalThinkingBuilder.Length > 0 || finalBlocks is { Count: > 0 }))
                 {
                     lastCheckpointAt = DateTimeOffset.Now;
                     var checkpointText = SnapshotPreview(finalTextBuilder);
@@ -879,7 +882,8 @@ public sealed partial class HomePage : Page
                                 null,
                                 rawEvents.ToList())
                             {
-                                Thinking = finalThinkingBuilder.ToString()
+                                Thinking = finalThinkingBuilder.ToString(),
+                                ActivityTimeline = bubble.ActivityTimeline.ToList()
                             }
                         })
                         .ToList();
@@ -955,7 +959,8 @@ public sealed partial class HomePage : Page
 
             localHistory.Add(new ChatMessageRecord("Hermes", finalText, DateTimeOffset.Now, finalBlocksVersion, finalBlocks?.ToList(), null, rawEvents)
             {
-                Thinking = finalThinkingBuilder.ToString()
+                Thinking = finalThinkingBuilder.ToString(),
+                ActivityTimeline = bubble.ActivityTimeline.ToList()
             });
             if (finalStats is not null)
             {
@@ -1548,7 +1553,8 @@ public sealed partial class HomePage : Page
                 message.VisualBlocks,
                 message.Stats,
                 message.RawEvents,
-                message.Thinking);
+                message.Thinking,
+                message.ActivityTimeline);
         }
 
         if (isStreaming && activeStream is not null)
@@ -1580,9 +1586,11 @@ public sealed partial class HomePage : Page
         IReadOnlyList<VisualBlockRecord>? visualBlocks = null,
         ChatStreamStats? stats = null,
         IReadOnlyList<HermesRawEventRecord>? rawEvents = null,
-        string? thinking = null)
+        string? thinking = null,
+        IReadOnlyList<AssistantActivityRecord>? activityTimeline = null)
     {
-        var advanced = AppSettingsStore.Load().AdvancedChatDetails;
+        var settings = AppSettingsStore.Load();
+        var advanced = settings.AdvancedChatDetails;
         var isUser = string.Equals(author, "Tu", StringComparison.OrdinalIgnoreCase);
         var isAssistant = string.Equals(author, "Hermes", StringComparison.OrdinalIgnoreCase);
         var content = new StackPanel { Spacing = 8 };
@@ -1620,8 +1628,16 @@ public sealed partial class HomePage : Page
                 Foreground = (Brush)Application.Current.Resources["FaintTextBrush"]
             });
             content.Children.Add(assistantLabel);
-            content.Children.Add(RenderThinkingExpander(thinking));
             content.Children.Add(MarkdownRenderer.Render(text, Colors.White));
+            var timeline = activityTimeline is { Count: > 0 }
+                ? activityTimeline
+                : string.IsNullOrWhiteSpace(thinking)
+                    ? []
+                    : [new AssistantActivityRecord("reasoning", thinking)];
+            if (timeline.Count > 0 || (advanced && rawEvents is { Count: > 0 }))
+            {
+                content.Children.Add(RenderActivityDisclosure(timeline, advanced ? rawEvents : null, settings.ShowToolCalls));
+            }
         }
         else
         {
@@ -1638,15 +1654,6 @@ public sealed partial class HomePage : Page
             foreach (var block in visualBlocks.Where(VisualBlockParser.IsValid))
             {
                 content.Children.Add(RenderVisualBlock(block));
-            }
-        }
-        if (advanced &&
-            isAssistant &&
-            rawEvents is { Count: > 0 })
-        {
-            foreach (var raw in rawEvents.Take(40))
-            {
-                content.Children.Add(RenderRawHermesEvent(raw));
             }
         }
         AddFooter(content, stats, text);
@@ -1705,6 +1712,104 @@ public sealed partial class HomePage : Page
             BorderThickness = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
+    }
+
+    private static Expander RenderActivityDisclosure(
+        IReadOnlyList<AssistantActivityRecord> timeline,
+        IReadOnlyList<HermesRawEventRecord>? rawEvents,
+        bool showToolCalls)
+    {
+        var panel = new StackPanel { Spacing = 8 };
+        var visibleTimeline = timeline.TakeLast(256).Where(item => showToolCalls || item.Kind != "tool").ToList();
+        foreach (var unsafeItem in visibleTimeline)
+        {
+            var item = AssistantActivityRedaction.Sanitize(unsafeItem);
+            switch (item.Kind)
+            {
+                case "reasoning":
+                case "progress":
+                    panel.Children.Add(new StackPanel
+                    {
+                        Spacing = 4,
+                        Children =
+                        {
+                            new TextBlock
+                            {
+                                Text = item.Kind == "reasoning" ? "Ragionamento" : "Progresso",
+                                FontSize = 11,
+                                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                                Foreground = (Brush)Application.Current.Resources["MutedTextBrush"]
+                            },
+                            new TextBlock
+                            {
+                                Text = item.Text,
+                                FontFamily = item.Kind == "reasoning" ? new FontFamily("Consolas") : null,
+                                FontSize = 12,
+                                Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
+                                TextWrapping = TextWrapping.WrapWholeWords
+                            }
+                        }
+                    });
+                    break;
+                case "tool":
+                    var detail = new StackPanel { Spacing = 5, Padding = new Thickness(4, 6, 4, 4) };
+                    if (!string.IsNullOrWhiteSpace(item.ToolArguments))
+                    {
+                        detail.Children.Add(new TextBlock { Text = $"Argomenti\n{PrettifyActivityJson(item.ToolArguments)}", FontFamily = new FontFamily("Consolas"), FontSize = 11, TextWrapping = TextWrapping.Wrap });
+                    }
+                    if (!string.IsNullOrWhiteSpace(item.ToolResult))
+                    {
+                        detail.Children.Add(new TextBlock { Text = $"Risultato\n{PrettifyActivityJson(item.ToolResult)}", FontFamily = new FontFamily("Consolas"), FontSize = 11, TextWrapping = TextWrapping.Wrap });
+                    }
+                    panel.Children.Add(new Expander
+                    {
+                        Header = new TextBlock
+                        {
+                            Text = $"Tool · {item.ToolName ?? item.ToolId ?? "tool"} · {item.ToolStatus ?? "in esecuzione…"}",
+                            FontSize = 12,
+                            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                            Foreground = new SolidColorBrush(Colors.White)
+                        },
+                        Content = detail,
+                        Background = (Brush)Application.Current.Resources["SurfaceBrush"],
+                        BorderBrush = (Brush)Application.Current.Resources["BorderBrushSoft"],
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(10)
+                    });
+                    break;
+            }
+        }
+        if (rawEvents is { Count: > 0 })
+        {
+            foreach (var raw in rawEvents.Take(40)) panel.Children.Add(RenderRawHermesEvent(raw));
+        }
+        return new Expander
+        {
+            Header = new TextBlock
+            {
+                Text = $"Attività Hermes ({visibleTimeline.Count + (rawEvents?.Count ?? 0)})",
+                FontSize = 14,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = (Brush)Application.Current.Resources["MutedTextBrush"]
+            },
+            Content = new ScrollViewer { MaxHeight = 350, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = panel },
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+    }
+
+    private static string PrettifyActivityJson(string value)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(value);
+            return JsonSerializer.Serialize(doc.RootElement, IndentedActivityJsonOptions);
+        }
+        catch
+        {
+            return value;
+        }
     }
 
     private void AddFooter(StackPanel content, ChatStreamStats? stats, string copyText)

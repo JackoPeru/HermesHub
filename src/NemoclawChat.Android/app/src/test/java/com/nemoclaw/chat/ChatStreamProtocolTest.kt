@@ -187,4 +187,68 @@ class ChatStreamProtocolTest {
         }
         assertEquals(final.trim(), state.text)
     }
+
+    @Test
+    fun activityTimelinePreservesServerOrderAndCoalescesAdjacentReasoning() {
+        var state = StreamingState()
+        state = state.applyEvent(ChatStreamEvent.ThinkingDelta("Controllo "))
+        state = state.applyEvent(ChatStreamEvent.ThinkingDelta("dati."))
+        state = state.applyEvent(ChatStreamEvent.ToolCallStart("t1", "ricerca"))
+        state = state.applyEvent(ChatStreamEvent.ToolCallArgs("t1", "{\"q\":\"x\"}"))
+        state = state.applyEvent(ChatStreamEvent.ThinkingDelta("Leggo risultato."))
+        state = state.applyEvent(ChatStreamEvent.PromptProgress(percent = 42, processedTokens = 42, totalTokens = 100))
+
+        assertEquals(listOf(
+            AssistantActivity.Kind.Reasoning,
+            AssistantActivity.Kind.Tool,
+            AssistantActivity.Kind.Reasoning,
+            AssistantActivity.Kind.PromptProgress
+        ), state.activityTimeline.map { it.kind })
+        assertEquals("Controllo dati.", state.activityTimeline[0].text)
+        assertEquals("Argomenti ricevuti; contenuto omesso.", state.activityTimeline[1].tool?.args)
+    }
+
+    @Test
+    fun estimatedProgressNeverAppearsInActivityTimelineAndCompletionKeepsIt() {
+        var state = StreamingState()
+        state = state.applyEvent(ChatStreamEvent.PromptProgress(75, estimated = true))
+        assertTrue(state.activityTimeline.isEmpty())
+        state = state.applyEvent(ChatStreamEvent.ThinkingDelta("Evento esplicito."))
+        state = state.applyEvent(ChatStreamEvent.Done(ChatStreamStats()))
+        assertTrue(state.isDone)
+        assertEquals("Evento esplicito.", state.activityTimeline.single().text)
+    }
+
+    @Test
+    fun toolResultWithoutIdUpdatesOriginalTimelineEntryByName() {
+        var state = StreamingState()
+        state = state.applyEvent(ChatStreamEvent.ToolCallStart("call-1", "ricerca"))
+        state = state.applyEvent(ChatStreamEvent.ThinkingDelta("Verifico il risultato."))
+        state = state.applyEvent(ChatStreamEvent.ToolResult(id = null, name = "ricerca", output = "ok"))
+
+        assertEquals(2, state.activityTimeline.size)
+        assertEquals("call-1", state.activityTimeline.first().tool?.id)
+        assertEquals("Risultato ricevuto; contenuto omesso.", state.activityTimeline.first().tool?.result)
+    }
+
+    @Test
+    fun toolPayloadsNeverReachTimelineAsRawSecrets() {
+        var state = StreamingState()
+        state = state.applyEvent(ChatStreamEvent.ToolCallStart("t1", "richiesta"))
+        state = state.applyEvent(ChatStreamEvent.ToolCallArgs("t1", "Authorization: Bearer top-secret"))
+        state = state.applyEvent(ChatStreamEvent.ToolResult("t1", "richiesta", "{\"password\":\"top-secret\"}"))
+
+        val tool = state.activityTimeline.single().tool!!
+        assertEquals("Argomenti ricevuti; contenuto omesso.", tool.args)
+        assertEquals("Risultato ricevuto; contenuto omesso.", tool.result)
+        assertFalse(tool.args.contains("Bearer"))
+        assertFalse(tool.result!!.contains("password"))
+    }
+
+    @Test
+    fun rawEventsAlwaysUseConstantSafeMarker() {
+        assertEquals(SAFE_RAW_EVENT_JSON, redactToolRawEvent("harmless.status", "ok"))
+        assertEquals(SAFE_RAW_EVENT_JSON, redactToolRawEvent("tool.started", "Authorization: Bearer top-secret"))
+        assertFalse(redactToolRawEvent("harmless.status", "unseen-secret-value").contains("unseen-secret-value"))
+    }
 }

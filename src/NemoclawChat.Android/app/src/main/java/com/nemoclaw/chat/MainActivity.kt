@@ -12,7 +12,6 @@ import android.content.ContextWrapper
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
-import android.content.SharedPreferences
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -154,6 +153,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -233,6 +233,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -252,6 +253,7 @@ import java.net.URLEncoder
 import java.net.URL
 import java.security.KeyStore
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -321,13 +323,11 @@ class MainActivity : ComponentActivity() {
         ) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4207)
         }
-        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 4208)
-        }
     }
 }
 
 private data class IncomingIntentRequest(val version: Long = 0L, val prompt: String = "", val uri: String = "", val conversationId: String = "", val tab: String = "")
+private data class LoadedGatewaySecret(val value: String?)
 private object IncomingIntentBus {
     var request by mutableStateOf(IncomingIntentRequest())
         private set
@@ -363,12 +363,17 @@ private object ConversationArchiveAutoSync {
     private val applyingRemote = AtomicBoolean(false)
     private val uploadQueued = AtomicBoolean(false)
     private val syncActive = AtomicBoolean(false)
-    private val eventsActive = AtomicBoolean(false)
+    private val activeClients = AtomicInteger(0)
+    private val lifecycleLock = Any()
+    private var eventListenerJob: Job? = null
+    private var delayedUploadJob: Job? = null
 
-    fun startEventListener(context: Context) {
-        if (!eventsActive.compareAndSet(false, true)) return
-        val appContext = context.applicationContext
-        HermesStreamRuntime.scope.launch {
+    fun attach(context: Context) {
+        synchronized(lifecycleLock) {
+            activeClients.incrementAndGet()
+            if (eventListenerJob?.isActive == true) return
+            val appContext = context.applicationContext
+            eventListenerJob = HermesStreamRuntime.scope.launch {
             while (true) {
                 try {
                     listenToHubEvents(appContext)
@@ -378,21 +383,36 @@ private object ConversationArchiveAutoSync {
                     delay(5_000)
                 }
             }
+            }
+        }
+    }
+
+    fun detach() {
+        synchronized(lifecycleLock) {
+            if (activeClients.decrementAndGet() > 0) return
+            activeClients.set(0)
+            eventListenerJob?.cancel()
+            eventListenerJob = null
+            delayedUploadJob?.cancel()
+            delayedUploadJob = null
+            uploadQueued.set(false)
         }
     }
 
     fun scheduleUpload(context: Context) {
+        if (activeClients.get() <= 0) return
         if (applyingRemote.get()) return
         val appContext = context.applicationContext
         if (uploadQueued.getAndSet(true)) return
-        HermesStreamRuntime.scope.launch {
+        delayedUploadJob = HermesStreamRuntime.scope.launch {
             delay(2_000)
             uploadQueued.set(false)
-            pushToHub(appContext)
+            if (activeClients.get() > 0) pushToHub(appContext)
         }
     }
 
     suspend fun pullFromHub(context: Context): String? {
+        if (activeClients.get() <= 0) return null
         if (!syncActive.compareAndSet(false, true)) return null
         val appContext = context.applicationContext
         return try {
@@ -479,6 +499,7 @@ data class ChatMessage(
     val fromUser: Boolean,
     val isAction: Boolean = false,
     val thinking: String = "",
+    val activityTimeline: List<AssistantActivity> = emptyList(),
     val visualBlocksVersion: Int? = null,
     val visualBlocks: List<VisualBlock> = emptyList(),
     val stats: ChatStreamStats? = null,
@@ -493,6 +514,11 @@ data class HermesRawEvent(
     val json: String,
     val timestamp: Long = System.currentTimeMillis()
 )
+
+private const val SAFE_RAW_EVENT_NAME = "hermes.event"
+
+private fun safeRawHermesEvent(timestamp: Long = System.currentTimeMillis()): HermesRawEvent =
+    HermesRawEvent(SAFE_RAW_EVENT_NAME, SAFE_RAW_EVENT_JSON, timestamp)
 
 @androidx.compose.runtime.Immutable
 data class VisualBlock(
@@ -1019,6 +1045,23 @@ private data class OperatorPreset(
 @Composable
 private fun ChatApp() {
     val context = LocalContext.current
+    val loadedSettings by produceState<AppSettings?>(initialValue = null, context.applicationContext) {
+        value = withContext(Dispatchers.IO) { loadSettings(context.applicationContext) }
+    }
+    val initialSettings = loadedSettings
+    if (initialSettings == null) {
+        StartupLoadingScreen()
+        return
+    }
+    var settings by remember(initialSettings) { mutableStateOf(initialSettings) }
+    var gatewaySecretRevision by remember { mutableIntStateOf(0) }
+    val loadedGatewaySecret by produceState<LoadedGatewaySecret?>(
+        initialValue = null,
+        context.applicationContext,
+        gatewaySecretRevision
+    ) {
+        value = withContext(Dispatchers.IO) { LoadedGatewaySecret(loadGatewaySecret(context.applicationContext)) }
+    }
     var selectedTabName by rememberSaveable { mutableStateOf(Tab.Chat.name) }
     val selectedTab = remember(selectedTabName) {
         runCatching { Tab.valueOf(selectedTabName) }.getOrDefault(Tab.Chat)
@@ -1030,12 +1073,21 @@ private fun ChatApp() {
             selectedTabName = tab.name
         }
     }
-    var settings by remember { mutableStateOf(loadSettings(context)) }
     val voiceProfileRevision = VoiceProfileEvents.revision
-    val wakeVoiceProfile = remember(settings.activeProjectId, voiceProfileRevision) {
-        loadVoiceProfile(context, settings.activeProjectId)
+    val loadedWakeVoiceProfile by produceState<VoiceProfile?>(
+        initialValue = null,
+        settings.activeProjectId,
+        voiceProfileRevision
+    ) {
+        value = withContext(Dispatchers.IO) { loadVoiceProfile(context.applicationContext, settings.activeProjectId) }
     }
-    var voiceAutoStartToken by rememberSaveable { mutableStateOf(0L) }
+    val initialGatewaySecret = loadedGatewaySecret
+    val wakeVoiceProfile = loadedWakeVoiceProfile
+    if (initialGatewaySecret == null || wakeVoiceProfile == null) {
+        StartupLoadingScreen()
+        return
+    }
+    var voiceAutoStartToken by rememberSaveable { mutableLongStateOf(0L) }
     var pendingPrompt by rememberSaveable { mutableStateOf("") }
     var pendingConversationId by rememberSaveable { mutableStateOf<String?>(null) }
     var sidebarOpen by rememberSaveable { mutableStateOf(false) }
@@ -1079,7 +1131,7 @@ private fun ChatApp() {
         var detected = false
         startVoiceForegroundService(context, mode = "wake")
         try {
-            awaitWakePhrase(context, settings, loadGatewaySecret(context), wakeVoiceProfile.wakePhrase)
+            awaitWakePhrase(context, settings, initialGatewaySecret.value, wakeVoiceProfile.wakePhrase)
             detected = true
             val activity = context as? Activity
             if (activity != null) {
@@ -1100,11 +1152,15 @@ private fun ChatApp() {
         }
     }
     LaunchedEffect(Unit) {
-        ConversationArchiveAutoSync.startEventListener(context)
-        while (true) {
-            ConversationArchiveAutoSync.pullFromHub(context)
-            ConversationArchiveAutoSync.scheduleUpload(context)
-            delay(120_000)
+        ConversationArchiveAutoSync.attach(context)
+        try {
+            while (true) {
+                ConversationArchiveAutoSync.pullFromHub(context)
+                ConversationArchiveAutoSync.scheduleUpload(context)
+                delay(120_000)
+            }
+        } finally {
+            ConversationArchiveAutoSync.detach()
         }
     }
     val chatScope = rememberCoroutineScope()
@@ -1162,8 +1218,8 @@ private fun ChatApp() {
                         onOpenSidebar = { sidebarOpen = true },
                         onSwitchTab = { tab -> setSelectedTab(tab) }
                     )
-                    Tab.Voice -> VoiceModeScreen(settings, loadGatewaySecret(context), voiceAutoStartToken)
-                    Tab.Jarvis -> JarvisModeScreen(settings, loadGatewaySecret(context))
+                    Tab.Voice -> VoiceModeScreen(settings, initialGatewaySecret.value, voiceAutoStartToken)
+                    Tab.Jarvis -> JarvisModeScreen(settings, initialGatewaySecret.value)
                     Tab.Projects -> ProjectsScreen(
                         context = context,
                         settings = settings,
@@ -1226,6 +1282,9 @@ private fun ChatApp() {
                     }
                     Tab.Settings -> SettingsScreen(
                         settings = settings,
+                        gatewaySecret = initialGatewaySecret.value,
+                        voiceProfile = wakeVoiceProfile,
+                        onGatewaySecretChanged = { gatewaySecretRevision++ },
                         onSave = { newSettings ->
                             settings = newSettings
                             chatScope.launch(Dispatchers.IO) { saveSettings(context, newSettings) }
@@ -1233,9 +1292,12 @@ private fun ChatApp() {
                         onReset = {
                             val reset = AppSettings()
                             settings = reset
-                            chatScope.launch(Dispatchers.IO) {
-                                saveSettings(context, reset)
-                                saveGatewaySecret(context, null)
+                            chatScope.launch {
+                                withContext(Dispatchers.IO) {
+                                    saveSettings(context, reset)
+                                    saveGatewaySecret(context, null)
+                                }
+                                gatewaySecretRevision++
                             }
                         }
                     )
@@ -1276,6 +1338,18 @@ private fun ChatApp() {
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun StartupLoadingScreen() {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = AppColors.Background
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text("Avvio Hermes Hub…", color = AppColors.Muted, fontSize = 14.sp)
         }
     }
 }
@@ -1573,6 +1647,9 @@ private fun ChatScreen(
     var gatewayAvailable by remember(settings.gatewayUrl, settings.inferenceEndpoint) {
         mutableStateOf(false)
     }
+    var gatewayRuntime by remember(settings.gatewayUrl, settings.inferenceEndpoint) {
+        mutableStateOf<GatewayRuntimeStatus?>(null)
+    }
     LaunchedEffect(networkOnline, settings.gatewayUrl, settings.inferenceEndpoint) {
         if (!networkOnline) {
             gatewayAvailable = false
@@ -1581,6 +1658,11 @@ private fun ChatScreen(
         while (true) {
             gatewayAvailable = withContext(Dispatchers.IO) {
                 probeHermesGateway(settings, loadGatewaySecret(context))
+            }
+            gatewayRuntime = if (gatewayAvailable) {
+                withContext(Dispatchers.IO) { loadGatewayRuntimeStatus(settings, loadGatewaySecret(context)) }
+            } else {
+                null
             }
             delay(if (gatewayAvailable) 15_000L else 5_000L)
         }
@@ -1664,6 +1746,7 @@ private fun ChatScreen(
         TopBar(
             contextUsage = contextUsage,
             connected = gatewayAvailable,
+            gatewayRuntime = gatewayRuntime,
             onNewChat = { state.resetForNewChat() },
             onOpenSidebar = onOpenSidebar,
             onOpenArchive = { onSwitchTab(Tab.Archive) }
@@ -1878,7 +1961,7 @@ private fun ChatScreen(
                             streamChatRequest(settings, mode, text, localHistory.takeLast(CHAT_HISTORY_MAX_MESSAGES).toList(), activeStreamCid, prevId, attachments, loadGatewaySecret(context))
                                 .collect { event ->
                                     if (event is ChatStreamEvent.RawHermesEvent) {
-                                        rawEvents += HermesRawEvent(event.name, event.json)
+                                        rawEvents += safeRawHermesEvent()
                                         if (rawEvents.size > 200) {
                                             rawEvents.subList(0, rawEvents.size - 200).clear()
                                         }
@@ -1896,7 +1979,8 @@ private fun ChatScreen(
                                         }
                                     }
                                     val now = System.currentTimeMillis()
-                                    if (now - lastCheckpointAt >= STREAMING_CHECKPOINT_INTERVAL_MS && (localState.text.isNotBlank() || localState.visualBlocks.isNotEmpty())) {
+                                    if (now - lastCheckpointAt >= STREAMING_CHECKPOINT_INTERVAL_MS &&
+                                        (localState.activityTimeline.isNotEmpty() || localState.text.isNotBlank() || localState.visualBlocks.isNotEmpty())) {
                                         lastCheckpointAt = now
                                         withContext(Dispatchers.IO) {
                                             saveConversationSnapshot(
@@ -1909,6 +1993,7 @@ private fun ChatScreen(
                                                     localState.text.streamingCheckpointPreview().ifBlank { "Hermes sta lavorando..." },
                                                     fromUser = false,
                                                     thinking = localState.thinking,
+                                                    activityTimeline = localState.activityTimeline,
                                                     visualBlocksVersion = localState.visualBlocksVersion,
                                                     visualBlocks = localState.visualBlocks,
                                                     stats = localState.stats,
@@ -1948,7 +2033,7 @@ private fun ChatScreen(
                             
                             val newMessagesToAppend = mutableListOf<ChatMessage>()
                             
-                            if (finalText.isNotEmpty() || finalState.visualBlocks.isNotEmpty()) {
+                            if (finalState.activityTimeline.isNotEmpty() || finalText.isNotEmpty() || finalState.visualBlocks.isNotEmpty()) {
                                 newMessagesToAppend.add(
                                     ChatMessage(
                                         if (interrupted && partialText.isEmpty()) "Stato" else "Hermes",
@@ -1956,6 +2041,7 @@ private fun ChatScreen(
                                         fromUser = false,
                                         isAction = interrupted && partialText.isEmpty(),
                                         thinking = finalState.thinking,
+                                        activityTimeline = finalState.activityTimeline,
                                         visualBlocksVersion = finalState.visualBlocksVersion,
                                         visualBlocks = finalState.visualBlocks,
                                         stats = finalState.stats,
@@ -2162,6 +2248,7 @@ private fun executeSlashCommand(
 private fun TopBar(
     contextUsage: ContextUsage,
     connected: Boolean,
+    gatewayRuntime: GatewayRuntimeStatus?,
     onNewChat: () -> Unit = {},
     onOpenSidebar: () -> Unit = {},
     onOpenArchive: () -> Unit = {}
@@ -2193,7 +2280,7 @@ private fun TopBar(
                             .background(if (connected) AppColors.Success else AppColors.Error, CircleShape)
                     )
                     Text(
-                        if (connected) "Gateway disponibile" else "Rete non disponibile",
+                        gatewayRuntimeLabel(connected, gatewayRuntime),
                         color = AppColors.Faint,
                         fontSize = 10.sp
                     )
@@ -2409,8 +2496,8 @@ private fun MessageBubble(message: ChatMessage, settings: AppSettings) {
                     Box(modifier = Modifier.size(7.dp).background(AppColors.Accent, CircleShape))
                     Text("HERMES", color = AppColors.Faint, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
                 }
-                ThinkingExpander(thinking = message.thinking, active = false, elapsedSec = 0.0)
                 MarkdownText(message.text, color = Color.White, fontSize = 15.sp)
+                ArchivedActivityDisclosure(message.activityTimeline, message.thinking, settings.showToolCalls)
                 if (message.visualBlocks.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         message.visualBlocks.filter { it.isValidVisualBlock() }.forEach { block ->
@@ -2451,9 +2538,8 @@ private fun MessageBubble(message: ChatMessage, settings: AppSettings) {
                     if (message.fromUser || message.isAction) {
                         Text(text = message.text, color = Color.White)
                     } else {
-                        ThinkingExpander(thinking = message.thinking, active = false, elapsedSec = 0.0)
-                        Spacer(modifier = Modifier.height(10.dp))
                         MarkdownText(message.text, color = Color.White)
+                        ArchivedActivityDisclosure(message.activityTimeline, message.thinking, settings.showToolCalls)
                     }
                     if (message.visualBlocks.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(10.dp))
@@ -2492,6 +2578,21 @@ private fun RawHermesEventsView(events: List<HermesRawEvent>) {
             }
         }
     }
+}
+
+@Composable
+private fun ArchivedActivityDisclosure(
+    persisted: List<AssistantActivity>,
+    legacyThinking: String,
+    showToolCalls: Boolean
+) {
+    val timeline = remember(persisted, legacyThinking, showToolCalls) {
+        val compatible = if (persisted.isEmpty() && legacyThinking.isNotBlank()) {
+            listOf(AssistantActivity(AssistantActivity.Kind.Reasoning, text = legacyThinking))
+        } else persisted
+        compatible.filter { showToolCalls || it.kind != AssistantActivity.Kind.Tool }
+    }
+    if (timeline.isNotEmpty()) HermesActivityDisclosure(timeline)
 }
 
 @Composable
@@ -7148,6 +7249,9 @@ private fun WellbeingBarChart(
 @Composable
 private fun SettingsScreen(
     settings: AppSettings,
+    gatewaySecret: String?,
+    voiceProfile: VoiceProfile,
+    onGatewaySecretChanged: () -> Unit,
     onSave: (AppSettings) -> Unit,
     onReset: () -> Unit
 ) {
@@ -7165,7 +7269,7 @@ private fun SettingsScreen(
     var visualBlocksMode by remember(settings.visualBlocksMode) { mutableStateOf(settings.visualBlocksMode) }
     var videoLibraryPath by remember(settings.videoLibraryPath) { mutableStateOf(settings.videoLibraryPath) }
     var newsLibraryPath by remember(settings.newsLibraryPath) { mutableStateOf(settings.newsLibraryPath) }
-    var apiKey by remember { mutableStateOf(loadGatewaySecret(context).orEmpty()) }
+    var apiKey by remember(gatewaySecret) { mutableStateOf(gatewaySecret.orEmpty()) }
     var fontScale by remember(settings.fontScale) { mutableFloatStateOf(settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)) }
     var showToolCalls by remember(settings.showToolCalls) { mutableStateOf(settings.showToolCalls) }
     var showMessageMetrics by remember(settings.showMessageMetrics) { mutableStateOf(settings.showMessageMetrics) }
@@ -7183,17 +7287,14 @@ private fun SettingsScreen(
     var healthIncludeSleep by remember(settings.healthIncludeSleep) { mutableStateOf(settings.healthIncludeSleep) }
     var healthIncludeWorkouts by remember(settings.healthIncludeWorkouts) { mutableStateOf(settings.healthIncludeWorkouts) }
     var healthIncludeHeartRate by remember(settings.healthIncludeHeartRate) { mutableStateOf(settings.healthIncludeHeartRate) }
-    val initialVoiceProfile = remember(settings.activeProjectId) {
-        loadVoiceProfile(context, settings.activeProjectId)
-    }
-    var voiceName by remember(settings.activeProjectId) { mutableStateOf(initialVoiceProfile.voice) }
-    var voiceSpeed by remember(settings.activeProjectId) { mutableFloatStateOf(initialVoiceProfile.speed) }
-    var voiceWakeWord by remember(settings.activeProjectId) { mutableStateOf(initialVoiceProfile.wakeWord) }
-    var voiceWakePhrase by remember(settings.activeProjectId) { mutableStateOf(initialVoiceProfile.wakePhrase) }
-    var voicePushToTalk by remember(settings.activeProjectId) { mutableStateOf(initialVoiceProfile.pushToTalk) }
-    var voiceTranscript by remember(settings.activeProjectId) { mutableStateOf(initialVoiceProfile.showTranscript) }
-    var voiceBluetooth by remember(settings.activeProjectId) { mutableStateOf(initialVoiceProfile.bluetooth) }
-    var voiceParticleShape by remember(settings.activeProjectId) { mutableStateOf(initialVoiceProfile.particleShape) }
+    var voiceName by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.voice) }
+    var voiceSpeed by remember(settings.activeProjectId, voiceProfile) { mutableFloatStateOf(voiceProfile.speed) }
+    var voiceWakeWord by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.wakeWord) }
+    var voiceWakePhrase by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.wakePhrase) }
+    var voicePushToTalk by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.pushToTalk) }
+    var voiceTranscript by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.showTranscript) }
+    var voiceBluetooth by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.bluetooth) }
+    var voiceParticleShape by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.particleShape) }
     var status by remember { mutableStateOf("Pronto.") }
     var showEraseHealthConfirm by remember { mutableStateOf(false) }
     var advancedVisible by rememberSaveable { mutableStateOf(false) }
@@ -7552,27 +7653,38 @@ private fun SettingsScreen(
                             val candidate = currentSettings()
                             val error = validateSettings(candidate)
                             if (error == null) {
-                                if (!saveGatewaySecret(context, apiKey)) {
-                                    status = "API key non salvata: Android Keystore non disponibile. Credenziale non scritta in chiaro."
-                                    return@Button
-                                }
-                                saveVoiceProfile(
-                                    context,
-                                    settings.activeProjectId,
-                                    VoiceProfile(
-                                        voice = voiceName,
-                                        speed = voiceSpeed,
-                                        wakeWord = voiceWakeWord,
-                                        wakePhrase = normalizeWakePhrase(voiceWakePhrase),
-                                        pushToTalk = voicePushToTalk,
-                                        showTranscript = voiceTranscript,
-                                        bluetooth = voiceBluetooth,
-                                        particleShape = voiceParticleShape
-                                    )
+                                val candidateSecret = apiKey
+                                val candidateVoiceProfile = VoiceProfile(
+                                    voice = voiceName,
+                                    speed = voiceSpeed,
+                                    wakeWord = voiceWakeWord,
+                                    wakePhrase = normalizeWakePhrase(voiceWakePhrase),
+                                    pushToTalk = voicePushToTalk,
+                                    showTranscript = voiceTranscript,
+                                    bluetooth = voiceBluetooth,
+                                    particleShape = voiceParticleShape
                                 )
-                                onSave(candidate)
-                                HealthSync.schedule(context, candidate)
-                                status = "Impostazioni e profilo voce salvati."
+                                scope.launch {
+                                    val saved = withContext(Dispatchers.IO) {
+                                        val secretSaved = saveGatewaySecret(context, candidateSecret)
+                                        if (secretSaved) {
+                                            saveVoiceProfile(
+                                                context,
+                                                settings.activeProjectId,
+                                                candidateVoiceProfile
+                                            )
+                                        }
+                                        secretSaved
+                                    }
+                                    if (!saved) {
+                                        status = "API key non salvata: Android Keystore non disponibile. Credenziale non scritta in chiaro."
+                                    } else {
+                                        onGatewaySecretChanged()
+                                        onSave(candidate)
+                                        HealthSync.schedule(context, candidate)
+                                        status = "Impostazioni e profilo voce salvati."
+                                    }
+                                }
                             } else {
                                 status = error
                             }
@@ -7601,8 +7713,15 @@ private fun SettingsScreen(
                     ) {
                         Button(onClick = {
                             apiKey = ""
-                            saveGatewaySecret(context, null)
-                            status = "API key rimossa."
+                            scope.launch {
+                                val removed = withContext(Dispatchers.IO) { saveGatewaySecret(context, null) }
+                                status = if (removed) {
+                                    onGatewaySecretChanged()
+                                    "API key rimossa."
+                                } else {
+                                    "API key non rimossa: Android Keystore non disponibile."
+                                }
+                            }
                         }) {
                             Text("Ripristina API key")
                         }
@@ -7622,10 +7741,8 @@ private fun SettingsScreen(
                             Text("Test Hermes")
                         }
                         Button(onClick = {
-                            saveGatewaySecret(context, null)
                             apiKey = ""
                             val defaults = VoiceProfile()
-                            saveVoiceProfile(context, settings.activeProjectId, defaults)
                             voiceName = defaults.voice
                             voiceSpeed = defaults.speed
                             voiceWakeWord = defaults.wakeWord
@@ -7634,7 +7751,12 @@ private fun SettingsScreen(
                             voiceTranscript = defaults.showTranscript
                             voiceBluetooth = defaults.bluetooth
                             voiceParticleShape = defaults.particleShape
-                            onReset()
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    saveVoiceProfile(context, settings.activeProjectId, defaults)
+                                }
+                                onReset()
+                            }
                         }) {
                             Text("Reset")
                         }
@@ -9105,6 +9227,31 @@ private val gatewayProbeHttpClient: OkHttpClient by lazy {
 
 internal fun isSuccessfulGatewayProbe(statusCode: Int): Boolean = statusCode in 200..299
 
+internal data class GatewayRuntimeStatus(
+    val agentVersion: String,
+    val status: String,
+    val failureReason: String
+)
+
+internal fun gatewayRuntimeLabel(connected: Boolean, runtime: GatewayRuntimeStatus?): String {
+    if (!connected) return "Rete non disponibile"
+    val version = runtime?.agentVersion?.trim().orEmpty()
+    val detail = when (runtime?.status?.trim()?.lowercase()) {
+        "rolled_back" -> "rollback"
+        "rollback_failed" -> "ripristino fallito"
+        "blocked" -> "aggiornamento bloccato"
+        "unhealthy" -> "stato da verificare"
+        "updating" -> "aggiornamento in corso"
+        else -> ""
+    }
+    val agent = if (version.isNotBlank()) "Agent $version" else "versione non letta"
+    return if (detail.isBlank()) {
+        "Gateway disponibile · $agent"
+    } else {
+        "Gateway disponibile · $agent · $detail"
+    }
+}
+
 internal fun isValidGatewayProbeUrl(url: String): Boolean {
     return try {
         val uri = URI(url)
@@ -9139,6 +9286,42 @@ private fun probeHermesGateway(settings: AppSettings, apiKey: String?): Boolean 
         if (statusCode != 401) return false
     }
     return false
+}
+
+private fun loadGatewayRuntimeStatus(settings: AppSettings, apiKey: String?): GatewayRuntimeStatus? {
+    val url = resolveHermesUrl(settings, "/v1/hub/runtime")
+    if (!isValidGatewayProbeUrl(url)) return null
+    for (token in hermesAuthCandidates(apiKey)) {
+        val request = try {
+            Request.Builder()
+                .url(url)
+                .header("Accept", "application/json")
+                .header("User-Agent", "HermesHub-Android-Runtime")
+                .apply { token?.let { header("Authorization", "Bearer $it") } }
+                .get()
+                .build()
+        } catch (_: Exception) {
+            return null
+        }
+        val response = try {
+            gatewayProbeHttpClient.newCall(request).execute()
+        } catch (_: Exception) {
+            return null
+        }
+        response.use {
+            if (it.code == 401) return@use
+            if (it.code !in 200..299) return null
+            val body = it.body.string()
+            val json = runCatching { JSONObject(body) }.getOrNull() ?: return null
+            val failure = json.optJSONObject("failure")
+            return GatewayRuntimeStatus(
+                agentVersion = json.optString("agent_version").take(80),
+                status = json.optString("status").take(40),
+                failureReason = failure?.optString("reason").orEmpty().take(240)
+            )
+        }
+    }
+    return null
 }
 
 private val voiceNoteHttpClient: OkHttpClient by lazy {
@@ -11378,7 +11561,7 @@ private fun materializeArtifacts(items: MutableList<LocalConversation>, conversa
                 artifactFileName = block.filename,
                 artifactMimeType = block.mimeType,
                 sourceConversationId = conversation.id,
-                sourceRunId = message.rawEvents.firstOrNull { it.json.contains("run_id", true) }?.json.orEmpty(),
+                sourceRunId = "",
                 version = version
             ))
         }
@@ -11603,10 +11786,11 @@ private fun parseArchiveExportText(text: String): List<LocalConversation> {
 
 private fun loadConversations(context: Context, includeDeleted: Boolean = false): List<LocalConversation> {
     synchronized(localArchiveLock) {
-        val raw = migratePrefs(context, CURRENT_ARCHIVE_PREFS, LEGACY_ARCHIVE_PREFS).getString("items", "[]") ?: "[]"
+        val prefs = migratePrefs(context, CURRENT_ARCHIVE_PREFS, LEGACY_ARCHIVE_PREFS)
+        val raw = prefs.getString("items", "[]") ?: "[]"
         return try {
             val array = JSONArray(raw)
-            buildList {
+            val conversations = buildList {
                 for (i in 0 until array.length()) {
                     val obj = array.optJSONObject(i) ?: continue
                     add(
@@ -11649,12 +11833,41 @@ private fun loadConversations(context: Context, includeDeleted: Boolean = false)
                     )
                 }
             }
-                .filter { includeDeleted || it.deletedAt == null }
-                .sortedByDescending { it.updatedAt }
+            if (archiveContainsRawToolPayload(array)) {
+                prefs.edit(commit = true) { putString("items", conversationsToJsonArray(conversations).toString()) }
+            }
+            conversations.filter { includeDeleted || it.deletedAt == null }.sortedByDescending { it.updatedAt }
         } catch (_: Exception) {
             emptyList()
         }
     }
+}
+
+private fun archiveContainsRawToolPayload(conversations: JSONArray): Boolean {
+    for (conversationIndex in 0 until conversations.length()) {
+        val messages = conversations.optJSONObject(conversationIndex)?.optJSONArray("messages") ?: continue
+        for (messageIndex in 0 until messages.length()) {
+            val message = messages.optJSONObject(messageIndex) ?: continue
+            val timeline = message.optJSONArray("activityTimeline") ?: JSONArray()
+            for (itemIndex in 0 until timeline.length()) {
+                val item = timeline.optJSONObject(itemIndex) ?: continue
+                val nestedTool = item.optJSONObject("tool") ?: item.optJSONObject("Tool")
+                val arguments = nestedTool?.optString("args")
+                    ?: item.optString("toolArguments", item.optString("ToolArguments"))
+                val result = nestedTool?.optString("result")
+                    ?: item.optString("toolResult", item.optString("ToolResult"))
+                if (!arguments.isNullOrBlank() && arguments != safeToolPayloadSummary(arguments, result = false)) return true
+                if (!result.isNullOrBlank() && result != safeToolPayloadSummary(result, result = true)) return true
+            }
+            val rawEvents = message.optJSONArray("rawEvents") ?: message.optJSONArray("RawEvents") ?: JSONArray()
+            for (rawIndex in 0 until rawEvents.length()) {
+                val rawEvent = rawEvents.optJSONObject(rawIndex) ?: continue
+                if (rawEvent.optString("name") != SAFE_RAW_EVENT_NAME ||
+                    rawEvent.optString("json") != SAFE_RAW_EVENT_JSON) return true
+            }
+        }
+    }
+    return false
 }
 
 private fun saveConversations(context: Context, conversations: List<LocalConversation>, syncAfterSave: Boolean = true) {
@@ -11828,10 +12041,11 @@ private fun readMessages(array: JSONArray): List<ChatMessage> {
                     fromUser = obj.optBoolean("fromUser"),
                     isAction = obj.optBoolean("isAction", false),
                     thinking = obj.optString("thinking"),
+                    activityTimeline = readAssistantActivityTimeline(obj.optJSONArray("activityTimeline") ?: JSONArray()),
                     visualBlocksVersion = obj.optNullableInt("visualBlocksVersion"),
                     visualBlocks = readVisualBlocks(obj.optJSONArray("visualBlocks") ?: JSONArray()),
                     stats = readChatStats(obj.optJSONObject("stats")),
-                    rawEvents = readRawEvents(obj.optJSONArray("rawEvents") ?: JSONArray()),
+                    rawEvents = readRawEvents(obj.optJSONArray("rawEvents") ?: obj.optJSONArray("RawEvents") ?: JSONArray()),
                     id = storedId ?: java.util.UUID.randomUUID().toString(),
                     isBookmarked = obj.optBoolean("bookmarked", obj.optBoolean("isBookmarked", false))
                 )
@@ -11851,6 +12065,7 @@ private fun writeMessages(messages: List<ChatMessage>): JSONArray {
                 .put("fromUser", message.fromUser)
                 .put("isAction", message.isAction)
                 .put("thinking", message.thinking)
+                .put("activityTimeline", writeAssistantActivityTimeline(message.activityTimeline))
                 .put("visualBlocksVersion", message.visualBlocksVersion ?: JSONObject.NULL)
                 .put("visualBlocks", writeVisualBlocks(message.visualBlocks))
                 .put("stats", writeChatStats(message.stats) ?: JSONObject.NULL)
@@ -11865,21 +12080,65 @@ private fun readRawEvents(array: JSONArray): List<HermesRawEvent> = buildList {
     for (i in 0 until minOf(array.length(), 80)) {
         val obj = array.optJSONObject(i) ?: continue
         add(
-            HermesRawEvent(
-                name = obj.optString("name", "hermes.event"),
-                json = obj.optString("json"),
-                timestamp = obj.optLong("timestamp", System.currentTimeMillis())
-            )
+            safeRawHermesEvent(obj.optLong("timestamp", obj.optLong("Timestamp", System.currentTimeMillis())))
         )
     }
 }
 
+private fun readAssistantActivityTimeline(array: JSONArray): List<AssistantActivity> = buildList {
+    for (i in 0 until minOf(array.length(), 256)) {
+        val item = array.optJSONObject(i) ?: continue
+        val kind = when (item.optString("kind", item.optString("Kind")).lowercase()) {
+            "reasoning" -> AssistantActivity.Kind.Reasoning
+            "progress", "promptprogress" -> AssistantActivity.Kind.PromptProgress
+            "tool" -> AssistantActivity.Kind.Tool
+            else -> null
+        } ?: continue
+        // Accept the previous Android nested form and the canonical flat wire form.
+        val toolObject = item.optJSONObject("tool") ?: item.optJSONObject("Tool")
+        val tool = (toolObject ?: item).let {
+            val id = it.optString("id", it.optString("toolId", it.optString("ToolId")))
+            if (id.isBlank()) null else ToolCallState(
+                id = id,
+                name = it.optString("name", it.optString("toolName", it.optString("ToolName", id))),
+                args = it.optString("args", it.optString("toolArguments", it.optString("ToolArguments"))),
+                status = it.optString("status", it.optString("toolStatus", it.optString("ToolStatus", "in esecuzione…"))),
+                result = it.optString("result", it.optString("toolResult", it.optString("ToolResult"))).takeIf(String::isNotEmpty)
+            )
+        }
+        if (kind != AssistantActivity.Kind.Tool || tool != null) {
+            add(AssistantActivity(kind, item.optString("text", item.optString("Text")), tool?.let(::safeToolCall)))
+        }
+    }
+}
+
+private fun writeAssistantActivityTimeline(items: List<AssistantActivity>): JSONArray = JSONArray().also { array ->
+    items.takeLast(256).forEach { item ->
+        val tool = item.tool?.let(::safeToolCall)
+        array.put(JSONObject()
+            .put("kind", activityKindWireName(item.kind))
+            .put("text", item.text)
+            .put("toolId", tool?.id ?: JSONObject.NULL)
+            .put("toolName", tool?.name ?: JSONObject.NULL)
+            .put("toolArguments", tool?.args ?: JSONObject.NULL)
+            .put("toolResult", tool?.result ?: JSONObject.NULL)
+            .put("toolStatus", tool?.status ?: JSONObject.NULL))
+    }
+}
+
+private fun activityKindWireName(kind: AssistantActivity.Kind): String = when (kind) {
+    AssistantActivity.Kind.Reasoning -> "reasoning"
+    AssistantActivity.Kind.PromptProgress -> "progress"
+    AssistantActivity.Kind.Tool -> "tool"
+}
+
 private fun writeRawEvents(events: List<HermesRawEvent>): JSONArray {
     return JSONArray(events.take(80).map { event ->
+        val safeEvent = safeRawHermesEvent(event.timestamp)
         JSONObject()
-            .put("name", event.name)
-            .put("json", event.json)
-            .put("timestamp", event.timestamp)
+            .put("name", safeEvent.name)
+            .put("json", safeEvent.json)
+            .put("timestamp", safeEvent.timestamp)
     })
 }
 
@@ -12124,44 +12383,11 @@ private fun openAndroidIntent(context: Context, intent: Intent): Boolean {
     }
 }
 
-private val prefsCache = java.util.concurrent.ConcurrentHashMap<String, SharedPreferences>()
-private val migratedPrefs = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
 private val localArchiveLock = Any()
 private val localTasksLock = Any()
 
-private fun migratePrefs(context: Context, currentName: String, legacyName: String): SharedPreferences {
-    val current = prefsCache.getOrPut(currentName) {
-        context.applicationContext.getSharedPreferences(currentName, Context.MODE_PRIVATE)
-    }
-
-    if (migratedPrefs.contains(currentName)) {
-        return current
-    }
-    migratedPrefs.add(currentName)
-
-    if (current.all.isNotEmpty()) {
-        return current
-    }
-
-    val legacy = prefsCache.getOrPut(legacyName) {
-        context.applicationContext.getSharedPreferences(legacyName, Context.MODE_PRIVATE)
-    }
-    if (legacy.all.isNotEmpty()) {
-        current.edit {
-            legacy.all.forEach { (key, value) ->
-                when (value) {
-                    is String -> putString(key, value)
-                    is Boolean -> putBoolean(key, value)
-                    is Int -> putInt(key, value)
-                    is Long -> putLong(key, value)
-                    is Float -> putFloat(key, value)
-                }
-            }
-        }
-    }
-
-    return current
-}
+private fun migratePrefs(context: Context, currentName: String, legacyName: String) =
+    PreferencesMigration.getOrMigrate(context, currentName, legacyName)
 
 private const val CURRENT_SETTINGS_PREFS = "chatclaw_settings"
 private const val LEGACY_SETTINGS_PREFS = "nemoclaw_settings"

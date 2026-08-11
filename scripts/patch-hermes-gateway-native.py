@@ -3485,6 +3485,7 @@ def _patch_dynamic_http_routes(text: str) -> tuple[str, bool]:
     block = r'''        # HERMES_HUB_DYNAMIC_ROUTES_BEGIN
         routes.extend([
             ("POST", "/v1/hermes/native", self._handle_responses),
+            ("GET", "/v1/hub/runtime", self._handle_hub_runtime),
             ("GET", "/v1/hub/hardware", self._handle_hub_hardware),
             ("GET", "/v1/hub/server/control", self._handle_hub_server_control),
             ("POST", "/v1/hub/server/action", self._handle_hub_server_action),
@@ -5353,6 +5354,42 @@ def _hermes_hub_notifications_payload(unread_only: bool = False) -> Dict[str, An
         )
         changes.append("audit continuity state changes")
 
+    if "def _hermes_hub_runtime_payload" not in text:
+        text, _ = _replace_once(
+            text,
+            'def _hermes_hub_storage_path(env_name: str, default_name: str) -> "Path":',
+            '''def _hermes_hub_runtime_payload() -> Dict[str, Any]:
+    """Expose reviewable runtime state, never paths, logs, or credentials."""
+    payload = _hermes_hub_read_json(
+        _hermes_hub_storage_path("HERMES_HUB_RUNTIME_STATE_PATH", "hub_gateway_runtime.json"),
+        {},
+    )
+    failure = payload.get("failure") if isinstance(payload.get("failure"), dict) else {}
+    reason = str(failure.get("reason") or "").replace("\\n", " ").replace("\\r", " ")[:240]
+    return {
+        "object": "hermes.hub.runtime",
+        "status": str(payload.get("status") or "unknown")[:40],
+        "gateway_version": str(payload.get("gateway_version") or "")[:80],
+        "agent_version": str(payload.get("agent_version") or "")[:80],
+        "agent_revision": str(payload.get("agent_revision") or "")[:80],
+        "previous_version": str(payload.get("previous_version") or "")[:80],
+        "candidate_version": str(payload.get("candidate_version") or "")[:80],
+        "update_available": bool(payload.get("update_available")),
+        "last_checked_at": float(payload.get("last_checked_at") or 0),
+        "last_success_at": float(payload.get("last_success_at") or 0),
+        "failure": ({
+            "version": str(failure.get("version") or "")[:80],
+            "reason": reason,
+            "at": float(failure.get("at") or 0),
+        } if reason else None),
+    }
+
+
+def _hermes_hub_storage_path(env_name: str, default_name: str) -> "Path":''',
+            "gateway runtime state payload",
+        )
+        changes.append("gateway runtime state payload")
+
     if "def _hermes_hub_serialized_store_mutation" not in text:
         text, _ = _replace_once(
             text,
@@ -7142,6 +7179,21 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("hardware endpoint handler")
 
+    if "async def _handle_hub_runtime" not in text:
+        text, _ = _replace_once(
+            text,
+            "    async def _handle_hub_hardware(self, request: \"web.Request\") -> \"web.Response\":",
+            "    async def _handle_hub_runtime(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_runtime_payload())\n"
+            "\n"
+            "    async def _handle_hub_hardware(self, request: \"web.Request\") -> \"web.Response\":",
+            "gateway runtime endpoint handler",
+        )
+        changes.append("gateway runtime endpoint handler")
+
     if "async def _handle_video_library" not in text:
         text, _ = _replace_once(
             text,
@@ -8219,6 +8271,16 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "router hermes_native alias",
         )
         changes.append("router hermes_native alias")
+
+    if not _route_registered(text, "GET", "/v1/hub/runtime", "_handle_hub_runtime"):
+        text, _ = _replace_regex_once(
+            text,
+            r'(^\s+self\._app\.router\.add_get\("/v1/capabilities", self\._handle_capabilities\)\n)',
+            r'\1'
+            r'            self._app.router.add_get("/v1/hub/runtime", self._handle_hub_runtime)' "\n",
+            "router gateway runtime endpoint",
+        )
+        changes.append("router gateway runtime endpoint")
 
     if not _route_registered(text, "GET", "/v1/hub/hardware", "_handle_hub_hardware"):
         text, _ = _replace_regex_once(

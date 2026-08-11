@@ -20,6 +20,7 @@ import com.meta.wearable.dat.core.types.DeviceSessionError
 import com.meta.wearable.dat.core.types.LinkState
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
+import com.meta.wearable.dat.core.types.RegistrationState
 import com.nemoclaw.chat.jarvis.FrameSampler
 import com.nemoclaw.chat.jarvis.JarvisFrameSource
 import java.io.ByteArrayOutputStream
@@ -27,13 +28,24 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 
 internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
     override val label: String = "Ray-Ban Meta (DAT 0.8.0)"
@@ -48,6 +60,7 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
     private var stream: Stream? = null
     private var sessionStateJob: Job? = null
     private var sessionErrorJob: Job? = null
+    private var deviceLinkJob: Job? = null
     private var streamStateJob: Job? = null
     private var streamErrorJob: Job? = null
     private var videoJob: Job? = null
@@ -67,6 +80,7 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
             MetaWearablesRuntime.initialize(appContext)
         }
 
+        awaitRegistration()
         val deviceId = awaitAvailableDevice()
         ensureWearableCameraPermission()
         ready = CompletableDeferred()
@@ -74,13 +88,29 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
             Wearables.createSession(SpecificDeviceSelector(deviceId)).getOrThrow()
         }
         session = created
+        monitorDeviceLink(deviceId)
         monitorSession(created)
         withContext(Dispatchers.Main.immediate) { created.start() }
         try {
-            ready.await()
+            withTimeout(STREAM_READY_TIMEOUT_MILLIS) { ready.await() }
+        } catch (error: TimeoutCancellationException) {
+            cleanupSession()
+            throw IllegalStateException(
+                "Il video degli occhiali non e diventato attivo entro ${STREAM_READY_TIMEOUT_MILLIS / 1_000} secondi. " +
+                    "Verifica che gli occhiali restino indossati e connessi in Meta AI."
+            )
         } catch (error: Throwable) {
             cleanupSession()
             throw error
+        }
+    }
+
+    private suspend fun awaitRegistration() {
+        val registered = withTimeoutOrNull(REGISTRATION_READY_TIMEOUT_MILLIS) {
+            Wearables.registrationState.first { it == RegistrationState.REGISTERED }
+        }
+        check(registered != null) {
+            "App Meta non registrata. Apri Configura occhiali Meta, completa la registrazione e poi riprova."
         }
     }
 
@@ -109,17 +139,60 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
         }
     }
 
-    private suspend fun awaitAvailableDevice(): DeviceIdentifier {
-        repeat(DEVICE_DISCOVERY_ATTEMPTS) {
-            val deviceId = Wearables.devices.value.firstOrNull { candidate ->
-                Wearables.devicesMetadata[candidate]?.value?.linkState == LinkState.CONNECTED
+    private fun monitorDeviceLink(deviceId: DeviceIdentifier) {
+        deviceLinkJob?.cancel()
+        val metadata = Wearables.devicesMetadata[deviceId] ?: return
+        deviceLinkJob = sdkScope.launch {
+            var wasConnected = false
+            metadata.collect { device ->
+                if (device.linkState == LinkState.CONNECTED) {
+                    wasConnected = true
+                } else if (wasConnected) {
+                    deliverFailure(
+                        IllegalStateException("Il collegamento DAT con gli occhiali si e interrotto.")
+                    )
+                }
             }
-            if (deviceId != null) return deviceId
-            delay(DEVICE_DISCOVERY_DELAY_MILLIS)
         }
-        throw IllegalStateException(
+    }
+
+    private suspend fun awaitAvailableDevice(): DeviceIdentifier {
+        return withTimeoutOrNull(DEVICE_READY_TIMEOUT_MILLIS) {
+            while (true) {
+                val deviceId = awaitConnectedDeviceEvent()
+                delay(LINK_STABILIZATION_MILLIS)
+                val stillConnected = deviceId in Wearables.devices.value &&
+                    Wearables.devicesMetadata[deviceId]?.value?.linkState == LinkState.CONNECTED
+                if (stillConnected) return@withTimeoutOrNull deviceId
+            }
+            error("Attesa connessione DAT terminata senza dispositivo.")
+        } ?: throw IllegalStateException(
             "Nessun Ray-Ban Meta connesso al DAT. Apri gli occhiali e verifica che Meta AI li mostri connessi."
         )
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private suspend fun awaitConnectedDeviceEvent(): DeviceIdentifier {
+        return Wearables.devices.flatMapLatest(::connectedDeviceEvents)
+            .filterNotNull()
+            .first()
+    }
+
+    private fun connectedDeviceEvents(deviceIds: Set<DeviceIdentifier>) = flow {
+        while (true) {
+            val metadataFlows = deviceIds.mapNotNull { deviceId ->
+                Wearables.devicesMetadata[deviceId]?.map { device ->
+                    if (device.linkState == LinkState.CONNECTED) deviceId else null
+                }
+            }
+            if (metadataFlows.isNotEmpty()) {
+                emitAll(merge(*metadataFlows.toTypedArray()))
+            }
+            // The SDK exposes device metadata in a per-device StateFlow. Wait briefly only
+            // for that flow to be published. A devices change cancels this branch and rebuilds
+            // it, so a newly exposed Ray-Ban cannot be hidden by an older disconnected device.
+            delay(METADATA_FLOW_WAIT_MILLIS)
+        }
     }
 
     private suspend fun ensureWearableCameraPermission() {
@@ -202,6 +275,8 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
 
     private suspend fun cleanupSession() {
         cleanupStream()
+        deviceLinkJob?.cancel()
+        deviceLinkJob = null
         sessionStateJob?.cancel()
         sessionStateJob = null
         sessionErrorJob?.cancel()
@@ -246,8 +321,11 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
     }
 
     private companion object {
-        const val DEVICE_DISCOVERY_ATTEMPTS = 48
-        const val DEVICE_DISCOVERY_DELAY_MILLIS = 250L
+        const val REGISTRATION_READY_TIMEOUT_MILLIS = 8_000L
+        const val DEVICE_READY_TIMEOUT_MILLIS = 18_000L
+        const val METADATA_FLOW_WAIT_MILLIS = 100L
+        const val LINK_STABILIZATION_MILLIS = 750L
+        const val STREAM_READY_TIMEOUT_MILLIS = 18_000L
         const val DAT_FRAME_RATE = 7
     }
 }

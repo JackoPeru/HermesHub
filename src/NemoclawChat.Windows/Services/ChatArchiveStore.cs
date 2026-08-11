@@ -1,8 +1,59 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace NemoclawChat_Windows.Services;
 
 public sealed record HermesRawEventRecord(string Name, string Json, DateTimeOffset Timestamp);
+
+/// <summary>Explicit server activity retained with an assistant reply, in arrival order.</summary>
+public sealed record AssistantActivityRecord(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("text")] string Text = "",
+    [property: JsonPropertyName("toolId")] string? ToolId = null,
+    [property: JsonPropertyName("toolName")] string? ToolName = null,
+    [property: JsonPropertyName("toolArguments")] string? ToolArguments = null,
+    [property: JsonPropertyName("toolResult")] string? ToolResult = null,
+    [property: JsonPropertyName("toolStatus")] string? ToolStatus = null);
+
+internal static class AssistantActivityRedaction
+{
+    private const string SafeArguments = "Argomenti ricevuti; contenuto omesso.";
+    private const string SafeResult = "Risultato ricevuto; contenuto omesso.";
+    private const string SafeRawEventName = "hermes.event";
+    private const string SafeRawEventJson = "{\"redacted\":true,\"summary\":\"Evento Hermes omesso per riservatezza.\"}";
+
+    public static string? SummarizePayload(string? payload, bool result) =>
+        string.IsNullOrEmpty(payload) ? payload : result ? SafeResult : SafeArguments;
+
+    public static AssistantActivityRecord Sanitize(AssistantActivityRecord activity) => activity with
+    {
+        ToolArguments = SummarizePayload(activity.ToolArguments, result: false),
+        ToolResult = SummarizePayload(activity.ToolResult, result: true)
+    };
+
+    public static AssistantActivityRecord? Canonicalize(AssistantActivityRecord activity)
+    {
+        var kind = (activity.Kind ?? string.Empty).Trim().ToLowerInvariant();
+        kind = kind == "promptprogress" ? "progress" : kind;
+        return kind is "reasoning" or "progress" or "tool"
+            ? Sanitize(activity with { Kind = kind })
+            : null;
+    }
+
+    public static List<AssistantActivityRecord> CanonicalizeTimeline(IEnumerable<AssistantActivityRecord>? timeline) =>
+        (timeline ?? [])
+            .Select(Canonicalize)
+            .OfType<AssistantActivityRecord>()
+            .ToList();
+
+    public static HermesRawEventRecord RedactRawEvent(HermesRawEventRecord raw) => raw with
+    {
+        Name = SafeRawEventName,
+        Json = SafeRawEventJson
+    };
+
+    public static string RedactRawEvent(string name, string json) => SafeRawEventJson;
+}
 
 public sealed record ChatMessageRecord(
     string Author,
@@ -16,6 +67,7 @@ public sealed record ChatMessageRecord(
 {
     public string Id { get; init; } = Guid.NewGuid().ToString("N");
     public string Thinking { get; init; } = string.Empty;
+    public List<AssistantActivityRecord>? ActivityTimeline { get; init; }
 }
 
 public sealed class ConversationRecord
@@ -55,7 +107,7 @@ public sealed record HomeNavigationRequest(string? ConversationId = null, string
 
 public static class ChatArchiveStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private static readonly TimeSpan DeletedRetention = TimeSpan.FromDays(30);
     private static event Action? _changed;
     public static event Action? Changed
@@ -102,6 +154,10 @@ public static class ChatArchiveStore
             try
             {
                 _cache = JsonSerializer.Deserialize<List<ConversationRecord>>(content) ?? [];
+                if (SanitizeActivityPayloads(_cache))
+                {
+                    AtomicJsonFile.Write(StorePath, JsonSerializer.Serialize(_cache, JsonOptions));
+                }
             }
             catch (JsonException)
             {
@@ -561,6 +617,7 @@ public static class ChatArchiveStore
             .Concat(deleted)
             .OrderByDescending(item => item.UpdatedAt)
             .ToList();
+        SanitizeActivityPayloads(ordered);
         AtomicJsonFile.Write(StorePath, JsonSerializer.Serialize(ordered, JsonOptions));
         lock (_cacheLock)
         {
@@ -617,8 +674,30 @@ public static class ChatArchiveStore
     private static ChatMessageRecord CloneMessage(ChatMessageRecord message) => message with
     {
         VisualBlocks = message.VisualBlocks?.Select(CloneVisualBlock).ToList(),
-        RawEvents = message.RawEvents?.ToList()
+        RawEvents = message.RawEvents?.Select(AssistantActivityRedaction.RedactRawEvent).ToList(),
+        ActivityTimeline = AssistantActivityRedaction.CanonicalizeTimeline(message.ActivityTimeline)
     };
+
+    private static bool SanitizeActivityPayloads(IEnumerable<ConversationRecord> conversations)
+    {
+        var changed = false;
+        foreach (var conversation in conversations)
+        {
+            for (var index = 0; index < conversation.Messages.Count; index++)
+            {
+                var message = conversation.Messages[index];
+                var timeline = message.ActivityTimeline;
+                var sanitizedTimeline = AssistantActivityRedaction.CanonicalizeTimeline(timeline);
+                var rawEvents = message.RawEvents;
+                var sanitizedRawEvents = rawEvents?.Select(AssistantActivityRedaction.RedactRawEvent).ToList();
+                if ((timeline is null || timeline.SequenceEqual(sanitizedTimeline)) &&
+                    (rawEvents is null || rawEvents.SequenceEqual(sanitizedRawEvents ?? []))) continue;
+                conversation.Messages[index] = message with { ActivityTimeline = sanitizedTimeline, RawEvents = sanitizedRawEvents };
+                changed = true;
+            }
+        }
+        return changed;
+    }
 
     private static VisualBlockRecord CloneVisualBlock(VisualBlockRecord block) => block with
     {
@@ -695,7 +774,7 @@ public static class ChatArchiveStore
                     ArtifactFileName = filename,
                     ArtifactMimeType = block.MimeType ?? string.Empty,
                     SourceConversationId = conversation.Id,
-                    SourceRunId = message.RawEvents?.Select(raw => raw.Json).FirstOrDefault(json => json.Contains("run_id", StringComparison.OrdinalIgnoreCase)) ?? string.Empty,
+                    SourceRunId = string.Empty,
                     Version = version,
                     UpdatedAt = message.Timestamp
                 });

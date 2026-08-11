@@ -15,6 +15,8 @@ internal sealed class StreamingBubble
 {
     private const int MaxLivePreviewChars = 120_000;
     private const int MaxMarkdownRenderChars = 32_000;
+    private const int MaxActivityEntryChars = 16_384;
+    private const int MaxActivityTimelineChars = 96_000;
     private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
 
     private readonly Page _page;
@@ -27,6 +29,8 @@ internal sealed class StreamingBubble
     private readonly StackPanel _toolCallsPanel;
     private readonly Expander _toolsExpander;
     private readonly TextBlock _toolsLabel;
+    private readonly StackPanel _activityPanel;
+    private readonly Expander _activityExpander;
     private readonly StackPanel _rawEventsPanel;
     private readonly ContentControl _assistantContainer;
     private readonly TextBlock _assistantTextPreview;
@@ -44,12 +48,15 @@ internal sealed class StreamingBubble
     private readonly DispatcherTimer _shimmerTimer;
     private readonly DispatcherTimer _renderTimer;
     private readonly Dictionary<string, ToolCallView> _toolViews = new();
+    private readonly List<AssistantActivityRecord> _activityTimeline = [];
+    private readonly List<UIElement> _activityElements = [];
     private readonly StringBuilder _thinkingBuilder = new();
     private readonly StringBuilder _textBuilder = new();
     private string _phaseStatusBase = "Invio prompt a Hermes...";
     private bool _hasThinking;
     private bool _hasText;
     private bool _renderPending;
+    private bool _activityAutoCollapsed;
     private DateTime _lastScroll = DateTime.MinValue;
     private double _shimmerPhase;
     private DateTime _started = DateTime.UtcNow;
@@ -89,6 +96,25 @@ internal sealed class StreamingBubble
             Foreground = (Brush)Application.Current.Resources["FaintTextBrush"]
         });
         _content.Children.Add(assistantLabel);
+
+        _activityPanel = new StackPanel { Spacing = 8 };
+        _activityExpander = new Expander
+        {
+            Header = new TextBlock
+            {
+                Text = "Attività Hermes",
+                FontSize = 14,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = (Brush)Application.Current.Resources["MutedTextBrush"]
+            },
+            Content = _activityPanel,
+            IsExpanded = true,
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Visibility = Visibility.Collapsed
+        };
+        _content.Children.Add(_activityExpander);
 
         _shimmerBrush = new LinearGradientBrush
         {
@@ -130,7 +156,7 @@ internal sealed class StreamingBubble
             Visibility = Visibility.Visible
         };
 
-        _content.Children.Add(_thinkingExpander);
+        // Replaced by chronological activity timeline; kept only to avoid a broad UI rewrite.
 
         _toolsLabel = new TextBlock
         {
@@ -157,7 +183,7 @@ internal sealed class StreamingBubble
             Visibility = Visibility.Collapsed
         };
 
-        _content.Children.Add(_toolsExpander);
+        // Tool cards are inserted at their original server-event position in _activityPanel.
 
         _rawEventsPanel = new StackPanel { Spacing = 8 };
         _content.Children.Add(_rawEventsPanel);
@@ -348,6 +374,24 @@ internal sealed class StreamingBubble
         SetStatus($"{status}: {clamped}%{suffix}");
         _promptProgressBar.Value = clamped;
         _promptProgressBar.Visibility = Visibility.Visible;
+        var activityText = $"{status}: {clamped}%{suffix}";
+        if (_activityTimeline.LastOrDefault()?.Kind == "progress" &&
+            _activityElements.LastOrDefault() is StackPanel progressPanel &&
+            progressPanel.Children.Count > 1 && progressPanel.Children[1] is TextBlock progressText)
+        {
+            _activityTimeline[^1] = NormalizeActivity(_activityTimeline[^1] with { Text = activityText });
+            progressText.Text = _activityTimeline[^1].Text;
+        }
+        else
+        {
+            AddActivity(new AssistantActivityRecord("progress", activityText), new TextBlock
+            {
+                Text = activityText,
+                FontSize = 12,
+                Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
+                TextWrapping = TextWrapping.WrapWholeWords
+            }, "Progresso");
+        }
     }
 
     public void ResumeLiveIndicators()
@@ -375,6 +419,28 @@ internal sealed class StreamingBubble
         _promptProgressBar.Visibility = Visibility.Collapsed;
         SetStatus("Ragionamento in corso...");
         _thinkingExpander.Visibility = Visibility.Visible;
+        if (_activityTimeline.LastOrDefault()?.Kind == "reasoning" &&
+            _activityElements.LastOrDefault() is StackPanel reasoningPanel &&
+            reasoningPanel.Children.Count > 1 && reasoningPanel.Children[1] is TextBlock existing)
+        {
+            var prior = _activityTimeline[^1];
+            var merged = NormalizeActivity(prior with { Text = MergeActivityText(prior.Text, delta) });
+            _activityTimeline[^1] = merged;
+            existing.Text = merged.Text;
+            EnforceActivityLimits();
+        }
+        else
+        {
+            var entry = new AssistantActivityRecord("reasoning", delta);
+            AddActivity(entry, new TextBlock
+            {
+                Text = delta,
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = 12,
+                Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
+                TextWrapping = TextWrapping.WrapWholeWords
+            }, "Ragionamento");
+        }
         ScheduleScroll();
     }
 
@@ -401,11 +467,6 @@ internal sealed class StreamingBubble
             return;
         }
 
-        if (_toolsExpander.Visibility == Visibility.Collapsed)
-        {
-            _toolsExpander.Visibility = Visibility.Visible;
-        }
-        _toolsLabel.Text = $"Azioni ({_toolViews.Count + 1})";
 
         var statusIcon = new FontIcon
         {
@@ -510,7 +571,7 @@ internal sealed class StreamingBubble
             CornerRadius = new CornerRadius(12)
         };
 
-        _toolCallsPanel.Children.Add(expander);
+        AddActivity(new AssistantActivityRecord("tool", ToolId: id, ToolName: name, ToolStatus: "in esecuzione…"), expander);
         _toolViews[id] = new ToolCallView(expander, argsBlock, resultBlock, resultLabel, resultBorder, statusText, statusIcon, outcomeText, new StringBuilder());
         ScheduleScroll();
     }
@@ -530,8 +591,20 @@ internal sealed class StreamingBubble
             StartToolCall(id, "tool");
             view = _toolViews[id];
         }
-        view.Args.Append(delta);
+        var safeArguments = AssistantActivityRedaction.SummarizePayload(delta, result: false);
+        if (!string.IsNullOrEmpty(safeArguments))
+        {
+            view.Args.Clear();
+            view.Args.Append(safeArguments);
+        }
+        if (view.Args.Length > MaxActivityEntryChars)
+        {
+            var clipped = KeepNewestActivityText(view.Args.ToString());
+            view.Args.Clear();
+            view.Args.Append(clipped);
+        }
         view.ArgsBlock.Text = PrettifyJson(view.Args.ToString());
+        UpdateToolActivity(id, item => item with { ToolArguments = safeArguments });
         ScheduleScroll();
     }
 
@@ -548,6 +621,7 @@ internal sealed class StreamingBubble
             view.StatusIcon.Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x34, 0xC7, 0x59));
             view.OutcomeText.Text = "Esito: riuscito";
             view.OutcomeText.Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x34, 0xC7, 0x59));
+            UpdateToolActivity(id, item => item with { ToolStatus = "completato" });
         }
     }
 
@@ -557,10 +631,15 @@ internal sealed class StreamingBubble
         {
             return;
         }
-        if (!string.IsNullOrWhiteSpace(id) && _toolViews.TryGetValue(id!, out var view))
+        var resolvedId = !string.IsNullOrWhiteSpace(id) && _toolViews.ContainsKey(id!)
+            ? id
+            : _activityTimeline.LastOrDefault(item =>
+                item.Kind == "tool" && !string.IsNullOrWhiteSpace(name) && item.ToolName == name)?.ToolId;
+        if (!string.IsNullOrWhiteSpace(resolvedId) && _toolViews.TryGetValue(resolvedId!, out var view))
         {
             view.StatusBlock.Text = "risultato pronto";
-            view.ResultBlock.Text = PrettifyJson(output);
+            var safeResult = AssistantActivityRedaction.SummarizePayload(output, result: true) ?? string.Empty;
+            view.ResultBlock.Text = safeResult;
             view.ResultLabel.Visibility = Visibility.Visible;
             view.ResultBorder.Visibility = Visibility.Visible;
             var isError = output.Contains("\"error\"", StringComparison.OrdinalIgnoreCase);
@@ -578,6 +657,11 @@ internal sealed class StreamingBubble
                 view.OutcomeText.Text = "Esito: riuscito";
                 view.OutcomeText.Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x34, 0xC7, 0x59));
             }
+            UpdateToolActivity(resolvedId!, item => item with
+            {
+                ToolResult = safeResult,
+                ToolStatus = "risultato pronto"
+            });
         }
         else
         {
@@ -638,6 +722,84 @@ internal sealed class StreamingBubble
         ScheduleScroll();
     }
 
+    public IReadOnlyList<AssistantActivityRecord> ActivityTimeline => _activityTimeline;
+
+    private void AddActivity(AssistantActivityRecord entry, UIElement body, string? label = null)
+    {
+        entry = NormalizeActivity(entry);
+        var element = label is null
+            ? body
+            : new StackPanel
+            {
+                Spacing = 4,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = label,
+                        FontSize = 11,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        Foreground = (Brush)Application.Current.Resources["MutedTextBrush"]
+                    },
+                    body
+                }
+            };
+        _activityTimeline.Add(entry);
+        _activityElements.Add(element);
+        _activityPanel.Children.Add(element);
+        EnforceActivityLimits();
+        _activityExpander.Visibility = Visibility.Visible;
+    }
+
+    private void EnforceActivityLimits()
+    {
+        while (_activityTimeline.Count > 256 || ActivityTimelineChars() > MaxActivityTimelineChars)
+        {
+            _activityTimeline.RemoveAt(0);
+            var old = _activityElements[0];
+            _activityElements.RemoveAt(0);
+            _activityPanel.Children.Remove(old);
+        }
+    }
+
+    private void UpdateToolActivity(string id, Func<AssistantActivityRecord, AssistantActivityRecord> update)
+    {
+        for (var index = _activityTimeline.Count - 1; index >= 0; index--)
+        {
+            if (_activityTimeline[index].Kind == "tool" && _activityTimeline[index].ToolId == id)
+            {
+                _activityTimeline[index] = NormalizeActivity(update(_activityTimeline[index]));
+                EnforceActivityLimits();
+                return;
+            }
+        }
+    }
+
+    private static string MergeActivityText(string current, string delta)
+    {
+        if (delta.Length == 0 || current.EndsWith(delta, StringComparison.Ordinal)) return current;
+        if (delta.StartsWith(current, StringComparison.Ordinal)) return delta;
+        return current + delta;
+    }
+
+    private int ActivityTimelineChars() => _activityTimeline.Sum(item =>
+        item.Text.Length + (item.ToolArguments?.Length ?? 0) + (item.ToolResult?.Length ?? 0));
+
+    private static AssistantActivityRecord NormalizeActivity(AssistantActivityRecord item) => item with
+    {
+        Text = KeepNewestActivityText(item.Text),
+        ToolArguments = item.ToolArguments is null ? null : KeepNewestActivityText(item.ToolArguments),
+        ToolResult = item.ToolResult is null ? null : KeepNewestActivityText(item.ToolResult)
+    };
+
+    private static string KeepNewestActivityText(string value)
+    {
+        if (value.Length <= MaxActivityEntryChars) return value;
+        var start = value.Length - MaxActivityEntryChars;
+        if (start > 0 && start < value.Length && char.IsHighSurrogate(value[start - 1]) && char.IsLowSurrogate(value[start])) start++;
+        return value[start..];
+    }
+
     public void Complete(ChatStreamStats stats)
     {
         FlushTextPreview();
@@ -645,6 +807,8 @@ internal sealed class StreamingBubble
         _statusText.Visibility = Visibility.Collapsed;
         _promptProgressBar.Visibility = Visibility.Collapsed;
         FreezeThinkingLabel();
+        MoveRawEventsIntoActivityDisclosure();
+        CollapseActivityOnce();
 
         if (!_hasText && _textBuilder.Length > 0)
         {
@@ -706,6 +870,8 @@ internal sealed class StreamingBubble
         _promptProgressBar.Visibility = Visibility.Collapsed;
 
         FreezeThinkingLabel();
+        MoveRawEventsIntoActivityDisclosure();
+        CollapseActivityOnce();
 
         if (!_hasText && _textBuilder.Length > 0)
         {
@@ -750,9 +916,38 @@ internal sealed class StreamingBubble
             _thinkingText.Text = finalThinking;
             _hasThinking = _thinkingBuilder.Length > 0;
             _thinkingExpander.Visibility = Visibility.Visible;
+            if (!_activityTimeline.Any(item => item.Kind == "reasoning"))
+            {
+                AddActivity(new AssistantActivityRecord("reasoning", finalThinking), new TextBlock
+                {
+                    Text = KeepNewestActivityText(finalThinking),
+                    FontFamily = new FontFamily("Consolas"),
+                    FontSize = 12,
+                    Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
+                    TextWrapping = TextWrapping.WrapWholeWords
+                }, "Ragionamento");
+            }
         }
 
         FlushTextPreview();
+    }
+
+    private void CollapseActivityOnce()
+    {
+        if (_activityAutoCollapsed || _activityPanel.Children.Count == 0) return;
+        _activityAutoCollapsed = true;
+        _activityExpander.IsExpanded = false;
+    }
+
+    private void MoveRawEventsIntoActivityDisclosure()
+    {
+        while (_rawEventsPanel.Children.Count > 0)
+        {
+            var child = _rawEventsPanel.Children[0];
+            _rawEventsPanel.Children.RemoveAt(0);
+            _activityPanel.Children.Add(child);
+        }
+        if (_activityPanel.Children.Count > 0) _activityExpander.Visibility = Visibility.Visible;
     }
 
     public void StopShimmer()

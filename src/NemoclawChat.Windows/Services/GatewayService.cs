@@ -33,6 +33,8 @@ public sealed record GatewayTaskResult(AgentTaskRecord Task, string Message);
 
 public sealed record WorkspaceRunResult(string Result, string Source, string Status);
 
+public sealed record GatewayRuntimeInfo(bool Available, string AgentVersion, string Status, string FailureReason);
+
 public sealed record NewsHtmlRecord(
     string Id,
     string Title,
@@ -165,6 +167,7 @@ public static class GatewayService
 {
     private const int MaxBufferedResponseBytes = 10 * 1024 * 1024;
     private const int MaxErrorResponseBytes = 64 * 1024;
+    private static readonly TimeSpan RuntimeInfoPollTimeout = TimeSpan.FromSeconds(5);
     private static readonly string[] PlugAndPlayGatewayHosts = [];
     private static readonly JsonSerializerOptions CaseInsensitiveJsonOptions = new()
     {
@@ -942,6 +945,43 @@ public static class GatewayService
         }
     }
 
+    public static async Task<GatewayRuntimeInfo> GetRuntimeInfoAsync(
+        AppSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(RuntimeInfoPollTimeout);
+        try
+        {
+            var response = await SendBufferedAsync(
+                token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, "/v1/hub/runtime"), token),
+                cancellationToken: timeout.Token);
+            if (!response.IsSuccessStatusCode || string.IsNullOrWhiteSpace(response.Body))
+            {
+                return new GatewayRuntimeInfo(false, string.Empty, "unavailable", string.Empty);
+            }
+
+            using var document = JsonDocument.Parse(response.Body);
+            var root = document.RootElement;
+            var failureReason = root.TryGetProperty("failure", out var failure) && failure.ValueKind == JsonValueKind.Object
+                ? ExtractString(failure, "reason") ?? string.Empty
+                : string.Empty;
+            return new GatewayRuntimeInfo(
+                true,
+                ExtractString(root, "agent_version") ?? string.Empty,
+                ExtractString(root, "status") ?? "unknown",
+                failureReason);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return new GatewayRuntimeInfo(false, string.Empty, "unavailable", string.Empty);
+        }
+    }
+
     internal static bool ShouldUseResponsesFirst(AppSettings settings, string mode)
     {
         if (HermesHubProtocol.IsNativePreferred(settings))
@@ -1266,7 +1306,10 @@ public static class GatewayService
                         visualBlocks = message.VisualBlocks ?? [],
                         stats = message.Stats,
                         thinking = message.Thinking,
-                        rawEvents = message.RawEvents ?? [],
+                        activityTimeline = AssistantActivityRedaction.CanonicalizeTimeline(message.ActivityTimeline),
+                        rawEvents = (message.RawEvents ?? [])
+                            .Select(AssistantActivityRedaction.RedactRawEvent)
+                            .ToList(),
                         bookmarked = message.IsBookmarked
                     })
                 })
@@ -1330,7 +1373,8 @@ public static class GatewayService
                                 message.TryGetProperty("bookmarked", out var bookmarked) && bookmarked.ValueKind == JsonValueKind.True)
                             {
                                 Id = ExtractString(message, "id", "messageId", "message_id") ?? Guid.NewGuid().ToString("N"),
-                                Thinking = ExtractString(message, "thinking", "reasoning") ?? string.Empty
+                                Thinking = ExtractString(message, "thinking", "reasoning") ?? string.Empty,
+                                ActivityTimeline = ReadMessageActivityTimeline(message)
                             });
                         }
                     }
@@ -1450,10 +1494,42 @@ public static class GatewayService
         }
     }
 
+    private static List<AssistantActivityRecord>? ReadMessageActivityTimeline(JsonElement message)
+    {
+        if (!(message.TryGetProperty("activityTimeline", out var timeline) || message.TryGetProperty("ActivityTimeline", out timeline)) ||
+            timeline.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var entries = new List<AssistantActivityRecord>();
+        foreach (var item in timeline.EnumerateArray().Take(256))
+        {
+            if (item.ValueKind != JsonValueKind.Object) continue;
+            var kind = ExtractString(item, "kind", "Kind")?.ToLowerInvariant();
+            kind = kind == "promptprogress" ? "progress" : kind;
+            if (kind is not ("reasoning" or "progress" or "tool")) continue;
+            item.TryGetProperty("tool", out var nestedTool);
+            if (nestedTool.ValueKind != JsonValueKind.Object) item.TryGetProperty("Tool", out nestedTool);
+            var tool = nestedTool.ValueKind == JsonValueKind.Object ? nestedTool : item;
+            var canonical = AssistantActivityRedaction.Canonicalize(new AssistantActivityRecord(
+                kind,
+                ExtractString(item, "text", "Text") ?? string.Empty,
+                ExtractString(tool, "id", "toolId", "ToolId"),
+                ExtractString(tool, "name", "toolName", "ToolName"),
+                ExtractString(tool, "args", "toolArguments", "ToolArguments"),
+                ExtractString(tool, "result", "toolResult", "ToolResult"),
+                ExtractString(tool, "status", "toolStatus", "ToolStatus")));
+            if (canonical is not null) entries.Add(canonical);
+        }
+        return entries.Count > 0 ? entries : null;
+    }
+
     private static List<HermesRawEventRecord>? ReadMessageRawEvents(JsonElement message)
     {
         if ((!message.TryGetProperty("rawEvents", out var rawEvents) &&
-             !message.TryGetProperty("raw_events", out rawEvents)) ||
+             !message.TryGetProperty("raw_events", out rawEvents) &&
+             !message.TryGetProperty("RawEvents", out rawEvents)) ||
             rawEvents.ValueKind != JsonValueKind.Array)
         {
             return null;
@@ -1461,7 +1537,9 @@ public static class GatewayService
 
         try
         {
-            return JsonSerializer.Deserialize<List<HermesRawEventRecord>>(rawEvents.GetRawText(), CaseInsensitiveJsonOptions);
+            return JsonSerializer.Deserialize<List<HermesRawEventRecord>>(rawEvents.GetRawText(), CaseInsensitiveJsonOptions)
+                ?.Select(AssistantActivityRedaction.RedactRawEvent)
+                .ToList();
         }
         catch (JsonException)
         {

@@ -119,6 +119,40 @@ data class ToolCallState(
     val result: String? = null
 )
 
+private const val SAFE_TOOL_ARGUMENTS_SUMMARY = "Argomenti ricevuti; contenuto omesso."
+private const val SAFE_TOOL_RESULT_SUMMARY = "Risultato ricevuto; contenuto omesso."
+internal const val SAFE_RAW_EVENT_JSON = "{\"redacted\":true,\"summary\":\"Evento Hermes omesso per riservatezza.\"}"
+
+/** Tool payload is untrusted and never retained client-side as raw text. */
+internal fun safeToolPayloadSummary(payload: String, result: Boolean): String? {
+    if (payload.isEmpty()) return null
+    return if (result) SAFE_TOOL_RESULT_SUMMARY else SAFE_TOOL_ARGUMENTS_SUMMARY
+}
+
+internal fun safeToolCall(tool: ToolCallState): ToolCallState = tool.copy(
+    args = safeToolPayloadSummary(tool.args, result = false) ?: "",
+    result = tool.result?.let { safeToolPayloadSummary(it, result = true) }
+)
+
+internal fun redactToolRawEvent(name: String, json: String): String {
+    // Raw gateway events are untrusted. Never retain a payload merely because it lacks a known marker.
+    return SAFE_RAW_EVENT_JSON
+}
+
+/** Explicit server activity. Client-generated status never enters this timeline. */
+@androidx.compose.runtime.Immutable
+data class AssistantActivity(
+    val kind: Kind,
+    val text: String = "",
+    val tool: ToolCallState? = null
+) {
+    enum class Kind { Reasoning, PromptProgress, Tool }
+}
+
+private const val MAX_ACTIVITY_TIMELINE_ENTRIES = 256
+private const val MAX_ACTIVITY_ENTRY_CHARS = 16_384
+private const val MAX_ACTIVITY_TIMELINE_CHARS = 96_000
+
 @androidx.compose.runtime.Immutable
 data class StreamingState(
     val text: String = "",
@@ -127,6 +161,7 @@ data class StreamingState(
     val thinkingFrozen: Boolean = false,
     val thinkingElapsedSec: Double = 0.0,
     val toolCalls: List<ToolCallState> = emptyList(),
+    val activityTimeline: List<AssistantActivity> = emptyList(),
     val visualBlocks: List<VisualBlock> = emptyList(),
     val visualBlocksVersion: Int? = null,
     val responseId: String? = null,
@@ -186,6 +221,7 @@ data class StreamingState(
         }
         is ChatStreamEvent.ThinkingDelta -> copy(
             thinking = mergeTextDelta(thinking, event.delta),
+            activityTimeline = appendReasoningActivity(event.delta),
             hasThinking = true,
             thinkingFrozen = false,
             promptProgressPercent = null,
@@ -198,6 +234,7 @@ data class StreamingState(
         ).withActivity(if (!hasThinking) "Reasoning ricevuto." else null)
         is ChatStreamEvent.ThinkingSnapshot -> copy(
             thinking = mergeTextSnapshot(thinking, event.text),
+            activityTimeline = appendReasoningSnapshotActivity(event.text),
             hasThinking = true,
             thinkingFrozen = false,
             promptProgressPercent = null,
@@ -212,23 +249,25 @@ data class StreamingState(
             status = "Tool in esecuzione: ${event.name}",
             toolCalls = if (toolCalls.any { it.id == event.id }) toolCalls
                 else toolCalls + ToolCallState(event.id, event.name)
-        ).withActivity("Tool avviato: ${event.name}")
+        ).withTimelineTool(event.id, event.name) { it }
         is ChatStreamEvent.ToolCallArgs -> copy(
             status = "Preparazione tool...",
             toolCalls = toolCalls.map {
-                if (it.id == event.id) it.copy(args = it.args + event.delta) else it
+                if (it.id == event.id) it.copy(args = safeToolPayloadSummary(event.delta, result = false).orEmpty()) else it
             }
-        ).withActivity("Argomenti tool aggiornati.")
+        ).withTimelineTool(event.id, null) { it.copy(args = safeToolPayloadSummary(event.delta, result = false).orEmpty()) }
         is ChatStreamEvent.ToolCallEnd -> copy(
             status = "Tool completato.",
             toolCalls = toolCalls.map {
                 if (it.id == event.id) it.copy(status = "completato") else it
             }
-        ).withActivity("Tool completato.")
+        ).withTimelineTool(event.id, null) { it.copy(status = "completato") }
         is ChatStreamEvent.ToolResult -> copy(
             status = "Risultato tool ricevuto.",
             toolCalls = upsertToolResult(toolCalls, event)
-        ).withActivity("Risultato tool ricevuto.")
+        ).withTimelineTool(event.id ?: event.name ?: "tool-result", event.name) {
+            it.copy(result = safeToolPayloadSummary(event.output, result = true), status = "risultato pronto")
+        }
         is ChatStreamEvent.ResponseId -> copy(responseId = event.id).withActivity("Response id: ${event.id}")
         is ChatStreamEvent.RunId -> copy(activeRunId = event.id).withActivity("Run id: ${event.id}")
         is ChatStreamEvent.VisualBlocks -> copy(
@@ -245,8 +284,9 @@ data class StreamingState(
             promptProgressTotalTokens = event.totalTokens,
             promptProgressCachedTokens = event.cachedTokens,
             promptProgressTimeMs = event.timeMs,
-            status = friendlyActivityStatus(event.label.ifBlank { "Elaborazione prompt" })
-        ).withActivity("Elaborazione prompt ${event.percent}%")
+            status = friendlyActivityStatus(event.label.ifBlank { "Elaborazione prompt" }),
+            activityTimeline = appendPromptProgressActivity(event)
+        )
         is ChatStreamEvent.Done -> copy(
             text = stripReasoningArtifacts(text),
             stats = event.stats,
@@ -287,11 +327,11 @@ private fun StreamingState.withActivity(message: String?): StreamingState {
 private fun upsertToolResult(tools: List<ToolCallState>, event: ChatStreamEvent.ToolResult): List<ToolCallState> {
     val id = event.id ?: event.name ?: "tool-result"
     if (tools.none { it.id == id }) {
-        return tools + ToolCallState(id = id, name = event.name ?: id, status = "risultato pronto", result = event.output)
+        return tools + ToolCallState(id = id, name = event.name ?: id, status = "risultato pronto", result = safeToolPayloadSummary(event.output, result = true))
     }
     return tools.map {
         if ((event.id != null && it.id == event.id) || (event.id == null && event.name != null && it.name == event.name)) {
-            it.copy(result = event.output, status = "risultato pronto")
+            it.copy(result = safeToolPayloadSummary(event.output, result = true), status = "risultato pronto")
         } else {
             it
         }
@@ -304,6 +344,86 @@ private fun mergeVisualBlocks(current: List<VisualBlock>, incoming: List<VisualB
     return current + incoming.filter {
         seen.add(if (it.mediaUrl.isNotBlank()) "${it.type}:media:${it.mediaUrl}" else it.id)
     }
+}
+
+private fun StreamingState.appendReasoningActivity(delta: String): List<AssistantActivity> {
+    if (delta.isEmpty()) return activityTimeline
+    val last = activityTimeline.lastOrNull()
+    return if (last?.kind == AssistantActivity.Kind.Reasoning) {
+        boundedTimeline(activityTimeline.dropLast(1) + last.copy(text = mergeTextDelta(last.text, delta)))
+    } else {
+        boundedTimeline(activityTimeline + AssistantActivity(AssistantActivity.Kind.Reasoning, text = delta))
+    }
+}
+
+private fun StreamingState.appendReasoningSnapshotActivity(snapshot: String): List<AssistantActivity> {
+    if (snapshot.isEmpty()) return activityTimeline
+    val last = activityTimeline.lastOrNull()
+    return if (last?.kind == AssistantActivity.Kind.Reasoning) {
+        boundedTimeline(activityTimeline.dropLast(1) + last.copy(text = mergeTextSnapshot(last.text, snapshot)))
+    } else {
+        boundedTimeline(activityTimeline + AssistantActivity(AssistantActivity.Kind.Reasoning, text = snapshot))
+    }
+}
+
+private fun StreamingState.appendPromptProgressActivity(event: ChatStreamEvent.PromptProgress): List<AssistantActivity> {
+    if (event.estimated) return activityTimeline
+    val details = buildList {
+        if (event.processedTokens != null && event.totalTokens != null && event.totalTokens > 0) add("${event.processedTokens}/${event.totalTokens} tok")
+        if (event.cachedTokens != null && event.cachedTokens > 0) add("cache ${event.cachedTokens}")
+        if (event.timeMs != null && event.timeMs >= 0) add("${String.format(java.util.Locale.US, "%.1f", event.timeMs / 1000.0)}s")
+    }
+    val label = friendlyActivityStatus(event.label.ifBlank { "Elaborazione prompt" })
+    val text = "$label ${event.percent.coerceIn(0, 100)}%" + if (details.isEmpty()) "" else " (${details.joinToString(", ")})"
+    val last = activityTimeline.lastOrNull()
+    return if (last?.kind == AssistantActivity.Kind.PromptProgress) {
+        boundedTimeline(activityTimeline.dropLast(1) + last.copy(text = text))
+    } else {
+        boundedTimeline(activityTimeline + AssistantActivity(AssistantActivity.Kind.PromptProgress, text = text))
+    }
+}
+
+private fun StreamingState.withTimelineTool(id: String, name: String?, update: (ToolCallState) -> ToolCallState): StreamingState {
+    val index = activityTimeline.indexOfLast {
+        it.kind == AssistantActivity.Kind.Tool &&
+            (it.tool?.id == id || (name != null && it.tool?.name == name))
+    }
+    val current = index.takeIf { it >= 0 }?.let { activityTimeline[it].tool }
+    val tool = update(current ?: ToolCallState(id, name ?: id))
+    val next = if (index >= 0) {
+        activityTimeline.toMutableList().also { it[index] = it[index].copy(tool = tool) }
+    } else {
+        activityTimeline + AssistantActivity(AssistantActivity.Kind.Tool, tool = tool)
+    }
+    return copy(activityTimeline = boundedTimeline(next))
+}
+
+private fun boundedTimeline(items: List<AssistantActivity>): List<AssistantActivity> {
+    val bounded = items.map { item ->
+        item.copy(
+            text = takeNewestActivityText(item.text),
+            tool = item.tool?.copy(
+                args = takeNewestActivityText(item.tool.args),
+                result = item.tool.result?.let(::takeNewestActivityText)
+            )
+        )
+    }.toMutableList()
+    while (bounded.size > MAX_ACTIVITY_TIMELINE_ENTRIES || activityTimelineChars(bounded) > MAX_ACTIVITY_TIMELINE_CHARS) {
+        if (bounded.size == 1) break
+        bounded.removeAt(0)
+    }
+    return bounded
+}
+
+private fun activityTimelineChars(items: List<AssistantActivity>): Int = items.sumOf {
+    it.text.length + (it.tool?.args?.length ?: 0) + (it.tool?.result?.length ?: 0)
+}
+
+private fun takeNewestActivityText(value: String): String {
+    if (value.length <= MAX_ACTIVITY_ENTRY_CHARS) return value
+    var start = value.length - MAX_ACTIVITY_ENTRY_CHARS
+    if (start < value.length && start > 0 && Character.isHighSurrogate(value[start - 1]) && Character.isLowSurrogate(value[start])) start++
+    return value.substring(start)
 }
 
 internal fun mergeTextDelta(current: String, delta: String): String {

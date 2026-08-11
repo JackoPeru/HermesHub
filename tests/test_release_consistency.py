@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.183"
-EXPECTED_ANDROID_VERSION_CODE = 187
+EXPECTED_VERSION = "0.6.184"
+EXPECTED_ANDROID_VERSION_CODE = 188
 
 
 def read(relative_path: str) -> str:
@@ -96,7 +96,11 @@ class ReleaseConsistencyTests(unittest.TestCase):
             self.assertFalse((ROOT / stale_file).exists(), stale_file)
 
         wrapper = read("src/NemoclawChat.Android/gradle/wrapper/gradle-wrapper.properties")
-        self.assertIn("gradle-9.6.1-bin.zip", wrapper)
+        self.assertIn("gradle-9.7.0-bin.zip", wrapper)
+        self.assertIn(
+            "distributionSha256Sum=84fbba45c7f4c64abc77460e1c00f541e9f960e3c7ed2538f1ede19eacd873ae",
+            wrapper,
+        )
         plugins = read("src/NemoclawChat.Android/build.gradle.kts")
         self.assertIn('version "9.2.0"', plugins)
         self.assertIn('version "2.3.21"', plugins)
@@ -155,18 +159,29 @@ class ReleaseConsistencyTests(unittest.TestCase):
         for required_dat_manifest_entry in (
             'android.permission.BLUETOOTH"',
             'android.permission.BLUETOOTH_CONNECT"',
-            'com.meta.wearable.mwdat.DAM_ENABLED',
+            'com.meta.wearable.mwdat.DAM_ENABLED" android:value="false"',
         ):
             self.assertIn(required_dat_manifest_entry, android_manifest)
         self.assertIn("Wearables.checkPermissionStatus(Permission.CAMERA)", dat_frame_source)
         self.assertIn("createdStream.errorStream.collect", dat_frame_source)
         self.assertIn("StreamState.STREAMING", dat_frame_source)
+        self.assertIn("Wearables.registrationState.first", dat_frame_source)
+        self.assertIn("Wearables.devices.flatMapLatest(::connectedDeviceEvents)", dat_frame_source)
+        self.assertIn("emitAll(merge(*metadataFlows.toTypedArray()))", dat_frame_source)
+        self.assertIn("LINK_STABILIZATION_MILLIS", dat_frame_source)
+        self.assertIn("STREAM_READY_TIMEOUT_MILLIS", dat_frame_source)
         self.assertNotIn("STARTUP_ATTEMPTS", dat_frame_source)
         self.assertNotIn("STARTUP_RETRY_DELAY_MILLIS", dat_frame_source)
         self.assertIn("MetaWearablesRuntime.initialize(appContext)", dat_frame_source)
         self.assertIn("MetaWearablesRuntime.initialize(activity.applicationContext)", dat_setup_bridge)
         self.assertIn("WearablesError.ALREADY_INITIALIZED", dat_runtime)
         self.assertIn("AtomicBoolean(false)", dat_runtime)
+        jarvis_controller = read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/jarvis/JarvisSessionController.kt"
+        )
+        self.assertIn("routeVoiceBluetooth(context, false)", jarvis_controller)
+        self.assertNotIn("routeVoiceBluetooth(context, true)", jarvis_controller)
+        self.assertIn("FRAME_SOURCE_START_TIMEOUT_MILLIS = 60_000L", jarvis_controller)
         meta_dat_root = ROOT / "src/NemoclawChat.Android/app/src/metaDat/java"
         initialize_callers = sorted(
             path.relative_to(ROOT).as_posix()
@@ -241,13 +256,80 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn("exportLocalBackup(context)", main)
         self.assertNotIn("exportLocalBackup(context, apiKey)", main)
 
+    def test_activity_timeline_uses_redacted_cross_platform_wire_schema(self) -> None:
+        android_stream = read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStream.kt"
+        )
+        android_archive = read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
+        )
+        windows_archive = read("src/NemoclawChat.Windows/Services/ChatArchiveStore.cs")
+        windows_sync = read("src/NemoclawChat.Windows/Services/GatewayService.cs")
+
+        self.assertIn("safeToolPayloadSummary", android_stream)
+        self.assertIn("SAFE_TOOL_ARGUMENTS_SUMMARY", android_stream)
+        self.assertIn("SAFE_TOOL_RESULT_SUMMARY", android_stream)
+        self.assertIn("redactToolRawEvent", android_stream)
+        for field in ("kind", "text", "toolId", "toolName", "toolArguments", "toolResult", "toolStatus"):
+            self.assertIn(f'.put("{field}"', android_archive)
+            self.assertIn(f'JsonPropertyName("{field}")', windows_archive)
+        self.assertIn('"reasoning"', android_archive)
+        self.assertIn('"progress"', android_archive)
+        self.assertIn('"tool"', android_archive)
+        self.assertIn("AssistantActivityRedaction.CanonicalizeTimeline", windows_sync)
+        self.assertIn("RedactRawEvent", windows_archive)
+
+    def test_activity_timeline_sync_raw_event_and_checkpoint_recovery_are_fail_closed(self) -> None:
+        android_stream = read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStream.kt"
+        )
+        android_archive = read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
+        )
+        windows_archive = read("src/NemoclawChat.Windows/Services/ChatArchiveStore.cs")
+        windows_sync = read("src/NemoclawChat.Windows/Services/GatewayService.cs")
+        windows_home = read("src/NemoclawChat.Windows/Pages/HomePage.xaml.cs")
+
+        self.assertIn(
+            "activityTimeline = AssistantActivityRedaction.CanonicalizeTimeline(message.ActivityTimeline)",
+            windows_sync,
+        )
+        self.assertIn("rawEvents = (message.RawEvents ?? [])", windows_sync)
+        self.assertIn(".Select(AssistantActivityRedaction.RedactRawEvent)", windows_sync)
+        self.assertIn('kind = kind == "promptprogress" ? "progress" : kind;', windows_archive)
+        self.assertIn("Name = SafeRawEventName", windows_archive)
+        self.assertIn("Json = SafeRawEventJson", windows_archive)
+        self.assertIn("SanitizeActivityPayloads(ordered);", windows_archive)
+
+        self.assertIn("internal const val SAFE_RAW_EVENT_JSON", android_stream)
+        self.assertIn("return SAFE_RAW_EVENT_JSON", android_stream)
+        self.assertIn("private fun safeRawHermesEvent", android_archive)
+        self.assertIn("rawEvents += safeRawHermesEvent()", android_archive)
+        self.assertIn('obj.optJSONArray("RawEvents")', android_archive)
+        self.assertIn("SAFE_RAW_EVENT_NAME", android_archive)
+        self.assertIn('sourceRunId = "",', android_archive)
+        self.assertNotIn("sourceRunId = message.rawEvents", android_archive)
+        self.assertIn('!message.TryGetProperty("RawEvents", out rawEvents)', windows_sync)
+        self.assertIn("?.Select(AssistantActivityRedaction.RedactRawEvent)", windows_sync)
+
+        self.assertIn("bubble.ActivityTimeline.Count > 0 || finalTextBuilder.Length > 0", windows_home)
+        self.assertIn("localState.activityTimeline.isNotEmpty() || localState.text.isNotBlank()", android_archive)
+        self.assertIn("if (finalState.activityTimeline.isNotEmpty() || finalText.isNotEmpty()", android_archive)
+
     def test_android_gateway_secret_storage_fails_closed(self) -> None:
         main = read(
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
         )
         self.assertIn("private fun saveGatewaySecret(context: Context, secret: String?): Boolean", main)
         self.assertIn("}.getOrNull() ?: return false", main)
-        self.assertIn("if (!saveGatewaySecret(context, apiKey))", main)
+        self.assertIn("val saved = withContext(Dispatchers.IO) {", main)
+        self.assertIn("val secretSaved = saveGatewaySecret(context, candidateSecret)", main)
+        secret_save = main.index("val secretSaved = saveGatewaySecret(context, candidateSecret)")
+        save_start = main.rfind("val saved = withContext(Dispatchers.IO) {", 0, secret_save)
+        save_block = main[save_start : main.index('Text("Salva")', secret_save)]
+        self.assertIn("if (!saved) {", save_block)
+        self.assertIn("onSave(candidate)", save_block)
+        self.assertLess(save_block.index("if (!saved) {"), save_block.index("onSave(candidate)"))
         self.assertIn("Credenziale non scritta in chiaro", main)
         self.assertNotIn("}.getOrDefault(normalized)", main)
 
@@ -260,10 +342,8 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn("if (!isValidGatewayProbeUrl(url)) return false", main)
         self.assertIn("connected = gatewayAvailable", main)
         self.assertNotIn("connected = online", main)
-        self.assertIn(
-            'if (connected) "Gateway disponibile" else "Rete non disponibile"',
-            main,
-        )
+        self.assertIn("gatewayRuntimeLabel(connected, gatewayRuntime)", main)
+        self.assertIn('resolveHermesUrl(settings, "/v1/hub/runtime")', main)
         self.assertIn(
             "if (connected) AppColors.Success else AppColors.Error",
             main,

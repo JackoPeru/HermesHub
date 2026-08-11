@@ -29,10 +29,13 @@ UPDATER_REQUIRED_FILES = (
     "hermes-hub-linux.sh",
     "patch-hermes-gateway-native.py",
     "hermes-hub-linux-update.sh",
+    "hermes-hub-agent-update.sh",
     "install-hermes-hub-linux.sh",
     "hermes-hub-linux.service",
     "hermes-hub-linux-update.service",
     "hermes-hub-linux-update.timer",
+    "hermes-hub-agent-update.service",
+    "hermes-hub-agent-update.timer",
     "hermes-wait-tailscale.sh",
     "hermes-wait-llama.sh",
     "hermes-power-monitor.sh",
@@ -383,6 +386,9 @@ class GatewayScriptTests(unittest.TestCase):
                 self.assertIn("if not encoded or estimated > max_bytes + 3:", patched)
                 self.assertIn("for offset in range(0, len(encoded), chunk_chars):", patched)
                 self.assertIn('"max_upload_mb": int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "0"))', patched)
+                self.assertIn('self._app.router.add_get("/v1/hub/runtime", self._handle_hub_runtime)', patched)
+                self.assertIn("def _hermes_hub_runtime_payload()", patched)
+                self.assertIn("async def _handle_hub_runtime", patched)
                 self.assertIn('"squashfs"', patched)
                 self.assertIn("device.startswith('/dev/loop')", patched)
             else:
@@ -1305,12 +1311,215 @@ class GatewayScriptTests(unittest.TestCase):
             self.skipTest("bash unavailable")
         for name in (
             "hermes-hub-linux-update.sh",
+            "hermes-hub-agent-update.sh",
             "hermes-hub-linux.sh",
             "hermes-power-monitor.sh",
             "hermes-wait-llama.sh",
             "hermes-wait-tailscale.sh",
         ):
             subprocess.run([bash, "-n", str(SCRIPTS / name)], check=True)
+
+    def _prepare_agent_updater_fixture(self, root: Path, bash: str, *, probe_payloads: list[str], fail_restart_on: int = 0) -> dict[str, object]:
+        """Create disposable Git repo plus fake network/service edges."""
+        home, agent, remote, bin_dir = (root / name for name in ("home", "agent", "remote.git", "bin"))
+        home.mkdir()
+        bin_dir.mkdir()
+        subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+        subprocess.run(["git", "init", "-b", "main", str(agent)], check=True, capture_output=True)
+        gateway = agent / "gateway" / "platforms"
+        gateway.mkdir(parents=True)
+        shutil.copyfile(CURRENT_UPSTREAM_GATEWAY_FIXTURE, gateway / "api_server.py")
+        subprocess.run(["git", "-C", str(agent), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(agent), "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-m", "base"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(agent), "remote", "add", "origin", str(remote)], check=True)
+        subprocess.run(["git", "-C", str(agent), "push", "-u", "origin", "main"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(remote), "symbolic-ref", "HEAD", "refs/heads/main"], check=True)
+        producer = root / "producer"
+        subprocess.run(["git", "clone", "--branch", "main", str(remote), str(producer)], check=True, capture_output=True)
+        (producer / "candidate.txt").write_text("candidate\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(producer), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(producer), "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-m", "candidate"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(producer), "push", "origin", "main"], check=True, capture_output=True)
+        real_python = Path(sys.executable)
+        python_wrapper = bin_dir / "python"
+        python_wrapper.write_text(f'#!/usr/bin/env bash\nif [ "$1" = "-m" ] && [ "${{2:-}}" = "pip" ]; then exit 0; fi\nexec "{real_python}" "$@"\n', encoding="utf-8")
+        hermes = bin_dir / "hermes"
+        hermes.write_text("#!/usr/bin/env bash\necho candidate\n", encoding="utf-8")
+        curl = bin_dir / "curl"
+        payload_file = root / "probe-payloads"
+        payload_file.write_text("\n---PAYLOAD---\n".join(probe_payloads), encoding="utf-8")
+        curl.write_text(textwrap.dedent("""\
+            #!/usr/bin/env bash
+            count_file="$FAKE_COUNTER_DIR/curl"
+            count=0; [ -f "$count_file" ] && count=$(cat "$count_file")
+            count=$((count + 1)); printf '%s' "$count" > "$count_file"
+            python3 - "$FAKE_PROBE_PAYLOADS" "$count" <<'PY'
+            import sys
+            chunks = open(sys.argv[1], encoding="utf-8").read().split("\\n---PAYLOAD---\\n")
+            print(chunks[min(int(sys.argv[2]) - 1, len(chunks) - 1)])
+            PY
+            """), encoding="utf-8")
+        systemctl = bin_dir / "systemctl"
+        systemctl.write_text(textwrap.dedent("""\
+            #!/usr/bin/env bash
+            count_file="$FAKE_COUNTER_DIR/systemctl"
+            count=0; [ -f "$count_file" ] && count=$(cat "$count_file")
+            count=$((count + 1)); printf '%s' "$count" > "$count_file"
+            [ "$FAKE_FAIL_RESTART_ON" = "$count" ] && exit 1
+            exit 0
+            """), encoding="utf-8")
+        for executable in (python_wrapper, hermes, curl, systemctl):
+            executable.chmod(0o755)
+        counter_dir = root / "counters"
+        counter_dir.mkdir()
+        bash_env = root / "agent-updater-env.sh"
+        bash_env.write_text(textwrap.dedent("""\
+            curl() {
+              local count_file="$FAKE_COUNTER_DIR/curl" count=0
+              [ -f "$count_file" ] && count=$(cat "$count_file")
+              count=$((count + 1)); printf '%s' "$count" > "$count_file"
+              python3 - "$FAKE_PROBE_PAYLOADS" "$count" <<'PY'
+            import sys
+            chunks = open(sys.argv[1], encoding="utf-8").read().split("\\n---PAYLOAD---\\n")
+            print(chunks[min(int(sys.argv[2]) - 1, len(chunks) - 1)])
+            PY
+            }
+            systemctl() {
+              local count_file="$FAKE_COUNTER_DIR/systemctl" count=0
+              [ -f "$count_file" ] && count=$(cat "$count_file")
+              count=$((count + 1)); printf '%s' "$count" > "$count_file"
+              [ "$FAKE_FAIL_RESTART_ON" = "$count" ] && return 1
+              return 0
+            }
+            sleep() { return 0; }
+            """), encoding="utf-8")
+        environment = os.environ.copy()
+        environment.update({
+            "PATH": f"{bash_path(bash, bin_dir)}:{environment['PATH']}",
+            "HERMES_HOME": bash_path(bash, home),
+            "HERMES_HUB_AGENT_ROOT": bash_path(bash, agent),
+            "HERMES_HUB_AGENT_VENV_BIN": bash_path(bash, bin_dir),
+            "HERMES_HUB_AGENT_COMMAND": bash_path(bash, hermes),
+            "HERMES_HUB_PATCHER": bash_path(bash, PATCHER_PATH),
+            "HERMES_HUB_API_KEY": "test-key",
+            "HERMES_HUB_UPDATE_PROBE_URL": "https://probe.invalid/v1/capabilities",
+            "HERMES_HUB_AGENT_UPDATE_PROBE_ATTEMPTS": "1",
+            "HERMES_HUB_AGENT_UPDATE_PROBE_SLEEP_SECONDS": "1",
+            "FAKE_COUNTER_DIR": bash_path(bash, counter_dir),
+            "FAKE_PROBE_PAYLOADS": bash_path(bash, payload_file),
+            "FAKE_FAIL_RESTART_ON": str(fail_restart_on),
+            "BASH_ENV": bash_path(bash, bash_env),
+        })
+        return {"agent": agent, "home": home, "environment": environment}
+
+    def _run_agent_updater(self, bash: str, fixture: dict[str, object], mode: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [bash, bash_path(bash, SCRIPTS / "hermes-hub-agent-update.sh"), mode],
+            env=fixture["environment"], text=True, capture_output=True,
+        )
+
+    def test_agent_updater_refuses_staged_and_untracked_before_fetch(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_agent_updater_fixture(Path(temporary), bash, probe_payloads=["{}"])
+            agent = fixture["agent"]
+            (agent / "staged.txt").write_text("do not reset\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(agent), "add", "staged.txt"], check=True)
+            staged = self._run_agent_updater(bash, fixture, "--apply")
+            self.assertEqual(2, staged.returncode)
+            self.assertIn("staged", staged.stderr)
+            self.assertTrue((agent / "staged.txt").exists())
+            subprocess.run(["git", "-C", str(agent), "reset", "--", "staged.txt"], check=True)
+            (agent / "untracked.txt").write_text("do not reset\n", encoding="utf-8")
+            untracked = self._run_agent_updater(bash, fixture, "--apply")
+            self.assertEqual(2, untracked.returncode)
+            self.assertIn("untracked", untracked.stderr)
+            self.assertTrue((agent / "untracked.txt").exists())
+
+    def test_agent_updater_cleans_verified_patcher_backups_without_allowing_user_files(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        valid = json.dumps({"object": "hermes.api_server.capabilities", "platform": "hermes-agent", "auth": {"type": "bearer"}, "runtime": {"mode": "server_agent"}, "features": {"hermes_native": True, "native_responses": True}, "endpoints": {"responses": {"method": "POST", "path": "/v1/responses"}}, "version": "candidate"})
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_agent_updater_fixture(Path(temporary), bash, probe_payloads=[valid, valid])
+            applied = self._run_agent_updater(bash, fixture, "--apply")
+            self.assertEqual(0, applied.returncode, applied.stdout + applied.stderr)
+            agent = fixture["agent"]
+            self.assertEqual([], list(agent.glob("gateway/platforms/api_server.py.bak-hermes-native-*")))
+            second_check = self._run_agent_updater(bash, fixture, "--check")
+            self.assertEqual(0, second_check.returncode, second_check.stdout + second_check.stderr)
+            user_file = agent / "user-owned.txt"
+            user_file.write_text("must survive\n", encoding="utf-8")
+            blocked = self._run_agent_updater(bash, fixture, "--check")
+            self.assertEqual(2, blocked.returncode)
+            self.assertIn("untracked", blocked.stderr)
+            self.assertTrue(user_file.exists())
+
+    def test_agent_updater_rejects_invalid_numeric_env_before_state_mutation(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_agent_updater_fixture(Path(temporary), bash, probe_payloads=["{}"])
+            fixture["environment"]["HERMES_HUB_AGENT_UPDATE_PROBE_ATTEMPTS"] = "zero"
+            result = self._run_agent_updater(bash, fixture, "--check")
+            self.assertEqual(2, result.returncode)
+            self.assertIn("HERMES_HUB_AGENT_UPDATE_PROBE_ATTEMPTS", result.stderr)
+            self.assertFalse((fixture["home"] / "hub_gateway_runtime.json").exists())
+
+    def test_agent_updater_healthy_state_clears_stale_failure(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        valid = json.dumps({"object": "hermes.api_server.capabilities", "platform": "hermes-agent", "auth": {"type": "bearer"}, "runtime": {"mode": "server_agent"}, "features": {"hermes_native": True, "native_responses": True}, "endpoints": {"responses": {"method": "POST", "path": "/v1/responses"}}, "version": "candidate"})
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_agent_updater_fixture(Path(temporary), bash, probe_payloads=["{}", valid])
+            state = fixture["home"] / "hub_gateway_runtime.json"
+            state.write_text(json.dumps({"failure": {"reason": "old"}, "status": "rolled_back"}), encoding="utf-8")
+            failed = self._run_agent_updater(bash, fixture, "--check")
+            self.assertNotEqual(0, failed.returncode)
+            rejected = json.loads(state.read_text(encoding="utf-8"))
+            self.assertNotEqual("healthy", rejected["status"])
+            self.assertIn("failure", rejected)
+            result = self._run_agent_updater(bash, fixture, "--check")
+            self.assertEqual(0, result.returncode, result.stderr)
+            current = json.loads(state.read_text(encoding="utf-8"))
+            self.assertEqual("healthy", current["status"])
+            self.assertNotIn("failure", current)
+
+    def test_agent_updater_keeps_third_party_dependencies_immutable(self):
+        updater = (SCRIPTS / "hermes-hub-agent-update.sh").read_text(encoding="utf-8")
+        self.assertIn('pip install --disable-pip-version-check --no-deps -e "${AGENT_ROOT}[all]"', updater)
+        self.assertGreaterEqual(updater.count('"$VENV_BIN/python" -m pip check'), 2)
+        self.assertIn("operator intervention required", updater)
+
+    def test_agent_updater_rejects_false_positive_probe_and_rolls_back(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        valid = json.dumps({"object": "hermes.api_server.capabilities", "platform": "hermes-agent", "auth": {"type": "bearer"}, "runtime": {"mode": "server_agent"}, "features": {"hermes_native": True, "native_responses": True}, "endpoints": {"responses": {"method": "POST", "path": "/v1/responses"}, "hermes_native": {"method": "POST", "path": "/v1/hermes/native"}}, "version": "candidate"})
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_agent_updater_fixture(Path(temporary), bash, probe_payloads=["{}", valid])
+            result = self._run_agent_updater(bash, fixture, "--apply")
+            self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            state = json.loads((fixture["home"] / "hub_gateway_runtime.json").read_text(encoding="utf-8"))
+            self.assertEqual("rolled_back", state["status"], result.stdout + result.stderr + repr(state))
+            self.assertIn("readiness probe", state["failure"]["reason"])
+
+    def test_agent_updater_surfaces_rollback_failure(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_agent_updater_fixture(Path(temporary), bash, probe_payloads=["{}"], fail_restart_on=2)
+            result = self._run_agent_updater(bash, fixture, "--apply")
+            self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            state = json.loads((fixture["home"] / "hub_gateway_runtime.json").read_text(encoding="utf-8"))
+            self.assertEqual("rollback_failed", state["status"])
+            self.assertIn("restart during rollback", state["failure"]["reason"])
 
 
 if __name__ == "__main__":

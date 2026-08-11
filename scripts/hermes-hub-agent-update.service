@@ -1,0 +1,14 @@
+[Unit]
+Description=Check or safely update Hermes Agent for Hermes Hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Automatic apply is transactional. Disable through a systemd override:
+# Environment=HERMES_HUB_AGENT_AUTO_UPDATE=false
+Environment=HERMES_HUB_AGENT_AUTO_UPDATE=true
+ExecStart=%h/.local/bin/hermes-hub-agent-update --auto
+# Includes isolated candidate validation, dependency compatibility checks, restart and
+# authenticated capability probes for both candidate and rollback.
+TimeoutStartSec=3600

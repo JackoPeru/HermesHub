@@ -90,13 +90,24 @@ internal fun StreamingBubbleView(
                 },
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            val showActivity = !state.isDone || state.hasThinking || state.thinking.isNotBlank() || (showToolCalls && state.toolCalls.isNotEmpty())
-            if (showActivity) {
-                HermesActivityExpander(state, showToolCalls, uiTickNs)
+            val timeline = state.activityTimeline.filter { showToolCalls || it.kind != AssistantActivity.Kind.Tool }
+            if (!state.isDone && timeline.isNotEmpty()) {
+                HermesActivityTimeline(timeline, active = true)
+            }
+            if (!state.isDone && timeline.isEmpty()) {
+                FlagRow(
+                    title = preGenerationStatusLabel(state.status, state.promptProgressPercent, 0.0),
+                    value = activityIndicator(state),
+                    shimmer = true
+                )
             }
 
             if (state.text.isNotEmpty()) {
                 MarkdownText(state.text, color = Color.White, fontSize = 15.sp)
+            }
+
+            if (state.isDone && timeline.isNotEmpty()) {
+                HermesActivityDisclosure(timeline)
             }
 
             val validBlocks = remember(state.visualBlocks) {
@@ -237,6 +248,68 @@ private fun preGenerationStatusLabel(status: String, progressPercent: Int?, elap
         normalized.contains("responses") || normalized.contains("protocollo") -> "Preparazione sessione Hermes"
         elapsedSec >= 1.0 -> "Attesa risposta dal modello"
         else -> status.ifBlank { "Invio prompt a Hermes" }
+    }
+}
+
+@Composable
+internal fun HermesActivityDisclosure(timeline: List<AssistantActivity>) {
+    var expanded by rememberSaveable(timeline.firstOrNull()?.hashCode(), timeline.size) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { expanded = !expanded },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Attività Hermes", color = AppColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text("${timeline.size}", color = AppColors.Muted, fontSize = 12.sp)
+            Spacer(Modifier.weight(1f))
+            Text(if (expanded) "Nascondi" else "Mostra", color = AppColors.Muted, fontSize = 12.sp)
+            Icon(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = if (expanded) "Chiudi attivita" else "Mostra attivita",
+                tint = AppColors.Muted, modifier = Modifier.size(16.dp))
+        }
+        if (expanded) HermesActivityTimeline(timeline, active = false)
+    }
+}
+
+@Composable
+internal fun HermesActivityTimeline(timeline: List<AssistantActivity>, active: Boolean) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        timeline.forEachIndexed { index, item ->
+            androidx.compose.runtime.key("${item.kind}-$index-${item.tool?.id.orEmpty()}") {
+                when (item.kind) {
+                    AssistantActivity.Kind.Reasoning -> ActivityTimelineText("Ragionamento", item.text, active, monospaced = true)
+                    AssistantActivity.Kind.PromptProgress -> ActivityTimelineText("Progresso", item.text, active, monospaced = false)
+                    AssistantActivity.Kind.Tool -> {
+                        val tool = item.tool
+                        if (tool != null) ToolActivityRow(tool)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityTimelineText(label: String, text: String, active: Boolean, monospaced: Boolean) {
+    Surface(
+        color = AppColors.Composer.copy(alpha = 0.62f),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (active) ShimmerText(label) else Text(label, color = AppColors.Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                text = text,
+                color = AppColors.Muted,
+                fontFamily = if (monospaced) FontFamily.Monospace else FontFamily.Default,
+                fontSize = 12.sp,
+                modifier = Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())
+            )
+        }
     }
 }
 

@@ -92,6 +92,7 @@ HERMES_HUB_STATE_PATH="${HERMES_HUB_STATE_PATH:-$HERMES_HOME/hub_state.json}"
 HERMES_HUB_MEMORY_PATH="${HERMES_HUB_MEMORY_PATH:-$HERMES_HOME/hub_memory.json}"
 HERMES_HUB_NOTIFICATIONS_PATH="${HERMES_HUB_NOTIFICATIONS_PATH:-$HERMES_HOME/hub_notifications.json}"
 HERMES_HUB_CONVERSATIONS_PATH="${HERMES_HUB_CONVERSATIONS_PATH:-$HERMES_HOME/hub_conversations.json}"
+HERMES_HUB_RUNTIME_STATE_PATH="${HERMES_HUB_RUNTIME_STATE_PATH:-$HERMES_HOME/hub_gateway_runtime.json}"
 HERMES_JARVIS_ENABLED="${HERMES_JARVIS_ENABLED:-false}"
 HERMES_JARVIS_MOCK_MODE="${HERMES_JARVIS_MOCK_MODE:-false}"
 HERMES_JARVIS_SINGLE_MODEL="${HERMES_JARVIS_SINGLE_MODEL:-true}"
@@ -319,6 +320,7 @@ export HERMES_HUB_STATE_PATH
 export HERMES_HUB_MEMORY_PATH
 export HERMES_HUB_NOTIFICATIONS_PATH
 export HERMES_HUB_CONVERSATIONS_PATH
+export HERMES_HUB_RUNTIME_STATE_PATH
 export HERMES_JARVIS_ENABLED HERMES_JARVIS_MOCK_MODE HERMES_JARVIS_SINGLE_MODEL
 export HERMES_JARVIS_FAST_BASE_URL HERMES_JARVIS_FAST_API_KEY HERMES_JARVIS_FAST_MODEL
 export HERMES_JARVIS_REASONING_BASE_URL HERMES_JARVIS_REASONING_API_KEY HERMES_JARVIS_REASONING_MODEL
@@ -369,7 +371,7 @@ managed_keys = [
     "GATEWAY_ALLOW_ALL_USERS", "TERMINAL_CWD", "HERMES_VIDEO_LIBRARY_PATH",
     "HERMES_NEWS_LIBRARY_PATH", "HERMES_HUB_UPLOAD_PATH", "HERMES_MEDIA_ROOTS",
     "HERMES_HUB_STATE_PATH", "HERMES_HUB_MEMORY_PATH", "HERMES_HUB_NOTIFICATIONS_PATH",
-    "HERMES_HUB_CONVERSATIONS_PATH", "HERMES_KOKORO_PRELOAD",
+    "HERMES_HUB_CONVERSATIONS_PATH", "HERMES_HUB_RUNTIME_STATE_PATH", "HERMES_KOKORO_PRELOAD",
     "HERMES_KOKORO_PRELOAD_REQUIRED", "HERMES_KOKORO_PRELOAD_TIMEOUT_SECONDS", "HERMES_KOKORO_REQUIRE_GPU",
     "HERMES_JARVIS_ENABLED", "HERMES_JARVIS_MOCK_MODE", "HERMES_JARVIS_SINGLE_MODEL",
     "HERMES_JARVIS_FAST_BASE_URL", "HERMES_JARVIS_FAST_API_KEY", "HERMES_JARVIS_FAST_MODEL",
@@ -479,6 +481,47 @@ if [ "$HERMES_NATIVE_GATEWAY_PATCH" = "true" ]; then
   fi
   python3 "$PATCHER"
 fi
+
+# State is shared with the authenticated /v1/hub/runtime endpoint.  It is
+# deliberately metadata-only: no filesystem paths, logs, or credentials.
+AGENT_ROOT="${HERMES_HUB_AGENT_ROOT:-$HERMES_HOME/hermes-agent}"
+AGENT_VERSION="$(hermes --version 2>/dev/null | head -n 1 | tr -d '\r' || true)"
+AGENT_REVISION="$(git -C "$AGENT_ROOT" rev-parse --short=12 HEAD 2>/dev/null || true)"
+HUB_VERSION="$(tr -d '[:space:]' < "$SCRIPT_DIR/VERSION" 2>/dev/null || true)"
+python3 - "$HERMES_HUB_RUNTIME_STATE_PATH" "$HUB_VERSION" "$AGENT_VERSION" "$AGENT_REVISION" <<'PY'
+import json
+import os
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+path = Path(sys.argv[1]).expanduser()
+try:
+    current = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+except Exception:
+    current = {}
+if not isinstance(current, dict):
+    current = {}
+current.update({
+    "schema_version": 1,
+    "status": "healthy",
+    "gateway_version": sys.argv[2],
+    "agent_version": sys.argv[3],
+    "agent_revision": sys.argv[4],
+    "last_checked_at": time.time(),
+    "last_success_at": time.time(),
+})
+path.parent.mkdir(parents=True, exist_ok=True)
+with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=path.name + ".", delete=False) as handle:
+    json.dump(current, handle, ensure_ascii=False, sort_keys=True)
+    handle.write("\n")
+    handle.flush()
+    os.fsync(handle.fileno())
+    temporary = Path(handle.name)
+os.replace(temporary, path)
+os.chmod(path, 0o600)
+PY
 
 echo "Hermes Gateway API: http://$HERMES_API_HOST:$HERMES_API_PORT/v1"
 echo "Provider: $HERMES_INFERENCE_PROVIDER"

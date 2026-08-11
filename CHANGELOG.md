@@ -2,7 +2,14 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
-## Unreleased
+## 0.6.184 - 2026-08-11
+
+- Aggiunta timeline attivita' stile Codex per ragionamento, avanzamento e tool, disponibile durante streaming e negli archivi Windows/Android senza esporre eventi grezzi come risposta finale.
+- Android carica impostazioni, credenziali Keystore e profilo voce prima dell'interfaccia; la migrazione conserva dati e nessuna credenziale viene scritta in chiaro se Keystore non e' disponibile.
+- Stato gateway mostra solo disponibilita' autenticata reale e stato aggiornamento; gateway irraggiungibile mantiene esattamente `Rete non disponibile`.
+- Rafforzato lifecycle Ray-Ban Meta DAT: permesso camera, stabilizzazione link, timeout stream e chiusure osservate; DAM resta disabilitato per percorso camera-only.
+- Gateway Linux include updater separato e transazionale Hermes Agent, con rollback, quarantena revisioni fallite, check capability autenticato e endpoint runtime privo di segreti.
+- Pacchetto Linux include nuovi script e timer updater Agent; aggiornamento gateway conserva e reinstalla le unit correlate.
 
 ## 0.6.183 - 2026-08-02
 

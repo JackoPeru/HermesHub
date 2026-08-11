@@ -20,6 +20,8 @@ public sealed partial class MainWindow : Window
     private readonly HubNotificationPoller _notificationPoller;
     private readonly ChatArchiveSyncService _archiveSyncService;
     private readonly WakeWordListener _wakeWordListener;
+    private readonly CancellationTokenSource _gatewayRuntimeCancellation = new();
+    private readonly Task _gatewayRuntimePollTask;
 
     public MainWindow()
     {
@@ -44,6 +46,7 @@ public sealed partial class MainWindow : Window
         _archiveSyncService.Start();
         RefreshWakeWordListener();
         RefreshRecentChats();
+        _gatewayRuntimePollTask = RefreshGatewayRuntimeAsync(_gatewayRuntimeCancellation.Token);
     }
 
     private async void MainWindow_Closed(object sender, WindowEventArgs args)
@@ -55,6 +58,10 @@ public sealed partial class MainWindow : Window
         _wakeWordListener.Detected -= WakeWordListener_Detected;
         ContentFrame.Navigated -= ContentFrame_Navigated;
         _notificationPoller.Stop();
+        _gatewayRuntimeCancellation.Cancel();
+        try { await _gatewayRuntimePollTask; }
+        catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"[MainWindow] gateway runtime poll cleanup error: {ex}"); }
+        finally { _gatewayRuntimeCancellation.Dispose(); }
         try { await _wakeWordListener.DisposeAsync(); }
         catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"[MainWindow] wake listener cleanup error: {ex}"); }
         try { await _archiveSyncService.StopAsync(); }
@@ -62,6 +69,61 @@ public sealed partial class MainWindow : Window
         try { SaveWindowState(); }
         catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"[MainWindow] state cleanup error: {ex}"); }
         Closed -= MainWindow_Closed;
+    }
+
+    private async Task RefreshGatewayRuntimeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var runtime = await GatewayService.GetRuntimeInfoAsync(AppSettingsStore.Load(), cancellationToken);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                if (DispatcherQueue.HasThreadAccess)
+                {
+                    ApplyGatewayRuntime(runtime);
+                }
+                else
+                {
+                    DispatcherQueue.TryEnqueue(() => ApplyGatewayRuntime(runtime));
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(runtime.Available ? 15 : 5), cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"[MainWindow] gateway runtime poll error: {ex}");
+        }
+    }
+
+    private void ApplyGatewayRuntime(GatewayRuntimeInfo runtime)
+    {
+        if (_closing) return;
+        if (!runtime.Available)
+        {
+            GatewayRuntimeStatus.Text = "Gateway non disponibile";
+            return;
+        }
+
+        var version = string.IsNullOrWhiteSpace(runtime.AgentVersion) ? "versione non letta" : runtime.AgentVersion;
+        var updateStatus = runtime.Status.Trim().ToLowerInvariant() switch
+        {
+            "rolled_back" => " · rollback",
+            "rollback_failed" => " · ripristino fallito",
+            "blocked" => " · aggiornamento bloccato",
+            "unhealthy" => " · stato da verificare",
+            "updating" => " · aggiornamento in corso",
+            _ => string.Empty
+        };
+        GatewayRuntimeStatus.Text = $"Gateway disponibile · Agent {version}{updateStatus}";
     }
 
     private void SaveWindowState()

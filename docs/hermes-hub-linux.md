@@ -17,8 +17,10 @@ Percorsi principali:
 ~/.local/share/hermes-hub-gateway/releases/<versione>
 ~/.local/share/hermes-hub-gateway/current
 ~/.local/bin/hermes-hub-linux-update
+~/.local/bin/hermes-hub-agent-update
 ~/.config/systemd/user/hermes-hub.service
 ~/.config/systemd/user/hermes-hub-linux-update.timer
+~/.config/systemd/user/hermes-hub-agent-update.timer
 ~/.hermes/.env
 ```
 
@@ -79,7 +81,34 @@ Contratto, variabili e benchmark: [Hermes Jarvis Mode](jarvis-mode.md).
 ```bash
 ~/.local/bin/hermes-hub-linux-update --check
 ~/.local/bin/hermes-hub-linux-update --restart
+~/.local/bin/hermes-hub-agent-update --check
 ```
+
+`hermes-hub-agent-update` is separate from gateway process. Its timer checks
+hourly and applies transactionally; set `HERMES_HUB_AGENT_AUTO_UPDATE=false`
+in a systemd override to leave it in check-only mode. Before any source mutation
+it refuses staged, untracked, or unrelated Hermes Agent changes. The only allowed
+unstaged changes are the exact output of the two Hub-managed patch targets.
+It also validates bounded numeric probe settings and validates candidate
+patchability in an isolated Git worktree.
+
+Readiness is an API-key authenticated `/v1/capabilities` contract check, not a
+generic JSON/HTTP-success check: it requires Hermes Agent identity, bearer auth,
+server-agent runtime, native features and a native/responses endpoint. If a
+candidate exposes a capability version, it must match the installed candidate.
+Automatic updates install only the candidate editable package with `--no-deps`
+and run `pip check`: they never update, add or remove third-party packages. If
+the candidate needs incompatible dependencies, it rolls back/fails and requires
+operator intervention. Failure quarantines that revision, restores the previous
+editable revision/Hub patch, restarts it and probes it again before recording `rolled_back` in
+`/v1/hub/runtime`. Any restore, restart or rollback-probe error records
+`rollback_failed` and exits nonzero. A later healthy check clears stale
+`failure` state.
+
+The patcher creates sibling `*.bak-hermes-native-<timestamp>-<pid>-<ns>` files
+while replacing source atomically. The updater removes only backups whose exact
+content matches the active Git revision; every other untracked file remains a
+hard block.
 
 L'updater cerca la release piu' recente che contenga un asset Linux, verifica versione, dimensione e SHA-256, estrae su staging, aggiorna il symlink `current`, riavvia e fa health probe. Se il probe fallisce ripristina la release precedente.
 

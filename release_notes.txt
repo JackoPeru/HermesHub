@@ -1,11 +1,15 @@
-Hermes Hub 0.6.183 (gateway upstream e stato rete reale)
+Hermes Hub 0.6.184 (timeline attivita', aggiornamenti transazionali e hardening DAT)
 
-- Gateway: compatibilita' con Hermes Agent `0a62610f1`, inclusi `agent_kwargs`, limite token per route e autenticazione profile-aware.
-- Affidabilita': eliminato il crash-loop del patcher; patch transazionale, compilabile e idempotente su upstream precedente e corrente.
-- Android: indicatore rete basato su probe autenticato `/v1/capabilities`, con stato rosso quando il gateway non risponde o rifiuta la credenziale.
-- Versioni: Windows/AdminBridge `0.6.183`; Android `versionName 0.6.183`, `versionCode 187`.
-- Asset: `HermesHub-0.6.183-android.apk`, `NemoclawChat.Windows_0.6.183.0_x64.msix`, `HermesHub-0.6.183-linux-gateway.tar.gz`.
-- SHA-256 Android: `5d58ddc59f561b427ed903a3ae587dfe02153a231c9260575e9d782e88c52d93`.
-- SHA-256 Windows: `ee0ee572af97140c481fa0deca4898cfa36999dd2cb19a2b9d3f1c2183eff9e4`.
-- SHA-256 Linux gateway: `9fb4deaa5405839ddd991c7448a08426897af4081f934656f8040cd2e72af36a`.
-- Verifica live: gateway `0.6.182` hotfix attivo con capabilities, TTS streaming e STT verificati; updater mantiene rollback `0.6.179`.
+- Chat Windows e Android mostrano una timeline attivita' in stile Codex per ragionamento, avanzamento e tool; e' persistita nell'archivio e resta separata dalla risposta finale.
+- Timeline sicura e interoperabile: argomenti e risultati tool sono ridotti a riassunti non sensibili prima di UI, archivio e sync; Android e Windows condividono lo stesso schema e migrano le forme precedenti.
+- Android attende caricamento impostazioni, chiave Keystore e profilo voce; migrazione e reset preservano dati previsti, e il fallimento Keystore impedisce salvataggi in chiaro.
+- Il badge rete resta basato su probe autenticato; assenza gateway continua a mostrare esattamente `Rete non disponibile`. Il client legge anche stato runtime aggiornamento senza rivelare percorsi, log o credenziali.
+- Lifecycle Ray-Ban Meta DAT piu' deterministico: selezione device connesso, camera permission, attesa stream, osservazione errori/chiusure e DAM disabilitato per camera-only.
+- Linux aggiunge updater Hermes Agent indipendente: controlli Git/worktree, candidate in worktree isolato, capability autenticata, installazione `--no-deps`, `pip check`, rollback/quarantena e runtime state atomico.
+- Asset Linux include script e unit systemd dell'updater Agent e aggiorna atomicamente anche tali unit.
+- Evidenza non eseguita: runtime dell'APK finale (emulatore escluso su richiesta), prova fisica Ray-Ban dopo le modifiche lifecycle, runtime dell'MSIX finale a parita' di versione installata e gateway live con chat, TTS, STT, archivio e SSE.
+- Versioni: Windows/AdminBridge `0.6.184`; Android `versionName 0.6.184`, `versionCode 188`.
+- Asset: `HermesHub-0.6.184-android.apk`, `NemoclawChat.Windows_0.6.184.0_x64.msix`, `HermesHub-0.6.184-linux-gateway.tar.gz`.
+- SHA-256 Android: `b7525d468c167e51c3e567eae6edf79bcfb60fc1ce744ddeab78ef617229afe8`.
+- SHA-256 Windows: `2fb87de3740c484cfaea74282957e811474934b0bfd215d4125e4124d04c71ea`.
+- SHA-256 Linux gateway: `d7e4d8fcee259fa579006ff52330f87acda96ff9f477492c24d76d80626e22ed`.

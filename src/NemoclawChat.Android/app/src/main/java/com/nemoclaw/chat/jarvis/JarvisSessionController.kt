@@ -183,6 +183,10 @@ internal object JarvisSessionController {
             // Jarvis owns the microphone/audio route for its lifetime.
             VoiceTurnController.interrupt()
             stopVoiceForegroundService(context)
+            // DAT camera sessions can be ended by the glasses when HFP/SCO owns their
+            // Bluetooth link. Jarvis therefore keeps its input on the phone microphone;
+            // ordinary media output remains routed by Android.
+            routeVoiceBluetooth(context, false)
             // Must happen synchronously before the first network suspension, but
             // only after local validation and runtime permissions have succeeded.
             startService(context)
@@ -232,15 +236,13 @@ internal object JarvisSessionController {
                 initiativeMode = remote.mode,
                 visionActive = !remote.viewPaused,
                 deviceStatus = frameSource.label,
-                audioRoute = "Telefono / Bluetooth Android",
+                audioRoute = "Microfono telefono; audio multimediale di sistema",
                 gatewayStatus = "Raggiungibile",
                 singleModel = remoteCapabilities.singleModel,
                 fastModelAvailable = remoteCapabilities.fastModelConfigured,
                 reasoningModelAvailable = remoteCapabilities.reasoningModelConfigured,
                 error = null
             )
-            val profile = loadVoiceProfile(context, configuredSettings.activeProjectId)
-            if (profile.bluetooth) routeVoiceBluetooth(context, true)
             sessionJob = controllerScope.launch {
                 launch { eventLoop(context, gateway, remote.id, configuredSettings, configuredApiKey) }
                 launch { voiceLoop(context, gateway, remote.id, configuredSettings, configuredApiKey) }
@@ -453,8 +455,6 @@ internal object JarvisSessionController {
         source = null
         val sessionId = old.sessionId
         if (notifyGateway && !sessionId.isNullOrBlank()) runCatching { api?.deleteSession(sessionId) }
-        val profile = settings?.let { loadVoiceProfile(context, it.activeProjectId) }
-        if (profile?.bluetooth == true) routeVoiceBluetooth(context, false)
         speaking.set(false)
         frameSampler.reset()
         rollingFrames.clear()
@@ -505,6 +505,8 @@ internal object JarvisSessionController {
         context.startService(Intent(context, JarvisSessionService::class.java).setAction(JarvisSessionService.ACTION_REFRESH))
     }
 
-    private const val FRAME_SOURCE_START_TIMEOUT_MILLIS = 45_000L
+    // DAT readiness includes registration, device-link stabilization and STREAMING confirmation.
+    // Keep controller deadline above their bounded total so source cleanup returns its own reason.
+    private const val FRAME_SOURCE_START_TIMEOUT_MILLIS = 60_000L
     private const val JARVIS_STT_BEAM_SIZE = 1
 }

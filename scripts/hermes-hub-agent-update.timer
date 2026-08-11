@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly guarded Hermes Agent update check
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

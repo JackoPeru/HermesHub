@@ -175,7 +175,7 @@ record_failed_release() {
 
 restore_units() {
   local name
-  for name in hermes-hub.service hermes-hub-linux-update.service hermes-hub-linux-update.timer hermes-power-monitor.service; do
+  for name in hermes-hub.service hermes-hub-linux-update.service hermes-hub-linux-update.timer hermes-hub-agent-update.service hermes-hub-agent-update.timer hermes-power-monitor.service; do
     if [ -f "$TMP_DIR/unit-backup/$name" ]; then
       atomic_install "$TMP_DIR/unit-backup/$name" "$SERVICE_DIR/$name" 0644 || true
     elif [ -f "$TMP_DIR/unit-backup/$name.missing" ]; then
@@ -477,10 +477,13 @@ declare -A FILE_MODE=(
   [hermes-hub-linux.sh]=0755
   [patch-hermes-gateway-native.py]=0644
   [hermes-hub-linux-update.sh]=0755
+  [hermes-hub-agent-update.sh]=0755
   [install-hermes-hub-linux.sh]=0755
   [hermes-hub-linux.service]=0644
   [hermes-hub-linux-update.service]=0644
   [hermes-hub-linux-update.timer]=0644
+  [hermes-hub-agent-update.service]=0644
+  [hermes-hub-agent-update.timer]=0644
   [hermes-wait-tailscale.sh]=0755
   [hermes-wait-llama.sh]=0755
   [hermes-power-monitor.sh]=0755
@@ -510,7 +513,7 @@ if [ -L "$INSTALL_DIR/current" ]; then
   PREVIOUS_TARGET="$(readlink -f "$INSTALL_DIR/current" || true)"
 fi
 mkdir -p "$TMP_DIR/unit-backup"
-for name in hermes-hub.service hermes-hub-linux-update.service hermes-hub-linux-update.timer hermes-power-monitor.service; do
+for name in hermes-hub.service hermes-hub-linux-update.service hermes-hub-linux-update.timer hermes-hub-agent-update.service hermes-hub-agent-update.timer hermes-power-monitor.service; do
   if [ -f "$SERVICE_DIR/$name" ]; then
     cp -p "$SERVICE_DIR/$name" "$TMP_DIR/unit-backup/$name"
   else
@@ -523,6 +526,7 @@ atomic_symlink "$FINAL_RELEASE_DIR" "$INSTALL_DIR/current"
 atomic_symlink "$INSTALL_DIR/current/hermes-hub-linux.sh" "$HOME/hermes-hub-linux.sh"
 atomic_symlink "$INSTALL_DIR/current/patch-hermes-gateway-native.py" "$HOME/patch-hermes-gateway-native.py"
 atomic_symlink "$INSTALL_DIR/current/hermes-hub-linux-update.sh" "$BIN_DIR/hermes-hub-linux-update"
+atomic_symlink "$INSTALL_DIR/current/hermes-hub-agent-update.sh" "$BIN_DIR/hermes-hub-agent-update"
 atomic_symlink "$INSTALL_DIR/current/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-tailscale.sh"
 atomic_symlink "$INSTALL_DIR/current/hermes-wait-llama.sh" "$BIN_DIR/hermes-wait-llama.sh"
 atomic_symlink "$INSTALL_DIR/current/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-tailscale"
@@ -533,6 +537,8 @@ atomic_symlink "$INSTALL_DIR/current/hermes-power-monitor.sh" "$BIN_DIR/hermes-p
 atomic_install "$FINAL_RELEASE_DIR/hermes-hub-linux.service" "$SERVICE_DIR/hermes-hub.service" 0644
 atomic_install "$FINAL_RELEASE_DIR/hermes-hub-linux-update.service" "$SERVICE_DIR/hermes-hub-linux-update.service" 0644
 atomic_install "$FINAL_RELEASE_DIR/hermes-hub-linux-update.timer" "$SERVICE_DIR/hermes-hub-linux-update.timer" 0644
+atomic_install "$FINAL_RELEASE_DIR/hermes-hub-agent-update.service" "$SERVICE_DIR/hermes-hub-agent-update.service" 0644
+atomic_install "$FINAL_RELEASE_DIR/hermes-hub-agent-update.timer" "$SERVICE_DIR/hermes-hub-agent-update.timer" 0644
 atomic_install "$FINAL_RELEASE_DIR/hermes-power-monitor.service" "$SERVICE_DIR/hermes-power-monitor.service" 0644
 
 if [ "$RESTART" = "true" ]; then
@@ -578,6 +584,9 @@ if [ "$RESTART" = "true" ]; then
 
   if systemctl --user is-active --quiet hermes-hub-linux-update.timer; then
     systemctl --user restart hermes-hub-linux-update.timer
+  fi
+  if systemctl --user is-active --quiet hermes-hub-agent-update.timer; then
+    systemctl --user restart hermes-hub-agent-update.timer
   fi
 fi
 
