@@ -58,6 +58,10 @@ internal object JarvisSessionController {
     private val speaking = AtomicBoolean(false)
     private val frameSampler = FrameSampler()
     private val rollingFrames = RollingFrameBuffer(3)
+    private val lifecycle = JarvisLifecycleStateMachine()
+
+    internal val lifecycleState: JarvisLifecycleState
+        get() = lifecycle.state
 
     fun start(
         context: Context,
@@ -89,6 +93,7 @@ internal object JarvisSessionController {
     }
 
     fun rejectStart(message: String) {
+        lifecycle.tryTransition(JarvisLifecycleEvent.FAILURE)
         _state.value = JarvisUiState(
             phase = JarvisPhase.ERROR,
             gatewayStatus = "Errore",
@@ -167,6 +172,7 @@ internal object JarvisSessionController {
         objective: String,
         preferPhoneDebug: Boolean
     ) {
+        lifecycle.tryTransition(JarvisLifecycleEvent.START_REQUESTED)
         _state.value = JarvisUiState(
             phase = JarvisPhase.CONNECTING,
             initiativeMode = mode,
@@ -207,6 +213,7 @@ internal object JarvisSessionController {
             frameUploadChannel = uploadChannel
             frameUploadJob = controllerScope.launch {
                 for (frame in uploadChannel) {
+                    lifecycle.tryTransition(JarvisLifecycleEvent.PROCESSING_STARTED)
                     runCatching {
                         gateway.uploadFrame(remote.id, frame.jpeg, frame.capturedAtMillis)
                     }.onFailure {
@@ -229,6 +236,7 @@ internal object JarvisSessionController {
                     }
                 )
             }
+            lifecycle.tryTransition(JarvisLifecycleEvent.LISTENING_READY)
             _state.value = _state.value.copy(
                 phase = JarvisPhase.ACTIVE,
                 active = true,
@@ -272,7 +280,9 @@ internal object JarvisSessionController {
         val signature = perceptualSignature(jpeg)
         if (!frameSampler.shouldAccept(capturedAtMillis, signature)) return
         rollingFrames.add(SampledFrame(jpeg, capturedAtMillis, signature))
-        frameUploadChannel?.trySend(SampledFrame(jpeg, capturedAtMillis, signature))
+        if (frameUploadChannel?.trySend(SampledFrame(jpeg, capturedAtMillis, signature))?.isSuccess == true) {
+            lifecycle.tryTransition(JarvisLifecycleEvent.FRAME_OBSERVED)
+        }
     }
 
     private suspend fun eventLoop(
@@ -288,21 +298,28 @@ internal object JarvisSessionController {
                 gateway.events(sessionId, lastEventId).collect { event ->
                     lastEventId = event.id ?: lastEventId
                     when (event.type) {
-                        "observer.result" -> _state.value = _state.value.copy(
-                            lastObservation = event.observation,
-                            situation = event.situation,
-                            currentModel = modelLabel("observer"),
-                            lastLatencyMs = event.totalLatencyMs,
-                            error = null
-                        )
+                        "observer.result" -> {
+                            lifecycle.tryTransition(JarvisLifecycleEvent.OBSERVATION_COMPLETE)
+                            _state.value = _state.value.copy(
+                                lastObservation = event.observation,
+                                situation = event.situation,
+                                currentModel = modelLabel("observer"),
+                                lastLatencyMs = event.totalLatencyMs,
+                                error = null
+                            )
+                        }
                         "assistant.thinking" -> _state.value = _state.value.copy(currentModel = modelLabel("observer"))
-                        "assistant.escalating" -> _state.value = _state.value.copy(currentModel = modelLabel("reasoning"))
+                        "assistant.escalating" -> {
+                            lifecycle.tryTransition(JarvisLifecycleEvent.ESCALATION_REQUIRED)
+                            _state.value = _state.value.copy(currentModel = modelLabel("reasoning"))
+                        }
                         "memory.summary" -> _state.value = _state.value.copy(
                             shortTermSummary = event.summary,
                             conversationTopic = event.topic,
                             awaitingFollowup = event.openLoop
                         )
                         "assistant.speak" -> if (event.autonomous && !event.text.isNullOrBlank()) {
+                            lifecycle.tryTransition(JarvisLifecycleEvent.RESPONSE_READY)
                             _state.value = _state.value.copy(
                                 lastInterventionText = event.text,
                                 lastInterventionEventId = event.id,
@@ -363,13 +380,19 @@ internal object JarvisSessionController {
                     beamSize = JARVIS_STT_BEAM_SIZE
                 )
                 if (transcript.isBlank()) continue
+                lifecycle.tryTransition(JarvisLifecycleEvent.PROCESSING_STARTED)
                 _state.value = _state.value.copy(transcript = transcript, currentModel = "Routing", error = null)
                 val turn = gateway.sendTurn(sessionId, transcript)
                 _state.value = _state.value.copy(
                     currentModel = modelLabel(turn.route),
                     lastLatencyMs = turn.totalLatencyMs
                 )
-                if (turn.text.isNotBlank()) speak(context, gateway, sessionId, configuredSettings, configuredApiKey, turn.text)
+                if (turn.text.isNotBlank()) {
+                    lifecycle.tryTransition(JarvisLifecycleEvent.RESPONSE_READY)
+                    speak(context, gateway, sessionId, configuredSettings, configuredApiKey, turn.text)
+                } else {
+                    lifecycle.tryTransition(JarvisLifecycleEvent.OBSERVATION_COMPLETE)
+                }
             } catch (error: Throwable) {
                 if (error is CancellationException) {
                     if (!currentCoroutineContext().isActive) throw error
@@ -410,6 +433,7 @@ internal object JarvisSessionController {
         } finally {
             runCatching { gateway.patchSession(sessionId, speaking = false) }
             speaking.set(false)
+            lifecycle.tryTransition(JarvisLifecycleEvent.SPEECH_COMPLETE)
         }
     }
 
@@ -441,6 +465,7 @@ internal object JarvisSessionController {
         preserveError: Boolean = false
     ) {
         val old = _state.value
+        lifecycle.tryTransition(JarvisLifecycleEvent.STOP_REQUESTED)
         if (old.active) _state.value = old.copy(phase = JarvisPhase.STOPPING, visionActive = false)
         VoiceTurnController.interrupt()
         frameUploadChannel?.close()
@@ -463,12 +488,14 @@ internal object JarvisSessionController {
         apiKey = null
         capabilities = null
         val retainedError = if (preserveError) _state.value.error else null
+        lifecycle.tryTransition(JarvisLifecycleEvent.STOPPED)
         _state.value = JarvisUiState(error = retainedError, phase = if (retainedError == null) JarvisPhase.IDLE else JarvisPhase.ERROR)
         stopService(context)
     }
 
     private fun reportError(error: Throwable) {
         if (error is CancellationException) return
+        lifecycle.tryTransition(JarvisLifecycleEvent.FAILURE)
         _state.value = _state.value.copy(
             error = error.message?.take(500) ?: error.javaClass.simpleName,
             gatewayStatus = if (_state.value.active) _state.value.gatewayStatus else "Errore"

@@ -78,7 +78,8 @@ class WellbeingGatewayPatchTests(unittest.TestCase):
     def test_android_contract_uses_health_connect_background_permission_and_no_raw_upload(self):
         manifest = (ROOT / "src" / "NemoclawChat.Android" / "app" / "src" / "main" / "AndroidManifest.xml").read_text(encoding="utf-8")
         source = (ROOT / "src" / "NemoclawChat.Android" / "app" / "src" / "main" / "java" / "com" / "nemoclaw" / "chat" / "HealthSync.kt").read_text(encoding="utf-8")
-        activity = (ROOT / "src" / "NemoclawChat.Android" / "app" / "src" / "main" / "java" / "com" / "nemoclaw" / "chat" / "MainActivity.kt").read_text(encoding="utf-8")
+        source_root = ROOT / "src" / "NemoclawChat.Android" / "app" / "src" / "main" / "java"
+        activity = "\n".join(path.read_text(encoding="utf-8") for path in sorted(source_root.rglob("*.kt")))
         self.assertIn("READ_HEALTH_DATA_IN_BACKGROUND", manifest)
         self.assertIn("HealthPermission.getReadPermission", source)
         self.assertIn('"raw_records", JSONArray()', source)

@@ -158,6 +158,9 @@ if ! [[ "$HERMES_KOKORO_CUDA_DEVICE" =~ ^[0-9]+$ ]] || ! [[ "$HERMES_WHISPER_DEV
 fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# The generated upstream module imports the modular monolith from the same
+# release directory.  Keep this overrideable for staged/offline installations.
+export HERMES_HUB_GATEWAY_PACKAGE="${HERMES_HUB_GATEWAY_PACKAGE:-$SCRIPT_DIR}"
 
 mkdir -p "$HERMES_HOME" "$HERMES_HUB_UPLOAD_PATH" "$HERMES_VIDEO_LIBRARY_PATH" "$HERMES_NEWS_LIBRARY_PATH"
 

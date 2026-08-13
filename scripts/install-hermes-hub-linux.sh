@@ -86,6 +86,10 @@ require_file hermes-hub-agent-update.service
 require_file hermes-hub-agent-update.timer
 require_file hermes-wait-tailscale.sh
 require_file hermes-wait-llama.sh
+if [ ! -d "$SCRIPT_DIR/hermes_hub_gateway" ]; then
+  echo "ERROR: missing modular gateway package: $SCRIPT_DIR/hermes_hub_gateway" >&2
+  exit 1
+fi
 
 mkdir -p "$RELEASE_DIR" "$BIN_DIR" "$SERVICE_DIR"
 install -m 0755 "$SCRIPT_DIR/hermes-hub-linux.sh" "$RELEASE_DIR/hermes-hub-linux.sh"
@@ -96,6 +100,10 @@ install -m 0755 "$SCRIPT_DIR/install-hermes-hub-linux.sh" "$RELEASE_DIR/install-
 install -m 0644 "$SCRIPT_DIR/hermes-hub-linux.service" "$RELEASE_DIR/hermes-hub-linux.service"
 install -m 0755 "$SCRIPT_DIR/hermes-wait-tailscale.sh" "$RELEASE_DIR/hermes-wait-tailscale.sh"
 install -m 0755 "$SCRIPT_DIR/hermes-wait-llama.sh" "$RELEASE_DIR/hermes-wait-llama.sh"
+mkdir -p "$RELEASE_DIR/hermes_hub_gateway"
+cp -a "$SCRIPT_DIR/hermes_hub_gateway/." "$RELEASE_DIR/hermes_hub_gateway/"
+find "$RELEASE_DIR/hermes_hub_gateway" -type d -name __pycache__ -prune -exec rm -rf {} +
+find "$RELEASE_DIR/hermes_hub_gateway" -type f -name '*.pyc' -delete
 
 if [ -f "$SCRIPT_DIR/hermes-hub-linux-update.service" ]; then
   install -m 0644 "$SCRIPT_DIR/hermes-hub-linux-update.service" "$RELEASE_DIR/hermes-hub-linux-update.service"

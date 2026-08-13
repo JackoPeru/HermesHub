@@ -66,6 +66,31 @@ public sealed record VisualBlockRecord
     [JsonPropertyName("summary")]
     public string? Summary { get; init; }
 
+    [JsonPropertyName("value")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Value { get; init; }
+
+    [JsonPropertyName("progress")]
+    public double? Progress { get; init; }
+
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
+
+    [JsonPropertyName("action")]
+    public string? Action { get; init; }
+
+    [JsonPropertyName("device_name")]
+    public string? DeviceName { get; init; }
+
+    [JsonPropertyName("device_kind")]
+    public string? DeviceKind { get; init; }
+
+    [JsonPropertyName("device_status")]
+    public string? DeviceStatus { get; init; }
+
+    [JsonPropertyName("battery_percent")]
+    public double? BatteryPercent { get; init; }
+
     [JsonPropertyName("series")]
     public List<VisualChartSeries> Series { get; init; } = [];
 
@@ -208,6 +233,10 @@ public static class VisualBlockParser
         "image_gallery",
         "media_file",
         "callout",
+        "metric",
+        "progress",
+        "approval",
+        "device",
         "unknown_block"
     };
 
@@ -519,6 +548,16 @@ public static class VisualBlockParser
                             !string.IsNullOrWhiteSpace(block.Alt),
             "callout" => block.Variant is "info" or "warning" or "error" or "success" &&
                          !string.IsNullOrWhiteSpace(block.Text),
+            "metric" => block.Value is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } value &&
+                        !string.IsNullOrWhiteSpace(JsonValueToText(value)),
+            "progress" => block.Progress is >= 0 and <= 1 &&
+                          (string.IsNullOrWhiteSpace(block.Status) ||
+                           block.Status is "pending" or "active" or "complete" or "blocked" or "failed"),
+            "approval" => block.Status is "pending" or "approved" or "rejected" &&
+                          !string.IsNullOrWhiteSpace(block.Action),
+            "device" => !string.IsNullOrWhiteSpace(block.DeviceName) &&
+                        block.DeviceStatus is "connected" or "connecting" or "disconnected" or "unknown" &&
+                        (!block.BatteryPercent.HasValue || block.BatteryPercent is >= 0 and <= 100),
             "unknown_block" => !string.IsNullOrWhiteSpace(block.RawJson),
             _ => false
         };
@@ -738,6 +777,45 @@ public static class VisualBlockFixtures
                 Variant = "info",
                 Title = "Sicurezza",
                 Text = "Niente HTML, niente JS, niente SVG client-side."
+            },
+            new VisualBlockRecord
+            {
+                Id = "fixture-metric",
+                Type = "metric",
+                Title = "Copertura contratto",
+                Value = JsonSerializer.SerializeToElement(100),
+                Unit = "%",
+                Status = "verified"
+            },
+            new VisualBlockRecord
+            {
+                Id = "fixture-progress",
+                Type = "progress",
+                Title = "Migrazione",
+                Progress = 0.75,
+                Status = "active",
+                Unit = "%",
+                Summary = "Tre quarti dei dati sono stati verificati."
+            },
+            new VisualBlockRecord
+            {
+                Id = "fixture-approval",
+                Type = "approval",
+                Title = "Conferma operazione",
+                Status = "pending",
+                Action = "Approvare la sincronizzazione",
+                Text = "L'operazione richiede conferma esplicita."
+            },
+            new VisualBlockRecord
+            {
+                Id = "fixture-device",
+                Type = "device",
+                Title = "Dispositivo DAT",
+                DeviceName = "Ray-Ban Meta",
+                DeviceKind = "wearable",
+                DeviceStatus = "connected",
+                BatteryPercent = 82,
+                Summary = "Camera connessa; audio sul telefono."
             }
         ];
     }

@@ -39,7 +39,7 @@ Hermes Visual Blocks e' il contratto per spiegazioni visuali sicure dentro Herme
   "visual_blocks": {
     "min_supported_version": 1,
     "max_supported_version": 1,
-    "types": ["markdown", "code", "table", "chart", "diagram", "image_gallery", "media_file", "callout", "unknown_block"],
+    "types": ["markdown", "code", "table", "chart", "diagram", "image_gallery", "media_file", "callout", "metric", "progress", "approval", "device", "unknown_block"],
     "max_blocks": 20,
     "max_payload_kb": 500,
     "max_table_columns": 12,
@@ -164,6 +164,38 @@ Serve per un singolo asset condiviso in chat: `image`, `video`, `audio` o `docum
 
 Varianti: `info`, `warning`, `error`, `success`.
 
+### metric
+
+```json
+{ "id": "b8", "type": "metric", "title": "Copertura", "value": 100, "unit": "%", "status": "verified" }
+```
+
+Valore dichiarativo (stringa o numero), senza azioni o layout arbitrari.
+
+### progress
+
+```json
+{ "id": "b9", "type": "progress", "title": "Migrazione", "progress": 0.75, "status": "active", "unit": "%" }
+```
+
+`progress` e' compreso tra `0` e `1`; gli stati v1 sono `pending`, `active`, `complete`, `blocked`, `failed`.
+
+### approval
+
+```json
+{ "id": "b10", "type": "approval", "status": "pending", "action": "Approvare la sincronizzazione", "text": "Serve conferma esplicita." }
+```
+
+E' una rappresentazione statica dell'intento di approvazione: il blocco non introduce callback o UI arbitraria.
+
+### device
+
+```json
+{ "id": "b11", "type": "device", "device_name": "Ray-Ban Meta", "device_kind": "wearable", "device_status": "connected", "battery_percent": 82 }
+```
+
+Il renderer mostra solo i campi dichiarati (`device_name`, `device_kind`, `device_status`, `battery_percent`, `summary`).
+
 ### unknown_block
 
 ```json
@@ -186,7 +218,7 @@ Ordine raccomandato: structured output con JSON Schema enforcement; tool interno
 I tipi C# e Kotlin devono derivare da `config/visual-blocks.schema.json`. Dopo ogni generazione quicktype va controllato che i discriminator e gli enum restino semanticamente uguali su entrambe le piattaforme:
 
 - discriminator blocchi: `type`;
-- valori `type`: `markdown`, `code`, `table`, `chart`, `diagram`, `image_gallery`, `media_file`, `callout`, `unknown_block`;
+- valori `type`: `markdown`, `code`, `table`, `chart`, `diagram`, `image_gallery`, `media_file`, `callout`, `metric`, `progress`, `approval`, `device`, `unknown_block`;
 - enum chart: `bar`, `line`;
 - enum callout: `info`, `warning`, `error`, `success`;
 - enum visual mode: `auto`, `always`, `never`.

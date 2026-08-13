@@ -28,6 +28,10 @@
         { "$ref": "#/$defs/image_gallery_block" },
         { "$ref": "#/$defs/media_file_block" },
         { "$ref": "#/$defs/callout_block" },
+        { "$ref": "#/$defs/metric_block" },
+        { "$ref": "#/$defs/progress_block" },
+        { "$ref": "#/$defs/approval_block" },
+        { "$ref": "#/$defs/device_block" },
         { "$ref": "#/$defs/unknown_block" }
       ]
     },
@@ -228,6 +232,87 @@
             "duration_ms": { "type": "integer", "minimum": 0, "maximum": 86400000 },
             "thumbnail_url": { "type": "string", "maxLength": 1000 },
             "alt": { "type": "string", "minLength": 1, "maxLength": 300 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "metric_block": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["id", "type", "value"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "metric" },
+            "title": { "$ref": "#/$defs/plain120" },
+            "caption": { "$ref": "#/$defs/plain300" },
+            "value": { "type": ["string", "number", "integer"], "minLength": 1 },
+            "unit": { "type": "string", "maxLength": 40 },
+            "status": { "type": "string", "maxLength": 40 },
+            "summary": { "type": "string", "maxLength": 500 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "progress_block": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["id", "type", "progress"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "progress" },
+            "title": { "$ref": "#/$defs/plain120" },
+            "caption": { "$ref": "#/$defs/plain300" },
+            "progress": { "type": "number", "minimum": 0, "maximum": 1 },
+            "status": { "enum": ["pending", "active", "complete", "blocked", "failed"] },
+            "unit": { "type": "string", "maxLength": 40 },
+            "summary": { "type": "string", "maxLength": 500 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "approval_block": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["id", "type", "status", "action"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "approval" },
+            "title": { "$ref": "#/$defs/plain120" },
+            "caption": { "$ref": "#/$defs/plain300" },
+            "status": { "enum": ["pending", "approved", "rejected"] },
+            "action": { "type": "string", "minLength": 1, "maxLength": 300 },
+            "text": { "type": "string", "maxLength": 80000 },
+            "summary": { "type": "string", "maxLength": 500 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "device_block": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["id", "type", "device_name", "device_status"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "device" },
+            "title": { "$ref": "#/$defs/plain120" },
+            "caption": { "$ref": "#/$defs/plain300" },
+            "device_name": { "type": "string", "minLength": 1, "maxLength": 160 },
+            "device_kind": { "type": "string", "maxLength": 80 },
+            "device_status": { "enum": ["connected", "connecting", "disconnected", "unknown"] },
+            "summary": { "type": "string", "maxLength": 500 },
+            "battery_percent": { "type": "number", "minimum": 0, "maximum": 100 }
           },
           "additionalProperties": false
         }

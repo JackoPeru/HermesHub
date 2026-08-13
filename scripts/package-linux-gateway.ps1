@@ -24,6 +24,8 @@ if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?$') {
 $outDir = [System.IO.Path]::GetFullPath((Join-Path $root $OutputDirectory))
 $stageRoot = Join-Path $outDir ("linux-gateway-stage-" + [Guid]::NewGuid().ToString("N"))
 $stageScripts = Join-Path $stageRoot "scripts"
+$gatewayPackageSource = Join-Path $PSScriptRoot "hermes_hub_gateway"
+$gatewayPackageStage = Join-Path $stageScripts "hermes_hub_gateway"
 $archive = Join-Path $outDir "HermesHub-$Version-linux-gateway.tar.gz"
 
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
@@ -60,6 +62,16 @@ try {
         Copy-Item -LiteralPath $source -Destination (Join-Path $stageScripts $file)
     }
 
+    if (-not (Test-Path -LiteralPath $gatewayPackageSource -PathType Container)) {
+        throw "Required gateway package missing: $gatewayPackageSource"
+    }
+    Copy-Item -LiteralPath $gatewayPackageSource -Destination $stageScripts -Recurse
+    Get-ChildItem -LiteralPath $gatewayPackageStage -Recurse -Directory -Filter "__pycache__" |
+        Sort-Object FullName -Descending |
+        Remove-Item -Recurse -Force
+    Get-ChildItem -LiteralPath $gatewayPackageStage -Recurse -File -Filter "*.pyc" |
+        Remove-Item -Force
+
     Set-Content -LiteralPath (Join-Path $stageRoot "VERSION") -Value $Version -NoNewline -Encoding Ascii
 
     if (Test-Path -LiteralPath $archive) {
@@ -80,6 +92,17 @@ try {
     }
     $expectedEntries = @("./", "./VERSION", "./scripts/")
     $expectedEntries += $files | ForEach-Object { "./scripts/$_" }
+    $expectedEntries += "./scripts/hermes_hub_gateway/"
+    $expectedEntries += Get-ChildItem -LiteralPath $gatewayPackageStage -Recurse |
+        ForEach-Object {
+            $relative = $_.FullName.Substring($stageRoot.Length) -replace '^[\\/]+', ''
+            if ($_.PSIsContainer) {
+                "./$($relative -replace '\\', '/')/"
+            }
+            else {
+                "./$($relative -replace '\\', '/')"
+            }
+        }
     $actualEntries = @($listing | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     $missingEntries = @($expectedEntries | Where-Object { $actualEntries -notcontains $_ })
     $unexpectedEntries = @($actualEntries | Where-Object { $expectedEntries -notcontains $_ })

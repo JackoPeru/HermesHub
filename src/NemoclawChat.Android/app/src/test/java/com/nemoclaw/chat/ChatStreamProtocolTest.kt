@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.json.JSONObject
 
 class ChatStreamProtocolTest {
     @Test
@@ -250,5 +251,48 @@ class ChatStreamProtocolTest {
         assertEquals(SAFE_RAW_EVENT_JSON, redactToolRawEvent("harmless.status", "ok"))
         assertEquals(SAFE_RAW_EVENT_JSON, redactToolRawEvent("tool.started", "Authorization: Bearer top-secret"))
         assertFalse(redactToolRawEvent("harmless.status", "unseen-secret-value").contains("unseen-secret-value"))
+    }
+
+    @Test
+    fun canonicalEnvelopeKeepsMetadataAndParsesPayload() {
+        val events = parseSseData(
+            "hermes.processing.progress",
+            """{"protocol_version":1,"event_id":"evt_fixture_001","sequence":7,"request_id":"req_fixture_001","correlation_id":"corr_fixture_001","run_id":"run_fixture_001","type":"hermes.processing.progress","payload":{"estimated":false,"percent":25,"prompt_progress":{"processed":25,"total":100,"cache":5,"time_ms":1200}},"source_type":"hermes-agent"}"""
+        )
+
+        val metadata = events.filterIsInstance<ChatStreamEvent.EnvelopeMetadata>().single()
+        assertEquals(1, metadata.protocolVersion)
+        assertEquals("evt_fixture_001", metadata.eventId)
+        assertEquals(7L, metadata.sequence)
+        assertEquals("req_fixture_001", metadata.requestId)
+        assertEquals("corr_fixture_001", metadata.correlationId)
+        assertEquals("run_fixture_001", metadata.runId)
+        assertEquals("hermes.processing.progress", metadata.type)
+        assertEquals("hermes-agent", metadata.sourceType)
+        assertEquals(25, events.filterIsInstance<ChatStreamEvent.PromptProgress>().single().percent)
+    }
+
+    @Test
+    fun unknownCanonicalEnvelopeRemainsForwardCompatibleAndCorrelated() {
+        val raw = """{"protocol_version":1,"event_id":"evt_fixture_unknown","sequence":8,"request_id":"req_fixture_001","correlation_id":"corr_fixture_001","type":"hermes.future.event.v2","payload":{"opaque":true},"source_type":"unknown"}"""
+        val events = parseSseData(null, raw)
+
+        val metadata = events.filterIsInstance<ChatStreamEvent.EnvelopeMetadata>().single()
+        val unknown = events.filterIsInstance<ChatStreamEvent.RawHermesEvent>().single()
+        assertEquals("hermes.future.event.v2", metadata.type)
+        assertEquals("req_fixture_001", unknown.requestId)
+        assertEquals("corr_fixture_001", unknown.correlationId)
+        assertEquals("hermes.future.event.v2", unknown.name)
+        assertEquals(JSONObject(raw).toString(), unknown.json)
+    }
+
+    @Test
+    fun canonicalWhitespaceOnlyDeltaIsNotTrimmed() {
+        val events = parseSseData(
+            null,
+            """{"protocol_version":1,"event_id":"evt_fixture_delta","sequence":9,"request_id":"req_fixture_001","correlation_id":"corr_fixture_001","type":"response.output_text.delta","payload":{"delta":"  "},"source_type":"hermes-agent"}"""
+        )
+
+        assertEquals("  ", events.filterIsInstance<ChatStreamEvent.TextDelta>().single().delta)
     }
 }

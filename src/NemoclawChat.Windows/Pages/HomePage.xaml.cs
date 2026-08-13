@@ -2619,6 +2619,10 @@ public sealed partial class HomePage : Page
             "image_gallery" => RenderGallery(block),
             "media_file" => RenderMediaFile(block),
             "callout" => RenderCallout(block),
+            "metric" => RenderMetric(block),
+            "progress" => RenderProgress(block),
+            "approval" => RenderApproval(block),
+            "device" => RenderDevice(block),
             "unknown_block" => RenderCode("json", block.RawJson ?? "{}", "hermes-unknown-block.json"),
             _ => new TextBlock { Text = block.Caption ?? "Blocco visuale non supportato.", Foreground = (Brush)Application.Current.Resources["MutedTextBrush"] }
         });
@@ -2644,6 +2648,102 @@ public sealed partial class HomePage : Page
             CornerRadius = new CornerRadius(14),
             Child = panel
         };
+    }
+
+    private static StackPanel RenderMetric(VisualBlockRecord block)
+    {
+        var panel = new StackPanel { Spacing = 4 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = $"{(block.Value is { } value ? VisualBlockParser.JsonValueToText(value) : string.Empty)}{block.Unit}",
+            Foreground = new SolidColorBrush(Colors.White),
+            FontSize = 28,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+        });
+        if (!string.IsNullOrWhiteSpace(block.Status))
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = block.Status,
+                Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
+                FontSize = 12
+            });
+        }
+        if (!string.IsNullOrWhiteSpace(block.Summary))
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = block.Summary,
+                Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
+                TextWrapping = TextWrapping.WrapWholeWords
+            });
+        }
+        return panel;
+    }
+
+    private static StackPanel RenderProgress(VisualBlockRecord block)
+    {
+        var panel = new StackPanel { Spacing = 7 };
+        var value = Math.Clamp(block.Progress ?? 0, 0, 1);
+        panel.Children.Add(new ProgressBar
+        {
+            Value = value * 100,
+            Maximum = 100,
+            Height = 8,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = $"{value * 100:0.#}%{(string.IsNullOrWhiteSpace(block.Status) ? string.Empty : $" · {block.Status}")}",
+            Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
+            FontSize = 12
+        });
+        if (!string.IsNullOrWhiteSpace(block.Summary))
+        {
+            panel.Children.Add(new TextBlock { Text = block.Summary, Foreground = new SolidColorBrush(Colors.White), TextWrapping = TextWrapping.WrapWholeWords });
+        }
+        return panel;
+    }
+
+    private static StackPanel RenderApproval(VisualBlockRecord block)
+    {
+        var panel = new StackPanel { Spacing = 6 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = $"{block.Status}: {block.Action}",
+            Foreground = new SolidColorBrush(Colors.White),
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextWrapping = TextWrapping.WrapWholeWords
+        });
+        if (!string.IsNullOrWhiteSpace(block.Text))
+        {
+            panel.Children.Add(new TextBlock { Text = block.Text, Foreground = (Brush)Application.Current.Resources["MutedTextBrush"], TextWrapping = TextWrapping.WrapWholeWords });
+        }
+        return panel;
+    }
+
+    private static StackPanel RenderDevice(VisualBlockRecord block)
+    {
+        var panel = new StackPanel { Spacing = 6 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = block.DeviceName,
+            Foreground = new SolidColorBrush(Colors.White),
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+        });
+        var details = string.IsNullOrWhiteSpace(block.DeviceKind)
+            ? block.DeviceStatus
+            : $"{block.DeviceKind} · {block.DeviceStatus}";
+        if (block.BatteryPercent.HasValue)
+        {
+            details = $"{details} · Batteria {block.BatteryPercent:0.#}%";
+        }
+        panel.Children.Add(new TextBlock { Text = details, Foreground = (Brush)Application.Current.Resources["MutedTextBrush"], TextWrapping = TextWrapping.WrapWholeWords });
+        if (!string.IsNullOrWhiteSpace(block.Summary))
+        {
+            panel.Children.Add(new TextBlock { Text = block.Summary, Foreground = new SolidColorBrush(Colors.White), TextWrapping = TextWrapping.WrapWholeWords });
+        }
+        return panel;
     }
 
     private static StackPanel RenderMarkdown(string markdown)

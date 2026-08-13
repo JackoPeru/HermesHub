@@ -30,7 +30,25 @@ public sealed record StreamToolResult(string? Id, string? Name, string Output) :
 public sealed record StreamResponseId(string Id) : ChatStreamEvent;
 public sealed record StreamRunId(string Id) : ChatStreamEvent;
 public sealed record StreamVisualBlocks(IReadOnlyList<VisualBlockRecord> Blocks, int Version) : ChatStreamEvent;
-public sealed record StreamRawHermesEvent(string Name, string Json) : ChatStreamEvent;
+public sealed record StreamRawHermesEvent(
+    string Name,
+    string Json,
+    int? ProtocolVersion = null,
+    string? EventId = null,
+    long? Sequence = null,
+    string? RequestId = null,
+    string? CorrelationId = null,
+    string? RunId = null,
+    string? SourceType = null) : ChatStreamEvent;
+public sealed record StreamEnvelopeMetadata(
+    int ProtocolVersion,
+    string EventId,
+    long Sequence,
+    string RequestId,
+    string CorrelationId,
+    string Type,
+    string SourceType,
+    string? RunId = null) : ChatStreamEvent;
 public sealed record StreamDone(ChatStreamStats Stats, string AccumulatedText, string AccumulatedThinking) : ChatStreamEvent;
 public sealed record StreamError(string Message) : ChatStreamEvent;
 public sealed record StreamCancelled : ChatStreamEvent;
@@ -137,6 +155,7 @@ public static class ChatStreamClient
     {
         var thinkExtractor = new ThinkExtractor();
         var stopwatch = Stopwatch.StartNew();
+        var requestContext = HermesHubProtocol.NewRequestContext();
         string? responseId = null;
         var accumulatedText = new StringBuilder();
         var accumulatedThinking = new StringBuilder();
@@ -211,7 +230,8 @@ public static class ChatStreamClient
                                    BuildResponsesPayload(candidatePreviousResponseId),
                                    "Hermes Responses API stream",
                                    true,
-                                   cancellationToken))
+                                   cancellationToken,
+                                   requestContext: requestContext))
                 {
                     if (ev is StreamError err)
                     {
@@ -362,7 +382,8 @@ public static class ChatStreamClient
                                "Hermes Chat Completions stream",
                                true,
                                cancellationToken,
-                               serverConversationId))
+                               serverConversationId,
+                               requestContext))
             {
                 if (ev is StreamError err)
                 {
@@ -475,9 +496,11 @@ public static class ChatStreamClient
         string label,
         bool allowCompatAuth,
         [EnumeratorCancellation] CancellationToken cancellationToken,
-        string? sessionId = null)
+        string? sessionId = null,
+        HermesRequestContext? requestContext = null)
     {
         var authCandidates = GatewayService.BuildHermesAuthCandidates(allowCompatAuth).ToArray();
+        var ids = requestContext ?? HermesHubProtocol.NewRequestContext();
         for (var attempt = 0; attempt < authCandidates.Length; attempt++)
         {
             yield return new StreamStatus($"{label}: connessione stream...");
@@ -487,6 +510,7 @@ public static class ChatStreamClient
             };
             request.Headers.TryAddWithoutValidation("Accept", "text/event-stream, application/json");
             request.Headers.TryAddWithoutValidation("User-Agent", "HermesHub-Windows");
+            HermesHubProtocol.AddCorrelationHeaders(request, ids);
             if (!string.IsNullOrWhiteSpace(authCandidates[attempt]))
             {
                 request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {authCandidates[attempt]}");
@@ -912,6 +936,7 @@ public static class ChatStreamClient
             ["mime_type"] = attachment.MimeType,
             ["data_url"] = attachment.DataUrl
         });
+        var requestContext = HermesHubProtocol.NewRequestContext();
 
         foreach (var token in GatewayService.BuildHermesAuthCandidates(allowCompatAuth: true))
         {
@@ -921,6 +946,7 @@ public static class ChatStreamClient
             };
             request.Headers.TryAddWithoutValidation("Accept", "application/json");
             request.Headers.TryAddWithoutValidation("User-Agent", "HermesHub-Windows");
+            HermesHubProtocol.AddCorrelationHeaders(request, requestContext);
             if (!string.IsNullOrWhiteSpace(token))
             {
                 request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {token}");
@@ -1014,11 +1040,13 @@ public static class ChatStreamClient
     private static async Task<(int StatusCode, string Body)> SendJsonAsync(HttpMethod method, string url, string? jsonPayload, bool allowCompatAuth, CancellationToken cancellationToken)
     {
         var authCandidates = GatewayService.BuildHermesAuthCandidates(allowCompatAuth).ToArray();
+        var requestContext = HermesHubProtocol.NewRequestContext();
         foreach (var token in authCandidates)
         {
             using var request = new HttpRequestMessage(method, url);
             request.Headers.TryAddWithoutValidation("Accept", "application/json");
             request.Headers.TryAddWithoutValidation("User-Agent", "HermesHub-Windows");
+            HermesHubProtocol.AddCorrelationHeaders(request, requestContext);
             if (!string.IsNullOrWhiteSpace(token))
             {
                 request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {token}");
@@ -1054,7 +1082,7 @@ public static class ChatStreamClient
         }
         catch (JsonException ex)
         {
-            System.Diagnostics.Trace.WriteLine($"[ChatStream] JSON parse fallito ({eventName ?? "<no-event>"}): {ex.Message}. Payload: {data[..Math.Min(120, data.Length)]}");
+            System.Diagnostics.Trace.WriteLine($"[ChatStream] JSON parse fallito ({eventName ?? "<no-event>"}): {ex.Message}");
             document = null;
         }
 
@@ -1066,14 +1094,40 @@ public static class ChatStreamClient
 
         using (document)
         {
-            var parsed = ParseEventElement(eventName, document.RootElement).ToList();
+            var root = document.RootElement;
+            var hasEnvelope = HermesHubProtocol.TryReadEventEnvelope(root, eventName, out var envelope);
+            var parsedEventName = hasEnvelope ? envelope.Type : eventName;
+            var parsedElement = hasEnvelope ? envelope.Payload : root;
+            if (hasEnvelope)
+            {
+                yield return new StreamEnvelopeMetadata(
+                    envelope.ProtocolVersion,
+                    envelope.EventId,
+                    envelope.Sequence,
+                    envelope.RequestId,
+                    envelope.CorrelationId,
+                    envelope.Type,
+                    envelope.SourceType,
+                    envelope.RunId);
+            }
+
+            var parsed = ParseEventElement(parsedEventName, parsedElement).ToList();
             foreach (var ev in parsed)
             {
                 yield return ev;
             }
             if (parsed.Count == 0)
             {
-                yield return new StreamRawHermesEvent(eventName ?? TryGetString(document.RootElement, "type", "event") ?? "hermes.event", document.RootElement.GetRawText());
+                yield return new StreamRawHermesEvent(
+                    parsedEventName ?? TryGetString(root, "type", "event") ?? "hermes.event",
+                    root.GetRawText(),
+                    hasEnvelope ? envelope.ProtocolVersion : null,
+                    hasEnvelope ? envelope.EventId : null,
+                    hasEnvelope ? envelope.Sequence : null,
+                    hasEnvelope ? envelope.RequestId : null,
+                    hasEnvelope ? envelope.CorrelationId : null,
+                    hasEnvelope ? envelope.RunId : null,
+                    hasEnvelope ? envelope.SourceType : null);
             }
         }
     }

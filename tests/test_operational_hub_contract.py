@@ -9,6 +9,10 @@ class OperationalHubContractTests(unittest.TestCase):
     def read(self, relative: str) -> str:
         return (ROOT / relative).read_text(encoding="utf-8")
 
+    def read_android_sources(self) -> str:
+        source_root = ROOT / "src" / "NemoclawChat.Android" / "app" / "src" / "main" / "java"
+        return "\n".join(path.read_text(encoding="utf-8") for path in sorted(source_root.rglob("*.kt")))
+
     def test_windows_exposes_all_operational_surfaces(self):
         shell = self.read("src/NemoclawChat.Windows/MainWindow.xaml.cs")
         for page in (
@@ -51,9 +55,7 @@ class OperationalHubContractTests(unittest.TestCase):
 
     def test_android_system_integrations_and_operational_tabs_exist(self):
         manifest = self.read("src/NemoclawChat.Android/app/src/main/AndroidManifest.xml")
-        main = self.read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
-        )
+        main = self.read_android_sources()
         for component in (
             "HermesWidgetProvider",
             "HermesVoiceTileService",
@@ -74,9 +76,7 @@ class OperationalHubContractTests(unittest.TestCase):
         android_voice = self.read(
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/VoiceModeScreen.kt"
         )
-        android_settings = self.read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
-        )
+        android_settings = self.read_android_sources()
         for label in ("if_sara", "im_nicola", "Push-to-talk", "Trascrizione"):
             with self.subTest(client="windows-settings", label=label):
                 self.assertIn(label, windows_settings)
@@ -94,9 +94,7 @@ class OperationalHubContractTests(unittest.TestCase):
         windows_store = self.read("src/NemoclawChat.Windows/Services/VoicePreferencesStore.cs")
         windows_listener = self.read("src/NemoclawChat.Windows/Services/WakeWordListener.cs")
         windows_shell = self.read("src/NemoclawChat.Windows/MainWindow.xaml.cs")
-        android_settings = self.read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
-        )
+        android_settings = self.read_android_sources()
         android_voice = self.read(
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/VoiceModeScreen.kt"
         )
@@ -111,9 +109,7 @@ class OperationalHubContractTests(unittest.TestCase):
     def test_quick_actions_are_above_or_exclude_empty_message_layers(self):
         windows = self.read("src/NemoclawChat.Windows/Pages/HomePage.xaml")
         windows_code = self.read("src/NemoclawChat.Windows/Pages/HomePage.xaml.cs")
-        android = self.read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
-        )
+        android = self.read_android_sources()
         self.assertIn('x:Name="MessagesList"', windows)
         self.assertIn('IsHitTestVisible="False"', windows)
         self.assertIn("MessagesList.IsHitTestVisible = visibility != Visibility.Visible", windows_code)

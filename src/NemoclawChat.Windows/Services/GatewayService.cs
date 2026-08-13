@@ -2061,6 +2061,7 @@ public static class GatewayService
         var request = new HttpRequestMessage(method, uri);
         request.Headers.TryAddWithoutValidation("Accept", "application/json");
         request.Headers.TryAddWithoutValidation("User-Agent", "HermesHub-Windows");
+        HermesHubProtocol.AddCorrelationHeaders(request);
         if (!string.IsNullOrWhiteSpace(bearerToken))
         {
             request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {bearerToken}");

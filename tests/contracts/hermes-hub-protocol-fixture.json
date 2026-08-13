@@ -1,0 +1,56 @@
+{
+  "protocol_version": 1,
+  "endpoints": [
+    { "method": "POST", "path": "/v1/responses", "compatibility": "required", "stream": true, "since": "1.0" },
+    { "method": "POST", "path": "/v1/chat/completions", "compatibility": "legacy-compatible", "stream": true, "since": "1.0" },
+    { "method": "GET", "path": "/v1/capabilities", "compatibility": "required", "since": "1.0" },
+    { "method": "GET", "path": "/v1/hub/conversations/events", "compatibility": "capability-negotiated", "stream": true, "since": "1.0" }
+  ],
+  "correlation_headers": {
+    "request_id": "X-Hermes-Request-Id",
+    "correlation_id": "X-Hermes-Correlation-Id",
+    "compatibility_request_id": "X-Request-Id"
+  },
+  "event_envelope": {
+    "protocol_version": 1,
+    "event_id": "evt_00000001",
+    "sequence": 1,
+    "request_id": "req_fixture_00000001",
+    "correlation_id": "corr_fixture_00000001",
+    "run_id": "run_fixture_00000001",
+    "type": "hermes.processing.progress",
+    "payload": {
+      "phase": "processing",
+      "progress": 0.5,
+      "label": "Elaborazione prompt"
+    },
+    "source_type": "hermes-agent"
+  },
+  "unknown_event_envelope": {
+    "protocol_version": 1,
+    "event_id": "evt_00000002",
+    "sequence": 2,
+    "request_id": "req_fixture_00000001",
+    "correlation_id": "corr_fixture_00000001",
+    "run_id": null,
+    "type": "hermes.future.event.v2",
+    "payload": { "new_field": "client must preserve envelope and ignore semantics" },
+    "source_type": "unknown"
+  },
+  "error": {
+    "protocol_version": 1,
+    "code": "gateway_unavailable",
+    "message": "Gateway Hermes non raggiungibile.",
+    "request_id": "req_fixture_00000001",
+    "correlation_id": "corr_fixture_00000001",
+    "run_id": null,
+    "retryable": true,
+    "details": { "http_status": 503 }
+  },
+  "visual_blocks": {
+    "version": 1,
+    "fallback_field": "output_text",
+    "unknown_block_type": "unknown_block",
+    "schema_ref": "config/visual-blocks.schema.json"
+  }
+}

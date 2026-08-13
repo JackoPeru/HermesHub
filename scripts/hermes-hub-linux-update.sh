@@ -503,6 +503,12 @@ mkdir -p "$STAGED_RELEASE"
 for name in "${!FILE_MODE[@]}"; do
   install -m "${FILE_MODE[$name]}" "${FOUND_FILE[$name]}" "$STAGED_RELEASE/$name"
 done
+GATEWAY_PACKAGE_SOURCE="$(find "$EXTRACT_DIR" -type d -name hermes_hub_gateway -print -quit)"
+if [ -n "$GATEWAY_PACKAGE_SOURCE" ] && [ -f "$GATEWAY_PACKAGE_SOURCE/infrastructure/runtime_store.py" ]; then
+  cp -a "$GATEWAY_PACKAGE_SOURCE" "$STAGED_RELEASE/hermes_hub_gateway"
+  find "$STAGED_RELEASE/hermes_hub_gateway" -type d -name __pycache__ -prune -exec rm -rf {} +
+  find "$STAGED_RELEASE/hermes_hub_gateway" -type f -name '*.pyc' -delete
+fi
 printf '%s\n' "$LATEST_VERSION" > "$STAGED_RELEASE/VERSION"
 python3 -m py_compile "$STAGED_RELEASE/patch-hermes-gateway-native.py"
 

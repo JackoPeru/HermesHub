@@ -21,6 +21,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 PATCHER_PATH = SCRIPTS / "patch-hermes-gateway-native.py"
+GATEWAY_PACKAGE_PATH = SCRIPTS / "hermes_hub_gateway"
 UPSTREAM_GATEWAY_FIXTURE = ROOT / "tests" / "fixtures" / "hermes-agent-v2026.7.7.2-api_server.py"
 CURRENT_UPSTREAM_GATEWAY_FIXTURE = (
     ROOT / "tests" / "fixtures" / "hermes-agent-0a62610f1-api_server.py"
@@ -416,6 +417,145 @@ class GatewayScriptTests(unittest.TestCase):
         self.assertEqual([], second_changes)
         self.assertEqual(patched, second)
 
+    def test_generated_gateway_delegates_hub_state_and_sync_to_sqlite_runtime(self):
+        source = UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8")
+        patched, _ = self.patcher._patch_text(source)
+        self.assertIn("# HERMES_HUB_SQLITE_SYNC_V1", patched)
+        self.assertIn("HubRuntimeStore.from_environment()", patched)
+        self.assertIn('self._app.router.add_get("/v1/hub/sync", self._handle_get_hub_sync)', patched)
+        self.assertIn("async def _handle_get_hub_sync", patched)
+        self.assertIn('"hub_sync": {"method": "GET", "path": "/v1/hub/sync?since=revision"}', patched)
+
+        runtime_block = patched[patched.index("# HERMES_HUB_SQLITE_SYNC_V1"):]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            legacy = root / "hub_conversations.json"
+            now_ms = int(time.time() * 1000)
+            legacy.write_text(
+                json.dumps(
+                    {
+                        "items": [
+                            {"id": "legacy", "title": "Legacy", "updatedAt": now_ms},
+                            {"id": "deleted", "title": "Deleted", "updatedAt": now_ms, "deletedAt": now_ms},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            namespace = {
+                "__file__": str(root / "api_server.py"),
+                "os": os,
+                "_hermes_hub_storage_path": lambda name, default: legacy if name == "HERMES_HUB_CONVERSATIONS_PATH" else root / default,
+                "_hermes_hub_conversations_payload": lambda: {"items": []},
+                "_hermes_hub_merge_conversations": lambda items: {"items": items},
+                "_hermes_hub_delete_conversation": lambda conversation_id: {"id": conversation_id},
+                "_hermes_hub_state_payload": lambda: {"items": []},
+                "_hermes_hub_add_state": lambda item: item,
+                "_hermes_hub_delete_state": lambda state_id: {"id": state_id},
+                "_hermes_hub_conversation_event_payload": lambda reason, result=None: {"reason": reason},
+            }
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "HERMES_HUB_GATEWAY_PACKAGE": str(SCRIPTS),
+                    "HERMES_HOME": str(root / "home"),
+                    "HERMES_HUB_CONVERSATIONS_PATH": str(legacy),
+                },
+                clear=False,
+            ):
+                exec(compile(runtime_block, "<generated-runtime>", "exec"), namespace)
+                payload = namespace["_hermes_hub_conversations_payload"]()
+                merged = namespace["_hermes_hub_merge_conversations"](
+                    [{"id": "new", "title": "New", "updatedAt": now_ms + 1}]
+                )
+                sync = namespace["_hermes_hub_sync_payload"](0, 500)
+
+            self.assertEqual("sqlite", payload["storage"])
+            self.assertEqual(2, payload["migration"]["imported_count"])
+            self.assertEqual(1, payload["migration"]["tombstone_count"])
+            self.assertEqual(3, merged["revision"])
+            self.assertEqual(3, len(sync["changes"]))
+            self.assertEqual("legacy", json.loads(legacy.read_text(encoding="utf-8"))["items"][0]["id"])
+
+    def test_generated_runtime_falls_back_only_when_modular_package_is_absent(self):
+        source = UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8")
+        patched, _ = self.patcher._patch_text(source)
+        runtime_block = patched[patched.index("# HERMES_HUB_SQLITE_SYNC_V1"):]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            namespace = {
+                "__file__": str(root / "api_server.py"),
+                "os": os,
+                "_hermes_hub_storage_path": lambda name, default: root / default,
+                "_hermes_hub_conversations_payload": lambda: {"items": [{"id": "legacy"}]},
+                "_hermes_hub_merge_conversations": lambda items: {"items": items},
+                "_hermes_hub_delete_conversation": lambda conversation_id: {"id": conversation_id},
+                "_hermes_hub_state_payload": lambda: {"items": []},
+                "_hermes_hub_add_state": lambda item: item,
+                "_hermes_hub_delete_state": lambda state_id: {"id": state_id},
+                "_hermes_hub_conversation_event_payload": lambda reason, result=None: {"reason": reason},
+            }
+            with mock.patch.dict(
+                os.environ,
+                {"HERMES_HUB_GATEWAY_PACKAGE": str(root / "missing-package")},
+                clear=False,
+            ), mock.patch("importlib.util.find_spec", return_value=None):
+                exec(compile(runtime_block, "<generated-runtime>", "exec"), namespace)
+                self.assertIsNone(namespace["_hermes_hub_gateway_runtime_store"]())
+                self.assertEqual(
+                    {"items": [{"id": "legacy"}]},
+                    namespace["_hermes_hub_conversations_payload"](),
+                )
+
+    def test_generated_runtime_propagates_sqlite_initialization_failure(self):
+        source = UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8")
+        patched, _ = self.patcher._patch_text(source)
+        runtime_block = patched[patched.index("# HERMES_HUB_SQLITE_SYNC_V1"):]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database_directory = root / "sqlite-directory"
+            database_directory.mkdir()
+            namespace = {
+                "__file__": str(root / "api_server.py"),
+                "os": os,
+                "_hermes_hub_storage_path": lambda name, default: root / default,
+                "_hermes_hub_conversations_payload": lambda: {"items": []},
+                "_hermes_hub_merge_conversations": lambda items: {"items": items},
+                "_hermes_hub_delete_conversation": lambda conversation_id: {"id": conversation_id},
+                "_hermes_hub_state_payload": lambda: {"items": []},
+                "_hermes_hub_add_state": lambda item: item,
+                "_hermes_hub_delete_state": lambda state_id: {"id": state_id},
+                "_hermes_hub_conversation_event_payload": lambda reason, result=None: {"reason": reason},
+            }
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "HERMES_HUB_GATEWAY_PACKAGE": str(SCRIPTS),
+                    "HERMES_HUB_SQLITE_PATH": str(database_directory),
+                },
+                clear=False,
+            ):
+                exec(compile(runtime_block, "<generated-runtime>", "exec"), namespace)
+                with self.assertRaises(Exception):
+                    namespace["_hermes_hub_gateway_runtime_store"]()
+
+    def test_generated_gateway_composes_agent_runtime_and_correlation_for_all_agent_surfaces(self):
+        source = CURRENT_UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8")
+        patched, changes = self.patcher._patch_text(source)
+        compile(patched, "<agent-runtime-correlation-gateway>", "exec")
+        self.assertIn("# HERMES_HUB_AGENT_RUNTIME_ADAPTER_V1", patched)
+        self.assertIn("async def _hermes_hub_legacy_run_agent", patched)
+        self.assertIn("from hermes_hub_gateway.adapters.hermes.agent_runtime import AgentRunRequest", patched)
+        self.assertIn("# HERMES_HUB_CORRELATION_RUNTIME_V1", patched)
+        self.assertIn("mws.append(web.middleware(_hermes_hub_correlation_middleware))", patched)
+        self.assertIn("_hermes_hub_install_correlation_runtime()", patched)
+        self.assertIn('"/v1/chat/completions"', patched)
+        self.assertIn('"/v1/responses"', patched)
+        self.assertIn('"/v1/runs"', patched)
+        self.assertIn('"/v1/runs/{run_id}/events"', patched)
+        self.assertIn("_hermes_hub_sse_sequence", (SCRIPTS / "hermes_hub_gateway" / "adapters" / "hermes" / "correlation_runtime.py").read_text(encoding="utf-8"))
+        self.assertIn("AgentRuntime adapter composition", " ".join(changes))
+
     def test_gateway_patch_reverts_06174_finite_transfer_defaults(self):
         patched, _ = self.patcher._patch_text(
             UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8")
@@ -696,6 +836,17 @@ class GatewayScriptTests(unittest.TestCase):
                 members = {member.name: member for member in archive.getmembers()}
             expected = {".", "./VERSION", "./scripts"}
             expected.update(f"./scripts/{name}" for name in UPDATER_REQUIRED_FILES)
+            expected.add("./scripts/hermes_hub_gateway")
+            expected.update(
+                f"./scripts/{path.relative_to(SCRIPTS).as_posix()}"
+                for path in GATEWAY_PACKAGE_PATH.rglob("*")
+                if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
+            )
+            expected.update(
+                f"./scripts/{path.relative_to(SCRIPTS).as_posix()}"
+                for path in GATEWAY_PACKAGE_PATH.rglob("*")
+                if path.is_dir() and "__pycache__" not in path.parts
+            )
             self.assertEqual(expected, actual)
             self.assertEqual(0o755, members["."].mode)
             self.assertEqual(0o755, members["./scripts"].mode)

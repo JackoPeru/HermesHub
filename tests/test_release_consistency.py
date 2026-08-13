@@ -15,6 +15,11 @@ def read(relative_path: str) -> str:
     return (ROOT / relative_path).read_text(encoding="utf-8")
 
 
+def read_android_sources() -> str:
+    source_root = ROOT / "src" / "NemoclawChat.Android" / "app" / "src" / "main" / "java"
+    return "\n".join(path.read_text(encoding="utf-8") for path in sorted(source_root.rglob("*.kt")))
+
+
 class ReleaseConsistencyTests(unittest.TestCase):
     def test_gateway_launcher_file_transfer_defaults_are_unlimited(self) -> None:
         launcher = read("scripts/hermes-hub-linux.sh")
@@ -219,9 +224,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
         windows_gateway = read("src/NemoclawChat.Windows/Services/GatewayService.cs")
         self.assertIn("PlugAndPlayGatewayHosts = [];", windows_gateway)
 
-        android_main = read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
-        )
+        android_main = read_android_sources()
         android_stream = read(
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStream.kt"
         )
@@ -238,16 +241,15 @@ class ReleaseConsistencyTests(unittest.TestCase):
             )
         )
         self.assertNotIn("http://", read("src/NemoclawChat.Windows/Services/AppSettings.cs"))
-        self.assertNotIn("http://", read("src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt").split("private object AppDefaults", 1)[1].split("}", 1)[0])
+        android_defaults = read("src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt")
+        self.assertNotIn("http://", android_defaults.split("// private object AppDefaults", 1)[0])
         self.assertNotIn("/home/", public_runtime)
 
     def test_android_backup_never_exports_credentials(self) -> None:
         exporter = read(
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/LocalBackupExporter.kt"
         )
-        main = read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
-        )
+        main = read_android_sources()
         self.assertIn("if (isSensitiveBackupKey(key)) return@forEach", exporter)
         for marker in ("apikey", "token", "secret", "password", "credential", "authorization"):
             self.assertIn(f'"{marker}"', exporter)
@@ -260,9 +262,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
         android_stream = read(
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStream.kt"
         )
-        android_archive = read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
-        )
+        android_archive = read_android_sources()
         windows_archive = read("src/NemoclawChat.Windows/Services/ChatArchiveStore.cs")
         windows_sync = read("src/NemoclawChat.Windows/Services/GatewayService.cs")
 
@@ -283,9 +283,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
         android_stream = read(
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStream.kt"
         )
-        android_archive = read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
-        )
+        android_archive = read_android_sources()
         windows_archive = read("src/NemoclawChat.Windows/Services/ChatArchiveStore.cs")
         windows_sync = read("src/NemoclawChat.Windows/Services/GatewayService.cs")
         windows_home = read("src/NemoclawChat.Windows/Pages/HomePage.xaml.cs")
@@ -317,9 +315,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn("if (finalState.activityTimeline.isNotEmpty() || finalText.isNotEmpty()", android_archive)
 
     def test_android_gateway_secret_storage_fails_closed(self) -> None:
-        main = read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
-        )
+        main = read_android_sources()
         self.assertIn("private fun saveGatewaySecret(context: Context, secret: String?): Boolean", main)
         self.assertIn("}.getOrNull() ?: return false", main)
         self.assertIn("val saved = withContext(Dispatchers.IO) {", main)
@@ -334,9 +330,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertNotIn("}.getOrDefault(normalized)", main)
 
     def test_android_network_badge_requires_real_gateway_probe(self) -> None:
-        main = read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
-        )
+        main = read_android_sources()
         self.assertIn("probeHermesGateway(settings, loadGatewaySecret(context))", main)
         self.assertIn('resolveHermesUrl(settings, "/v1/capabilities")', main)
         self.assertIn("if (!isValidGatewayProbeUrl(url)) return false", main)
@@ -350,9 +344,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
         )
 
     def test_android_media_auth_is_scoped_to_configured_hermes_origin(self) -> None:
-        main = read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt"
-        )
+        main = read_android_sources()
         self.assertIn(
             "val needsHermesAuth = shouldAuthenticateHermesUrl(settings, candidateUrl)",
             main,

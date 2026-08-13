@@ -9,6 +9,10 @@ class ProjectWorkspaceContractTests(unittest.TestCase):
     def read(self, relative: str) -> str:
         return (ROOT / relative).read_text(encoding="utf-8")
 
+    def read_android_sources(self) -> str:
+        source_root = ROOT / "src" / "NemoclawChat.Android" / "app" / "src" / "main" / "java"
+        return "\n".join(path.read_text(encoding="utf-8") for path in sorted(source_root.rglob("*.kt")))
+
     def test_windows_project_navigation_is_not_archive_alias(self):
         shell = self.read("src/NemoclawChat.Windows/MainWindow.xaml")
         code = self.read("src/NemoclawChat.Windows/MainWindow.xaml.cs")
@@ -25,7 +29,7 @@ class ProjectWorkspaceContractTests(unittest.TestCase):
             "authorizedTools",
         )
         windows_gateway = self.read("src/NemoclawChat.Windows/Services/GatewayService.cs")
-        android = self.read("src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt")
+        android = self.read_android_sources()
         gateway_patch = self.read("scripts/patch-hermes-gateway-native.py")
         for field in fields:
             with self.subTest(field=field):
@@ -36,7 +40,7 @@ class ProjectWorkspaceContractTests(unittest.TestCase):
     def test_active_project_context_reaches_native_requests(self):
         windows_protocol = self.read("src/NemoclawChat.Windows/Services/HermesHubProtocol.cs")
         android_stream = self.read("src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStream.kt")
-        android_main = self.read("src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt")
+        android_main = self.read_android_sources()
         self.assertIn("project_context = project is null ? null", windows_protocol)
         self.assertIn("ProjectContextInstructions(settings)", windows_protocol)
         self.assertIn('"project_context"', android_stream)
@@ -45,8 +49,8 @@ class ProjectWorkspaceContractTests(unittest.TestCase):
 
     def test_project_editor_only_exposes_name_and_optional_system_prompt(self):
         windows_xaml = self.read("src/NemoclawChat.Windows/Pages/ProjectsPage.xaml")
-        android = self.read("src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt")
-        android_editor = android[android.index("private fun ProjectsScreen("):android.index("private fun AppSettings.withActiveProject")]
+        android = self.read_android_sources()
+        android_editor = android[android.index("internal fun ProjectsScreen("):android.index("internal fun AppSettings.withActiveProject")]
 
         self.assertIn('x:Name="TitleBox"', windows_xaml)
         self.assertIn('x:Name="SystemPromptBox"', windows_xaml)
@@ -60,7 +64,7 @@ class ProjectWorkspaceContractTests(unittest.TestCase):
 
     def test_project_prompt_is_the_only_user_authored_context(self):
         windows_protocol = self.read("src/NemoclawChat.Windows/Services/HermesHubProtocol.cs")
-        android = self.read("src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt")
+        android = self.read_android_sources()
         gateway_patch = self.read("scripts/patch-hermes-gateway-native.py")
         self.assertIn("system_prompt = project.ProjectInstructions", windows_protocol)
         self.assertIn('.put("system_prompt", settings.activeProjectInstructions)', android)
@@ -72,7 +76,7 @@ class ProjectWorkspaceContractTests(unittest.TestCase):
 
     def test_quick_actions_send_instead_of_only_filling_composer(self):
         windows = self.read("src/NemoclawChat.Windows/Pages/HomePage.xaml.cs")
-        android = self.read("src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt")
+        android = self.read_android_sources()
         for handler in ("PromptSetup_Click", "PromptHealth_Click", "PromptAgent_Click"):
             start = windows.index(f"void {handler}")
             body = windows[start:windows.index("\n    }", start)]
@@ -83,7 +87,7 @@ class ProjectWorkspaceContractTests(unittest.TestCase):
     def test_chat_title_is_generated_once_by_hermes_after_first_answer(self):
         windows_stream = self.read("src/NemoclawChat.Windows/Services/ChatStream.cs")
         windows_store = self.read("src/NemoclawChat.Windows/Services/ChatArchiveStore.cs")
-        android = self.read("src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt")
+        android = self.read_android_sources()
         self.assertIn("GenerateConversationTitleAsync", windows_stream)
         self.assertIn("store = false", windows_stream)
         self.assertIn('Title = "Nuova chat"', windows_store)

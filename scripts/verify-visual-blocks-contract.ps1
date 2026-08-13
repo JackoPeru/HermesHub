@@ -26,7 +26,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Visual Blocks JSON Schema validation failed with exit code $LASTEXITCODE."
 }
 
-$expectedTypes = @("markdown", "code", "table", "chart", "diagram", "image_gallery", "media_file", "callout", "unknown_block")
+$expectedTypes = @("markdown", "code", "table", "chart", "diagram", "image_gallery", "media_file", "callout", "metric", "progress", "approval", "device", "unknown_block")
 $expectedChartTypes = @("bar", "line")
 $expectedCallouts = @("info", "warning", "error", "success")
 $expectedModes = @("auto", "always", "never")
@@ -46,7 +46,19 @@ foreach ($type in $expectedTypes + $expectedChartTypes + $expectedCallouts) {
 }
 
 $windowsText = if (Test-Path $WindowsTypesPath) { Get-Content $WindowsTypesPath -Raw } else { "" }
-$androidText = if (Test-Path $AndroidTypesPath) { Get-Content $AndroidTypesPath -Raw } else { "" }
+
+# Android protocol/rendering code is intentionally feature-owned.  Keep the
+# parameter as a compatibility override for callers that pass one file, while
+# the default path validates the complete source tree after MainActivity's
+# decomposition.
+$androidText = ""
+if ($AndroidTypesPath -eq "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt" -and (Test-Path $AndroidTypesPath)) {
+    $androidRoot = Split-Path -Parent $AndroidTypesPath
+    $androidFiles = Get-ChildItem -LiteralPath $androidRoot -Recurse -Filter *.kt -File | Sort-Object FullName
+    $androidText = ($androidFiles | ForEach-Object { Get-Content $_.FullName -Raw -Encoding UTF8 }) -join "`n"
+} elseif (Test-Path $AndroidTypesPath) {
+    $androidText = Get-Content $AndroidTypesPath -Raw -Encoding UTF8
+}
 
 foreach ($type in $expectedTypes + $expectedChartTypes + $expectedCallouts + $expectedModes) {
     if ($windowsText) {

@@ -270,6 +270,9 @@ data class StreamingState(
         }
         is ChatStreamEvent.ResponseId -> copy(responseId = event.id).withActivity("Response id: ${event.id}")
         is ChatStreamEvent.RunId -> copy(activeRunId = event.id).withActivity("Run id: ${event.id}")
+        is ChatStreamEvent.EnvelopeMetadata -> copy(
+            status = "Evento Hermes correlato: ${event.type}"
+        )
         is ChatStreamEvent.VisualBlocks -> copy(
             visualBlocks = mergeVisualBlocks(visualBlocks, event.blocks),
             visualBlocksVersion = event.version
@@ -457,7 +460,27 @@ sealed class ChatStreamEvent {
     data class RunId(val id: String) : ChatStreamEvent()
     data class VisualBlocks(val blocks: List<VisualBlock>, val version: Int) : ChatStreamEvent()
     data class Status(val message: String) : ChatStreamEvent()
-    data class RawHermesEvent(val name: String, val json: String) : ChatStreamEvent()
+    data class RawHermesEvent(
+        val name: String,
+        val json: String,
+        val protocolVersion: Int? = null,
+        val eventId: String? = null,
+        val sequence: Long? = null,
+        val requestId: String? = null,
+        val correlationId: String? = null,
+        val runId: String? = null,
+        val sourceType: String? = null
+    ) : ChatStreamEvent()
+    data class EnvelopeMetadata(
+        val protocolVersion: Int,
+        val eventId: String,
+        val sequence: Long,
+        val requestId: String,
+        val correlationId: String,
+        val type: String,
+        val sourceType: String,
+        val runId: String?
+    ) : ChatStreamEvent()
     data class Usage(val promptTokens: Int?, val completionTokens: Int?, val tokensPerSecond: Double? = null) : ChatStreamEvent()
     data class ContextUsage(val tokens: Int?, val length: Int?, val percent: Int?) : ChatStreamEvent()
     data class PromptProgress(
@@ -516,6 +539,7 @@ fun streamChatRequest(
     val accumText = StringBuilder()
     val accumThink = StringBuilder()
     var lastError: String? = null
+    val requestContext = HermesHubProtocol.newCorrelationContext()
     val videoMode = isVideoRequest(prompt)
     val nativeMode = isHermesNative(settings)
     val serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
@@ -711,7 +735,14 @@ fun streamChatRequest(
             }
             val responsePayload = buildResponsePayload(candidatePreviousResponseId)
             lastError = null
-            val result = openSseStream(responseUrl, responsePayload, "Hermes Responses API", apiKey, true) { ev ->
+            val result = openSseStream(
+                responseUrl,
+                responsePayload,
+                "Hermes Responses API",
+                apiKey,
+                true,
+                requestContext = requestContext
+            ) { ev ->
                 emitAndTrack(ev)
             }
             sawTerminal = result.terminal
@@ -790,7 +821,15 @@ fun streamChatRequest(
         })
         val url = "${settings.gatewayUrl.trimEnd('/')}/chat/completions"
         lastError = null
-        val result = openSseStream(url, payload, "Hermes Chat Completions", apiKey, true, serverConversationId) { ev ->
+        val result = openSseStream(
+            url,
+            payload,
+            "Hermes Chat Completions",
+            apiKey,
+            true,
+            sessionId = serverConversationId,
+            requestContext = requestContext
+        ) { ev ->
             emitAndTrack(ev)
         }
         sawTerminal = result.terminal
@@ -859,6 +898,7 @@ private suspend fun openSseStream(
     apiKey: String?,
     allowCompatAuth: Boolean,
     sessionId: String? = null,
+    requestContext: HermesRequestContext = HermesHubProtocol.newCorrelationContext(),
     onEvent: suspend (ChatStreamEvent) -> Unit
 ): SseOpenResult {
     val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
@@ -873,6 +913,7 @@ private suspend fun openSseStream(
                 .url(candidateUrl)
                 .header("Accept", "text/event-stream, application/json")
                 .header("User-Agent", "HermesHub-Android")
+            HermesHubProtocol.addCorrelationHeaders(builder, requestContext)
             bearerToken?.let { builder.header("Authorization", "Bearer $it") }
             sessionId?.takeIf { it.isNotBlank() }?.let { builder.header("X-Hermes-Session-Id", it) }
             val request = builder.post(body).build()
@@ -1124,6 +1165,7 @@ private suspend fun uploadAttachmentForTool(settings: AppSettings, attachment: C
     val endpoint = "${settings.gatewayUrl.trimEnd('/')}/media/upload"
     val body = attachment.streamingJsonUploadBody()
     val authCandidates = hermesAuthCandidates(apiKey, true)
+    val requestContext = HermesHubProtocol.newCorrelationContext()
     var lastError = "gateway non raggiungibile"
     candidateLoop@ for (candidateUrl in plugAndPlayStreamUrlCandidates(endpoint)) {
         for ((index, token) in authCandidates.withIndex()) {
@@ -1132,6 +1174,7 @@ private suspend fun uploadAttachmentForTool(settings: AppSettings, attachment: C
                 .header("Accept", "application/json")
                 .header("User-Agent", "HermesHub-Android")
                 .post(body)
+            HermesHubProtocol.addCorrelationHeaders(builder, requestContext)
             token?.let { builder.header("Authorization", "Bearer $it") }
             val response = executeCancellableRequest(builder.build())
             if (response.first == 0) {
@@ -1304,6 +1347,7 @@ private fun runDetachedAgent(
 private suspend fun executeRunJsonRequest(url: String, payload: JSONObject?, apiKey: String?, method: String): Pair<Int, String> {
     var last: Pair<Int, String>? = null
     val authCandidates = hermesAuthCandidates(apiKey, true)
+    val requestContext = HermesHubProtocol.newCorrelationContext()
     for (candidateUrl in plugAndPlayStreamUrlCandidates(url)) {
         for ((index, token) in authCandidates.withIndex()) {
             val builder = Request.Builder()
@@ -1311,6 +1355,7 @@ private suspend fun executeRunJsonRequest(url: String, payload: JSONObject?, api
                 .header("Accept", "application/json")
                 .header("User-Agent", "HermesHub-Android")
             token?.let { builder.header("Authorization", "Bearer $it") }
+            HermesHubProtocol.addCorrelationHeaders(builder, requestContext)
             val request = when (method.uppercase()) {
                 "GET" -> builder.get().build()
                 else -> builder.post((payload ?: JSONObject()).toString().toRequestBody("application/json; charset=utf-8".toMediaType())).build()
@@ -1361,12 +1406,38 @@ internal fun parseSseData(eventName: String?, data: String): List<ChatStreamEven
     val json = try { JSONObject(data) } catch (_: Exception) {
         return listOf(ChatStreamEvent.TextDelta(data))
     }
-    val parsed = parseEventObject(eventName, json)
-    return if (parsed.isEmpty()) {
-        listOf(ChatStreamEvent.RawHermesEvent(eventName ?: json.optString("type", "hermes.event"), json.toString()))
-    } else {
-        parsed
+    val envelope = HermesHubProtocol.readEventEnvelope(json)
+    val parsedEventName = envelope?.type ?: eventName
+    val parsed = parseEventObject(parsedEventName, envelope?.payload ?: json)
+    val result = mutableListOf<ChatStreamEvent>()
+    if (envelope != null) {
+        result += ChatStreamEvent.EnvelopeMetadata(
+            protocolVersion = envelope.protocolVersion,
+            eventId = envelope.eventId,
+            sequence = envelope.sequence,
+            requestId = envelope.requestId,
+            correlationId = envelope.correlationId,
+            type = envelope.type,
+            sourceType = envelope.sourceType,
+            runId = envelope.runId
+        )
     }
+    if (parsed.isEmpty()) {
+        result += ChatStreamEvent.RawHermesEvent(
+            name = parsedEventName ?: json.optString("type", "hermes.event"),
+            json = json.toString(),
+            protocolVersion = envelope?.protocolVersion,
+            eventId = envelope?.eventId,
+            sequence = envelope?.sequence,
+            requestId = envelope?.requestId,
+            correlationId = envelope?.correlationId,
+            runId = envelope?.runId,
+            sourceType = envelope?.sourceType
+        )
+    } else {
+        result += parsed
+    }
+    return result
 }
 
 private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStreamEvent> {

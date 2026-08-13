@@ -90,6 +90,41 @@
       "text": "Niente HTML, niente JS, niente SVG client-side."
     },
     {
+      "id": "fixture-metric",
+      "type": "metric",
+      "title": "Copertura contratto",
+      "value": 100,
+      "unit": "%",
+      "status": "verified"
+    },
+    {
+      "id": "fixture-progress",
+      "type": "progress",
+      "title": "Migrazione",
+      "progress": 0.75,
+      "status": "active",
+      "unit": "%",
+      "summary": "Tre quarti dei dati sono stati verificati."
+    },
+    {
+      "id": "fixture-approval",
+      "type": "approval",
+      "title": "Conferma operazione",
+      "status": "pending",
+      "action": "Approvare la sincronizzazione",
+      "text": "L'operazione richiede conferma esplicita."
+    },
+    {
+      "id": "fixture-device",
+      "type": "device",
+      "title": "Dispositivo DAT",
+      "device_name": "Ray-Ban Meta",
+      "device_kind": "wearable",
+      "device_status": "connected",
+      "battery_percent": 82,
+      "summary": "Camera connessa; audio sul telefono."
+    },
+    {
       "id": "fixture-unknown",
       "type": "unknown_block",
       "title": "Fallback futuro",

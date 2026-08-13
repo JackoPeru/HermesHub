@@ -1,8 +1,135 @@
+using System.Net.Http;
+using System.Text.Json;
+
 namespace NemoclawChat_Windows.Services;
+
+public sealed record HermesRequestContext(string RequestId, string CorrelationId);
+
+public sealed record HermesEventEnvelope(
+    int ProtocolVersion,
+    string EventId,
+    long Sequence,
+    string RequestId,
+    string CorrelationId,
+    string Type,
+    JsonElement Payload,
+    string SourceType,
+    string? RunId = null);
+
+public sealed record HermesProtocolError(
+    int ProtocolVersion,
+    string Code,
+    string Message,
+    string RequestId,
+    string CorrelationId,
+    bool Retryable,
+    string? RunId = null);
 
 public static class HermesHubProtocol
 {
+    public const int ProtocolVersion = 1;
+    public const string RequestIdHeader = "X-Hermes-Request-Id";
+    public const string CorrelationIdHeader = "X-Hermes-Correlation-Id";
+    public const string CompatibilityRequestIdHeader = "X-Request-Id";
     public const string WindowsSurface = "windows-app";
+
+    public static HermesRequestContext NewRequestContext()
+    {
+        var token = Guid.NewGuid().ToString("N");
+        return new HermesRequestContext($"req_{token}", $"corr_{token}");
+    }
+
+    public static void AddCorrelationHeaders(HttpRequestMessage request, HermesRequestContext? context = null)
+    {
+        var ids = context ?? NewRequestContext();
+        request.Headers.TryAddWithoutValidation(RequestIdHeader, ids.RequestId);
+        request.Headers.TryAddWithoutValidation(CorrelationIdHeader, ids.CorrelationId);
+        request.Headers.TryAddWithoutValidation(CompatibilityRequestIdHeader, ids.RequestId);
+    }
+
+    public static bool TryReadEventEnvelope(
+        JsonElement element,
+        string? eventName,
+        out HermesEventEnvelope envelope)
+    {
+        envelope = default!;
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty("protocol_version", out var version) ||
+            version.ValueKind != JsonValueKind.Number ||
+            !version.TryGetInt32(out var protocolVersion) ||
+            protocolVersion != ProtocolVersion ||
+            !element.TryGetProperty("payload", out var payload) ||
+            !element.TryGetProperty("event_id", out var eventId) ||
+            !element.TryGetProperty("sequence", out var sequence) ||
+            !element.TryGetProperty("request_id", out var requestId) ||
+            !element.TryGetProperty("correlation_id", out var correlationId) ||
+            !element.TryGetProperty("type", out var type) ||
+            !element.TryGetProperty("source_type", out var sourceType))
+        {
+            return false;
+        }
+
+        if (eventId.ValueKind != JsonValueKind.String ||
+            !long.TryParse(sequence.GetRawText(), out var sequenceValue) ||
+            sequenceValue < 0 ||
+            requestId.ValueKind != JsonValueKind.String ||
+            correlationId.ValueKind != JsonValueKind.String ||
+            type.ValueKind != JsonValueKind.String ||
+            sourceType.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        var requestIdValue = requestId.GetString();
+        var correlationIdValue = correlationId.GetString();
+        var eventIdValue = eventId.GetString();
+        var typeValue = type.GetString();
+        var sourceValue = sourceType.GetString();
+        if (!IsWireId(requestIdValue) ||
+            !IsWireId(correlationIdValue) ||
+            !IsWireId(eventIdValue) ||
+            string.IsNullOrWhiteSpace(typeValue) ||
+            typeValue.Length > 160 ||
+            sourceValue is not ("hermes-agent" or "hermes-gateway" or "hermes-hub" or "unknown"))
+        {
+            return false;
+        }
+
+        var runId = element.TryGetProperty("run_id", out var run) && run.ValueKind == JsonValueKind.String
+            ? run.GetString()
+            : null;
+        envelope = new HermesEventEnvelope(
+            protocolVersion,
+            eventIdValue!,
+            sequenceValue,
+            requestIdValue!,
+            correlationIdValue!,
+            typeValue,
+            payload.Clone(),
+            sourceValue,
+            runId);
+        return true;
+    }
+
+    private static bool IsWireId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 128)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < value.Length; i++)
+        {
+            var ch = value[i];
+            var valid = char.IsLetterOrDigit(ch) || ch is '.' or '_' or ':' or '-';
+            if (!valid || i == 0 && !char.IsLetterOrDigit(ch))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     public static string Instructions(string mode)
     {
