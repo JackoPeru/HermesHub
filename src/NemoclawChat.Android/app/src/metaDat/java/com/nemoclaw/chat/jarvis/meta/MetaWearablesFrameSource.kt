@@ -6,6 +6,7 @@ import android.graphics.Rect
 import android.graphics.YuvImage
 import com.meta.wearable.dat.camera.Stream
 import com.meta.wearable.dat.camera.addStream
+import com.meta.wearable.dat.camera.removeStream
 import com.meta.wearable.dat.camera.types.StreamConfiguration
 import com.meta.wearable.dat.camera.types.StreamError
 import com.meta.wearable.dat.camera.types.StreamState
@@ -16,6 +17,8 @@ import com.meta.wearable.dat.core.selectors.SpecificDeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.core.types.DeviceIdentifier
+import com.meta.wearable.dat.core.types.DeviceCompatibility
+import com.meta.wearable.dat.core.types.DeviceType
 import com.meta.wearable.dat.core.types.DeviceSessionError
 import com.meta.wearable.dat.core.types.LinkState
 import com.meta.wearable.dat.core.types.Permission
@@ -43,6 +46,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -55,6 +60,9 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
     private val closed = AtomicBoolean(false)
     private val streamStarting = AtomicBoolean(false)
     private val failureDelivered = AtomicBoolean(false)
+    private val operationMutex = Mutex()
+    private val generation = java.util.concurrent.atomic.AtomicLong(0L)
+    private val streamGeneration = java.util.concurrent.atomic.AtomicLong(0L)
     private val rawFrameSampler = FrameSampler()
     private var session: DeviceSession? = null
     private var stream: Stream? = null
@@ -73,6 +81,8 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
         onError: (Throwable) -> Unit
     ) {
         check(!closed.get()) { "Sessione DAT gia chiusa." }
+        val callbackGeneration = generation.incrementAndGet()
+        failureDelivered.set(false)
         this.onFrame = onFrame
         this.onError = onError
         rawFrameSampler.reset()
@@ -88,8 +98,8 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
             Wearables.createSession(SpecificDeviceSelector(deviceId)).getOrThrow()
         }
         session = created
-        monitorDeviceLink(deviceId)
-        monitorSession(created)
+        monitorDeviceLink(deviceId, callbackGeneration)
+        monitorSession(created, callbackGeneration)
         withContext(Dispatchers.Main.immediate) { created.start() }
         try {
             withTimeout(STREAM_READY_TIMEOUT_MILLIS) { ready.await() }
@@ -114,24 +124,33 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
         }
     }
 
-    private fun monitorSession(created: DeviceSession) {
+    private fun monitorSession(created: DeviceSession, callbackGeneration: Long) {
         sessionErrorJob = sdkScope.launch {
             created.errors.collect { error ->
-                deliverFailure(IllegalStateException(describeSessionError(error)))
+                deliverFailure(IllegalStateException(describeSessionError(error)), callbackGeneration)
             }
         }
         sessionStateJob = sdkScope.launch {
             var sessionWasStarted = false
             created.state.collect { state ->
+                if (!isCurrentSession(callbackGeneration)) return@collect
                 when (state) {
                     DeviceSessionState.STARTED -> {
                         sessionWasStarted = true
                         if (stream == null && streamStarting.compareAndSet(false, true)) {
-                            startStream(created)
+                            startStream(created, callbackGeneration)
+                        }
+                    }
+                    DeviceSessionState.PAUSED -> {
+                        // DAT can pause the session independently of the client.
+                        // Detach the stopped capability before STARTED is allowed
+                        // to create a fresh stream.
+                        if (stream != null || streamStarting.get()) {
+                            cleanupStream()
                         }
                     }
                     DeviceSessionState.STOPPED -> if (sessionWasStarted) {
-                        deliverFailure(IllegalStateException("Gli occhiali hanno chiuso la sessione DAT."))
+                        deliverFailure(IllegalStateException("Gli occhiali hanno chiuso la sessione DAT."), callbackGeneration)
                     }
                     else -> Unit
                 }
@@ -139,18 +158,17 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
         }
     }
 
-    private fun monitorDeviceLink(deviceId: DeviceIdentifier) {
+    private fun monitorDeviceLink(deviceId: DeviceIdentifier, callbackGeneration: Long) {
         deviceLinkJob?.cancel()
         val metadata = Wearables.devicesMetadata[deviceId] ?: return
         deviceLinkJob = sdkScope.launch {
             var wasConnected = false
             metadata.collect { device ->
+                if (!isCurrentSession(callbackGeneration)) return@collect
                 if (device.linkState == LinkState.CONNECTED) {
                     wasConnected = true
                 } else if (wasConnected) {
-                    deliverFailure(
-                        IllegalStateException("Il collegamento DAT con gli occhiali si e interrotto.")
-                    )
+                    deliverFailure(IllegalStateException("Il collegamento DAT con gli occhiali si e interrotto."), callbackGeneration)
                 }
             }
         }
@@ -162,7 +180,7 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
                 val deviceId = awaitConnectedDeviceEvent()
                 delay(LINK_STABILIZATION_MILLIS)
                 val stillConnected = deviceId in Wearables.devices.value &&
-                    Wearables.devicesMetadata[deviceId]?.value?.linkState == LinkState.CONNECTED
+                    isEligibleDevice(deviceId)
                 if (stillConnected) return@withTimeoutOrNull deviceId
             }
             error("Attesa connessione DAT terminata senza dispositivo.")
@@ -182,7 +200,10 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
         while (true) {
             val metadataFlows = deviceIds.mapNotNull { deviceId ->
                 Wearables.devicesMetadata[deviceId]?.map { device ->
-                    if (device.linkState == LinkState.CONNECTED) deviceId else null
+                    if (device.linkState == LinkState.CONNECTED &&
+                        device.compatibility == DeviceCompatibility.COMPATIBLE &&
+                        device.deviceType == DeviceType.RAYBAN_META
+                    ) deviceId else null
                 }
             }
             if (metadataFlows.isNotEmpty()) {
@@ -202,25 +223,36 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
         }
     }
 
-    private suspend fun startStream(activeSession: DeviceSession) {
+    private suspend fun startStream(activeSession: DeviceSession, callbackGeneration: Long) = operationMutex.withLock {
+        if (!isCurrentSession(callbackGeneration) || activeSession.state.value != DeviceSessionState.STARTED) {
+            streamStarting.set(false)
+            return@withLock
+        }
+        val streamCallbackGeneration = streamGeneration.incrementAndGet()
         withContext(Dispatchers.Main.immediate) {
             activeSession.addStream(
                 StreamConfiguration(videoQuality = VideoQuality.MEDIUM, frameRate = DAT_FRAME_RATE)
             ).onSuccess { createdStream ->
+                if (!isCurrentStream(callbackGeneration, streamCallbackGeneration) || activeSession.state.value != DeviceSessionState.STARTED) {
+                    runCatching { createdStream.stop() }
+                    sdkScope.launch(Dispatchers.Main.immediate) { runCatching { activeSession.removeStream() } }
+                    streamStarting.set(false)
+                    return@onSuccess
+                }
                 stream = createdStream
-                monitorStream(createdStream)
+                monitorStream(createdStream, callbackGeneration, streamCallbackGeneration)
                 createdStream.start().onFailure { error, _ ->
                     streamStarting.set(false)
-                    deliverFailure(IllegalStateException(error.getLocalizedDescription(appContext)))
+                    deliverStreamFailure(IllegalStateException(error.getLocalizedDescription(appContext)), callbackGeneration, streamCallbackGeneration)
                 }
             }.onFailure { error, _ ->
                 streamStarting.set(false)
-                deliverFailure(IllegalStateException(error.getLocalizedDescription(appContext)))
+                deliverStreamFailure(IllegalStateException(error.getLocalizedDescription(appContext)), callbackGeneration, streamCallbackGeneration)
             }
         }
     }
 
-    private fun monitorStream(createdStream: Stream) {
+    private fun monitorStream(createdStream: Stream, callbackGeneration: Long, streamCallbackGeneration: Long) {
         videoJob?.cancel()
         videoJob = workerScope.launch {
             createdStream.videoStream.collect { frame ->
@@ -233,8 +265,8 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
         streamErrorJob?.cancel()
         streamErrorJob = sdkScope.launch {
             createdStream.errorStream.collect { error ->
-                if (error != StreamError.STREAM_ERROR) {
-                    deliverFailure(IllegalStateException(error.getLocalizedDescription(appContext)))
+                if (isCurrentStream(callbackGeneration, streamCallbackGeneration)) {
+                    deliverStreamFailure(IllegalStateException(error.getLocalizedDescription(appContext)), callbackGeneration, streamCallbackGeneration)
                 }
             }
         }
@@ -242,6 +274,7 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
         streamStateJob = sdkScope.launch {
             var streamWasActive = false
             createdStream.state.collect { state ->
+                if (!isCurrentStream(callbackGeneration, streamCallbackGeneration)) return@collect
                 when (state) {
                     StreamState.STARTING, StreamState.STARTED -> streamWasActive = true
                     StreamState.STREAMING -> {
@@ -249,9 +282,10 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
                         streamStarting.set(false)
                         if (!ready.isCompleted) ready.complete(Unit)
                     }
+                    StreamState.PAUSED -> Unit
                     StreamState.STOPPED, StreamState.CLOSED -> if (streamWasActive) {
                         streamStarting.set(false)
-                        deliverFailure(IllegalStateException("Lo stream video DAT si e chiuso."))
+                        deliverStreamFailure(IllegalStateException("Lo stream video DAT si e chiuso."), callbackGeneration, streamCallbackGeneration)
                     }
                     else -> Unit
                 }
@@ -260,20 +294,29 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
     }
 
     private suspend fun cleanupStream() {
-        videoJob?.cancel()
-        videoJob = null
-        streamStateJob?.cancel()
-        streamStateJob = null
-        streamErrorJob?.cancel()
-        streamErrorJob = null
-        withContext(Dispatchers.Main.immediate) {
-            stream?.stop()
+        operationMutex.withLock {
+            streamGeneration.incrementAndGet()
+            videoJob?.cancel()
+            videoJob = null
+            streamStateJob?.cancel()
+            streamStateJob = null
+            streamErrorJob?.cancel()
+            streamErrorJob = null
+            val oldStream = stream
+            val oldSession = session
             stream = null
+            withContext(Dispatchers.Main.immediate) {
+                runCatching { oldStream?.stop() }
+                if (oldStream != null && oldSession != null) {
+                    runCatching { oldSession.removeStream() }
+                }
+            }
+            streamStarting.set(false)
         }
-        streamStarting.set(false)
     }
 
     private suspend fun cleanupSession() {
+        generation.incrementAndGet()
         cleanupStream()
         deviceLinkJob?.cancel()
         deviceLinkJob = null
@@ -293,16 +336,39 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
 
     override suspend fun resume() {
         val active = session ?: return
-        if (stream == null && streamStarting.compareAndSet(false, true)) {
-            rawFrameSampler.reset()
-            ready = CompletableDeferred()
-            startStream(active)
-            ready.await()
+        val callbackGeneration = try {
+            operationMutex.withLock {
+                if (closed.get() || stream != null || !streamStarting.compareAndSet(false, true)) return@withLock null
+                val nextGeneration = generation.get()
+                rawFrameSampler.reset()
+                ready = CompletableDeferred()
+                val state = withTimeoutOrNull(RESUME_SESSION_READY_TIMEOUT_MILLIS) {
+                    active.state.first { it == DeviceSessionState.STARTED || it == DeviceSessionState.STOPPED }
+                } ?: throw IllegalStateException("La sessione DAT non e tornata pronta entro ${RESUME_SESSION_READY_TIMEOUT_MILLIS / 1_000} secondi.")
+                check(state == DeviceSessionState.STARTED) { "La sessione DAT e stata chiusa durante la ripresa." }
+                nextGeneration
+            }
+        } catch (error: Throwable) {
+            streamStarting.set(false)
+            throw error
+        } ?: return
+        try {
+            startStream(active, callbackGeneration)
+            withTimeout(STREAM_READY_TIMEOUT_MILLIS) { ready.await() }
+        } catch (error: TimeoutCancellationException) {
+            cleanupStream()
+            throw IllegalStateException(
+                "Il video degli occhiali non e diventato attivo entro ${STREAM_READY_TIMEOUT_MILLIS / 1_000} secondi."
+            )
+        } catch (error: Throwable) {
+            cleanupStream()
+            throw error
         }
     }
 
     override suspend fun stop() {
         if (!closed.compareAndSet(false, true)) return
+        generation.incrementAndGet()
         onFrame = null
         onError = null
         cleanupSession()
@@ -310,14 +376,28 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
         workerScope.cancel()
     }
 
-    private fun deliverFailure(error: Throwable) {
-        if (!ready.isCompleted) {
-            ready.completeExceptionally(error)
-            return
+    private fun deliverFailure(error: Throwable, callbackGeneration: Long = generation.get()) {
+        if (!isCurrentSession(callbackGeneration) || closed.get() || !failureDelivered.compareAndSet(false, true)) return
+        if (!ready.isCompleted) ready.completeExceptionally(error) else onError?.invoke(error)
+    }
+
+    private fun isCurrentSession(callbackGeneration: Long): Boolean =
+        !closed.get() && generation.get() == callbackGeneration
+
+    private fun isCurrentStream(callbackGeneration: Long, streamCallbackGeneration: Long): Boolean =
+        isCurrentSession(callbackGeneration) && streamGeneration.get() == streamCallbackGeneration
+
+    private fun deliverStreamFailure(error: Throwable, callbackGeneration: Long, streamCallbackGeneration: Long) {
+        if (isCurrentStream(callbackGeneration, streamCallbackGeneration)) {
+            deliverFailure(error, callbackGeneration)
         }
-        if (!closed.get() && failureDelivered.compareAndSet(false, true)) {
-            onError?.invoke(error)
-        }
+    }
+
+    private fun isEligibleDevice(deviceId: DeviceIdentifier): Boolean {
+        val device = Wearables.devicesMetadata[deviceId]?.value ?: return false
+        return device.linkState == LinkState.CONNECTED &&
+            device.compatibility == DeviceCompatibility.COMPATIBLE &&
+            device.deviceType == DeviceType.RAYBAN_META
     }
 
     private companion object {
@@ -326,6 +406,7 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
         const val METADATA_FLOW_WAIT_MILLIS = 100L
         const val LINK_STABILIZATION_MILLIS = 750L
         const val STREAM_READY_TIMEOUT_MILLIS = 18_000L
+        const val RESUME_SESSION_READY_TIMEOUT_MILLIS = 8_000L
         const val DAT_FRAME_RATE = 7
     }
 }

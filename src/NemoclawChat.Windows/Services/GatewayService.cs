@@ -35,6 +35,59 @@ public sealed record WorkspaceRunResult(string Result, string Source, string Sta
 
 public sealed record GatewayRuntimeInfo(bool Available, string AgentVersion, string Status, string FailureReason);
 
+public sealed class HermesBotRecord
+{
+    public HermesBotRecord(
+        string profile,
+        string displayName,
+        string description,
+        bool hidden,
+        string? chatId,
+        bool isDefault,
+        string connectionId = "primary",
+        string connectionLabel = "Gateway principale",
+        string? handle = null)
+    {
+        Profile = profile;
+        DisplayName = displayName;
+        Description = description;
+        Hidden = hidden;
+        ChatId = chatId;
+        IsDefault = isDefault;
+        ConnectionId = string.IsNullOrWhiteSpace(connectionId) ? "primary" : connectionId.Trim();
+        ConnectionLabel = string.IsNullOrWhiteSpace(connectionLabel) ? ConnectionId : connectionLabel.Trim();
+        IdentityKey = $"{ConnectionId}::{Profile}";
+        Handle = string.IsNullOrWhiteSpace(handle) ? DisplayName : handle.Trim();
+    }
+
+    public string Profile { get; set; }
+    public string DisplayName { get; set; }
+    public string Description { get; set; }
+    public bool Hidden { get; set; }
+    public string? ChatId { get; set; }
+    public bool IsDefault { get; set; }
+    public string ConnectionId { get; set; }
+    public string ConnectionLabel { get; set; }
+    public string IdentityKey { get; set; }
+    public string Handle { get; set; }
+}
+
+public sealed record HermesBotRoster(
+    IReadOnlyList<HermesBotRecord> Items,
+    bool BotModeProtocol,
+    bool MultiplexEnabled,
+    bool ChatSupported,
+    string Status);
+
+public sealed record HermesBotChat(
+    string Profile,
+    string SessionId,
+    string Title,
+    bool MultiplexEnabled,
+    bool ChatSupported,
+    string ProfileBasePath,
+    string PathTemplate);
+
 public sealed record NewsHtmlRecord(
     string Id,
     string Title,
@@ -69,7 +122,8 @@ public sealed record CronJobRecord(
     string LastRunAt,
     string LastStatus,
     string Deliver,
-    string Origin);
+    string Origin,
+    string Profile = "");
 
 public sealed record CronJobsResult(
     IReadOnlyList<CronJobRecord> Jobs,
@@ -924,6 +978,392 @@ public static class GatewayService
         return $"{prefix} Preset: API {settings.GatewayUrl}, modello {settings.Model}, protocollo {settings.PreferredApi}.{detail}";
     }
 
+    public static async Task<HermesBotRecord> CreateBotAsync(
+        AppSettings settings,
+        string profile,
+        string displayName,
+        string description,
+        string soul,
+        string? cloneFrom = null,
+        bool noSkills = false,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = HermesHubProtocol.NormalizeProfileName(profile);
+        var payload = JsonSerializer.Serialize(new
+        {
+            name = normalized,
+            profile = normalized,
+            display_name = displayName.Trim(),
+            description = description.Trim(),
+            soul = string.IsNullOrWhiteSpace(soul) ? null : soul,
+            clone_from = string.IsNullOrWhiteSpace(cloneFrom) ? null : HermesHubProtocol.NormalizeProfileName(cloneFrom),
+            no_skills = noSkills
+        });
+        var response = await SendBufferedAsync(
+            token => BuildJsonRequest(HttpMethod.Post, ResolveHermesUri(settings, "/v1/hub/bots"), payload, token),
+            cancellationToken: cancellationToken);
+        EnsureBotMutationSuccess(response, "Bot non creato.");
+        using var document = JsonDocument.Parse(response.Body);
+        return ParseBotRecord(UnwrapBot(document.RootElement), false);
+    }
+
+    internal static async Task<HermesBotRecord> CreateBotOnConnectionAsync(
+        AppSettings settings,
+        string? bearerToken,
+        string profile,
+        string displayName,
+        string description,
+        string soul,
+        string? cloneFrom = null,
+        bool noSkills = false,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = HermesHubProtocol.NormalizeProfileName(profile);
+        var payload = JsonSerializer.Serialize(new
+        {
+            name = normalized,
+            profile = normalized,
+            display_name = displayName.Trim(),
+            description = description.Trim(),
+            soul = string.IsNullOrWhiteSpace(soul) ? null : soul,
+            clone_from = string.IsNullOrWhiteSpace(cloneFrom) ? null : HermesHubProtocol.NormalizeProfileName(cloneFrom),
+            no_skills = noSkills
+        });
+        var response = await SendBufferedAsync(
+            token => BuildJsonRequest(HttpMethod.Post, ResolveHermesUri(settings, "/v1/hub/bots"), payload, token),
+            cancellationToken: cancellationToken,
+            authCandidates: new string?[] { bearerToken });
+        EnsureBotMutationSuccess(response, "Bot non creato.");
+        using var document = JsonDocument.Parse(response.Body);
+        return ParseBotRecord(UnwrapBot(document.RootElement), false);
+    }
+
+    public static async Task<HermesBotRecord> UpdateBotAsync(
+        AppSettings settings,
+        HermesBotRecord existing,
+        string description,
+        string displayName,
+        string? soul,
+        CancellationToken cancellationToken = default)
+    {
+        var profile = HermesHubProtocol.NormalizeProfileName(existing.Profile);
+        var payload = JsonSerializer.Serialize(new
+        {
+            description = description.Trim(),
+            display_name = displayName.Trim(),
+            soul = string.IsNullOrWhiteSpace(soul) ? null : soul
+        });
+        var response = await SendBufferedAsync(
+            token => BuildJsonRequest(
+                HttpMethod.Patch,
+                ResolveHermesUri(settings, $"/v1/hub/bots/{Uri.EscapeDataString(profile)}"),
+                payload,
+                token),
+            cancellationToken: cancellationToken);
+        EnsureBotMutationSuccess(response, "Modifiche bot non salvate.");
+        using var document = JsonDocument.Parse(response.Body);
+        return ParseBotRecord(UnwrapBot(document.RootElement), existing.IsDefault);
+    }
+
+    internal static async Task<HermesBotRecord> UpdateBotOnConnectionAsync(
+        AppSettings settings,
+        string? bearerToken,
+        HermesBotRecord existing,
+        string description,
+        string displayName,
+        string? soul,
+        CancellationToken cancellationToken = default)
+    {
+        var profile = HermesHubProtocol.NormalizeProfileName(existing.Profile);
+        var payload = JsonSerializer.Serialize(new
+        {
+            description = description.Trim(),
+            display_name = displayName.Trim(),
+            soul = string.IsNullOrWhiteSpace(soul) ? null : soul
+        });
+        var response = await SendBufferedAsync(
+            token => BuildJsonRequest(HttpMethod.Patch, ResolveHermesUri(settings, $"/v1/hub/bots/{Uri.EscapeDataString(profile)}"), payload, token),
+            cancellationToken: cancellationToken,
+            authCandidates: new string?[] { bearerToken });
+        EnsureBotMutationSuccess(response, "Modifiche bot non salvate.");
+        using var document = JsonDocument.Parse(response.Body);
+        return ParseBotRecord(UnwrapBot(document.RootElement), existing.IsDefault);
+    }
+
+    public static async Task DeleteBotAsync(
+        AppSettings settings,
+        HermesBotRecord bot,
+        string confirmation,
+        CancellationToken cancellationToken = default)
+    {
+        var profile = HermesHubProtocol.NormalizeProfileName(bot.Profile);
+        if (bot.IsDefault || string.Equals(profile, "default", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Il profilo predefinito non può essere eliminato.");
+        }
+        if (!string.Equals(confirmation.Trim(), profile, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("La conferma deve corrispondere esattamente al nome del bot.");
+        }
+
+        var response = await SendBufferedAsync(
+            token => BuildJsonRequest(
+                HttpMethod.Delete,
+                ResolveHermesUri(settings, $"/v1/hub/bots/{Uri.EscapeDataString(profile)}"),
+                JsonSerializer.Serialize(new { confirm_name = confirmation }),
+                token),
+            cancellationToken: cancellationToken);
+        EnsureBotMutationSuccess(response, "Bot non eliminato.");
+    }
+
+    internal static async Task DeleteBotOnConnectionAsync(
+        AppSettings settings,
+        string? bearerToken,
+        HermesBotRecord bot,
+        string confirmation,
+        CancellationToken cancellationToken = default)
+    {
+        var profile = HermesHubProtocol.NormalizeProfileName(bot.Profile);
+        if (bot.IsDefault || string.Equals(profile, "default", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Il profilo predefinito non può essere eliminato.");
+        }
+        if (!string.Equals(confirmation.Trim(), profile, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("La conferma deve corrispondere esattamente al nome del bot.");
+        }
+
+        var response = await SendBufferedAsync(
+            token => BuildJsonRequest(
+                HttpMethod.Delete,
+                ResolveHermesUri(settings, $"/v1/hub/bots/{Uri.EscapeDataString(profile)}"),
+                JsonSerializer.Serialize(new { confirm_name = confirmation }),
+                token),
+            cancellationToken: cancellationToken,
+            authCandidates: new string?[] { bearerToken });
+        EnsureBotMutationSuccess(response, "Bot non eliminato.");
+    }
+
+    private static JsonElement UnwrapBot(JsonElement root)
+    {
+        return root.ValueKind == JsonValueKind.Object &&
+               root.TryGetProperty("bot", out var bot) &&
+               bot.ValueKind == JsonValueKind.Object
+            ? bot
+            : root;
+    }
+
+    private static HermesBotRecord ParseBotRecord(JsonElement item, bool defaultFallback)
+    {
+        var profile = ExtractString(item, "profile", "name") ?? string.Empty;
+        return new HermesBotRecord(
+            profile,
+            ExtractString(item, "display_name", "displayName", "title") ?? profile,
+            ExtractString(item, "description") ?? string.Empty,
+            ExtractBoolean(item, "hidden"),
+            ExtractString(item, "chat_id", "chatId", "chat"),
+            ExtractBoolean(item, "is_default", "isDefault") || defaultFallback);
+    }
+
+    private static void EnsureBotMutationSuccess(BufferedHermesResponse response, string fallback)
+    {
+        if (response.IsSuccessStatusCode) return;
+        var detail = SafeBotError(response.Body);
+        throw new InvalidOperationException(
+            string.IsNullOrWhiteSpace(detail)
+                ? $"{fallback} (HTTP {response.StatusCode})."
+                : $"{fallback} (HTTP {response.StatusCode}): {detail}");
+    }
+
+    private static string SafeBotError(string body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var message = ExtractString(document.RootElement, "message", "detail")
+                ?? ExtractNestedString(document.RootElement, "error", "message");
+            return string.IsNullOrWhiteSpace(message) ? string.Empty : Truncate(message, 320);
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    public static Task<HermesBotRoster> LoadBotRosterAsync(
+        AppSettings settings,
+        CancellationToken cancellationToken = default) =>
+        LoadBotRosterCoreAsync(settings, null, usePrimaryCredential: true, cancellationToken);
+
+    internal static Task<HermesBotRoster> LoadBotRosterOnConnectionAsync(
+        AppSettings settings,
+        string? bearerToken,
+        CancellationToken cancellationToken = default) =>
+        LoadBotRosterCoreAsync(settings, bearerToken, usePrimaryCredential: false, cancellationToken);
+
+    private static async Task<HermesBotRoster> LoadBotRosterCoreAsync(
+        AppSettings settings,
+        string? bearerToken,
+        bool usePrimaryCredential,
+        CancellationToken cancellationToken)
+    {
+        if (usePrimaryCredential)
+        {
+            await EnsureReachableGatewayAsync(settings, cancellationToken);
+        }
+        try
+        {
+            var response = await SendBufferedAsync(
+                token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, "/v1/hub/bots"), token),
+                cancellationToken: cancellationToken,
+                authCandidates: usePrimaryCredential ? null : new string?[] { bearerToken });
+            if (!response.IsSuccessStatusCode)
+            {
+                var detail = SafeBotError(response.Body);
+                return new HermesBotRoster([], false, false, false, string.IsNullOrWhiteSpace(detail)
+                    ? $"Bot non disponibili: HTTP {response.StatusCode}."
+                    : $"Bot non disponibili: HTTP {response.StatusCode}: {detail}");
+            }
+
+            using var document = JsonDocument.Parse(response.Body);
+            var root = document.RootElement;
+            var rows = root.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array
+                ? items
+                : root.TryGetProperty("profiles", out var profiles) && profiles.ValueKind == JsonValueKind.Array
+                    ? profiles
+                    : default;
+            var bots = new List<HermesBotRecord>();
+            if (rows.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in rows.EnumerateArray())
+                {
+                    var profile = ExtractString(item, "profile", "name");
+                    if (string.IsNullOrWhiteSpace(profile)) continue;
+                    bots.Add(new HermesBotRecord(
+                        profile,
+                        ExtractString(item, "display_name", "displayName", "title") ?? profile,
+                        ExtractString(item, "description") ?? string.Empty,
+                        ExtractBoolean(item, "hidden"),
+                        ExtractString(item, "chat_id", "chatId", "chat"),
+                        ExtractBoolean(item, "is_default", "isDefault")));
+                }
+            }
+
+            return new HermesBotRoster(
+                bots,
+                ExtractBoolean(root, "bot_mode_protocol"),
+                ExtractBoolean(root, "multiplex_enabled", "profile_multiplexing"),
+                ExtractBoolean(root, "chat_supported"),
+                ExtractBoolean(root, "chat_supported")
+                    ? $"{bots.Count} profili Hermes disponibili."
+                    : "Roster disponibile; chat bot bloccata finché il multiplexing non è attivo.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new HermesBotRoster([], false, false, false, $"Bot non disponibili: {Truncate(ex.Message, 320)}");
+        }
+    }
+
+    public static async Task<HermesBotChat> OpenBotChatAsync(
+        AppSettings settings,
+        HermesBotRecord bot,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureReachableGatewayAsync(settings, cancellationToken);
+        var encoded = Uri.EscapeDataString(HermesHubProtocol.NormalizeProfileName(bot.Profile));
+        var endpoint = ResolveHermesUri(settings, $"/v1/hub/bots/{encoded}/chat");
+        var response = await SendBufferedAsync(
+            token => BuildJsonRequest(HttpMethod.Post, endpoint, "{}", token),
+            cancellationToken: cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var detail = SafeBotError(response.Body);
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(detail)
+                ? $"Chat bot non disponibile: HTTP {response.StatusCode}."
+                : $"Chat bot non disponibile: HTTP {response.StatusCode}: {detail}");
+        }
+
+        using var document = JsonDocument.Parse(response.Body);
+        var root = document.RootElement;
+        var multiplex = ExtractBoolean(root, "multiplex_enabled");
+        var supported = ExtractBoolean(root, "chat_supported");
+        var sessionId = ExtractString(root, "session_id", "sessionId");
+        if (!multiplex || !supported || string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new InvalidOperationException("Chat bot rifiutata: multiplexing Hermes non pronto.");
+        }
+
+        return new HermesBotChat(
+            ExtractString(root, "profile") ?? bot.Profile,
+            sessionId,
+            ExtractString(root, "title") ?? "Bot Chat",
+            multiplex,
+            supported,
+            ExtractString(root, "profile_base_path", "profileBasePath") ?? HermesHubProtocol.ProfileScopedUri(settings, "/v1", bot.Profile, multiplex),
+            ExtractString(root, "path_template", "pathTemplate") ?? HermesHubProtocol.ProfileScopedUri(settings, "/v1/responses", bot.Profile, multiplex));
+    }
+
+    internal static async Task<HermesBotChat> OpenBotChatOnConnectionAsync(
+        AppSettings settings,
+        string? bearerToken,
+        HermesBotRecord bot,
+        CancellationToken cancellationToken = default)
+    {
+        var encoded = Uri.EscapeDataString(HermesHubProtocol.NormalizeProfileName(bot.Profile));
+        var endpoint = ResolveHermesUri(settings, $"/v1/hub/bots/{encoded}/chat");
+        var response = await SendBufferedAsync(
+            token => BuildJsonRequest(HttpMethod.Post, endpoint, "{}", token),
+            cancellationToken: cancellationToken,
+            authCandidates: new string?[] { bearerToken });
+        if (!response.IsSuccessStatusCode)
+        {
+            var detail = SafeBotError(response.Body);
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(detail)
+                ? $"Chat bot non disponibile: HTTP {response.StatusCode}."
+                : $"Chat bot non disponibile: HTTP {response.StatusCode}: {detail}");
+        }
+
+        using var document = JsonDocument.Parse(response.Body);
+        var root = document.RootElement;
+        var multiplex = ExtractBoolean(root, "multiplex_enabled");
+        var supported = ExtractBoolean(root, "chat_supported");
+        var sessionId = ExtractString(root, "session_id", "sessionId");
+        if (!multiplex || !supported || string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new InvalidOperationException("Chat bot rifiutata: multiplexing Hermes non pronto.");
+        }
+
+        return new HermesBotChat(
+            ExtractString(root, "profile") ?? bot.Profile,
+            sessionId,
+            ExtractString(root, "title") ?? "Bot Chat",
+            multiplex,
+            supported,
+            ExtractString(root, "profile_base_path", "profileBasePath") ?? HermesHubProtocol.ProfileScopedUri(settings, "/v1", bot.Profile, multiplex),
+            ExtractString(root, "path_template", "pathTemplate") ?? HermesHubProtocol.ProfileScopedUri(settings, "/v1/responses", bot.Profile, multiplex));
+    }
+
+    internal static async Task<(int StatusCode, string Body)> SendBotGroupTurnOnConnectionAsync(
+        AppSettings settings,
+        string? bearerToken,
+        object payload,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await SendBufferedAsync(
+            token => BuildJsonRequest(
+                HttpMethod.Post,
+                ResolveHermesUri(settings, "/v1/hub/bots/group-turn"),
+                JsonSerializer.Serialize(payload),
+                token),
+            cancellationToken: cancellationToken,
+            authCandidates: new string?[] { bearerToken });
+        return (response.StatusCode, response.Body);
+    }
+
     public static async Task<bool> SupportsResponsesAsync(AppSettings settings)
     {
         await EnsureReachableGatewayAsync(settings);
@@ -1122,18 +1562,23 @@ public static class GatewayService
         return response.Body;
     }
 
-    public static async Task<CronJobsResult> LoadCronJobsAsync(AppSettings settings, bool includeDisabled = true)
+    public static async Task<CronJobsResult> LoadCronJobsAsync(
+        AppSettings settings,
+        bool includeDisabled = true,
+        string? profile = null,
+        bool profileMultiplexEnabled = false)
     {
         try
         {
             var path = includeDisabled ? "/api/jobs?type=cron&include_disabled=1" : "/api/jobs?type=cron";
-            var response = await SendBufferedAsync(token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, path), token));
+            var response = await SendBufferedAsync(token => BuildRequest(HttpMethod.Get, ResolveCronUri(settings, path, profile, profileMultiplexEnabled), token));
             if (!response.IsSuccessStatusCode)
             {
                 return new CronJobsResult([], $"Cron non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}");
             }
 
             var jobs = ParseCronJobs(response.Body)
+                .Select(job => string.IsNullOrWhiteSpace(profile) ? job : job with { Profile = HermesHubProtocol.NormalizeProfileName(profile) })
                 .OrderByDescending(job => job.Enabled)
                 .ThenBy(job => string.IsNullOrWhiteSpace(job.NextRunAt) ? "9999" : job.NextRunAt, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(job => job.Name, StringComparer.OrdinalIgnoreCase)
@@ -1147,9 +1592,13 @@ public static class GatewayService
         }
     }
 
-    public static async Task<string> RunCronJobAsync(AppSettings settings, string id)
+    public static async Task<string> RunCronJobAsync(
+        AppSettings settings,
+        string id,
+        string? profile = null,
+        bool profileMultiplexEnabled = false)
     {
-        return await CronJobActionAsync(settings, id, "run", HttpMethod.Post, "Cron avviato.");
+        return await CronJobActionAsync(settings, id, "run", HttpMethod.Post, "Cron avviato.", profile, profileMultiplexEnabled);
     }
 
     public static async Task<string> SaveCronJobAsync(
@@ -1158,37 +1607,49 @@ public static class GatewayService
         string name,
         string schedule,
         string prompt,
-        string deliver)
+        string deliver,
+        string? profile = null,
+        bool profileMultiplexEnabled = false)
     {
-        var payload = JsonSerializer.Serialize(new
+        try
         {
-            name = name.Trim(),
-            schedule = schedule.Trim(),
-            prompt,
-            deliver = string.IsNullOrWhiteSpace(deliver) ? "local" : deliver.Trim()
-        });
-        var creating = string.IsNullOrWhiteSpace(id);
-        var path = creating ? "/api/jobs" : $"/api/jobs/{Uri.EscapeDataString(id!)}";
-        var method = creating ? HttpMethod.Post : HttpMethod.Patch;
-        var response = await SendBufferedAsync(token => BuildJsonRequest(method, ResolveHermesUri(settings, path), payload, token));
-        return response.IsSuccessStatusCode
-            ? creating ? "Automazione creata." : "Automazione aggiornata."
-            : $"Automazione non salvata: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}";
+            var scopedName = string.IsNullOrWhiteSpace(profile)
+                ? name.Trim()
+                : NormalizeBotRoutineName(profile, name);
+            var payload = JsonSerializer.Serialize(new
+            {
+                name = scopedName,
+                schedule = schedule.Trim(),
+                prompt,
+                deliver = string.IsNullOrWhiteSpace(deliver) ? "local" : deliver.Trim()
+            });
+            var creating = string.IsNullOrWhiteSpace(id);
+            var path = creating ? "/api/jobs" : $"/api/jobs/{Uri.EscapeDataString(id!)}";
+            var method = creating ? HttpMethod.Post : HttpMethod.Patch;
+            var response = await SendBufferedAsync(token => BuildJsonRequest(method, ResolveCronUri(settings, path, profile, profileMultiplexEnabled), payload, token));
+            return response.IsSuccessStatusCode
+                ? creating ? "Automazione creata." : "Automazione aggiornata."
+                : $"Automazione non salvata: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}";
+        }
+        catch (Exception ex)
+        {
+            return $"Automazione non salvata: {ex.Message}";
+        }
     }
 
-    public static async Task<string> PauseCronJobAsync(AppSettings settings, string id)
+    public static async Task<string> PauseCronJobAsync(AppSettings settings, string id, string? profile = null, bool profileMultiplexEnabled = false)
     {
-        return await CronJobActionAsync(settings, id, "pause", HttpMethod.Post, "Cron messo in pausa.");
+        return await CronJobActionAsync(settings, id, "pause", HttpMethod.Post, "Cron messo in pausa.", profile, profileMultiplexEnabled);
     }
 
-    public static async Task<string> ResumeCronJobAsync(AppSettings settings, string id)
+    public static async Task<string> ResumeCronJobAsync(AppSettings settings, string id, string? profile = null, bool profileMultiplexEnabled = false)
     {
-        return await CronJobActionAsync(settings, id, "resume", HttpMethod.Post, "Cron riattivato.");
+        return await CronJobActionAsync(settings, id, "resume", HttpMethod.Post, "Cron riattivato.", profile, profileMultiplexEnabled);
     }
 
-    public static async Task<string> DeleteCronJobAsync(AppSettings settings, string id)
+    public static async Task<string> DeleteCronJobAsync(AppSettings settings, string id, string? profile = null, bool profileMultiplexEnabled = false)
     {
-        return await CronJobActionAsync(settings, id, null, HttpMethod.Delete, "Cron eliminato.");
+        return await CronJobActionAsync(settings, id, null, HttpMethod.Delete, "Cron eliminato.", profile, profileMultiplexEnabled);
     }
 
     public static async Task<(HubMemoryState Memory, string Status)> LoadHubMemoryAsync(AppSettings settings)
@@ -1683,7 +2144,12 @@ public static class GatewayService
         return response.IsSuccessStatusCode ? "Notifica aggiornata." : $"Notifica non aggiornata: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}";
     }
 
-    public static async Task<string> TryStopRunAsync(AppSettings settings, string runId, CancellationToken cancellationToken = default)
+    public static async Task<string> TryStopRunAsync(
+        AppSettings settings,
+        string runId,
+        string? botProfile = null,
+        bool botMultiplexEnabled = false,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(runId))
         {
@@ -1692,14 +2158,41 @@ public static class GatewayService
 
         await EnsureReachableGatewayAsync(settings, cancellationToken);
         var payload = JsonSerializer.Serialize(new { reason = "user_cancelled" });
+        var stopPath = $"/v1/runs/{Uri.EscapeDataString(runId)}/stop";
+        var stopUri = string.IsNullOrWhiteSpace(botProfile)
+            ? ResolveHermesUri(settings, stopPath)
+            : HermesHubProtocol.ProfileScopedUri(settings, stopPath, botProfile, botMultiplexEnabled);
         var response = await SendBufferedAsync(
             token => BuildJsonRequest(
                 HttpMethod.Post,
-                ResolveHermesUri(settings, $"/v1/runs/{Uri.EscapeDataString(runId)}/stop"),
+                stopUri,
                 payload,
                 token),
             cancellationToken: cancellationToken);
 
+        return response.IsSuccessStatusCode || response.StatusCode == 404
+            ? "Run Hermes arrestata."
+            : $"Stop run fallito: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}";
+    }
+
+    internal static async Task<string> TryStopRunOnConnectionAsync(
+        AppSettings settings,
+        string? bearerToken,
+        string runId,
+        string? botProfile = null,
+        bool botMultiplexEnabled = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(runId)) return "Run Hermes assente.";
+        var payload = JsonSerializer.Serialize(new { reason = "user_cancelled" });
+        var stopPath = $"/v1/runs/{Uri.EscapeDataString(runId)}/stop";
+        var stopUri = string.IsNullOrWhiteSpace(botProfile)
+            ? ResolveHermesUri(settings, stopPath)
+            : HermesHubProtocol.ProfileScopedUri(settings, stopPath, botProfile, botMultiplexEnabled);
+        var response = await SendBufferedAsync(
+            token => BuildJsonRequest(HttpMethod.Post, stopUri, payload, token),
+            cancellationToken: cancellationToken,
+            authCandidates: new string?[] { bearerToken });
         return response.IsSuccessStatusCode || response.StatusCode == 404
             ? "Run Hermes arrestata."
             : $"Stop run fallito: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}";
@@ -1811,7 +2304,42 @@ public static class GatewayService
         }
     }
 
-    private static async Task<string> CronJobActionAsync(AppSettings settings, string id, string? action, HttpMethod method, string success)
+    internal static string NormalizeBotRoutineName(string profile, string name)
+    {
+        var normalizedProfile = HermesHubProtocol.NormalizeProfileName(profile);
+        var value = (name ?? string.Empty).Trim();
+        if (value.StartsWith("[bot:", StringComparison.OrdinalIgnoreCase))
+        {
+            var close = value.IndexOf(']');
+            if (close >= 0)
+            {
+                value = value[(close + 1)..].Trim();
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException("Il nome della routine è obbligatorio.", nameof(name));
+        }
+
+        return $"[bot:{normalizedProfile}] {value}";
+    }
+
+    private static string ResolveCronUri(AppSettings settings, string path, string? profile, bool profileMultiplexEnabled)
+    {
+        return string.IsNullOrWhiteSpace(profile)
+            ? ResolveHermesUri(settings, path)
+            : HermesHubProtocol.ProfileScopedApiUri(settings, path, profile, profileMultiplexEnabled);
+    }
+
+    private static async Task<string> CronJobActionAsync(
+        AppSettings settings,
+        string id,
+        string? action,
+        HttpMethod method,
+        string success,
+        string? profile = null,
+        bool profileMultiplexEnabled = false)
     {
         if (string.IsNullOrWhiteSpace(id))
         {
@@ -1822,7 +2350,7 @@ public static class GatewayService
         var path = string.IsNullOrWhiteSpace(action) ? $"/api/jobs/{safeId}" : $"/api/jobs/{safeId}/{action}";
         try
         {
-            var response = await SendBufferedAsync(token => BuildJsonRequest(method, ResolveHermesUri(settings, path), "{}", token));
+            var response = await SendBufferedAsync(token => BuildJsonRequest(method, ResolveCronUri(settings, path, profile, profileMultiplexEnabled), "{}", token));
             return response.IsSuccessStatusCode
                 ? success
                 : $"Azione cron fallita: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}";
@@ -1973,10 +2501,11 @@ public static class GatewayService
     private static async Task<BufferedHermesResponse> SendBufferedAsync(
         Func<string?, HttpRequestMessage> requestFactory,
         bool allowCompatAuth = true,
+        IEnumerable<string?>? authCandidates = null,
         CancellationToken cancellationToken = default)
     {
         BufferedHermesResponse? last = null;
-        var candidates = BuildHermesAuthCandidates(allowCompatAuth).ToArray();
+        var candidates = (authCandidates ?? BuildHermesAuthCandidates(allowCompatAuth)).ToArray();
         for (var i = 0; i < candidates.Length; i++)
         {
             using var request = requestFactory(candidates[i]);
@@ -2077,7 +2606,7 @@ public static class GatewayService
     private static HttpRequestMessage BuildJsonRequest(HttpMethod method, string uri, string payload, string? bearerToken = null, string? sessionId = null)
     {
         var request = BuildRequest(method, uri, bearerToken, sessionId);
-        if (method != HttpMethod.Get && method != HttpMethod.Delete)
+        if (method != HttpMethod.Get)
         {
             request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
         }
@@ -2576,5 +3105,23 @@ public static class GatewayService
         }
 
         return null;
+    }
+
+    private static bool ExtractBoolean(JsonElement root, params string[] keys)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        foreach (var key in keys)
+        {
+            if (!root.TryGetProperty(key, out var property)) continue;
+            if (property.ValueKind == JsonValueKind.True) return true;
+            if (property.ValueKind == JsonValueKind.False) return false;
+            if (property.ValueKind == JsonValueKind.String && bool.TryParse(property.GetString(), out var value)) return value;
+        }
+
+        return false;
     }
 }

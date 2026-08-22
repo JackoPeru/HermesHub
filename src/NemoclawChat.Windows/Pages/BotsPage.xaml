@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="NemoclawChat_Windows.Pages.BotsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:NemoclawChat_Windows.Services"
+    Background="{StaticResource AppBackgroundBrush}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Padding="44,36" MaxWidth="1080" Spacing="20">
+            <Grid ColumnSpacing="18">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="8">
+                    <TextBlock FontSize="30" FontWeight="SemiBold" Foreground="White" Text="Bot Hermes" />
+                    <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Roster reale dei profili Hermes. Configurazione, memoria, skill e credenziali restano nel profilo upstream; le routine bot richiedono multiplexing attivo." TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <Button Click="Create_Click" Content="Nuovo bot" />
+                    <Button Click="AddConnection_Click" Content="Nuova connessione" />
+                    <Button Click="Refresh_Click" Content="Aggiorna" />
+                </StackPanel>
+            </Grid>
+            <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedTextBrush}" Text="Caricamento profili Hermes..." TextWrapping="Wrap" />
+            <TextBlock FontSize="20" FontWeight="SemiBold" Foreground="White" Text="Connessioni" />
+            <ListView x:Name="ConnectionsList" ItemsSource="{x:Bind Connections}" SelectionMode="None" IsItemClickEnabled="False">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:HermesBotConnection">
+                        <Grid Padding="0,6" ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="2">
+                                <TextBlock Foreground="White" FontWeight="SemiBold" Text="{x:Bind Label}" />
+                                <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="{x:Bind Endpoint}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Tag="{x:Bind}" Click="DeleteConnection_Click" Content="Rimuovi" />
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+            <TextBlock FontSize="20" FontWeight="SemiBold" Foreground="White" Text="Bot disponibili" />
+            <ListView x:Name="BotsList" ItemsSource="{x:Bind Bots}" SelectionMode="None" IsItemClickEnabled="False">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:HermesBotRecord">
+                        <Grid Padding="0,12" ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="4">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="White" Text="{x:Bind DisplayName}" />
+                                    <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="{x:Bind Profile}" />
+                                    <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="{x:Bind Handle}" />
+                                </StackPanel>
+                                <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="{x:Bind ConnectionLabel}" />
+                                <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="{x:Bind Description}" TextWrapping="Wrap" />
+                                <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="{x:Bind ChatId, FallbackValue=Bot Chat disponibile dopo apertura}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <Button Click="Open_Click" Tag="{x:Bind}" Content="Apri Bot Chat" />
+                                <Button Click="Edit_Click" Tag="{x:Bind}" Content="Modifica" />
+                                <Button Click="Delete_Click" Loaded="DeleteButton_Loaded" Tag="{x:Bind}" Content="Elimina" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+            <TextBlock FontSize="20" FontWeight="SemiBold" Foreground="White" Text="Gruppi Hermes" />
+            <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Seleziona da 2 a 6 bot source-qualified. I gruppi sono locali al client; i turni vengono inviati all'endpoint proprietario di ogni membro." TextWrapping="Wrap" />
+            <TextBox x:Name="GroupNameInput" Header="Nome gruppo" PlaceholderText="es. Revisione progetto" MaxLength="160" />
+            <ListView x:Name="GroupMembersList" ItemsSource="{x:Bind Bots}" SelectionMode="Multiple" Height="220">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:HermesBotRecord">
+                        <StackPanel Padding="0,5" Spacing="2">
+                            <TextBlock Foreground="White" Text="{x:Bind DisplayName}" />
+                            <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="{x:Bind Handle}" />
+                            <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="{x:Bind ConnectionLabel}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Click="CreateGroup_Click" Content="Salva gruppo" />
+                <Button Click="RunSelectedGroup_Click" Content="Esegui turno gruppo" />
+                <Button x:Name="CancelGroupTurnButton" Click="CancelGroupTurn_Click" Content="Annulla turno" IsEnabled="False" />
+            </StackPanel>
+            <ListView x:Name="GroupsList" ItemsSource="{x:Bind Groups}" SelectionMode="Single">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:HermesBotGroup">
+                        <Grid Padding="0,8" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="3">
+                                <TextBlock Foreground="White" FontWeight="SemiBold" Text="{x:Bind Name}" />
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="{x:Bind Members.Count, FallbackValue=0}" />
+                                    <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="membri · sessioni Group persistenti" />
+                                </StackPanel>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                <Button Tag="{x:Bind}" Click="RunGroup_Click" Content="Esegui" />
+                                <Button Tag="{x:Bind}" Click="DeleteGroup_Click" Content="Elimina" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

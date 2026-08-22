@@ -8,6 +8,8 @@ namespace NemoclawChat_Windows.Pages;
 public sealed partial class CronPage : Page
 {
     private IReadOnlyList<CronJobRecord> _jobs = [];
+    private HermesBotRoster? _botRoster;
+    private bool _updatingProfileSelector;
     private string? _editingId;
 
     public CronPage()
@@ -32,7 +34,80 @@ public sealed partial class CronPage : Page
     {
         StatusText.Text = "Carico cron Hermes...";
         CronPanel.Children.Clear();
-        var result = await GatewayService.LoadCronJobsAsync(AppSettingsStore.Load(), includeDisabled: true);
+        await RefreshBotProfilesAsync();
+        var result = await LoadJobsAsync();
+        _jobs = result.Jobs;
+        StatusText.Text = result.Status;
+        RenderJobs();
+    }
+
+    private async Task RefreshBotProfilesAsync()
+    {
+        var selected = SelectedProfile;
+        var roster = await GatewayService.LoadBotRosterAsync(AppSettingsStore.Load());
+        _botRoster = roster;
+        _updatingProfileSelector = true;
+        try
+        {
+            BotProfileBox.Items.Clear();
+            BotProfileBox.Items.Add(new ComboBoxItem { Content = "Globale / default", Tag = string.Empty });
+            foreach (var bot in roster.Items)
+            {
+                BotProfileBox.Items.Add(new ComboBoxItem
+                {
+                    Content = $"{bot.DisplayName} ({bot.Profile})",
+                    Tag = bot.Profile,
+                    IsEnabled = roster.MultiplexEnabled
+                });
+            }
+
+            SelectProfile(string.IsNullOrWhiteSpace(selected) ? string.Empty : selected);
+            BotScopeHint.Text = roster.MultiplexEnabled
+                ? "Le routine del profilo selezionato sono isolate dal gateway Hermes."
+                : "Routine bot bloccate: il gateway non dichiara multiplexing profili attivo.";
+        }
+        finally
+        {
+            _updatingProfileSelector = false;
+        }
+    }
+
+    private async Task<CronJobsResult> LoadJobsAsync()
+    {
+        var profile = SelectedProfile;
+        var mux = string.IsNullOrWhiteSpace(profile) || _botRoster?.MultiplexEnabled == true;
+        return await GatewayService.LoadCronJobsAsync(
+            AppSettingsStore.Load(),
+            includeDisabled: true,
+            profile: string.IsNullOrWhiteSpace(profile) ? null : profile,
+            profileMultiplexEnabled: mux);
+    }
+
+    private string SelectedProfile => (BotProfileBox.SelectedItem as ComboBoxItem)?.Tag as string ?? string.Empty;
+
+    private bool SelectedProfileMultiplexEnabled =>
+        string.IsNullOrWhiteSpace(SelectedProfile) || _botRoster?.MultiplexEnabled == true;
+
+    private void SelectProfile(string profile)
+    {
+        var normalized = profile.Trim();
+        for (var index = 0; index < BotProfileBox.Items.Count; index++)
+        {
+            if (BotProfileBox.Items[index] is ComboBoxItem item &&
+                string.Equals(item.Tag as string, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                BotProfileBox.SelectedIndex = index;
+                return;
+            }
+        }
+
+        BotProfileBox.SelectedIndex = 0;
+    }
+
+    private async void BotProfileBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingProfileSelector || BotProfileBox.SelectedItem is null) return;
+        var result = await LoadJobsAsync();
         _jobs = result.Jobs;
         StatusText.Text = result.Status;
         RenderJobs();
@@ -113,6 +188,7 @@ public sealed partial class CronPage : Page
         AddDetail(details, "Stato", job.State);
         AddDetail(details, "Consegna", job.Deliver);
         AddDetail(details, "Origine", job.Origin);
+        AddDetail(details, "Profilo", job.Profile);
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         actions.Children.Add(CreateActionButton("Modifica", job.Id, Edit_Click));
@@ -176,22 +252,22 @@ public sealed partial class CronPage : Page
 
     private async void Run_Click(object sender, RoutedEventArgs e)
     {
-        await ExecuteActionAsync(sender, GatewayService.RunCronJobAsync);
+        await ExecuteActionAsync(sender, (settings, id) => GatewayService.RunCronJobAsync(settings, id, SelectedProfile, SelectedProfileMultiplexEnabled));
     }
 
     private async void Pause_Click(object sender, RoutedEventArgs e)
     {
-        await ExecuteActionAsync(sender, GatewayService.PauseCronJobAsync);
+        await ExecuteActionAsync(sender, (settings, id) => GatewayService.PauseCronJobAsync(settings, id, SelectedProfile, SelectedProfileMultiplexEnabled));
     }
 
     private async void Resume_Click(object sender, RoutedEventArgs e)
     {
-        await ExecuteActionAsync(sender, GatewayService.ResumeCronJobAsync);
+        await ExecuteActionAsync(sender, (settings, id) => GatewayService.ResumeCronJobAsync(settings, id, SelectedProfile, SelectedProfileMultiplexEnabled));
     }
 
     private async void Delete_Click(object sender, RoutedEventArgs e)
     {
-        await ExecuteActionAsync(sender, GatewayService.DeleteCronJobAsync);
+        await ExecuteActionAsync(sender, (settings, id) => GatewayService.DeleteCronJobAsync(settings, id, SelectedProfile, SelectedProfileMultiplexEnabled));
     }
 
     private void Edit_Click(object sender, RoutedEventArgs e)
@@ -199,6 +275,7 @@ public sealed partial class CronPage : Page
         if (sender is not FrameworkElement { Tag: string id }) return;
         var job = _jobs.FirstOrDefault(candidate => candidate.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
         if (job is null) return;
+        SelectProfile(job.Profile);
         var definition = AutomationPromptCodec.Decode(job.Prompt);
         _editingId = job.Id;
         EditorTitle.Text = $"Modifica · {job.Name}";
@@ -257,9 +334,17 @@ public sealed partial class CronPage : Page
 
         var definition = ReadDefinition(task);
         StatusText.Text = "Salvo automazione...";
+        var selectedProfile = SelectedProfile;
+        if (!string.IsNullOrWhiteSpace(selectedProfile) && !SelectedProfileMultiplexEnabled)
+        {
+            StatusText.Text = "Routine bot non salvata: multiplexing profili non pronto.";
+            return;
+        }
         StatusText.Text = await GatewayService.SaveCronJobAsync(
             AppSettingsStore.Load(), _editingId, name, schedule,
-            AutomationPromptCodec.Encode(definition), DeliverBox.Text);
+            AutomationPromptCodec.Encode(definition), DeliverBox.Text,
+            string.IsNullOrWhiteSpace(selectedProfile) ? null : selectedProfile,
+            SelectedProfileMultiplexEnabled);
         if (!StatusText.Text.StartsWith("Automazione non", StringComparison.Ordinal))
         {
             ClearEditor_Click(sender, e);

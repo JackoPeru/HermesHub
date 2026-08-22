@@ -162,6 +162,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import com.nemoclaw.chat.features.bots.HermesBotRoster
+import com.nemoclaw.chat.features.bots.loadHermesBotRoster
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -288,6 +290,9 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
     var notificationTemplate by rememberSaveable { mutableStateOf("") }
     var projectId by rememberSaveable { mutableStateOf(settings.activeProjectId) }
     var dependencies by rememberSaveable { mutableStateOf("") }
+    var botRoster by remember { mutableStateOf<HermesBotRoster?>(null) }
+    var selectedBotProfile by rememberSaveable { mutableStateOf("") }
+    var botMenuExpanded by remember { mutableStateOf(false) }
 
     fun schedule(): String {
         if (frequency == "Ogni ora") return "0 * * * *"
@@ -321,7 +326,17 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
     }
 
     LaunchedEffect(settings.gatewayUrl, refreshNonce) {
-        val result = loadCronJobs(settings, loadGatewaySecret(context))
+        botRoster = loadHermesBotRoster(settings, loadGatewaySecret(context))
+    }
+
+    LaunchedEffect(settings.gatewayUrl, refreshNonce, selectedBotProfile, botRoster?.multiplexEnabled) {
+        val secret = loadGatewaySecret(context)
+        val result = loadCronJobs(
+            settings,
+            secret,
+            selectedBotProfile.takeIf { it.isNotBlank() },
+            botRoster?.multiplexEnabled == true
+        )
         jobs = result.first
         status = result.second
     }
@@ -343,6 +358,27 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text(if (editingId.isBlank()) "Nuova automazione" else "Modifica automazione", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                         Button(onClick = { clearEditor() }) { Text("Nuova") }
+                    }
+                    Box {
+                        Button(onClick = { botMenuExpanded = true }) {
+                            Text(if (selectedBotProfile.isBlank()) "Profilo: Globale / default" else "Profilo: $selectedBotProfile")
+                        }
+                        DropdownMenu(expanded = botMenuExpanded, onDismissRequest = { botMenuExpanded = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Globale / default") },
+                                onClick = { selectedBotProfile = ""; botMenuExpanded = false }
+                            )
+                            botRoster?.items.orEmpty().forEach { bot ->
+                                DropdownMenuItem(
+                                    text = { Text("${bot.displayName} (${bot.profile})") },
+                                    enabled = botRoster?.multiplexEnabled == true,
+                                    onClick = { selectedBotProfile = bot.profile; botMenuExpanded = false }
+                                )
+                            }
+                        }
+                    }
+                    if (selectedBotProfile.isNotBlank() && botRoster?.multiplexEnabled != true) {
+                        Text("Routine bot bloccate: il gateway non dichiara multiplexing profili attivo.", color = AppColors.Muted, fontSize = 12.sp)
                     }
                     SettingsField("Nome", name, { name = it })
                     SettingsField("Attività", taskPrompt, { taskPrompt = it })
@@ -368,7 +404,21 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                             if (name.isBlank() || taskPrompt.isBlank() || cron.isBlank()) {
                                 status = "Nome, attività e programmazione obbligatori."
                             } else scope.launch {
-                                status = saveCronJob(settings, editingId.ifBlank { null }, name, cron, encodeAutomationPrompt(definition()), deliver, loadGatewaySecret(context))
+                                if (selectedBotProfile.isNotBlank() && botRoster?.multiplexEnabled != true) {
+                                    status = "Routine bot non salvata: multiplexing profili non pronto."
+                                    return@launch
+                                }
+                                status = saveCronJob(
+                                    settings,
+                                    editingId.ifBlank { null },
+                                    name,
+                                    cron,
+                                    encodeAutomationPrompt(definition()),
+                                    deliver,
+                                    loadGatewaySecret(context),
+                                    selectedBotProfile.takeIf { it.isNotBlank() },
+                                    botRoster?.multiplexEnabled == true
+                                )
                                 if (!status.startsWith("Automazione non")) { clearEditor(); refreshNonce++ }
                             }
                         }) { Text("Salva") }
@@ -388,7 +438,7 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(status, color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text("Fonte: GET /api/jobs?type=cron&include_disabled=1. I cron in pausa restano visibili.", color = AppColors.Muted, fontSize = 12.sp)
+                    Text("Fonte: API Hermes jobs. Profilo: ${selectedBotProfile.ifBlank { "Globale / default" }}. Le routine bot usano /p/{profilo}/api/jobs quando il multiplexing è pronto.", color = AppColors.Muted, fontSize = 12.sp)
                     Button(onClick = {
                         status = "Aggiorno cron..."
                         refreshNonce++
@@ -413,19 +463,19 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                 onDuplicate = { edit(job, duplicate = true) },
                 onRun = {
                     scope.launch {
-                        status = cronAction(settings, job.id, "run", loadGatewaySecret(context))
+                        status = cronAction(settings, job.id, "run", loadGatewaySecret(context), selectedBotProfile.takeIf { it.isNotBlank() }, botRoster?.multiplexEnabled == true)
                         refreshNonce++
                     }
                 },
                 onPauseResume = {
                     scope.launch {
-                        status = cronAction(settings, job.id, if (job.enabled) "pause" else "resume", loadGatewaySecret(context))
+                        status = cronAction(settings, job.id, if (job.enabled) "pause" else "resume", loadGatewaySecret(context), selectedBotProfile.takeIf { it.isNotBlank() }, botRoster?.multiplexEnabled == true)
                         refreshNonce++
                     }
                 },
                 onDelete = {
                     scope.launch {
-                        status = cronAction(settings, job.id, "delete", loadGatewaySecret(context))
+                        status = cronAction(settings, job.id, "delete", loadGatewaySecret(context), selectedBotProfile.takeIf { it.isNotBlank() }, botRoster?.multiplexEnabled == true)
                         refreshNonce++
                     }
                 }

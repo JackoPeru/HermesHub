@@ -40,6 +40,8 @@
                             <Button Grid.Column="1" Click="ClearEditor_Click" Content="Nuova" />
                         </Grid>
                         <TextBox x:Name="NameBox" Header="Nome" MaxLength="120" />
+                        <ComboBox x:Name="BotProfileBox" Header="Profilo routine" SelectionChanged="BotProfileBox_SelectionChanged" />
+                        <TextBlock x:Name="BotScopeHint" Foreground="{StaticResource MutedTextBrush}" Text="Routine globali sul profilo predefinito." TextWrapping="Wrap" />
                         <TextBox x:Name="TaskPromptBox" Header="Attività" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="100" MaxLength="12000" />
                         <Grid ColumnSpacing="10">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
@@ -84,7 +86,7 @@
                             Text="Caricamento cron..." />
                         <TextBlock
                             Foreground="{StaticResource MutedTextBrush}"
-                            Text="Fonte: GET /api/jobs?type=cron&amp;include_disabled=1. I cron in pausa restano visibili, ma separati dagli attivi."
+                            Text="Fonte: API Hermes jobs. Scegli Globale / default oppure un profilo bot; le routine bot usano /p/{profilo}/api/jobs solo con multiplexing dichiarato."
                             TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>

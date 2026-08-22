@@ -226,6 +226,8 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
+import com.nemoclaw.chat.features.bots.BotChatContext
+import com.nemoclaw.chat.features.bots.BotsScreen
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -315,12 +317,14 @@ internal fun ChatApp() {
     var voiceAutoStartToken by rememberSaveable { mutableLongStateOf(0L) }
     var pendingPrompt by rememberSaveable { mutableStateOf("") }
     var pendingConversationId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingBot by remember { mutableStateOf<BotChatContext?>(null) }
     var sidebarOpen by rememberSaveable { mutableStateOf(false) }
     var savedDraft by rememberSaveable { mutableStateOf("") }
     val chatState = remember { ChatStateHolder().apply { draft = savedDraft } }
     val incoming = IncomingIntentBus.request
     LaunchedEffect(incoming.version) {
         if (incoming.version == 0L) return@LaunchedEffect
+        pendingBot = null
         pendingConversationId = incoming.conversationId.ifBlank { null }
         pendingPrompt = incoming.prompt
         if (incoming.uri.isNotBlank()) {
@@ -430,10 +434,12 @@ internal fun ChatApp() {
                 onClose = { sidebarOpen = false },
                 onNewChat = {
                 chatState.resetForNewChat()
+                pendingBot = null
                 setSelectedTab(Tab.Chat)
                 sidebarOpen = false
                 },
                 onOpenConversation = { id ->
+                pendingBot = null
                 pendingConversationId = id
                 pendingPrompt = ""
                 setSelectedTab(Tab.Chat)
@@ -455,6 +461,17 @@ internal fun ChatApp() {
                 state = chatState,
                 scope = chatScope,
                 conversationId = pendingConversationId,
+                botProfile = pendingBot?.profile,
+                botSessionId = pendingBot?.sessionId,
+                botDisplayName = pendingBot?.displayName,
+                botMultiplexEnabled = pendingBot?.multiplexEnabled == true,
+                botConnectionId = pendingBot?.connectionId,
+                botEndpoint = pendingBot?.endpoint,
+                onNewChat = {
+                    pendingBot = null
+                    pendingConversationId = null
+                    chatState.resetForNewChat()
+                },
                 initialPrompt = pendingPrompt,
                 onInitialPromptConsumed = {
                 pendingPrompt = ""
@@ -473,25 +490,40 @@ internal fun ChatApp() {
                 saveSettings(context, updated)
                 },
                 onNewChat = {
+                pendingBot = null
                 pendingConversationId = null
                 pendingPrompt = ""
                 setSelectedTab(Tab.Chat)
                 },
                 onOpenConversation = { id ->
+                pendingBot = null
                 pendingConversationId = id
                 pendingPrompt = ""
                 setSelectedTab(Tab.Chat)
                 }
                 )
+                Tab.Bots -> BotsScreen(
+                    context = context,
+                    settings = settings,
+                onOpenBot = { bot ->
+                        // Never carry normal-chat messages, attachments or
+                        // previous-response state into a bot archive.
+                        chatState.resetForNewChat()
+                        pendingBot = bot
+                        pendingConversationId = bot.localConversationId
+                        pendingPrompt = ""
+                        setSelectedTab(Tab.Chat)
+                    }
+                )
                 Tab.Artifacts -> ArtifactLibraryScreen(
                 context = context,
                 settings = settings,
-                onOpenConversation = { id -> pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) },
-                onRegenerate = { prompt -> pendingConversationId = null; pendingPrompt = prompt; setSelectedTab(Tab.Chat) }
+                onOpenConversation = { id -> pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) },
+                onRegenerate = { prompt -> pendingBot = null; pendingConversationId = null; pendingPrompt = prompt; setSelectedTab(Tab.Chat) }
                 )
                 Tab.Search -> UniversalSearchScreen(context, settings) { kind, id ->
                 when (kind) {
-                "Chat", "Task" -> { pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) }
+                "Chat", "Task" -> { pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) }
                 "Progetto" -> setSelectedTab(Tab.Projects)
                 "Artifact" -> setSelectedTab(Tab.Artifacts)
                 "Cron" -> setSelectedTab(Tab.Cron)
@@ -502,6 +534,8 @@ internal fun ChatApp() {
                 Tab.Archive -> ArchiveScreen(
                 context = context,
                 onOpenConversation = { id, _ ->
+                chatState.resetForNewChat()
+                pendingBot = null
                 pendingConversationId = id
                 pendingPrompt = ""
                 setSelectedTab(Tab.Chat)
@@ -509,19 +543,22 @@ internal fun ChatApp() {
                 )
                 Tab.Cron -> CronScreen(context, settings)
                 Tab.Notifications -> NotificationsScreen(context, settings) { prompt ->
+                pendingBot = null
                 pendingPrompt = prompt
                 setSelectedTab(Tab.Chat)
                 }
-                Tab.Continuity -> ContinuityScreen(context, settings) { id -> pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) }
+                Tab.Continuity -> ContinuityScreen(context, settings) { id -> pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) }
                 Tab.Audit -> AuditScreen(context, settings)
                 Tab.Server -> ServerScreen(context, settings)
                 Tab.Hardware -> HardwareScreen(context, settings)
                 Tab.Health -> HealthDashboardScreen(context, settings) { setSelectedTab(Tab.Settings) }
                 Tab.Video -> VideoScreen(context, settings) { prompt ->
+                pendingBot = null
                 pendingPrompt = prompt
                 setSelectedTab(Tab.Chat)
                 }
                 Tab.News -> NewsScreen(context, settings) { prompt ->
+                pendingBot = null
                 pendingPrompt = prompt
                 setSelectedTab(Tab.Chat)
                 }

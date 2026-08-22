@@ -275,11 +275,35 @@ internal fun ChatScreen(
     state: ChatStateHolder,
     scope: kotlinx.coroutines.CoroutineScope,
     conversationId: String? = null,
+    botProfile: String? = null,
+    botSessionId: String? = null,
+    botDisplayName: String? = null,
+    botMultiplexEnabled: Boolean = false,
+    botConnectionId: String? = null,
+    botEndpoint: String? = null,
+    onNewChat: () -> Unit = { state.resetForNewChat() },
     initialPrompt: String = "",
     onInitialPromptConsumed: () -> Unit = {},
     onOpenSidebar: () -> Unit = {},
     onSwitchTab: (Tab) -> Unit = {}
 ) {
+    val remoteBot = !botConnectionId.isNullOrBlank() && !botConnectionId.equals("primary", true)
+    val botSettings = if (remoteBot && !botEndpoint.isNullOrBlank()) {
+        settings.copy(
+            gatewayUrl = botEndpoint.trimEnd('/'),
+            gatewayWsUrl = "",
+            inferenceEndpoint = botEndpoint.trimEnd('/'),
+            adminBridgeUrl = botEndpoint.trimEnd('/')
+        )
+    } else {
+        settings
+    }
+    val botApiKey = if (remoteBot) {
+        loadGatewayConnectionSecret(context, botConnectionId.orEmpty())
+    } else {
+        loadGatewaySecret(context)
+    }
+    val botAllowCompatAuth = !remoteBot
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     var quickPrompt by remember { mutableStateOf<String?>(null) }
 
@@ -289,7 +313,7 @@ internal fun ChatScreen(
             if (saved != null) {
                 state.activeConversationId = saved.id
                 val expectedServerConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, saved.id)
-                state.previousResponseId = if (saved.serverConversationId == expectedServerConversationId) {
+                state.previousResponseId = if (botProfile.isNullOrBlank() && saved.serverConversationId == expectedServerConversationId) {
                     saved.previousResponseId
                 } else {
                     null
@@ -315,23 +339,23 @@ internal fun ChatScreen(
 
     val haptics = LocalHapticFeedback.current
     val networkOnline by rememberOnlineState(context)
-    var gatewayAvailable by remember(settings.gatewayUrl, settings.inferenceEndpoint) {
+    var gatewayAvailable by remember(settings.gatewayUrl, settings.inferenceEndpoint, botConnectionId, botEndpoint) {
         mutableStateOf(false)
     }
-    var gatewayRuntime by remember(settings.gatewayUrl, settings.inferenceEndpoint) {
+    var gatewayRuntime by remember(settings.gatewayUrl, settings.inferenceEndpoint, botConnectionId, botEndpoint) {
         mutableStateOf<GatewayRuntimeStatus?>(null)
     }
-    LaunchedEffect(networkOnline, settings.gatewayUrl, settings.inferenceEndpoint) {
+    LaunchedEffect(networkOnline, botSettings.gatewayUrl, botSettings.inferenceEndpoint, botApiKey) {
         if (!networkOnline) {
             gatewayAvailable = false
             return@LaunchedEffect
         }
         while (true) {
             gatewayAvailable = withContext(Dispatchers.IO) {
-                probeHermesGateway(settings, loadGatewaySecret(context))
+                probeHermesGateway(botSettings, botApiKey)
             }
             gatewayRuntime = if (gatewayAvailable) {
-                withContext(Dispatchers.IO) { loadGatewayRuntimeStatus(settings, loadGatewaySecret(context)) }
+                withContext(Dispatchers.IO) { loadGatewayRuntimeStatus(botSettings, botApiKey) }
             } else {
                 null
             }
@@ -339,6 +363,9 @@ internal fun ChatScreen(
         }
     }
     val isStreaming = state.streamingState != null
+    val archivedBotWithoutContext = botProfile.isNullOrBlank() &&
+        (conversationId ?: state.activeConversationId)
+            ?.startsWith("bot-", ignoreCase = true) == true
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             scope.launch {
@@ -418,10 +445,40 @@ internal fun ChatScreen(
             contextUsage = contextUsage,
             connected = gatewayAvailable,
             gatewayRuntime = gatewayRuntime,
-            onNewChat = { state.resetForNewChat() },
+            onNewChat = onNewChat,
             onOpenSidebar = onOpenSidebar,
             onOpenArchive = { onSwitchTab(Tab.Archive) }
         )
+        if (!botProfile.isNullOrBlank()) {
+            Surface(color = AppColors.NavIndicator, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Bot attivo · ${botDisplayName ?: botProfile} · Bot Chat",
+                    color = AppColors.Accent,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp)
+                )
+            }
+        }
+        if (archivedBotWithoutContext) {
+            Surface(color = Color(0xFF7A3E00), modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Chat bot archiviata: riaprila da Bot Hermes",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Button(onClick = { onSwitchTab(Tab.Bots) }) {
+                        Text("Apri Bot Hermes")
+                    }
+                }
+            }
+        }
         Box(modifier = Modifier.weight(1f)) {
             LazyColumn(
                 state = listState,
@@ -445,7 +502,7 @@ internal fun ChatScreen(
                             state.streamUiTickNs,
                             onSpeakMessage = { text ->
                                 scope.launch {
-                                    runCatching { speakChatMessage(context, settings, text, loadGatewaySecret(context)) }
+                                    runCatching { speakChatMessage(context, botSettings, text, botApiKey) }
                                         .onFailure { Toast.makeText(context, "TTS Kokoro non disponibile: ${it.message}", Toast.LENGTH_SHORT).show() }
                                 }
                             }
@@ -578,6 +635,17 @@ internal fun ChatScreen(
             onQuickPromptConsumed = { quickPrompt = null },
             onSend = {
                 var text = state.draft.trim()
+                if (archivedBotWithoutContext) {
+                    state.messages.add(
+                        ChatMessage(
+                            "Hermes Hub",
+                            "Chat bot archiviata: riaprila da Bot Hermes",
+                            fromUser = false,
+                            isAction = true
+                        )
+                    )
+                    return@Composer
+                }
                 if ((text.isNotEmpty() || state.pendingAttachments.isNotEmpty()) && !state.sending && state.activeStreamJob == null) {
                     // No fallback prompt required when only sending attachments
                     val attachments = state.pendingAttachments.toList()
@@ -629,7 +697,20 @@ internal fun ChatScreen(
                         state.activeStreams[activeStreamCid] = initialActiveState.copy(streamingState = localState, job = coroutineContext[kotlinx.coroutines.Job])
 
                         try {
-                            streamChatRequest(settings, mode, text, localHistory.takeLast(CHAT_HISTORY_MAX_MESSAGES).toList(), activeStreamCid, prevId, attachments, loadGatewaySecret(context))
+                            streamChatRequest(
+                                botSettings,
+                                mode,
+                                text,
+                                localHistory.takeLast(CHAT_HISTORY_MAX_MESSAGES).toList(),
+                                activeStreamCid,
+                                prevId,
+                                attachments,
+                                botApiKey,
+                                botProfile,
+                                botSessionId,
+                                botMultiplexEnabled,
+                                botAllowCompatAuth
+                            )
                                 .collect { event ->
                                     if (event is ChatStreamEvent.RawHermesEvent) {
                                         rawEvents += safeRawHermesEvent()
@@ -799,7 +880,7 @@ internal fun ChatScreen(
                 if (!activeRunId.isNullOrBlank()) {
                     HermesStreamRuntime.scope.launch {
                         runCatching {
-                            stopHermesRun(settings, activeRunId, loadGatewaySecret(context))
+                            stopHermesRun(botSettings, activeRunId, botApiKey, botProfile, botMultiplexEnabled, botAllowCompatAuth)
                         }
                     }
                 }

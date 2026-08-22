@@ -205,9 +205,17 @@ public static class HermesHubProtocol
         return string.IsNullOrWhiteSpace(safeLocal) ? null : $"hermes-hub:{safeSurface}:{safeLocal}";
     }
 
-    public static object Metadata(AppSettings settings, string? workspace = null, string? source = null, string? conversationId = null)
+    public static object Metadata(
+        AppSettings settings,
+        string? workspace = null,
+        string? source = null,
+        string? conversationId = null,
+        string? profile = null,
+        string? canonicalSessionId = null)
     {
-        var serverConversationId = ServerConversationId(conversationId);
+        var serverConversationId = string.IsNullOrWhiteSpace(canonicalSessionId)
+            ? ServerConversationId(conversationId)
+            : canonicalSessionId.Trim();
         var project = ResolveActiveProject(settings);
         return new
         {
@@ -216,7 +224,9 @@ public static class HermesHubProtocol
             hub_client = true,
             requested_protocol = settings.PreferredApi,
             strict_native_mode = settings.StrictNativeMode,
-            profile = "user",
+            profile = string.IsNullOrWhiteSpace(profile) ? "user" : profile.Trim(),
+            bot_profile = string.IsNullOrWhiteSpace(profile) ? null : profile.Trim(),
+            bot_session_id = string.IsNullOrWhiteSpace(canonicalSessionId) ? null : canonicalSessionId.Trim(),
             project_id = settings.ActiveProjectId,
             project_name = settings.ActiveProjectName,
             workspace = workspace ?? (string.IsNullOrWhiteSpace(settings.ActiveProjectName) ? "default" : settings.ActiveProjectName),
@@ -306,6 +316,68 @@ public static class HermesHubProtocol
     public static bool IsNativePreferred(AppSettings settings)
     {
         return string.Equals(settings.PreferredApi, "hermes-native", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static string ProfileScopedUri(
+        AppSettings settings,
+        string path,
+        string profile,
+        bool multiplexEnabled)
+    {
+        if (!multiplexEnabled)
+        {
+            throw new InvalidOperationException("Il multiplexing dei profili Hermes non è pronto.");
+        }
+
+        var name = NormalizeProfileName(profile);
+
+        var root = settings.GatewayUrl.TrimEnd('/');
+        if (root.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            root = root[..^3];
+        }
+
+        var normalized = path.StartsWith('/') ? path : $"/{path}";
+        var suffix = normalized.StartsWith("/v1", StringComparison.OrdinalIgnoreCase)
+            ? normalized[3..]
+            : normalized;
+        return $"{root}/p/{Uri.EscapeDataString(name)}/v1{suffix}";
+    }
+
+    public static string ProfileScopedApiUri(
+        AppSettings settings,
+        string path,
+        string profile,
+        bool multiplexEnabled)
+    {
+        if (!multiplexEnabled)
+        {
+            throw new InvalidOperationException("Il multiplexing dei profili Hermes non è pronto.");
+        }
+
+        var name = NormalizeProfileName(profile);
+        var root = settings.GatewayUrl.TrimEnd('/');
+        if (root.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            root = root[..^3];
+        }
+
+        var normalized = path.StartsWith('/') ? path : $"/{path}";
+        return $"{root}/p/{Uri.EscapeDataString(name)}{normalized}";
+    }
+
+    public static string NormalizeProfileName(string? profile)
+    {
+        var name = (profile ?? string.Empty).Trim().ToLowerInvariant();
+        if (name.Length is < 1 or > 64 || name.Any(ch => !(
+            (ch >= 'a' && ch <= 'z') ||
+            (ch >= '0' && ch <= '9') ||
+            ch is '_' or '-')))
+        {
+            throw new ArgumentException("Nome profilo non valido.", nameof(profile));
+        }
+
+        return name;
     }
 
     public static string NativeInstructions(string mode)

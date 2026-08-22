@@ -1,15 +1,14 @@
-Hermes Hub 0.6.184 (timeline attivita', aggiornamenti transazionali e hardening DAT)
+Hermes Hub 0.6.185 (Bot Mode, gruppi multi-connessione e hardening DAT)
 
-- Chat Windows e Android mostrano una timeline attivita' in stile Codex per ragionamento, avanzamento e tool; e' persistita nell'archivio e resta separata dalla risposta finale.
-- Timeline sicura e interoperabile: argomenti e risultati tool sono ridotti a riassunti non sensibili prima di UI, archivio e sync; Android e Windows condividono lo stesso schema e migrano le forme precedenti.
-- Android attende caricamento impostazioni, chiave Keystore e profilo voce; migrazione e reset preservano dati previsti, e il fallimento Keystore impedisce salvataggi in chiaro.
-- Il badge rete resta basato su probe autenticato; assenza gateway continua a mostrare esattamente `Rete non disponibile`. Il client legge anche stato runtime aggiornamento senza rivelare percorsi, log o credenziali.
-- Lifecycle Ray-Ban Meta DAT piu' deterministico: selezione device connesso, camera permission, attesa stream, osservazione errori/chiusure e DAM disabilitato per camera-only.
-- Linux aggiunge updater Hermes Agent indipendente: controlli Git/worktree, candidate in worktree isolato, capability autenticata, installazione `--no-deps`, `pip check`, rollback/quarantena e runtime state atomico.
-- Asset Linux include script e unit systemd dell'updater Agent e aggiorna atomicamente anche tali unit.
-- Evidenza non eseguita: runtime dell'APK finale (emulatore escluso su richiesta), prova fisica Ray-Ban dopo le modifiche lifecycle, runtime dell'MSIX finale a parita' di versione installata e gateway live con chat, TTS, STT, archivio e SSE.
-- Versioni: Windows/AdminBridge `0.6.184`; Android `versionName 0.6.184`, `versionCode 188`.
-- Asset: `HermesHub-0.6.184-android.apk`, `NemoclawChat.Windows_0.6.184.0_x64.msix`, `HermesHub-0.6.184-linux-gateway.tar.gz`.
-- SHA-256 Android: `b7525d468c167e51c3e567eae6edf79bcfb60fc1ce744ddeab78ef617229afe8`.
-- SHA-256 Windows: `2fb87de3740c484cfaea74282957e811474934b0bfd215d4125e4124d04c71ea`.
-- SHA-256 Linux gateway: `d7e4d8fcee259fa579006ff52330f87acda96ff9f477492c24d76d80626e22ed`.
+- Bot Mode usa profili reali di Hermes Agent per elenco, creazione, modifica, clonazione e rimozione; nessun runtime bot locale parallelo.
+- I gruppi supportano da 2 a 6 bot anche su connessioni diverse, routing per menzioni e richiesta utente originale preservata; ogni turno è limitato a 3 round e 10 risposte bot.
+- Connections supporta endpoint nominativi cross-machine e token sicuri separati per connessione: Windows usa PasswordVault, Android usa Android Keystore, mentre il catalogo persistito non contiene token.
+- Bot omonimi ricevono handle stabili per la disambiguazione. Errori di singoli membri sono riportati come fallimenti parziali, senza retry incerti dopo l'accettazione server; cancellazione e sostituzione invalidano lavoro e salvataggi tardivi.
+- Bot Chat è il percorso canonico per i profili Hermes e resta fail-closed quando il multiplexing profili non è esplicitamente disponibile; cron e chat rispettano lo scope del profilo.
+- Lifecycle Meta DAT/Jarvis rafforzato: inizializzazione process-wide idempotente, sessione/stream serializzati, stato attivo solo dopo `STREAMING`, cleanup deterministico e singola causa terminale osservabile.
+- Evidenza non eseguita: runtime APK finale (emulatore escluso), prova fisica Ray-Ban, runtime MSIX installato e gateway live cross-machine/chat/TTS/STT/archivio/SSE.
+- Versioni: Windows/AdminBridge `0.6.185`; Android `versionName 0.6.185`, `versionCode 189`.
+- Asset: `HermesHub-0.6.185-android.apk`, `NemoclawChat.Windows_0.6.185.0_x64.msix`, `HermesHub-0.6.185-linux-gateway.tar.gz`.
+- SHA-256 Android: `1805ea272a22f9a21b6133f713811b2ce6afddbd1c9c9fea4b36a32f3391c36b`.
+- SHA-256 Windows: `781940c6085b16c157a31043506564a08d7e39423185362fdc8ffe980645a24a`.
+- SHA-256 Linux gateway: `00f94f02517efa44010da74b549b2427bf954e9a292d62c7781cd2d24fd1dd09`.

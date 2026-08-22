@@ -1,4 +1,5 @@
 using Windows.Security.Credentials;
+using System.Text.RegularExpressions;
 
 namespace NemoclawChat_Windows.Services;
 
@@ -8,6 +9,7 @@ public static class GatewayCredentialStore
     private const string LegacyResource = "ChatClaw.OpenClawGateway";
     private const string UserName = "hermes";
     private const string LegacyUserName = "operator";
+    private static readonly Regex ConnectionIdRegex = new("^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     // PasswordVault e' wrapper COM thread-safe: cachiamo singleton invece di allocare per call.
     private static readonly Lazy<PasswordVault> SharedVault = new(() => new PasswordVault());
@@ -82,6 +84,66 @@ public static class GatewayCredentialStore
             RemoveSecret(Resource, UserName);
             RemoveSecret(LegacyResource, LegacyUserName);
         }
+    }
+
+    public static bool HasConnectionSecret(string connectionId)
+    {
+        return TryLoadSecret(ConnectionResource(connectionId), UserName, out _);
+    }
+
+    public static string LoadConnectionSecret(string connectionId)
+    {
+        return TryLoadSecret(ConnectionResource(connectionId), UserName, out var secret) ? secret : string.Empty;
+    }
+
+    public static bool SaveConnectionSecret(string connectionId, string secret)
+    {
+        var resource = ConnectionResource(connectionId);
+        lock (MutationLock)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(secret))
+                {
+                    DeleteConnectionSecret(connectionId);
+                    return true;
+                }
+
+                var normalized = secret.Trim();
+                SharedVault.Value.Add(new PasswordCredential(resource, UserName, normalized));
+                if (!TryLoadSecret(resource, UserName, out var saved) || !string.Equals(saved, normalized, StringComparison.Ordinal))
+                {
+                    RemoveSecret(resource, UserName);
+                    throw new InvalidOperationException("Verifica credenziale connessione non riuscita.");
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.WriteLine($"[GatewayCredentialStore] SaveConnectionSecret: {ex.GetType().Name}");
+                return false;
+            }
+        }
+    }
+
+    public static void DeleteConnectionSecret(string connectionId)
+    {
+        lock (MutationLock)
+        {
+            RemoveSecret(ConnectionResource(connectionId), UserName);
+        }
+    }
+
+    private static string ConnectionResource(string connectionId)
+    {
+        var normalized = (connectionId ?? string.Empty).Trim();
+        if (!ConnectionIdRegex.IsMatch(normalized) || string.Equals(normalized, "primary", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Identificativo connessione non valido.", nameof(connectionId));
+        }
+
+        return $"HermesHub.Connection.{normalized}";
     }
 
     private static void RemoveSecret(string resource, string userName)

@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
     <exclude domain="root" path="." />
+    <exclude domain="sharedpref" path="chatclaw_connection_secrets.xml" />
+    <exclude domain="sharedpref" path="chatclaw_settings.xml" />
+    <exclude domain="sharedpref" path="nemoclaw_settings.xml" />
 </full-backup-content>

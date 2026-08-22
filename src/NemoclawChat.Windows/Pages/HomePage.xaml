@@ -47,7 +47,23 @@
             Margin="24,4"
             IsClosable="True"
             IsOpen="False"
-            Severity="Error" />
+            Severity="Error">
+            <InfoBar.ActionButton>
+                <Button
+                    x:Name="OpenBotHermesButton"
+                    Click="OpenBotHermes_Click"
+                    Content="Apri Bot Hermes" />
+            </InfoBar.ActionButton>
+        </InfoBar>
+
+        <TextBlock
+            x:Name="BotActiveText"
+            Grid.Row="0"
+            Margin="28,42,28,0"
+            Foreground="{StaticResource AccentBrush}"
+            FontWeight="SemiBold"
+            Visibility="Collapsed"
+            TextWrapping="Wrap" />
 
         <ScrollViewer
             x:Name="MessagesScroll"

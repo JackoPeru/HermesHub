@@ -103,6 +103,9 @@
                         <Button x:Name="NavProjectsButton" Click="Projects_Click" Style="{StaticResource SidebarButtonStyle}" AutomationProperties.Name="Progetti" ToolTipService.ToolTip="Progetti">
                             <StackPanel Orientation="Horizontal" Spacing="11"><FontIcon FontSize="16" Glyph="&#xE8F1;" /><TextBlock Text="Progetti" /></StackPanel>
                         </Button>
+                        <Button x:Name="NavBotsButton" Click="Bots_Click" Style="{StaticResource SidebarButtonStyle}" AutomationProperties.Name="Bot Hermes" ToolTipService.ToolTip="Bot Hermes">
+                            <StackPanel Orientation="Horizontal" Spacing="11"><FontIcon FontSize="16" Glyph="&#xE7B2;" /><TextBlock Text="Bot Hermes" /></StackPanel>
+                        </Button>
                         <Button x:Name="NavCronButton" Click="Cron_Click" Style="{StaticResource SidebarButtonStyle}" AutomationProperties.Name="Cron Hermes" ToolTipService.ToolTip="Cron Hermes">
                             <StackPanel Orientation="Horizontal" Spacing="11"><FontIcon FontSize="16" Glyph="&#xE7C1;" /><TextBlock Text="Cron" /></StackPanel>
                         </Button>

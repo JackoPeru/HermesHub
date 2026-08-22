@@ -18,6 +18,7 @@ import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PlayCircle
+import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.TaskAlt
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Visibility
@@ -29,6 +30,7 @@ internal enum class Tab(val label: String, val icon: ImageVector) {
     Voice("Voce", Icons.Rounded.Mic),
     Jarvis("Jarvis", Icons.Rounded.Visibility),
     Projects("Progetti", Icons.Rounded.FolderOpen),
+    Bots("Bot Hermes", Icons.Rounded.SmartToy),
     Artifacts("Artifact", Icons.Rounded.FolderOpen),
     Search("Ricerca", Icons.AutoMirrored.Rounded.ManageSearch),
     Archive("Archivio", Icons.Rounded.FolderOpen),
@@ -49,6 +51,7 @@ internal fun tabForIncomingRoute(value: String): Tab = when {
     value.equals("voice", ignoreCase = true) -> Tab.Voice
     value.equals("jarvis", ignoreCase = true) -> Tab.Jarvis
     value.equals("projects", ignoreCase = true) -> Tab.Projects
+    value.equals("bots", ignoreCase = true) -> Tab.Bots
     value.equals("artifacts", ignoreCase = true) -> Tab.Artifacts
     value.equals("archive", ignoreCase = true) -> Tab.Archive
     value.equals("settings", ignoreCase = true) -> Tab.Settings

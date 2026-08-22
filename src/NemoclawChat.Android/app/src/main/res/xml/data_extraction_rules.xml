@@ -2,8 +2,14 @@
 <data-extraction-rules>
     <cloud-backup disableIfNoEncryptionCapabilities="true">
         <exclude domain="root" path="." />
+        <exclude domain="sharedpref" path="chatclaw_connection_secrets.xml" />
+        <exclude domain="sharedpref" path="chatclaw_settings.xml" />
+        <exclude domain="sharedpref" path="nemoclaw_settings.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="root" path="." />
+        <exclude domain="sharedpref" path="chatclaw_connection_secrets.xml" />
+        <exclude domain="sharedpref" path="chatclaw_settings.xml" />
+        <exclude domain="sharedpref" path="nemoclaw_settings.xml" />
     </device-transfer>
 </data-extraction-rules>

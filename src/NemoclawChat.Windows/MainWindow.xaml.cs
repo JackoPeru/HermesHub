@@ -202,6 +202,11 @@ public sealed partial class MainWindow : Window
         ContentFrame.Navigate(typeof(ProjectsPage));
     }
 
+    private void Bots_Click(object sender, RoutedEventArgs e)
+    {
+        ContentFrame.Navigate(typeof(BotsPage));
+    }
+
     private void Cron_Click(object sender, RoutedEventArgs e)
     {
         ContentFrame.Navigate(typeof(CronPage));
@@ -413,6 +418,8 @@ public sealed partial class MainWindow : Window
                 ? ("Archivio chat", "Conversazioni sincronizzate", NavArchiveButton)
                 : pageType == typeof(ProjectsPage) || pageType == typeof(ConversationManagerPage)
                     ? ("Progetti", "Workspace e attività operative", NavProjectsButton)
+                    : pageType == typeof(BotsPage)
+                        ? ("Bot Hermes", "Profili reali e Bot Chat canoniche", NavBotsButton)
                     : pageType == typeof(CronPage)
                         ? ("Cron", "Automazioni Hermes programmate", NavCronButton)
                         : pageType == typeof(NotificationsPage)
@@ -456,6 +463,7 @@ public sealed partial class MainWindow : Window
         yield return NavNewChatButton;
         yield return NavArchiveButton;
         yield return NavProjectsButton;
+        yield return NavBotsButton;
         yield return NavCronButton;
         yield return NavNotificationsButton;
         yield return NavContinuityButton;

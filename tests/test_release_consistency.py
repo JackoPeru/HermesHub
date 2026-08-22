@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.184"
-EXPECTED_ANDROID_VERSION_CODE = 188
+EXPECTED_VERSION = "0.6.185"
+EXPECTED_ANDROID_VERSION_CODE = 189
 
 
 def read(relative_path: str) -> str:
@@ -101,9 +101,9 @@ class ReleaseConsistencyTests(unittest.TestCase):
             self.assertFalse((ROOT / stale_file).exists(), stale_file)
 
         wrapper = read("src/NemoclawChat.Android/gradle/wrapper/gradle-wrapper.properties")
-        self.assertIn("gradle-9.7.0-bin.zip", wrapper)
+        self.assertIn("gradle-9.7.1-bin.zip", wrapper)
         self.assertIn(
-            "distributionSha256Sum=84fbba45c7f4c64abc77460e1c00f541e9f960e3c7ed2538f1ede19eacd873ae",
+            "distributionSha256Sum=acd53f1edaf02f1a8ff99879f8a34b302661a057d9b063ae9e35b552f804d20a",
             wrapper,
         )
         plugins = read("src/NemoclawChat.Android/build.gradle.kts")
@@ -169,6 +169,13 @@ class ReleaseConsistencyTests(unittest.TestCase):
             self.assertIn(required_dat_manifest_entry, android_manifest)
         self.assertIn("Wearables.checkPermissionStatus(Permission.CAMERA)", dat_frame_source)
         self.assertIn("createdStream.errorStream.collect", dat_frame_source)
+        self.assertNotIn("error != StreamError.STREAM_ERROR", dat_frame_source)
+        self.assertIn("DeviceCompatibility.COMPATIBLE", dat_frame_source)
+        self.assertIn("DeviceSessionState.PAUSED", dat_frame_source)
+        self.assertIn("streamGeneration", dat_frame_source)
+        self.assertIn("operationMutex.withLock", dat_frame_source)
+        self.assertIn("oldSession.removeStream()", dat_frame_source)
+        self.assertIn("withTimeout(STREAM_READY_TIMEOUT_MILLIS)", dat_frame_source)
         self.assertIn("StreamState.STREAMING", dat_frame_source)
         self.assertIn("Wearables.registrationState.first", dat_frame_source)
         self.assertIn("Wearables.devices.flatMapLatest(::connectedDeviceEvents)", dat_frame_source)
@@ -246,6 +253,12 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertNotIn("/home/", public_runtime)
 
     def test_android_backup_never_exports_credentials(self) -> None:
+        backup_rules = read("src/NemoclawChat.Android/app/src/main/res/xml/backup_rules.xml")
+        extraction_rules = read("src/NemoclawChat.Android/app/src/main/res/xml/data_extraction_rules.xml")
+        for rules in (backup_rules, extraction_rules):
+            self.assertIn('domain="sharedpref" path="chatclaw_connection_secrets.xml"', rules)
+            self.assertIn('domain="sharedpref" path="chatclaw_settings.xml"', rules)
+            self.assertIn('domain="sharedpref" path="nemoclaw_settings.xml"', rules)
         exporter = read(
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/LocalBackupExporter.kt"
         )
@@ -331,7 +344,8 @@ class ReleaseConsistencyTests(unittest.TestCase):
 
     def test_android_network_badge_requires_real_gateway_probe(self) -> None:
         main = read_android_sources()
-        self.assertIn("probeHermesGateway(settings, loadGatewaySecret(context))", main)
+        self.assertIn("probeHermesGateway(botSettings, botApiKey)", main)
+        self.assertIn("val botAllowCompatAuth = !remoteBot", main)
         self.assertIn('resolveHermesUrl(settings, "/v1/capabilities")', main)
         self.assertIn("if (!isValidGatewayProbeUrl(url)) return false", main)
         self.assertIn("connected = gatewayAvailable", main)

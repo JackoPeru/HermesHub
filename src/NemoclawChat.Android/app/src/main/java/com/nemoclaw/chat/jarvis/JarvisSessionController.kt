@@ -439,22 +439,24 @@ internal object JarvisSessionController {
 
     private fun updateView(context: Context, paused: Boolean) {
         controllerScope.launch {
-            val sessionId = _state.value.sessionId ?: return@launch
-            val gateway = api ?: return@launch
-            val frameSource = source ?: return@launch
-            runCatching {
-                gateway.patchSession(sessionId, viewPaused = paused, status = if (paused) "paused" else "active")
-                if (paused) frameSource.pause() else frameSource.resume()
-            }.onSuccess {
-                if (_state.value.sessionId != sessionId || !_state.value.active) return@onSuccess
-                _state.value = _state.value.copy(
-                    phase = if (paused) JarvisPhase.PAUSED else JarvisPhase.ACTIVE,
-                    visionActive = !paused,
-                    error = null
-                )
-                refreshNotification(context)
-            }.onFailure {
-                if (_state.value.sessionId == sessionId) reportError(it)
+            lifecycleMutex.withLock {
+                val sessionId = _state.value.sessionId ?: return@withLock
+                val gateway = api ?: return@withLock
+                val frameSource = source ?: return@withLock
+                runCatching {
+                    gateway.patchSession(sessionId, viewPaused = paused, status = if (paused) "paused" else "active")
+                    if (paused) frameSource.pause() else frameSource.resume()
+                }.onSuccess {
+                    if (_state.value.sessionId != sessionId || !_state.value.active) return@onSuccess
+                    _state.value = _state.value.copy(
+                        phase = if (paused) JarvisPhase.PAUSED else JarvisPhase.ACTIVE,
+                        visionActive = !paused,
+                        error = null
+                    )
+                    refreshNotification(context)
+                }.onFailure {
+                    if (_state.value.sessionId == sessionId) reportError(it)
+                }
             }
         }
     }

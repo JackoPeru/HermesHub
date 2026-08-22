@@ -136,7 +136,10 @@ internal fun executeJsonRequest(
     sessionId?.takeIf { it.isNotBlank() }?.let { builder.header("X-Hermes-Session-Id", it) }
     val normalizedMethod = method.uppercase()
     val request = when (normalizedMethod) {
-        "DELETE" -> builder.delete().build()
+        "DELETE" -> builder.method(
+            "DELETE",
+            payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+        ).build()
         "PATCH" -> builder.patch(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())).build()
         else -> builder.post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())).build()
     }

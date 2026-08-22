@@ -2,6 +2,15 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.185 - 2026-08-22
+
+- Bot Mode usa i profili reali di Hermes Agent per elenco, creazione, modifica, clonazione e rimozione, senza inventare un runtime bot locale.
+- Bot groups orchestrano da 2 a 6 bot anche su connessioni diverse, con routing per menzioni, richiesta utente originale preservata e limiti espliciti di 3 round e 10 risposte.
+- Connections aggiunge endpoint nominativi cross-machine con token separati per connessione, conservati negli store sicuri del client e mai nel catalogo JSON; handle stabili disambiguano bot omonimi.
+- Errori di singoli membri restano parziali e visibili, senza retry incerti dopo un'accettazione server; cancellazione e sostituzione del turno invalidano davvero lavoro e salvataggi tardivi.
+- Bot Chat diventa il percorso canonico per i profili Hermes e resta fail-closed quando il multiplexing profili non è esplicitamente disponibile; cron e chat mantengono lo scope del profilo.
+- Rafforzato lifecycle Meta DAT/Jarvis con inizializzazione process-wide idempotente, sessione/stream serializzati, stato attivo solo dopo `STREAMING`, cleanup deterministico e osservazione unica degli errori terminali.
+
 ## 0.6.184 - 2026-08-11
 
 - Aggiunta timeline attivita' stile Codex per ragionamento, avanzamento e tool, disponibile durante streaming e negli archivi Windows/Android senza esporre eventi grezzi come risposta finale.

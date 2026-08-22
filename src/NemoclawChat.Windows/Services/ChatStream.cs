@@ -151,6 +151,11 @@ public static class ChatStreamClient
         string? conversationId,
         string? previousResponseId,
         IReadOnlyList<ChatInputAttachment>? attachments = null,
+        string? botProfile = null,
+        string? botSessionId = null,
+        bool botMultiplexEnabled = false,
+        string? botConnectionToken = null,
+        bool botRemoteConnection = false,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var thinkExtractor = new ThinkExtractor();
@@ -172,8 +177,24 @@ public static class ChatStreamClient
         string? lastError = null;
         var nativeMode = HermesHubProtocol.IsNativePreferred(settings);
         attachments ??= Array.Empty<ChatInputAttachment>();
-        await GatewayService.EnsureReachableGatewayAsync(settings, cancellationToken);
-        var (promptForModel, uploadedRefs) = await BuildPromptWithAttachmentToolRefsAsync(settings, prompt, attachments, cancellationToken);
+        if (!botRemoteConnection)
+        {
+            await GatewayService.EnsureReachableGatewayAsync(settings, cancellationToken);
+        }
+        var authCandidates = botRemoteConnection
+            ? new string?[] { botConnectionToken }
+            : null;
+        string ProfileUrl(string path) => string.IsNullOrWhiteSpace(botProfile)
+            ? $"{settings.GatewayUrl.TrimEnd('/')}{path}"
+            : HermesHubProtocol.ProfileScopedUri(settings, path, botProfile, botMultiplexEnabled);
+        var (promptForModel, uploadedRefs) = await BuildPromptWithAttachmentToolRefsAsync(
+            settings,
+            prompt,
+            attachments,
+            botProfile,
+            botMultiplexEnabled,
+            authCandidates,
+            cancellationToken);
         var payloadAttachments = uploadedRefs > 0
             ? attachments.Where(attachment => !attachment.MimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)).ToArray()
             : attachments;
@@ -184,7 +205,7 @@ public static class ChatStreamClient
 
         if (string.Equals(mode, "Agente", StringComparison.OrdinalIgnoreCase))
         {
-            await foreach (var ev in RunDetachedAgentAsync(settings, promptForModel, history, conversationId, payloadAttachments, cancellationToken))
+            await foreach (var ev in RunDetachedAgentAsync(settings, promptForModel, history, conversationId, payloadAttachments, botProfile, botSessionId, botMultiplexEnabled, authCandidates, cancellationToken))
             {
                 yield return ev;
             }
@@ -197,7 +218,9 @@ public static class ChatStreamClient
                 ? "Protocollo effettivo: Hermes Native via Responses. Context delegato a Hermes."
                 : "Protocollo effettivo: Hermes Responses compat.");
             yield return new StreamStatus("Preparazione richiesta al modello...");
-            var serverConversationId = HermesHubProtocol.ServerConversationId(conversationId);
+            var serverConversationId = string.IsNullOrWhiteSpace(botSessionId)
+                ? HermesHubProtocol.ServerConversationId(conversationId)
+                : botSessionId.Trim();
             string BuildResponsesPayload(string? candidatePreviousResponseId) => JsonSerializer.Serialize(new
             {
                 model = settings.Model,
@@ -209,10 +232,10 @@ public static class ChatStreamClient
                 timings_per_token = true,
                 conversation = serverConversationId,
                 previous_response_id = string.IsNullOrWhiteSpace(serverConversationId) && !string.IsNullOrWhiteSpace(candidatePreviousResponseId) ? candidatePreviousResponseId : null,
-                metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId)
+                metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId, profile: botProfile, canonicalSessionId: botSessionId)
             });
 
-            var responsesUrl = $"{settings.GatewayUrl.TrimEnd('/')}/responses";
+            var responsesUrl = ProfileUrl("/responses");
             var previousCandidates = string.IsNullOrWhiteSpace(previousResponseId)
                 ? new string?[] { null }
                 : [previousResponseId, null];
@@ -231,7 +254,8 @@ public static class ChatStreamClient
                                    "Hermes Responses API stream",
                                    true,
                                    cancellationToken,
-                                   requestContext: requestContext))
+                                   requestContext: requestContext,
+                                   authCandidatesOverride: authCandidates))
                 {
                     if (ev is StreamError err)
                     {
@@ -344,7 +368,9 @@ public static class ChatStreamClient
             {
                 yield return new StreamStatus("Protocollo effettivo: Hermes Chat Completions compat.");
             }
-            var serverConversationId = HermesHubProtocol.ServerConversationId(conversationId);
+            var serverConversationId = string.IsNullOrWhiteSpace(botSessionId)
+                ? HermesHubProtocol.ServerConversationId(conversationId)
+                : botSessionId.Trim();
             var chatMessages = new List<Dictionary<string, object?>>();
             if (!nativeMode)
             {
@@ -371,11 +397,11 @@ public static class ChatStreamClient
                 return_progress = true,
                 timings_per_token = true,
                 session_id = serverConversationId,
-                metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId),
+                metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId, profile: botProfile, canonicalSessionId: botSessionId),
                 messages = chatMessages
             });
 
-            var chatUrl = $"{settings.GatewayUrl.TrimEnd('/')}/chat/completions";
+            var chatUrl = ProfileUrl("/chat/completions");
             await foreach (var ev in OpenStreamAsync(
                                chatUrl,
                                chatPayload,
@@ -383,7 +409,8 @@ public static class ChatStreamClient
                                true,
                                cancellationToken,
                                serverConversationId,
-                               requestContext))
+                               requestContext,
+                               authCandidates))
             {
                 if (ev is StreamError err)
                 {
@@ -497,9 +524,10 @@ public static class ChatStreamClient
         bool allowCompatAuth,
         [EnumeratorCancellation] CancellationToken cancellationToken,
         string? sessionId = null,
-        HermesRequestContext? requestContext = null)
+        HermesRequestContext? requestContext = null,
+        IEnumerable<string?>? authCandidatesOverride = null)
     {
-        var authCandidates = GatewayService.BuildHermesAuthCandidates(allowCompatAuth).ToArray();
+        var authCandidates = (authCandidatesOverride ?? GatewayService.BuildHermesAuthCandidates(allowCompatAuth)).ToArray();
         var ids = requestContext ?? HermesHubProtocol.NewRequestContext();
         for (var attempt = 0; attempt < authCandidates.Length; attempt++)
         {
@@ -678,16 +706,22 @@ public static class ChatStreamClient
         IReadOnlyList<ChatMessageRecord> history,
         string? conversationId,
         IReadOnlyList<ChatInputAttachment> attachments,
+        string? botProfile,
+        string? botSessionId,
+        bool botMultiplexEnabled,
+        IEnumerable<string?>? authCandidates,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var serverConversationId = HermesHubProtocol.ServerConversationId(conversationId);
+        var serverConversationId = string.IsNullOrWhiteSpace(botSessionId)
+            ? HermesHubProtocol.ServerConversationId(conversationId)
+            : botSessionId.Trim();
         var payload = JsonSerializer.Serialize(new
         {
             model = settings.Model,
             input = BuildResponsesInput(prompt, attachments),
             instructions = HermesHubProtocol.Instructions(settings, "Agente"),
             session_id = serverConversationId,
-            metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId),
+            metadata = HermesHubProtocol.Metadata(settings, conversationId: conversationId, profile: botProfile, canonicalSessionId: botSessionId),
             conversation_history = history
                 .Where(m => !string.Equals(m.Author, "Tu", StringComparison.OrdinalIgnoreCase) ||
                             !string.Equals(m.Text, prompt, StringComparison.Ordinal))
@@ -700,7 +734,10 @@ public static class ChatStreamClient
         });
 
         yield return new StreamStatus("Modalita Agente: avvio run server-side persistente...");
-        var started = await SendJsonAsync(HttpMethod.Post, $"{settings.GatewayUrl.TrimEnd('/')}/runs", payload, true, cancellationToken);
+        var runUrl = string.IsNullOrWhiteSpace(botProfile)
+            ? $"{settings.GatewayUrl.TrimEnd('/')}/runs"
+            : HermesHubProtocol.ProfileScopedUri(settings, "/runs", botProfile, botMultiplexEnabled);
+        var started = await SendJsonAsync(HttpMethod.Post, runUrl, payload, true, cancellationToken, authCandidates);
         if (started.StatusCode is < 200 or > 299)
         {
             yield return new StreamError($"Hermes Runs: HTTP {started.StatusCode}: {Trim(started.Body)}");
@@ -735,7 +772,7 @@ public static class ChatStreamClient
         while (!cancellationToken.IsCancellationRequested && startedAt.Elapsed < TimeSpan.FromMinutes(30))
         {
             await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
-            var status = await SendJsonAsync(HttpMethod.Get, $"{settings.GatewayUrl.TrimEnd('/')}/runs/{runId}", null, true, cancellationToken);
+            var status = await SendJsonAsync(HttpMethod.Get, $"{settings.GatewayUrl.TrimEnd('/')}/runs/{runId}", null, true, cancellationToken, authCandidates);
             if (status.StatusCode == 404)
             {
                 consecutiveFailures++;
@@ -877,6 +914,9 @@ public static class ChatStreamClient
         AppSettings settings,
         string prompt,
         IReadOnlyList<ChatInputAttachment> attachments,
+        string? botProfile,
+        bool botMultiplexEnabled,
+        IEnumerable<string?>? authCandidates,
         CancellationToken cancellationToken)
     {
         var imageAttachments = attachments
@@ -890,7 +930,7 @@ public static class ChatStreamClient
         var refs = new List<UploadedAttachmentRef>();
         foreach (var attachment in imageAttachments)
         {
-            refs.Add(await TryUploadAttachmentAsync(settings, attachment, cancellationToken));
+            refs.Add(await TryUploadAttachmentAsync(settings, attachment, botProfile, botMultiplexEnabled, authCandidates, cancellationToken));
         }
 
         var uploaded = refs.Where(item => string.IsNullOrWhiteSpace(item.Error)).ToArray();
@@ -927,9 +967,14 @@ public static class ChatStreamClient
     private static async Task<UploadedAttachmentRef> TryUploadAttachmentAsync(
         AppSettings settings,
         ChatInputAttachment attachment,
+        string? botProfile,
+        bool botMultiplexEnabled,
+        IEnumerable<string?>? authCandidates,
         CancellationToken cancellationToken)
     {
-        var endpoint = $"{settings.GatewayUrl.TrimEnd('/')}/media/upload";
+        var endpoint = string.IsNullOrWhiteSpace(botProfile)
+            ? $"{settings.GatewayUrl.TrimEnd('/')}/media/upload"
+            : HermesHubProtocol.ProfileScopedUri(settings, "/media/upload", botProfile, botMultiplexEnabled);
         var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
         {
             ["filename"] = attachment.FileName,
@@ -938,7 +983,7 @@ public static class ChatStreamClient
         });
         var requestContext = HermesHubProtocol.NewRequestContext();
 
-        foreach (var token in GatewayService.BuildHermesAuthCandidates(allowCompatAuth: true))
+        foreach (var token in authCandidates ?? GatewayService.BuildHermesAuthCandidates(allowCompatAuth: true))
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
             {
@@ -1037,9 +1082,15 @@ public static class ChatStreamClient
         return content;
     }
 
-    private static async Task<(int StatusCode, string Body)> SendJsonAsync(HttpMethod method, string url, string? jsonPayload, bool allowCompatAuth, CancellationToken cancellationToken)
+    private static async Task<(int StatusCode, string Body)> SendJsonAsync(
+        HttpMethod method,
+        string url,
+        string? jsonPayload,
+        bool allowCompatAuth,
+        CancellationToken cancellationToken,
+        IEnumerable<string?>? authCandidatesOverride = null)
     {
-        var authCandidates = GatewayService.BuildHermesAuthCandidates(allowCompatAuth).ToArray();
+        var authCandidates = (authCandidatesOverride ?? GatewayService.BuildHermesAuthCandidates(allowCompatAuth)).ToArray();
         var requestContext = HermesHubProtocol.NewRequestContext();
         foreach (var token in authCandidates)
         {

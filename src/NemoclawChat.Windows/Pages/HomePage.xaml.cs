@@ -50,6 +50,12 @@ public sealed partial class HomePage : Page
     private string _mode = "Chat";
     private string? _conversationId;
     private string? _previousResponseId;
+    private string? _botProfile;
+    private string? _botSessionId;
+    private string? _botDisplayName;
+    private bool _botMultiplexEnabled;
+    private string _botConnectionId = "primary";
+    private string _botEndpoint = string.Empty;
     private readonly List<ChatMessageRecord> _messageHistory = [];
     private int _lastServerContextTokens;
     private int _lastServerContextLength;
@@ -122,8 +128,45 @@ public sealed partial class HomePage : Page
 
         if (e.Parameter is HomeNavigationRequest request)
         {
+            var bot = BotNavigationContext.TakePending();
+            if (bot is not null)
+            {
+                ResetForNewChat();
+                _botProfile = bot.Profile;
+                _botSessionId = bot.SessionId;
+                _botDisplayName = bot.DisplayName;
+                _botMultiplexEnabled = bot.MultiplexEnabled;
+                _botConnectionId = bot.ConnectionId;
+                _botEndpoint = bot.Endpoint;
+                _conversationId = bot.LocalConversationId;
+                if (ChatArchiveStore.Find(bot.LocalConversationId) is not null)
+                {
+                    LoadConversation(bot.LocalConversationId);
+                }
+                // The local bot archive is display/history only. Never carry a
+                // default-profile previous_response_id into the canonical bot route.
+                _botProfile = bot.Profile;
+                _botSessionId = bot.SessionId;
+                _botDisplayName = bot.DisplayName;
+                _botMultiplexEnabled = bot.MultiplexEnabled;
+                _botConnectionId = bot.ConnectionId;
+                _botEndpoint = bot.Endpoint;
+                _conversationId = bot.LocalConversationId;
+                _previousResponseId = null;
+                UpdateArchivedBotGuard();
+                BotActiveText.Text = $"Bot attivo · {bot.DisplayName} · Bot Chat";
+                BotActiveText.Visibility = Visibility.Visible;
+                if (!string.IsNullOrWhiteSpace(request.Prompt))
+                {
+                    PromptBox.Text = request.Prompt;
+                    PromptBox.Focus(FocusState.Programmatic);
+                }
+                return;
+            }
             if (!string.IsNullOrWhiteSpace(request.ConversationId))
             {
+                // Global Archive never implies a bot continuation.
+                ResetForNewChat();
                 LoadConversation(request.ConversationId);
                 return;
             }
@@ -512,13 +555,26 @@ public sealed partial class HomePage : Page
         streamCts?.Cancel();
         if (!string.IsNullOrWhiteSpace(gatewayRunId))
         {
-            _ = StopRunAfterResetAsync(gatewayRunId);
+            _ = StopRunAfterResetAsync(gatewayRunId, _botProfile, _botMultiplexEnabled, _botConnectionId, _botEndpoint);
         }
         ReleaseCurrentComposerRun();
         _messageHistory.Clear();
         ResetServerContextMeter();
         _conversationId = null;
         _previousResponseId = null;
+        _botProfile = null;
+        _botSessionId = null;
+        _botDisplayName = null;
+        _botMultiplexEnabled = false;
+        _botConnectionId = "primary";
+        _botEndpoint = string.Empty;
+        ErrorInfoBar.ActionButton = null;
+        ErrorInfoBar.IsOpen = false;
+        if (BotActiveText is not null)
+        {
+            BotActiveText.Text = string.Empty;
+            BotActiveText.Visibility = Visibility.Collapsed;
+        }
         _activeStreamCts = null;
         Messages.Clear();
         _pendingAttachments.Clear();
@@ -536,17 +592,38 @@ public sealed partial class HomePage : Page
         MessagesList.IsHitTestVisible = visibility != Visibility.Visible;
     }
 
-    private static async Task StopRunAfterResetAsync(string runId)
+    private static async Task StopRunAfterResetAsync(string runId, string? botProfile, bool botMultiplexEnabled, string connectionId, string endpoint)
     {
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            await GatewayService.TryStopRunAsync(AppSettingsStore.Load(), runId, timeout.Token);
+            await StopRunForConnectionAsync(runId, botProfile, botMultiplexEnabled, connectionId, endpoint, timeout.Token);
         }
         catch (Exception ex)
         {
             Trace.WriteLine($"[HomePage] Detached run stop after reset failed: {ex.Message}");
         }
+    }
+
+    private static Task<string> StopRunForConnectionAsync(
+        string runId,
+        string? botProfile,
+        bool botMultiplexEnabled,
+        string connectionId,
+        string endpoint,
+        CancellationToken cancellationToken)
+    {
+        var settings = AppSettingsStore.Load();
+        if (!string.IsNullOrWhiteSpace(endpoint) && !string.Equals(connectionId, "primary", StringComparison.OrdinalIgnoreCase))
+        {
+            settings.GatewayUrl = endpoint;
+            settings.GatewayWsUrl = string.Empty;
+            settings.InferenceEndpoint = endpoint;
+            settings.AdminBridgeUrl = endpoint;
+            return GatewayService.TryStopRunOnConnectionAsync(settings, GatewayCredentialStore.LoadConnectionSecret(connectionId), runId, botProfile, botMultiplexEnabled, cancellationToken);
+        }
+
+        return GatewayService.TryStopRunAsync(settings, runId, botProfile, botMultiplexEnabled, cancellationToken);
     }
 
     private void SetMode(string mode)
@@ -635,7 +712,7 @@ public sealed partial class HomePage : Page
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            await GatewayService.TryStopRunAsync(AppSettingsStore.Load(), runId, timeout.Token);
+            await StopRunForConnectionAsync(runId, _botProfile, _botMultiplexEnabled, _botConnectionId, _botEndpoint, timeout.Token);
         }
         catch (Exception ex)
         {
@@ -645,6 +722,12 @@ public sealed partial class HomePage : Page
 
     private async Task SendCurrentPromptAsync()
     {
+        if (IsArchivedBotWithoutContext)
+        {
+            ShowArchivedBotGuard();
+            return;
+        }
+
         // Atomic guard: set flag prima di qualsiasi await. UI thread single-threaded ma
         // multipli entry-point (Send_Click, PromptBox_KeyDown, slash command activate)
         // possono entrare back-to-back prima che Send button si disabiliti.
@@ -679,6 +762,20 @@ public sealed partial class HomePage : Page
         var localHistory = _messageHistory.ToList();
         var attachments = _pendingAttachments.ToList();
         var settings = AppSettingsStore.Load();
+        var botProfile = _botProfile;
+        var botSessionId = _botSessionId;
+        var botMultiplexEnabled = _botMultiplexEnabled;
+        var botConnectionId = _botConnectionId;
+        var botEndpoint = _botEndpoint;
+        var botRemoteConnection = !string.IsNullOrWhiteSpace(botProfile) && !string.Equals(botConnectionId, "primary", StringComparison.OrdinalIgnoreCase);
+        var botConnectionToken = botRemoteConnection ? GatewayCredentialStore.LoadConnectionSecret(botConnectionId) : null;
+        if (botRemoteConnection && !string.IsNullOrWhiteSpace(botEndpoint))
+        {
+            settings.GatewayUrl = botEndpoint;
+            settings.GatewayWsUrl = string.Empty;
+            settings.InferenceEndpoint = botEndpoint;
+            settings.AdminBridgeUrl = botEndpoint;
+        }
 
         try
         {
@@ -728,7 +825,7 @@ public sealed partial class HomePage : Page
             double? uiLastTextMs = null;
             _activeGatewayRunId = null;
             _activeStreams[conversationId] = new ActiveStreamState(composerRunId, bubble, streamCts, null);
-            var streamEvents = StartStreamProducer(settings, sendMode, prompt, localHistory.ToList(), conversationId, previousResponseId, attachments, streamCts.Token);
+            var streamEvents = StartStreamProducer(settings, sendMode, prompt, localHistory.ToList(), conversationId, previousResponseId, attachments, botProfile, botSessionId, botMultiplexEnabled, botConnectionToken, botRemoteConnection, streamCts.Token);
 
             void AddRawEventIfEnabled(string name, string json)
             {
@@ -1073,6 +1170,11 @@ public sealed partial class HomePage : Page
         string? conversationId,
         string? previousResponseId,
         IReadOnlyList<ChatInputAttachment> attachments,
+        string? botProfile,
+        string? botSessionId,
+        bool botMultiplexEnabled,
+        string? botConnectionToken,
+        bool botRemoteConnection,
         CancellationToken cancellationToken)
     {
         var channel = Channel.CreateBounded<ChatStreamEvent>(new BoundedChannelOptions(512)
@@ -1123,7 +1225,7 @@ public sealed partial class HomePage : Page
             try
             {
                 await foreach (var ev in ChatStreamClient
-                                   .StreamChatAsync(settings, mode, prompt, history, conversationId, previousResponseId, attachments, cancellationToken)
+                                   .StreamChatAsync(settings, mode, prompt, history, conversationId, previousResponseId, attachments, botProfile, botSessionId, botMultiplexEnabled, botConnectionToken, botRemoteConnection, cancellationToken)
                                    .WithCancellation(cancellationToken)
                                    .ConfigureAwait(false))
                 {
@@ -1576,6 +1678,39 @@ public sealed partial class HomePage : Page
         }
 
         UpdateContextMeter();
+        UpdateArchivedBotGuard();
+    }
+
+    private bool IsArchivedBotWithoutContext =>
+        string.IsNullOrWhiteSpace(_botProfile) &&
+        !string.IsNullOrWhiteSpace(_conversationId) &&
+        _conversationId.StartsWith("bot-", StringComparison.OrdinalIgnoreCase);
+
+    private void UpdateArchivedBotGuard()
+    {
+        if (IsArchivedBotWithoutContext)
+        {
+            ShowArchivedBotGuard();
+        }
+        else if (ErrorInfoBar.Severity == InfoBarSeverity.Warning)
+        {
+            ErrorInfoBar.ActionButton = null;
+            ErrorInfoBar.IsOpen = false;
+        }
+    }
+
+    private void ShowArchivedBotGuard()
+    {
+        ErrorInfoBar.Title = "Chat bot archiviata: riaprila da Bot Hermes";
+        ErrorInfoBar.Message = "Questa chat è legata a un profilo Hermes. Per continuare, apri il bot dal roster Bot Hermes.";
+        ErrorInfoBar.Severity = InfoBarSeverity.Warning;
+        ErrorInfoBar.ActionButton = OpenBotHermesButton;
+        ErrorInfoBar.IsOpen = true;
+    }
+
+    private void OpenBotHermes_Click(object sender, RoutedEventArgs e)
+    {
+        Frame?.Navigate(typeof(BotsPage));
     }
 
     private void AddBubble(
@@ -2114,6 +2249,7 @@ public sealed partial class HomePage : Page
         ErrorInfoBar.Title = "Errore";
         ErrorInfoBar.Message = message;
         ErrorInfoBar.Severity = InfoBarSeverity.Error;
+        ErrorInfoBar.ActionButton = null;
         ErrorInfoBar.IsOpen = true;
     }
 

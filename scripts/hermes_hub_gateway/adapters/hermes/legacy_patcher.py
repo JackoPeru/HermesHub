@@ -39,6 +39,16 @@ _JARVIS_CLEANUP_BEGIN = "            # HERMES_HUB_JARVIS_CLEANUP_BEGIN"
 _JARVIS_CLEANUP_END = "            # HERMES_HUB_JARVIS_CLEANUP_END"
 _DYNAMIC_ROUTES_BEGIN = "        # HERMES_HUB_DYNAMIC_ROUTES_BEGIN"
 _DYNAMIC_ROUTES_END = "        # HERMES_HUB_DYNAMIC_ROUTES_END"
+_BOTS_HANDLERS_BEGIN = "    # HERMES_HUB_BOTS_HANDLERS_BEGIN"
+_BOTS_HANDLERS_END = "    # HERMES_HUB_BOTS_HANDLERS_END"
+_BOTS_CAPABILITIES_BEGIN = "            # HERMES_HUB_BOTS_CAPABILITIES_BEGIN"
+_BOTS_CAPABILITIES_END = "            # HERMES_HUB_BOTS_CAPABILITIES_END"
+_BOTS_ENDPOINTS_BEGIN = "                # HERMES_HUB_BOTS_ENDPOINTS_BEGIN"
+_BOTS_ENDPOINTS_END = "                # HERMES_HUB_BOTS_ENDPOINTS_END"
+_BOTS_DYNAMIC_ROUTES_BEGIN = "        # HERMES_HUB_BOTS_DYNAMIC_ROUTES_BEGIN"
+_BOTS_DYNAMIC_ROUTES_END = "        # HERMES_HUB_BOTS_DYNAMIC_ROUTES_END"
+_BOTS_LEGACY_ROUTES_BEGIN = "            # HERMES_HUB_BOTS_LEGACY_ROUTES_BEGIN"
+_BOTS_LEGACY_ROUTES_END = "            # HERMES_HUB_BOTS_LEGACY_ROUTES_END"
 _WELLBEING_RUNTIME_BEGIN = "# WELLBEING_HERMES_HUB_RUNTIME_BEGIN"
 _WELLBEING_RUNTIME_END = "# WELLBEING_HERMES_HUB_RUNTIME_END"
 _WELLBEING_HANDLERS_BEGIN = "    # HERMES_HUB_WELLBEING_HANDLERS_BEGIN"
@@ -3486,6 +3496,209 @@ def _route_registered(text: str, method: str, path: str, handler: str) -> bool:
     return legacy in text or declarative in text
 
 
+def _patch_bot_profiles_v1(text: str) -> tuple[str, list[str]]:
+    """Expose Hermes' real profiles without adding a second bot runtime."""
+    changes: list[str] = []
+    handlers = r'''    # HERMES_HUB_BOTS_HANDLERS_BEGIN
+    # HERMES_HUB_BOTS_PROFILE_V1
+    async def _handle_hub_bot_request(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            from hermes_hub_gateway import bot_profiles
+            raw = await request.content.read(256 * 1024 + 1)
+            if len(raw) > 256 * 1024:
+                raise ValueError("Payload bot troppo grande")
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+            if not isinstance(body, dict):
+                raise ValueError("Il corpo deve essere un oggetto JSON")
+            method = request.method.upper()
+            name = request.match_info.get("bot_name", "")
+            if method == "POST" and request.path.rstrip("/") == "/v1/hub/bots/group-turn":
+                readiness = bot_profiles.readiness(self)
+                if not readiness.get("chat_supported"):
+                    code = "profile_multiplexing_disabled" if not readiness.get("multiplex_enabled") else "update_required"
+                    status = 503 if not readiness.get("multiplex_enabled") else 501
+                    raise bot_profiles.BotProfileError(
+                        "Turno gruppo non disponibile: il multiplexing dei profili Hermes non è pronto.",
+                        code=code,
+                        status=status,
+                    )
+                result = await bot_profiles.group_turn(
+                    self,
+                    body.get("group_name", body.get("name")),
+                    body.get("members"),
+                    body.get("user_message", body.get("prompt")),
+                    max_rounds=body.get("max_rounds", 3),
+                    max_messages=body.get("max_messages", 10),
+                    local_connection_id=body.get("local_connection_id", body.get("connection_id")),
+                    target_profiles=body.get("target_profiles"),
+                    transcript=body.get("transcript"),
+                    original_user_message=body.get("original_user_message"),
+                )
+                return web.json_response(result)
+            if method == "GET":
+                readiness = bot_profiles.readiness(self)
+                items = await asyncio.to_thread(bot_profiles.list_bots)
+                return web.json_response({
+                    "object": "hermes.hub.bots",
+                    "items": items,
+                    "profiles": items,
+                    **readiness,
+                    "endpoints": {
+                        "roster": {"method": "GET", "path": "/v1/hub/bots"},
+                        "create": {"method": "POST", "path": "/v1/hub/bots"},
+                        "edit": {"method": "PATCH", "path": "/v1/hub/bots/{bot_name}"},
+                        "delete": {"method": "DELETE", "path": "/v1/hub/bots/{bot_name}"},
+                        "chat": {"method": "POST", "path": "/v1/hub/bots/{bot_name}/chat"},
+                        "group_turn": {"method": "POST", "path": "/v1/hub/bots/group-turn"},
+                    },
+                })
+            if method == "POST" and not name:
+                bot = await asyncio.to_thread(
+                    bot_profiles.create_bot,
+                    body.get("name", body.get("profile")),
+                    clone_from=body.get("clone_from"),
+                    description=body.get("description", ""),
+                    soul=body.get("soul"),
+                    display_name=body.get("display_name"),
+                    no_skills=body.get("no_skills", False),
+                )
+                return web.json_response({"object": "hermes.hub.bot", "bot": bot}, status=201)
+            if method == "PATCH":
+                unknown = sorted(set(body) - {"description", "soul", "display_name"})
+                if unknown:
+                    raise bot_profiles.BotProfileError(
+                        "Campi bot non supportati: " + ", ".join(unknown),
+                        code="unsupported_bot_field",
+                    )
+                bot = await asyncio.to_thread(
+                    bot_profiles.update_bot,
+                    name,
+                    description=body.get("description"),
+                    soul=body.get("soul"),
+                    display_name=body.get("display_name"),
+                )
+                return web.json_response({"object": "hermes.hub.bot", "bot": bot})
+            if method == "DELETE":
+                result = await asyncio.to_thread(
+                    bot_profiles.delete_bot,
+                    name,
+                    body.get("confirm_name", body.get("confirmation")),
+                )
+                return web.json_response(result)
+            if method == "POST" and name:
+                readiness = bot_profiles.readiness(self)
+                if not readiness.get("chat_supported"):
+                    code = "profile_multiplexing_disabled" if not readiness.get("multiplex_enabled") else "update_required"
+                    status = 503 if not readiness.get("multiplex_enabled") else 501
+                    raise bot_profiles.BotProfileError(
+                        "Chat bot non disponibile: il multiplexing dei profili Hermes non è pronto.",
+                        code=code,
+                        status=status,
+                    )
+                result = await asyncio.to_thread(
+                    bot_profiles.canonical_chat,
+                    self,
+                    name,
+                    description=str(body.get("description") or ""),
+                )
+                from urllib.parse import quote
+                encoded = quote(str(result["profile"]), safe="")
+                result.update({
+                    "profile_base_path": f"/p/{encoded}/v1",
+                    "path_template": f"/p/{encoded}/v1/responses",
+                })
+                return web.json_response(result)
+            raise bot_profiles.BotProfileError("Operazione bot non valida.", code="invalid_bot_operation")
+        except Exception as exc:
+            from hermes_hub_gateway.bot_profiles import public_error
+            payload, status = public_error(exc)
+            return web.json_response(payload, status=status)
+    # HERMES_HUB_BOTS_HANDLERS_END'''
+    text, changed = _upsert_versioned_block(
+        text,
+        begin=_BOTS_HANDLERS_BEGIN,
+        end=_BOTS_HANDLERS_END,
+        block=handlers,
+        anchor='    async def _handle_models(self, request: "web.Request") -> "web.Response":',
+        label="Hermes Hub bot handlers v1",
+    )
+    if changed:
+        changes.append("Hermes Hub bot handlers v1")
+    capabilities = r'''            # HERMES_HUB_BOTS_CAPABILITIES_BEGIN
+            "bot_mode": __import__("hermes_hub_gateway.bot_profiles", fromlist=["readiness"]).readiness(self),
+            # HERMES_HUB_BOTS_CAPABILITIES_END'''
+    text, changed = _upsert_versioned_block(
+        text,
+        begin=_BOTS_CAPABILITIES_BEGIN,
+        end=_BOTS_CAPABILITIES_END,
+        block=capabilities,
+        anchor='            "endpoints": {\n                "health": {"method": "GET", "path": "/health"},',
+        label="Hermes Hub bot capabilities v1",
+    )
+    if changed:
+        changes.append("Hermes Hub bot capabilities v1")
+    endpoint_entries = r'''                # HERMES_HUB_BOTS_ENDPOINTS_BEGIN
+                "hub_bots": {"method": "GET", "path": "/v1/hub/bots"},
+                "hub_bots_create": {"method": "POST", "path": "/v1/hub/bots"},
+                "hub_bots_edit": {"method": "PATCH", "path": "/v1/hub/bots/{bot_name}"},
+                "hub_bots_delete": {"method": "DELETE", "path": "/v1/hub/bots/{bot_name}"},
+                "hub_bots_chat": {"method": "POST", "path": "/v1/hub/bots/{bot_name}/chat"},
+                "hub_bots_group_turn": {"method": "POST", "path": "/v1/hub/bots/group-turn"},
+                # HERMES_HUB_BOTS_ENDPOINTS_END'''
+    text, changed = _upsert_versioned_block(
+        text,
+        begin=_BOTS_ENDPOINTS_BEGIN,
+        end=_BOTS_ENDPOINTS_END,
+        block=endpoint_entries,
+        anchor='                "models": {"method": "GET", "path": "/v1/models"},',
+        label="Hermes Hub bot endpoint capabilities v1",
+    )
+    if changed:
+        changes.append("Hermes Hub bot endpoint capabilities v1")
+    if "def _http_route_table(self)" in text:
+        routes = r'''        # HERMES_HUB_BOTS_DYNAMIC_ROUTES_BEGIN
+        routes.extend([
+            ("GET", "/v1/hub/bots", self._handle_hub_bot_request),
+            ("POST", "/v1/hub/bots", self._handle_hub_bot_request),
+            ("POST", "/v1/hub/bots/group-turn", self._handle_hub_bot_request),
+            ("PATCH", "/v1/hub/bots/{bot_name}", self._handle_hub_bot_request),
+            ("DELETE", "/v1/hub/bots/{bot_name}", self._handle_hub_bot_request),
+            ("POST", "/v1/hub/bots/{bot_name}/chat", self._handle_hub_bot_request),
+        ])
+        # HERMES_HUB_BOTS_DYNAMIC_ROUTES_END'''
+        text, changed = _upsert_versioned_block(
+            text,
+            begin=_BOTS_DYNAMIC_ROUTES_BEGIN,
+            end=_BOTS_DYNAMIC_ROUTES_END,
+            block=routes,
+            anchor="        if _CRON_AVAILABLE:\n",
+            label="Hermes Hub bot dynamic routes v1",
+        )
+    else:
+        routes = r'''            # HERMES_HUB_BOTS_LEGACY_ROUTES_BEGIN
+            self._app.router.add_get("/v1/hub/bots", self._handle_hub_bot_request)
+            self._app.router.add_post("/v1/hub/bots", self._handle_hub_bot_request)
+            self._app.router.add_post("/v1/hub/bots/group-turn", self._handle_hub_bot_request)
+            self._app.router.add_patch("/v1/hub/bots/{bot_name}", self._handle_hub_bot_request)
+            self._app.router.add_delete("/v1/hub/bots/{bot_name}", self._handle_hub_bot_request)
+            self._app.router.add_post("/v1/hub/bots/{bot_name}/chat", self._handle_hub_bot_request)
+            # HERMES_HUB_BOTS_LEGACY_ROUTES_END'''
+        text, changed = _upsert_versioned_block(
+            text,
+            begin=_BOTS_LEGACY_ROUTES_BEGIN,
+            end=_BOTS_LEGACY_ROUTES_END,
+            block=routes,
+            anchor='            self._app.router.add_get("/v1/capabilities", self._handle_capabilities)\n',
+            label="Hermes Hub bot legacy routes v1",
+        )
+    if changed:
+        changes.append("Hermes Hub bot routes v1")
+    return text, changes
+
+
 def _patch_dynamic_http_routes(text: str) -> tuple[str, bool]:
     """Add Hermes Hub routes to upstream's multiplex-aware route table."""
     if "def _http_route_table(self)" not in text:
@@ -4113,6 +4326,9 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
     text, dynamic_routes_changed = _patch_dynamic_http_routes(text)
     if dynamic_routes_changed:
         changes.append("dynamic HTTP route table")
+
+    text, bot_profile_changes = _patch_bot_profiles_v1(text)
+    changes.extend(bot_profile_changes)
 
     if _MODEL_ROUTE_TOOLSETS_MARKER not in text:
         old_route_parser = '''        allowed_keys = ("model", "provider", "api_key", "base_url")

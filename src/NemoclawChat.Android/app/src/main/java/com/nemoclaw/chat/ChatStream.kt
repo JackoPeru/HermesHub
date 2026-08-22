@@ -520,7 +520,11 @@ fun streamChatRequest(
     conversationId: String?,
     previousResponseId: String?,
     attachments: List<ChatInputAttachment>,
-    apiKey: String?
+    apiKey: String?,
+    botProfile: String? = null,
+    botSessionId: String? = null,
+    botMultiplexEnabled: Boolean = false,
+    allowCompatAuth: Boolean = true
 ): Flow<ChatStreamEvent> = flow {
     val start = System.nanoTime()
     var sawActivity = false
@@ -542,8 +546,14 @@ fun streamChatRequest(
     val requestContext = HermesHubProtocol.newCorrelationContext()
     val videoMode = isVideoRequest(prompt)
     val nativeMode = isHermesNative(settings)
-    val serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
-    val attachmentPreparation = buildPromptWithAttachmentToolRefs(settings, prompt, attachments, apiKey)
+    val serverConversationId = botSessionId?.trim()?.takeIf { it.isNotBlank() }
+        ?: hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
+    fun profileUrl(path: String): String = if (botProfile.isNullOrBlank()) {
+        "${settings.gatewayUrl.trimEnd('/')}$path"
+    } else {
+        resolveHermesProfileUrl(settings, botProfile, path, botMultiplexEnabled)
+    }
+    val attachmentPreparation = buildPromptWithAttachmentToolRefs(settings, prompt, attachments, apiKey, botProfile, botMultiplexEnabled, allowCompatAuth)
     val promptForModel = attachmentPreparation.prompt
     val payloadAttachments = attachmentPreparation.inlineAttachments
     if (attachmentPreparation.uploadedCount > 0) {
@@ -692,7 +702,7 @@ fun streamChatRequest(
     }
 
     if (mode.equals("Agente", ignoreCase = true)) {
-        runDetachedAgent(settings, promptForModel, history, conversationId, payloadAttachments, apiKey).collect { emit(it) }
+        runDetachedAgent(settings, promptForModel, history, conversationId, payloadAttachments, apiKey, botProfile, botSessionId, botMultiplexEnabled, allowCompatAuth).collect { emit(it) }
         return@flow
     }
 
@@ -710,7 +720,7 @@ fun streamChatRequest(
                 .put("timings_per_token", true)
                 .put("conversation", serverConversationId ?: JSONObject.NULL)
                 .put("previous_response_id", if (serverConversationId == null) candidatePreviousResponseId ?: JSONObject.NULL else JSONObject.NULL)
-                .put("metadata", visualBlocksMetadataJson(settings, conversationId))
+                .put("metadata", visualBlocksMetadataJson(settings, conversationId, botProfile, botSessionId))
             payload.put(
                 "instructions",
                 (if (nativeMode) hermesNativeInstructions(mode) else
@@ -722,7 +732,7 @@ fun streamChatRequest(
             return payload
         }
 
-        val responseUrl = "${settings.gatewayUrl.trimEnd('/')}/responses"
+        val responseUrl = profileUrl("/responses")
         val previousResponseCandidates = if (serverConversationId != null || previousResponseId.isNullOrBlank()) {
             listOf<String?>(null)
         } else {
@@ -740,7 +750,7 @@ fun streamChatRequest(
                 responsePayload,
                 "Hermes Responses API",
                 apiKey,
-                true,
+                allowCompatAuth,
                 requestContext = requestContext
             ) { ev ->
                 emitAndTrack(ev)
@@ -782,7 +792,7 @@ fun streamChatRequest(
             .put("return_progress", true)
             .put("timings_per_token", true)
             .put("session_id", serverConversationId ?: JSONObject.NULL)
-            .put("metadata", visualBlocksMetadataJson(settings, conversationId))
+            .put("metadata", visualBlocksMetadataJson(settings, conversationId, botProfile, botSessionId))
             .put("messages", JSONArray().apply {
                 if (!nativeMode) {
                     put(
@@ -819,14 +829,14 @@ fun streamChatRequest(
                     )
                 }
         })
-        val url = "${settings.gatewayUrl.trimEnd('/')}/chat/completions"
+        val url = profileUrl("/chat/completions")
         lastError = null
         val result = openSseStream(
             url,
             payload,
             "Hermes Chat Completions",
             apiKey,
-            true,
+            allowCompatAuth,
             sessionId = serverConversationId,
             requestContext = requestContext
         ) { ev ->
@@ -1129,10 +1139,13 @@ private suspend fun buildPromptWithAttachmentToolRefs(
     settings: AppSettings,
     prompt: String,
     attachments: List<ChatInputAttachment>,
-    apiKey: String?
+    apiKey: String?,
+    botProfile: String?,
+    botMultiplexEnabled: Boolean,
+    allowCompatAuth: Boolean
 ): AttachmentPreparation {
     if (attachments.isEmpty()) return AttachmentPreparation(prompt, emptyList(), 0, emptyList())
-    val refs = attachments.map { uploadAttachmentForTool(settings, it, apiKey) }
+    val refs = attachments.map { uploadAttachmentForTool(settings, it, apiKey, botProfile, botMultiplexEnabled, allowCompatAuth) }
     val uploadedIndexes = refs.indices.filter { refs[it].error.isNullOrBlank() }.toSet()
     val uploaded = refs.filterIndexed { index, _ -> index in uploadedIndexes }
     val remaining = attachments.filterIndexed { index, _ -> index !in uploadedIndexes }
@@ -1161,10 +1174,21 @@ private suspend fun buildPromptWithAttachmentToolRefs(
     return AttachmentPreparation(text, remaining, uploaded.size, errors)
 }
 
-private suspend fun uploadAttachmentForTool(settings: AppSettings, attachment: ChatInputAttachment, apiKey: String?): UploadedAttachmentRef {
-    val endpoint = "${settings.gatewayUrl.trimEnd('/')}/media/upload"
+private suspend fun uploadAttachmentForTool(
+    settings: AppSettings,
+    attachment: ChatInputAttachment,
+    apiKey: String?,
+    botProfile: String?,
+    botMultiplexEnabled: Boolean,
+    allowCompatAuth: Boolean
+): UploadedAttachmentRef {
+    val endpoint = if (botProfile.isNullOrBlank()) {
+        "${settings.gatewayUrl.trimEnd('/')}/media/upload"
+    } else {
+        resolveHermesProfileUrl(settings, botProfile, "/media/upload", botMultiplexEnabled)
+    }
     val body = attachment.streamingJsonUploadBody()
-    val authCandidates = hermesAuthCandidates(apiKey, true)
+    val authCandidates = hermesAuthCandidates(apiKey, allowCompatAuth)
     val requestContext = HermesHubProtocol.newCorrelationContext()
     var lastError = "gateway non raggiungibile"
     candidateLoop@ for (candidateUrl in plugAndPlayStreamUrlCandidates(endpoint)) {
@@ -1244,15 +1268,24 @@ private fun runDetachedAgent(
     history: List<ChatMessage>,
     conversationId: String?,
     attachments: List<ChatInputAttachment>,
-    apiKey: String?
+    apiKey: String?,
+    botProfile: String?,
+    botSessionId: String?,
+    botMultiplexEnabled: Boolean,
+    allowCompatAuth: Boolean
 ): Flow<ChatStreamEvent> = flow {
     val startedAt = System.nanoTime()
     val payload = JSONObject()
         .put("model", settings.model)
         .put("input", buildMultimodalInput(prompt, attachments))
         .put("instructions", hermesHubAgentInstructions() + projectContextInstructions(settings))
-        .put("session_id", hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId) ?: JSONObject.NULL)
-        .put("metadata", visualBlocksMetadataJson(settings, conversationId))
+        .put(
+            "session_id",
+            botSessionId?.trim()?.takeIf { it.isNotBlank() }
+                ?: hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
+                ?: JSONObject.NULL
+        )
+        .put("metadata", visualBlocksMetadataJson(settings, conversationId, botProfile, botSessionId))
         .put("conversation_history", JSONArray(history.takeLast(30).mapNotNull { msg ->
             if (msg.isAction || (msg.fromUser && msg.text == prompt)) {
                 null
@@ -1263,7 +1296,12 @@ private fun runDetachedAgent(
             }
         }))
     emit(ChatStreamEvent.Status("Modalita Agente: avvio run server-side persistente..."))
-    val startResponse = executeRunJsonRequest("${settings.gatewayUrl.trimEnd('/')}/runs", payload, apiKey, "POST")
+    val runUrl = if (botProfile.isNullOrBlank()) {
+        "${settings.gatewayUrl.trimEnd('/')}/runs"
+    } else {
+        resolveHermesProfileUrl(settings, botProfile, "/runs", botMultiplexEnabled)
+    }
+    val startResponse = executeRunJsonRequest(runUrl, payload, apiKey, "POST", allowCompatAuth)
     if (startResponse.first !in 200..299) {
         emit(ChatStreamEvent.Error("Hermes Runs HTTP ${startResponse.first}: ${startResponse.second.take(240)}"))
         return@flow
@@ -1286,7 +1324,9 @@ private fun runDetachedAgent(
             return@flow
         }
         kotlinx.coroutines.delay((2_000L * (consecutiveFailures + 1)).coerceAtMost(10_000L))
-        val statusResponse = executeRunJsonRequest("${settings.gatewayUrl.trimEnd('/')}/runs/$runId", null, apiKey, "GET")
+        val statusPath = "/runs/$runId"
+        val statusUrl = if (botProfile.isNullOrBlank()) "${settings.gatewayUrl.trimEnd('/')}$statusPath" else resolveHermesProfileUrl(settings, botProfile, statusPath, botMultiplexEnabled)
+        val statusResponse = executeRunJsonRequest(statusUrl, null, apiKey, "GET", allowCompatAuth)
         if (statusResponse.first == 404) {
             consecutiveFailures++
             val message = "Run $runId non piu' in cache gateway; se era lunga puo' ancora lavorare sul processo Hermes."
@@ -1344,9 +1384,15 @@ private fun runDetachedAgent(
     }
 }.flowOn(Dispatchers.IO)
 
-private suspend fun executeRunJsonRequest(url: String, payload: JSONObject?, apiKey: String?, method: String): Pair<Int, String> {
+private suspend fun executeRunJsonRequest(
+    url: String,
+    payload: JSONObject?,
+    apiKey: String?,
+    method: String,
+    allowCompatAuth: Boolean = true
+): Pair<Int, String> {
     var last: Pair<Int, String>? = null
-    val authCandidates = hermesAuthCandidates(apiKey, true)
+    val authCandidates = hermesAuthCandidates(apiKey, allowCompatAuth)
     val requestContext = HermesHubProtocol.newCorrelationContext()
     for (candidateUrl in plugAndPlayStreamUrlCandidates(url)) {
         for ((index, token) in authCandidates.withIndex()) {
@@ -1377,11 +1423,20 @@ private suspend fun executeRunJsonRequest(url: String, payload: JSONObject?, api
     return last ?: (0 to "")
 }
 
-internal suspend fun stopHermesRun(settings: AppSettings, runId: String, apiKey: String?): Pair<Int, String> = withContext(Dispatchers.IO) {
+internal suspend fun stopHermesRun(
+    settings: AppSettings,
+    runId: String,
+    apiKey: String?,
+    botProfile: String? = null,
+    botMultiplexEnabled: Boolean = false,
+    allowCompatAuth: Boolean = true
+): Pair<Int, String> = withContext(Dispatchers.IO) {
     if (runId.isBlank()) {
         return@withContext 0 to "run_id assente"
     }
-    executeRunJsonRequest("${settings.gatewayUrl.trimEnd('/')}/runs/$runId/stop", JSONObject().put("reason", "user_cancelled"), apiKey, "POST")
+    val path = "/runs/$runId/stop"
+    val url = if (botProfile.isNullOrBlank()) "${settings.gatewayUrl.trimEnd('/')}$path" else resolveHermesProfileUrl(settings, botProfile, path, botMultiplexEnabled)
+    executeRunJsonRequest(url, JSONObject().put("reason", "user_cancelled"), apiKey, "POST", allowCompatAuth)
 }
 
 private fun plugAndPlayStreamUrlCandidates(url: String): List<String> {
@@ -2128,15 +2183,23 @@ private fun JSONObject.tokensPerSecondOrNull(): Double? {
     )
 }
 
-private fun visualBlocksMetadataJson(settings: AppSettings, conversationId: String?): JSONObject {
-    val serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
+private fun visualBlocksMetadataJson(
+    settings: AppSettings,
+    conversationId: String?,
+    botProfile: String? = null,
+    botSessionId: String? = null
+): JSONObject {
+    val serverConversationId = botSessionId?.trim()?.takeIf { it.isNotBlank() }
+        ?: hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
     return JSONObject()
         .put("client", "hermes-hub")
         .put("client_surface", HERMES_HUB_ANDROID_SURFACE)
         .put("hub_client", true)
         .put("requested_protocol", settings.preferredApi)
         .put("strict_native_mode", settings.strictNativeMode)
-        .put("profile", "user")
+        .put("profile", botProfile?.takeIf { it.isNotBlank() } ?: "user")
+        .put("bot_profile", botProfile?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+        .put("bot_session_id", botSessionId?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
         .put("project_id", settings.activeProjectId)
         .put("project_name", settings.activeProjectName)
         .put("workspace", settings.activeProjectName.ifBlank { "default" })

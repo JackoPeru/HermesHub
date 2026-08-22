@@ -913,6 +913,50 @@ internal fun resolveHermesUrl(settings: AppSettings, path: String): String {
     }
 }
 
+internal fun resolveHermesProfileUrl(
+    settings: AppSettings,
+    profile: String,
+    path: String,
+    multiplexEnabled: Boolean
+): String {
+    check(multiplexEnabled) { "Il multiplexing dei profili Hermes non è pronto." }
+    val name = normalizeHermesProfileName(profile)
+    val root = hermesRoot(settings).trimEnd('/')
+    val normalized = if (path.startsWith('/')) path else "/$path"
+    val suffix = if (normalized.startsWith("/v1", ignoreCase = true)) normalized.removePrefix("/v1") else normalized
+    return "$root/p/${URLEncoder.encode(name, "UTF-8")}/v1$suffix"
+}
+
+internal fun resolveHermesProfileApiUrl(
+    settings: AppSettings,
+    profile: String,
+    path: String,
+    multiplexEnabled: Boolean
+): String {
+    check(multiplexEnabled) { "Il multiplexing dei profili Hermes non è pronto." }
+    val name = normalizeHermesProfileName(profile)
+    val root = hermesRoot(settings).trimEnd('/')
+    val normalized = if (path.startsWith('/')) path else "/$path"
+    return "$root/p/${URLEncoder.encode(name, "UTF-8")}$normalized"
+}
+
+internal fun normalizeHermesProfileName(profile: String): String {
+    val name = profile.trim().lowercase()
+    require(name.matches(Regex("[a-z0-9][a-z0-9_-]{0,63}"))) { "Nome profilo non valido." }
+    return name
+}
+
+internal fun normalizeBotRoutineName(profile: String, name: String): String {
+    val normalizedProfile = normalizeHermesProfileName(profile)
+    var value = name.trim()
+    if (value.startsWith("[bot:", ignoreCase = true)) {
+        val close = value.indexOf(']')
+        if (close >= 0) value = value.substring(close + 1).trim()
+    }
+    require(value.isNotBlank()) { "Il nome della routine è obbligatorio." }
+    return "[bot:$normalizedProfile] $value"
+}
+
 internal suspend fun loadVideoLibrary(settings: AppSettings, apiKey: String?): Pair<List<VideoLibraryItem>, String> = withContext(Dispatchers.IO) {
     return@withContext try {
         val response = httpGetResponse(resolveHermesUrl(settings, "/v1/video/library"), apiKey)
@@ -1100,9 +1144,20 @@ internal suspend fun patchHubNotification(settings: AppSettings, id: String, pat
     } catch (ex: Exception) { "Notifica non aggiornata: ${ex.message ?: ex.javaClass.simpleName}" }
 }
 
-internal suspend fun loadCronJobs(settings: AppSettings, apiKey: String?): Pair<List<CronJob>, String> = withContext(Dispatchers.IO) {
+internal suspend fun loadCronJobs(
+    settings: AppSettings,
+    apiKey: String?,
+    profile: String? = null,
+    profileMultiplexEnabled: Boolean = false
+): Pair<List<CronJob>, String> = withContext(Dispatchers.IO) {
     return@withContext try {
-        val response = httpGetResponse(resolveHermesUrl(settings, "/api/jobs?type=cron&include_disabled=1"), apiKey)
+        val path = "/api/jobs?type=cron&include_disabled=1"
+        val endpoint = if (profile.isNullOrBlank()) {
+            resolveHermesUrl(settings, path)
+        } else {
+            resolveHermesProfileApiUrl(settings, profile, path, profileMultiplexEnabled)
+        }
+        val response = httpGetResponse(endpoint, apiKey)
         if (response.first !in 200..299) {
             return@withContext emptyList<CronJob>() to "Cron HTTP ${response.first}: ${extractHumanError(response.second)}"
         }
@@ -1117,13 +1172,25 @@ internal suspend fun loadCronJobs(settings: AppSettings, apiKey: String?): Pair<
     }
 }
 
-internal suspend fun cronAction(settings: AppSettings, id: String, action: String, apiKey: String?): String = withContext(Dispatchers.IO) {
+internal suspend fun cronAction(
+    settings: AppSettings,
+    id: String,
+    action: String,
+    apiKey: String?,
+    profile: String? = null,
+    profileMultiplexEnabled: Boolean = false
+): String = withContext(Dispatchers.IO) {
     if (id.isBlank()) return@withContext "ID cron mancante."
     return@withContext try {
         val encodedId = URLEncoder.encode(id, "UTF-8")
         val path = if (action == "delete") "/api/jobs/$encodedId" else "/api/jobs/$encodedId/$action"
         val method = if (action == "delete") "DELETE" else "POST"
-        val response = postJson(resolveHermesUrl(settings, path), JSONObject(), apiKey, method)
+        val endpoint = if (profile.isNullOrBlank()) {
+            resolveHermesUrl(settings, path)
+        } else {
+            resolveHermesProfileApiUrl(settings, profile, path, profileMultiplexEnabled)
+        }
+        val response = postJson(endpoint, JSONObject(), apiKey, method)
         if (response.first in 200..299) {
             when (action) {
                 "run" -> "Cron avviato."
@@ -1147,17 +1214,25 @@ internal suspend fun saveCronJob(
     schedule: String,
     prompt: String,
     deliver: String,
-    apiKey: String?
+    apiKey: String?,
+    profile: String? = null,
+    profileMultiplexEnabled: Boolean = false
 ): String = withContext(Dispatchers.IO) {
     return@withContext try {
         val creating = id.isNullOrBlank()
         val path = if (creating) "/api/jobs" else "/api/jobs/${URLEncoder.encode(id, "UTF-8")}"
+        val scopedName = if (profile.isNullOrBlank()) name.trim() else normalizeBotRoutineName(profile, name)
         val payload = JSONObject()
-            .put("name", name.trim())
+            .put("name", scopedName)
             .put("schedule", schedule.trim())
             .put("prompt", prompt)
             .put("deliver", deliver.trim().ifBlank { "local" })
-        val response = postJson(resolveHermesUrl(settings, path), payload, apiKey, if (creating) "POST" else "PATCH")
+        val endpoint = if (profile.isNullOrBlank()) {
+            resolveHermesUrl(settings, path)
+        } else {
+            resolveHermesProfileApiUrl(settings, profile, path, profileMultiplexEnabled)
+        }
+        val response = postJson(endpoint, payload, apiKey, if (creating) "POST" else "PATCH")
         if (response.first in 200..299) {
             if (creating) "Automazione creata." else "Automazione aggiornata."
         } else {

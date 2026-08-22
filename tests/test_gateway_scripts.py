@@ -417,6 +417,35 @@ class GatewayScriptTests(unittest.TestCase):
         self.assertEqual([], second_changes)
         self.assertEqual(patched, second)
 
+    def test_bot_profile_routes_are_compilable_profile_scoped_and_idempotent(self):
+        for fixture_path in (UPSTREAM_GATEWAY_FIXTURE, CURRENT_UPSTREAM_GATEWAY_FIXTURE):
+            with self.subTest(fixture=fixture_path.name):
+                patched, changes = self.patcher._patch_text(
+                    fixture_path.read_text(encoding="utf-8")
+                )
+                compile(patched, f"<{fixture_path.name}-bot-profile>", "exec")
+                self.assertIn("HERMES_HUB_BOTS_HANDLERS_BEGIN", patched)
+                self.assertIn("HERMES_HUB_BOTS_CAPABILITIES_BEGIN", patched)
+                self.assertIn("HERMES_HUB_BOTS_ENDPOINTS_BEGIN", patched)
+                self.assertTrue(
+                    "HERMES_HUB_BOTS_DYNAMIC_ROUTES_BEGIN" in patched
+                    or "HERMES_HUB_BOTS_LEGACY_ROUTES_BEGIN" in patched
+                )
+                self.assertIn('"/v1/hub/bots"', patched)
+                self.assertIn('"/v1/hub/bots/{bot_name}/chat"', patched)
+                self.assertIn('"/v1/hub/bots/{bot_name}"', patched)
+                self.assertIn('confirm_name', patched)
+                self.assertIn('display_name=body.get("display_name")', patched)
+                self.assertIn('profile_multiplexing_disabled', patched)
+                self.assertIn("profile_multiplexing_disabled", patched)
+                self.assertIn("/p/{encoded}/v1", patched)
+                self.assertTrue(any("bot" in change.lower() for change in changes))
+
+                second, second_changes = self.patcher._patch_text(patched)
+                compile(second, f"<{fixture_path.name}-bot-profile-second>", "exec")
+                self.assertEqual([], second_changes)
+                self.assertEqual(patched, second)
+
     def test_generated_gateway_delegates_hub_state_and_sync_to_sqlite_runtime(self):
         source = UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8")
         patched, _ = self.patcher._patch_text(source)
