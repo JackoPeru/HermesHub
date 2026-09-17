@@ -373,23 +373,14 @@ internal fun visualBlocksMetadata(settings: AppSettings, conversationId: String?
 }
 
 internal suspend fun queueTaskRequest(settings: AppSettings, task: AgentTask, apiKey: String?): GatewayTaskResult = withContext(Dispatchers.IO) {
+    // Contratto reale POST /api/jobs (main): solo name*, schedule*, prompt, deliver,
+    // skills, repeat, paused/paused_reason. Altri campi verrebbero scartati dal server:
+    // non inviare model/provider/reasoning/continuity/monitor (superficie dashboard, non esterna).
     val payload = JSONObject()
-        .put("title", task.title)
-        .put("instructions", task.detail)
-        .put("detail", task.detail)
-        .put("mode", task.mode)
-        .put("requiresApproval", task.requiresApproval)
-        .put("approvalRequired", task.requiresApproval)
-        .put("model", settings.model)
-        .put("provider", settings.provider)
-        .put(
-            "metadata",
-            JSONObject()
-                .put("client", "hermes-hub")
-                .put("client_surface", "android-app")
-                .put("memory_scope", "shared-hermes-agent-memory")
-                .put("source", "jobs-section")
-        )
+        .put("name", task.title)
+        .put("prompt", task.detail)
+        .put("schedule", task.schedule)
+        .put("deliver", task.deliver.ifBlank { "local" })
 
     try {
         val response = postJson("${hermesRoot(settings)}/api/jobs", payload, apiKey)
@@ -416,9 +407,12 @@ internal suspend fun queueTaskRequest(settings: AppSettings, task: AgentTask, ap
 }
 
 internal suspend fun updateTaskRequest(settings: AppSettings, task: AgentTask, action: String, apiKey: String?): GatewayTaskResult = withContext(Dispatchers.IO) {
-    val targetStatus = when (action) {
+    val normalized = action.trim().lowercase()
+    val targetStatus = when (normalized) {
         "run" -> "Run richiesto"
         "pause" -> "Pausa richiesta"
+        "resume" -> "Ripresa richiesta"
+        "patch" -> "Aggiornamento richiesto"
         else -> "Eliminato"
     }
 
@@ -434,16 +428,34 @@ internal suspend fun updateTaskRequest(settings: AppSettings, task: AgentTask, a
     }
 
     try {
-        val url = if (action == "delete") {
-            "${hermesRoot(settings)}/api/jobs/${task.remoteId}"
-        } else {
-            "${hermesRoot(settings)}/api/jobs/${task.remoteId}/$action"
+        // Contratto moderno Jobs API: POST .../run, .../pause, .../resume, PATCH ..., DELETE ...
+        // Mantiene fallback legacy esplicito (run/pause/delete gia' supportati).
+        val url = when (normalized) {
+            "delete", "remove" -> "${hermesRoot(settings)}/api/jobs/${task.remoteId}"
+            "patch" -> "${hermesRoot(settings)}/api/jobs/${task.remoteId}"
+            else -> "${hermesRoot(settings)}/api/jobs/${task.remoteId}/$normalized"
         }
-        val response = postJson(url, JSONObject(), apiKey, if (action == "delete") "DELETE" else "POST")
+        val method = when (normalized) {
+            "delete", "remove" -> "DELETE"
+            "patch" -> "PATCH"
+            else -> "POST"
+        }
+        val patchPayload = if (normalized == "patch") {
+            // Whitelist server reale (_UPDATE_ALLOWED_FIELDS): name, schedule, prompt, deliver,
+            // skills, skill, repeat, enabled. Altri campi verrebbero scartati.
+            JSONObject()
+                .put("name", task.title)
+                .put("prompt", task.detail)
+                .apply {
+                    if (task.schedule.isNotBlank()) put("schedule", task.schedule)
+                    if (task.deliver.isNotBlank()) put("deliver", task.deliver)
+                }
+        } else JSONObject()
+        val response = postJson(url, patchPayload, apiKey, method)
         if (response.first in 200..299) {
             return@withContext GatewayTaskResult(
                 task.copy(
-                    status = if (action == "delete") "Eliminato" else extractTaskStatus(response.second) ?: targetStatus,
+                    status = if (normalized == "delete" || normalized == "remove") "Eliminato" else extractTaskStatus(response.second) ?: targetStatus,
                     source = "Hermes Jobs",
                     updatedAt = System.currentTimeMillis()
                 ),
@@ -698,22 +710,9 @@ internal suspend fun sendWorkspaceRunRequest(
     val title = makeTitle(prompt)
 
     val jobPayload = JSONObject()
-        .put("title", title)
-        .put("instructions", runPrompt)
-        .put("detail", runPrompt)
-        .put("mode", kind)
-        .put("requiresApproval", false)
-        .put(
-            "metadata",
-            JSONObject()
-                .put("client", "hermes-hub")
-                .put("client_surface", "android-app")
-                .put("workspace", kind.lowercase())
-                .put("destination", kind)
-                .put("memory_scope", "shared-hermes-agent-memory")
-                .put("share_with_cli", true)
-                .put("output_contract", workspaceOutputContract(kind))
-        )
+        .put("name", title)
+        .put("prompt", runPrompt)
+        .put("deliver", "local")
 
     try {
         val job = postJson("${hermesRoot(settings)}/api/jobs", jobPayload, apiKey)
@@ -750,6 +749,13 @@ internal suspend fun sendWorkspaceRunRequest(
                 .put("memory_scope", "shared-hermes-agent-memory")
                 .put("share_with_cli", true)
         )
+    // Per-request model/provider: Hermes resta responsabile del routing.
+    if (settings.provider.isNotBlank() && !settings.provider.equals("hermes-agent", ignoreCase = true)) {
+        payload.put("provider", settings.provider)
+    }
+    buildHermesModelOptions(settings.reasoningEffort, settings.serviceTier, capabilities = null)?.let {
+        payload.put("model_options", it)
+    }
 
     try {
         val run = postJson(resolveHermesUrl(settings, "/v1/runs"), payload, apiKey)
@@ -1216,7 +1222,8 @@ internal suspend fun saveCronJob(
     deliver: String,
     apiKey: String?,
     profile: String? = null,
-    profileMultiplexEnabled: Boolean = false
+    profileMultiplexEnabled: Boolean = false,
+    skills: String = ""
 ): String = withContext(Dispatchers.IO) {
     return@withContext try {
         val creating = id.isNullOrBlank()
@@ -1227,6 +1234,11 @@ internal suspend fun saveCronJob(
             .put("schedule", schedule.trim())
             .put("prompt", prompt)
             .put("deliver", deliver.trim().ifBlank { "local" })
+        // Solo campi della whitelist /api/jobs (main): model/provider/reasoning/workdir/script/
+        // no_agent/monitor/context_from/enabled_toolsets vivono sulla superficie dashboard
+        // /api/cron/jobs (listener/auth diversi, non adatta al client esterno) e verrebbero scartati.
+        val skillList = skills.split(',', ';', '\n').map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        if (skillList.isNotEmpty()) payload.put("skills", JSONArray(skillList))
         val endpoint = if (profile.isNullOrBlank()) {
             resolveHermesUrl(settings, path)
         } else {
@@ -1285,7 +1297,23 @@ internal fun parseCronJobs(body: String): List<CronJob> {
                     lastRunAt = obj.optString("last_run_at", obj.optString("lastRunAt", obj.optString("last_run", obj.optString("lastRun")))),
                     lastStatus = obj.optString("last_status", obj.optString("lastStatus", obj.optString("last_result", obj.optString("lastResult")))),
                     deliver = obj.optString("deliver", obj.optString("delivery", obj.optString("target"))),
-                    origin = cronOriginText(obj)
+                    origin = cronOriginText(obj),
+                    profile = obj.optString("profile", ""),
+                    model = obj.optString("model", ""),
+                    provider = obj.optString("provider", ""),
+                    reasoningEffort = obj.optString("reasoning_effort", obj.optString("reasoningEffort", "")),
+                    workdir = obj.optString("workdir", ""),
+                    skills = obj.optJSONArray("skills")?.let { arr ->
+                        (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }.joinToString(", ")
+                    }.orEmpty(),
+                    script = obj.optString("script", ""),
+                    noAgent = obj.optBoolean("no_agent", obj.optBoolean("noAgent", false)),
+                    contextFrom = obj.optJSONArray("context_from")?.let { arr ->
+                        (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }.joinToString(", ")
+                    } ?: obj.optString("context_from", ""),
+                    enabledToolsets = obj.optJSONArray("enabled_toolsets")?.let { arr ->
+                        (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }.joinToString(", ")
+                    }.orEmpty()
                 )
             )
         }
@@ -3253,6 +3281,12 @@ internal suspend fun sendVideoLibraryFeedback(settings: AppSettings, item: Video
                 .put("memory_scope", "shared-hermes-agent-memory")
                 .put("share_with_cli", true)
         )
+    if (settings.provider.isNotBlank() && !settings.provider.equals("hermes-agent", ignoreCase = true)) {
+        payload.put("provider", settings.provider)
+    }
+    buildHermesModelOptions(settings.reasoningEffort, settings.serviceTier, capabilities = null)?.let {
+        payload.put("model_options", it)
+    }
     try {
         postHubState(
             settings,
@@ -3372,7 +3406,11 @@ internal fun saveConversationSnapshot(
     source: String,
     responseId: String? = null,
     projectId: String? = null,
-    syncAfterSave: Boolean = true
+    syncAfterSave: Boolean = true,
+    hermesSessionId: String? = null,
+    modelOverride: String? = null,
+    providerOverride: String? = null,
+    reasoningEffort: String? = null
 ): LocalConversation {
     synchronized(localArchiveLock) {
         val conversations = loadConversations(context, includeDeleted = true).toMutableList()
@@ -3389,6 +3427,10 @@ internal fun saveConversationSnapshot(
                 messages = messages,
                 previousResponseId = responseId ?: current.previousResponseId,
                 serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, current.id),
+                hermesSessionId = hermesSessionId ?: current.hermesSessionId,
+                modelOverride = modelOverride ?: current.modelOverride,
+                providerOverride = providerOverride ?: current.providerOverride,
+                reasoningEffort = reasoningEffort ?: current.reasoningEffort,
                 projectId = current.projectId.ifBlank { projectId.orEmpty() }
             )
         } else {
@@ -3402,6 +3444,10 @@ internal fun saveConversationSnapshot(
                 messages = messages,
                 previousResponseId = responseId,
                 serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, newConversationId),
+                hermesSessionId = hermesSessionId,
+                modelOverride = modelOverride.orEmpty(),
+                providerOverride = providerOverride.orEmpty(),
+                reasoningEffort = reasoningEffort.orEmpty(),
                 projectId = projectId.orEmpty()
             )
         }
@@ -3559,6 +3605,156 @@ internal fun deleteConversation(context: Context, id: String): Boolean {
         )
         saveConversations(context, conversations)
         return true
+    }
+}
+
+/** Esito scrittura sessione server: mai presentare falso successo da sola cache locale. */
+internal enum class HermesSessionWrite {
+    APPLIED,
+    GONE,
+    AUTH_DENIED,
+    TRANSIENT
+}
+
+internal fun sessionWriteOutcome(code: Int): HermesSessionWrite = when {
+    code in 200..299 -> HermesSessionWrite.APPLIED
+    code == 404 -> HermesSessionWrite.GONE
+    code == 401 || code == 403 -> HermesSessionWrite.AUTH_DENIED
+    else -> HermesSessionWrite.TRANSIENT
+}
+
+internal data class HermesSessionWriteResult(
+    val ok: Boolean,
+    /** false = conversazione non collegata a sessione Hermes (percorso legacy locale). */
+    val serverBound: Boolean,
+    val error: String? = null
+)
+
+/**
+ * Rename con Hermes autorevole: prima PATCH server, poi cache locale.
+ * 401/403/transient -> nessun falso successo e nessuna divergenza silenziosa.
+ */
+internal suspend fun renameHermesSessionForConversation(
+    context: Context,
+    settings: AppSettings,
+    apiKey: String?,
+    localId: String,
+    newTitle: String,
+    profile: String? = null,
+    multiplexEnabled: Boolean = false
+): HermesSessionWriteResult = withContext(Dispatchers.IO) {
+    val serverId = loadSessionBinding(context, localId, profile)
+        ?: loadConversation(context, localId)?.hermesSessionId
+    if (serverId.isNullOrBlank()) {
+        val localOk = renameConversation(context, localId, newTitle)
+        return@withContext HermesSessionWriteResult(localOk, serverBound = false)
+    }
+    return@withContext try {
+        val caps = loadHermesCapabilitiesCached(settings, apiKey)
+        if (caps != null && !caps.sessionPatch) {
+            val localOk = renameConversation(context, localId, newTitle)
+            return@withContext HermesSessionWriteResult(localOk, serverBound = false)
+        }
+        val client = HermesSessionClient(settings, apiKey, profile, multiplexEnabled, caps)
+        when (sessionWriteOutcome(client.patch(serverId, title = newTitle).first)) {
+            HermesSessionWrite.APPLIED -> {
+                val localOk = renameConversation(context, localId, newTitle)
+                HermesSessionWriteResult(localOk, serverBound = true)
+            }
+            HermesSessionWrite.GONE -> {
+                // Sessione inesistente: binding morto rimosso, locale resta e diventa
+                // unbound (il prossimo turno crea una sessione fresca). Mai presentarlo
+                // come modifica applicata sul server.
+                clearSessionBinding(context, localId, profile)
+                val localOk = renameConversation(context, localId, newTitle)
+                HermesSessionWriteResult(localOk, serverBound = false)
+            }
+            HermesSessionWrite.AUTH_DENIED ->
+                HermesSessionWriteResult(false, serverBound = true, error = "Chiave rifiutata dal server (fail-closed).")
+            HermesSessionWrite.TRANSIENT ->
+                HermesSessionWriteResult(false, serverBound = true, error = "Modifica server non applicata (errore temporaneo): riprova.")
+        }
+    } catch (ex: Exception) {
+        HermesSessionWriteResult(false, serverBound = true, error = "Modifica server non applicata: ${ex.message ?: ex.javaClass.simpleName}.")
+    }
+}
+
+/**
+ * Delete con Hermes autorevole: prima DELETE server (binding conservato per retry),
+ * poi tombstone locale. 401/403/transient -> nulla eliminato, errore esplicito.
+ */
+internal suspend fun deleteHermesSessionForConversation(
+    context: Context,
+    settings: AppSettings,
+    apiKey: String?,
+    localId: String,
+    profile: String? = null,
+    multiplexEnabled: Boolean = false
+): HermesSessionWriteResult = withContext(Dispatchers.IO) {
+    val serverId = loadSessionBinding(context, localId, profile)
+        ?: loadConversation(context, localId)?.hermesSessionId
+    if (serverId.isNullOrBlank()) {
+        val localOk = deleteConversation(context, localId)
+        return@withContext HermesSessionWriteResult(localOk, serverBound = false)
+    }
+    return@withContext try {
+        val caps = loadHermesCapabilitiesCached(settings, apiKey)
+        if (caps != null && !caps.sessionDelete) {
+            val localOk = deleteConversation(context, localId)
+            clearSessionBinding(context, localId, profile)
+            return@withContext HermesSessionWriteResult(localOk, serverBound = false)
+        }
+        when (sessionWriteOutcome(HermesSessionClient(settings, apiKey, profile, multiplexEnabled, caps).delete(serverId))) {
+            HermesSessionWrite.APPLIED, HermesSessionWrite.GONE -> {
+                val localOk = deleteConversation(context, localId)
+                clearSessionBinding(context, localId, profile)
+                HermesSessionWriteResult(localOk, serverBound = true)
+            }
+            HermesSessionWrite.AUTH_DENIED ->
+                HermesSessionWriteResult(false, serverBound = true, error = "Chiave rifiutata dal server (fail-closed).")
+            HermesSessionWrite.TRANSIENT ->
+                HermesSessionWriteResult(false, serverBound = true, error = "Eliminazione server non applicata (errore temporaneo): riprova.")
+        }
+    } catch (ex: Exception) {
+        HermesSessionWriteResult(false, serverBound = true, error = "Eliminazione server non applicata: ${ex.message ?: ex.javaClass.simpleName}.")
+    }
+}
+
+/** Fork reale Hermes: branch server-side + nuova chat locale collegata al fork. */
+internal suspend fun forkHermesSessionForConversation(
+    context: Context,
+    settings: AppSettings,
+    apiKey: String?,
+    localId: String,
+    profile: String? = null,
+    multiplexEnabled: Boolean = false,
+    title: String? = null
+): LocalConversation? = withContext(Dispatchers.IO) {
+    val source = loadConversation(context, localId) ?: return@withContext null
+    val serverId = loadSessionBinding(context, localId, profile) ?: source.hermesSessionId
+    if (serverId.isNullOrBlank()) return@withContext null
+    return@withContext try {
+        val caps = loadHermesCapabilitiesCached(settings, apiKey)
+        if (caps != null && !caps.sessionFork) return@withContext null
+        val client = HermesSessionClient(settings, apiKey, profile, multiplexEnabled, caps)
+        val (code, forked) = client.fork(serverId, title = title ?: "${source.title} (branch)")
+        if (code !in 200..299 || forked == null) return@withContext null
+        val newId = "conv_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(8)}"
+        val branched = source.copy(
+            id = newId,
+            title = forked.title.ifBlank { "${source.title} (branch)" },
+            updatedAt = System.currentTimeMillis(),
+            hermesSessionId = forked.id,
+            serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, newId),
+            parentConversationId = source.id
+        )
+        val conversations = loadConversations(context, includeDeleted = true).toMutableList()
+        conversations.add(0, branched)
+        saveConversations(context, conversations)
+        saveSessionBinding(context, newId, profile, forked.id)
+        branched
+    } catch (_: Exception) {
+        null
     }
 }
 

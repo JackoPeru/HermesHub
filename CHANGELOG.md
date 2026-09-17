@@ -2,6 +2,14 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.186 - 2026-09-17
+
+- Android usa la Sessions API nativa Hermes (`/api/sessions`, chat/stream, messaggi, fork, rename/delete propagate) come percorso primario della Chat quando `/v1/capabilities` la dichiara, con fallback legacy esplicito.
+- Runs API completa in Chat: stop reale, steer con gestione 409/`pending_steer`, approval server-side con scelte dinamiche offerte dal server, eventi SSE nativi come fonte primaria.
+- Model picker moderno (`/api/model/options` con fallback `/v1/models`), reasoning effort per-chat con ladder capability-driven e model lock persistente per sessione.
+- Cron Android allineato al trasporto esterno `/api/jobs` (whitelist verificata su upstream): name/schedule/prompt/deliver/skills, pausa/resume/run/elimina; i campi dashboard-only restano in sola lettura.
+- Rename/delete sessioni e model lock falliscono esplicitamente senza falsi successi; isolamento auth profili fail-closed anche su GET e session-chat.
+
 ## 0.6.185 - 2026-08-22
 
 - Bot Mode usa i profili reali di Hermes Agent per elenco, creazione, modifica, clonazione e rimozione, senza inventare un runtime bot locale.

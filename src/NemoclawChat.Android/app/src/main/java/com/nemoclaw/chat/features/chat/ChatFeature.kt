@@ -144,6 +144,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -318,6 +319,11 @@ internal fun ChatScreen(
                 } else {
                     null
                 }
+                state.hermesSessionId = saved.hermesSessionId
+                    ?: withContext(Dispatchers.IO) { loadSessionBinding(context, saved.id, botProfile) }
+                state.chatModelOverride = saved.modelOverride
+                state.chatProviderOverride = saved.providerOverride
+                state.chatReasoningEffort = saved.reasoningEffort
                 state.messages.clear()
                 val loadedMessages = saved.messages.toMutableList()
                 val activeStream = state.activeStreams[saved.id]
@@ -360,6 +366,33 @@ internal fun ChatScreen(
                 null
             }
             delay(if (gatewayAvailable) 15_000L else 5_000L)
+        }
+    }
+    // Capabilities + model catalog in background (fonte capability-driven, mai version check).
+    LaunchedEffect(botSettings.gatewayUrl, botApiKey) {
+        if (botSettings.gatewayUrl.isBlank()) return@LaunchedEffect
+        val caps = withContext(Dispatchers.IO) {
+            runCatching { loadHermesCapabilitiesCached(botSettings, botApiKey) }.getOrNull()
+        } ?: return@LaunchedEffect
+        state.chatCapabilities = caps
+        if (caps.supportsModelOptions()) {
+            val catalog = withContext(Dispatchers.IO) {
+                runCatching {
+                    val body = httpGet("${botSettings.gatewayUrl.trimEnd('/')}/api/model/options", botApiKey)
+                    parseModelOptionsPayload(body)
+                }.getOrElse {
+                    runCatching {
+                        val fallback = httpGet("${botSettings.gatewayUrl.trimEnd('/')}/v1/models", botApiKey)
+                        parseV1ModelsFallback(fallback)
+                    }.getOrNull()
+                }
+            }
+            if (catalog != null && catalog.models.isNotEmpty()) state.chatModelCatalog = catalog
+        } else {
+            val fallback = withContext(Dispatchers.IO) {
+                runCatching { httpGet("${botSettings.gatewayUrl.trimEnd('/')}/v1/models", botApiKey) }.getOrNull()
+            }?.let { parseV1ModelsFallback(it) }
+            if (fallback != null && fallback.models.isNotEmpty()) state.chatModelCatalog = fallback
         }
     }
     val isStreaming = state.streamingState != null
@@ -593,6 +626,26 @@ internal fun ChatScreen(
             onDispose { releaseVoiceRecorder(deleteTempFile = true) }
         }
 
+        ChatModelSessionBar(
+            state = state,
+            settings = settings,
+            context = context,
+            botSettings = botSettings,
+            botApiKey = botApiKey,
+            botProfile = botProfile,
+            botMultiplexEnabled = botMultiplexEnabled,
+            scope = scope
+        )
+        ChatApprovalCards(
+            state = state,
+            botSettings = botSettings,
+            botApiKey = botApiKey,
+            botProfile = botProfile,
+            botMultiplexEnabled = botMultiplexEnabled,
+            scope = scope,
+            context = context
+        )
+
         Composer(
             context = context,
             value = state.draft,
@@ -696,68 +749,166 @@ internal fun ChatScreen(
                         val initialActiveState = state.activeStreams[streamCid] ?: ActiveStreamState(null, null)
                         state.activeStreams[activeStreamCid] = initialActiveState.copy(streamingState = localState, job = coroutineContext[kotlinx.coroutines.Job])
 
-                        try {
-                            streamChatRequest(
-                                botSettings,
-                                mode,
-                                text,
-                                localHistory.takeLast(CHAT_HISTORY_MAX_MESSAGES).toList(),
-                                activeStreamCid,
-                                prevId,
-                                attachments,
-                                botApiKey,
-                                botProfile,
-                                botSessionId,
-                                botMultiplexEnabled,
-                                botAllowCompatAuth
-                            )
-                                .collect { event ->
-                                    if (event is ChatStreamEvent.RawHermesEvent) {
-                                        rawEvents += safeRawHermesEvent()
-                                        if (rawEvents.size > 200) {
-                                            rawEvents.subList(0, rawEvents.size - 200).clear()
-                                        }
-                                        if (!SHOW_RAW_HERMES_EVENTS_IN_CHAT) {
-                                            return@collect
-                                        }
+                        // Percorso primario: Sessions API quando capability presente, altriment legacy.
+                        // Nessun fallback invisibile su 401/403 profile scope.
+                        val capsSnapshot = state.chatCapabilities
+                        val useSessions = capsSnapshot?.supportsModernSessions() == true && botSessionId.isNullOrBlank()
+                        var sessionIdForTurn: String? = null
+                        if (useSessions) {
+                            state.sessionRoute = "sessions"
+                            sessionIdForTurn = try {
+                                withContext(Dispatchers.IO) {
+                                    ensureHermesChatSession(
+                                        context, botSettings, botApiKey, activeStreamCid,
+                                        botProfile, botMultiplexEnabled, capsSnapshot, displayText.take(80)
+                                    )
+                                }
+                            } catch (se: SecurityException) {
+                                localState = localState.applyEvent(
+                                    ChatStreamEvent.Error(se.message ?: "Hermes ha rifiutato la chiave per il profilo.")
+                                )
+                                if (state.activeConversationId == activeStreamCid) state.streamingState = localState
+                                null
+                            }
+                            if (sessionIdForTurn != null) {
+                                state.hermesSessionId = sessionIdForTurn
+                                withContext(NonCancellable + Dispatchers.IO) {
+                                    saveSessionBinding(context, activeStreamCid, botProfile, sessionIdForTurn)
+                                }
+                            }
+                        } else {
+                            state.sessionRoute = "legacy"
+                        }
+                        val effModel = state.chatModelOverride.ifBlank { botSettings.model }
+                        val effProvider = state.chatProviderOverride.ifBlank { botSettings.provider }
+                        val effReasoning = state.chatReasoningEffort.ifBlank { botSettings.reasoningEffort }
+
+                        suspend fun collectFlow(flow: kotlinx.coroutines.flow.Flow<ChatStreamEvent>) {
+                            flow.collect { event ->
+                                if (event is ChatStreamEvent.ApprovalResolved) {
+                                    // Risoluzione già applicata allo stato via applyEvent; notifica leggera.
+                                }
+                                if (event is ChatStreamEvent.RawHermesEvent) {
+                                    rawEvents += safeRawHermesEvent()
+                                    if (rawEvents.size > 200) {
+                                        rawEvents.subList(0, rawEvents.size - 200).clear()
                                     }
-                                    localState = localState.applyEvent(event)
-                                    if (state.activeConversationId == activeStreamCid) {
-                                        state.streamingState = localState
-                                    } else {
-                                        val existing = state.activeStreams[activeStreamCid]
-                                        if (existing != null) {
-                                            state.activeStreams[activeStreamCid] = existing.copy(streamingState = localState)
+                                    if (!SHOW_RAW_HERMES_EVENTS_IN_CHAT) {
+                                        // Applica comunque metadata/run tracking senza mostrare raw.
+                                        localState = localState.applyEvent(event)
+                                        if (state.activeConversationId == activeStreamCid) {
+                                            state.streamingState = localState
                                         }
-                                    }
-                                    val now = System.currentTimeMillis()
-                                    if (now - lastCheckpointAt >= STREAMING_CHECKPOINT_INTERVAL_MS &&
-                                        (localState.activityTimeline.isNotEmpty() || localState.text.isNotBlank() || localState.visualBlocks.isNotEmpty())) {
-                                        lastCheckpointAt = now
-                                        withContext(Dispatchers.IO) {
-                                            saveConversationSnapshot(
-                                                context = context,
-                                                conversationId = activeStreamCid,
-                                                mode = mode,
-                                                prompt = displayText,
-                                                messages = localHistory.toList() + ChatMessage(
-                                                    "Hermes",
-                                                    localState.text.streamingCheckpointPreview().ifBlank { "Hermes sta lavorando..." },
-                                                    fromUser = false,
-                                                    thinking = localState.thinking,
-                                                    activityTimeline = localState.activityTimeline,
-                                                    visualBlocksVersion = localState.visualBlocksVersion,
-                                                    visualBlocks = localState.visualBlocks,
-                                                    stats = localState.stats,
-                                                    rawEvents = rawEvents.toList()
-                                                ),
-                                                source = "Hermes in corso",
-                                                responseId = localState.responseId ?: prevId,
-                                                syncAfterSave = false
-                                            )
-                                        }
+                                        return@collect
                                     }
                                 }
+                                localState = localState.applyEvent(event)
+                                if (state.activeConversationId == activeStreamCid) {
+                                    state.streamingState = localState
+                                } else {
+                                    val existing = state.activeStreams[activeStreamCid]
+                                    if (existing != null) {
+                                        state.activeStreams[activeStreamCid] = existing.copy(streamingState = localState)
+                                    }
+                                }
+                                val now = System.currentTimeMillis()
+                                if (now - lastCheckpointAt >= STREAMING_CHECKPOINT_INTERVAL_MS &&
+                                    (localState.activityTimeline.isNotEmpty() || localState.text.isNotBlank() || localState.visualBlocks.isNotEmpty())) {
+                                    lastCheckpointAt = now
+                                    withContext(Dispatchers.IO) {
+                                        saveConversationSnapshot(
+                                            context = context,
+                                            conversationId = activeStreamCid,
+                                            mode = mode,
+                                            prompt = displayText,
+                                            messages = localHistory.toList() + ChatMessage(
+                                                "Hermes",
+                                                localState.text.streamingCheckpointPreview().ifBlank { "Hermes sta lavorando..." },
+                                                fromUser = false,
+                                                thinking = localState.thinking,
+                                                activityTimeline = localState.activityTimeline,
+                                                visualBlocksVersion = localState.visualBlocksVersion,
+                                                visualBlocks = localState.visualBlocks,
+                                                stats = localState.stats,
+                                                rawEvents = rawEvents.toList()
+                                            ),
+                                            source = if (sessionIdForTurn != null) "Sessione Hermes" else "Hermes in corso",
+                                            responseId = localState.responseId ?: prevId,
+                                            hermesSessionId = sessionIdForTurn ?: state.hermesSessionId,
+                                            modelOverride = state.chatModelOverride,
+                                            providerOverride = state.chatProviderOverride,
+                                            reasoningEffort = state.chatReasoningEffort,
+                                            syncAfterSave = false
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        try {
+                            if (sessionIdForTurn != null) {
+                                val sessionSettings = botSettings.copy(
+                                    model = effModel,
+                                    provider = effProvider,
+                                    reasoningEffort = effReasoning
+                                )
+                                collectFlow(
+                                    streamHermesSessionChat(
+                                        sessionSettings,
+                                        sessionIdForTurn,
+                                        text,
+                                        botApiKey,
+                                        botProfile,
+                                        botMultiplexEnabled,
+                                        model = effModel,
+                                        provider = effProvider.takeIf { it.isNotBlank() && !it.equals("hermes-agent", true) },
+                                        modelOptions = buildHermesModelOptions(effReasoning, botSettings.serviceTier, capsSnapshot),
+                                        sessionKey = botSettings.hermesSessionKey.takeIf { isValidHermesSessionKey(it) },
+                                        allowCompatAuth = botAllowCompatAuth
+                                    )
+                                )
+                            } else if (useSessions && localState.error == null) {
+                                // Sessions dichiarate ma creazione fallita: errore esplicito, un solo fallback legacy
+                                // solo se non è un problema auth/profile.
+                                localState = localState.applyEvent(
+                                    ChatStreamEvent.Status("Sessions non disponibili, fallback legacy esplicito...")
+                                )
+                                if (state.activeConversationId == activeStreamCid) state.streamingState = localState
+                                state.sessionRoute = "legacy-fallback"
+                                collectFlow(
+                                    streamChatRequest(
+                                        botSettings.copy(model = effModel, provider = effProvider, reasoningEffort = effReasoning),
+                                        mode,
+                                        text,
+                                        localHistory.takeLast(CHAT_HISTORY_MAX_MESSAGES).toList(),
+                                        activeStreamCid,
+                                        prevId,
+                                        attachments,
+                                        botApiKey,
+                                        botProfile,
+                                        botSessionId,
+                                        botMultiplexEnabled,
+                                        botAllowCompatAuth
+                                    )
+                                )
+                            } else if (localState.error == null) {
+                                collectFlow(
+                                    streamChatRequest(
+                                        botSettings.copy(model = effModel, provider = effProvider, reasoningEffort = effReasoning),
+                                        mode,
+                                        text,
+                                        localHistory.takeLast(CHAT_HISTORY_MAX_MESSAGES).toList(),
+                                        activeStreamCid,
+                                        prevId,
+                                        attachments,
+                                        botApiKey,
+                                        botProfile,
+                                        botSessionId,
+                                        botMultiplexEnabled,
+                                        botAllowCompatAuth
+                                    )
+                                )
+                            }
                         } catch (_: CancellationException) {
                             interrupted = true
                         } catch (ex: Exception) {
@@ -843,8 +994,12 @@ internal fun ChatScreen(
                                     mode = mode,
                                     prompt = displayText,
                                     messages = localHistory.toList(),
-                                    source = if (interrupted) "Hermes interrotto" else if (finalState.error != null) "Errore Hermes" else "Hermes",
-                                    responseId = finalState.responseId ?: prevId
+                                    source = if (interrupted) "Hermes interrotto" else if (finalState.error != null) "Errore Hermes" else if (state.sessionRoute == "sessions") "Sessione Hermes" else "Hermes",
+                                    responseId = finalState.responseId ?: prevId,
+                                    hermesSessionId = state.hermesSessionId,
+                                    modelOverride = state.chatModelOverride,
+                                    providerOverride = state.chatProviderOverride,
+                                    reasoningEffort = state.chatReasoningEffort
                                 )
                             }
                             if (state.activeConversationId == activeStreamCid) {
@@ -863,7 +1018,15 @@ internal fun ChatScreen(
                                     apiKey = loadGatewaySecret(context)
                                 )
                                 withContext(NonCancellable + Dispatchers.IO) {
-                                    renameConversation(context, saved.id, generatedTitle)
+                                    // Propaga rename alla sessione server quando disponibile.
+                                    // Se il server rifiuta/fallisce, il titolo resta da generare
+                                    // al prossimo turno: niente falso successo, niente divergenza.
+                                    runCatching {
+                                        renameHermesSessionForConversation(
+                                            context, botSettings, botApiKey, saved.id,
+                                            generatedTitle, botProfile, botMultiplexEnabled
+                                        )
+                                    }.getOrNull()
                                 }
                             }
                         }
@@ -873,14 +1036,23 @@ internal fun ChatScreen(
             },
             onStop = {
                 val activeRunId = state.streamingState?.activeRunId
+                // Aggiornamento UI immediato + vero POST /v1/runs/{id}/stop (non solo cancel locale).
                 state.streamingState = state.streamingState?.copy(
                     status = "Interruzione richiesta. Chiudo stream Hermes...",
                     error = null
                 )
                 if (!activeRunId.isNullOrBlank()) {
                     HermesStreamRuntime.scope.launch {
-                        runCatching {
+                        val (code, body) = runCatching {
                             stopHermesRun(botSettings, activeRunId, botApiKey, botProfile, botMultiplexEnabled, botAllowCompatAuth)
+                        }.getOrElse { 0 to (it.message ?: it.javaClass.simpleName) }
+                        if (code !in 200..299) {
+                            val msg = when (code) {
+                                401, 403 -> "Stop rifiutato (HTTP $code): chiave non valida per il profilo."
+                                404 -> "Run non trovato sul server (404)."
+                                else -> "Stop HTTP $code: ${body.take(160)}"
+                            }
+                            state.messages.add(ChatMessage("Hermes Hub", msg, fromUser = false, isAction = true))
                         }
                     }
                 }
@@ -2171,6 +2343,301 @@ internal fun CalloutBlock(block: VisualBlock) {
     ) {
         Box(modifier = Modifier.width(3.dp).height(56.dp).background(color, RoundedCornerShape(2.dp)))
         MarkdownBlock(block.text)
+    }
+}
+
+@Composable
+internal fun ChatModelSessionBar(
+    state: ChatStateHolder,
+    settings: AppSettings,
+    context: Context,
+    botSettings: AppSettings,
+    botApiKey: String?,
+    botProfile: String?,
+    botMultiplexEnabled: Boolean,
+    scope: kotlinx.coroutines.CoroutineScope
+) {
+    val caps = state.chatCapabilities
+    val catalog = state.chatModelCatalog
+    var showModelDialog by remember { mutableStateOf(false) }
+    var showReasoningDialog by remember { mutableStateOf(false) }
+    var showSteerDialog by remember { mutableStateOf(false) }
+    var steerText by remember { mutableStateOf("") }
+    var steerStatus by remember { mutableStateOf("") }
+    val streaming = state.streamingState
+    val runId = streaming?.activeRunId
+    val steerable = !runId.isNullOrBlank() && streaming?.isDone == false &&
+        (caps?.supportsSteer() ?: false) && streaming?.runStatus !in listOf("completed", "failed", "cancelled")
+    val effModel = state.chatModelOverride.ifBlank { settings.model }
+    val effProvider = state.chatProviderOverride.ifBlank { settings.provider }
+    val selectedOption = catalog.models.firstOrNull {
+        it.id == state.chatModelOverride && (state.chatProviderOverride.isBlank() || it.provider == state.chatProviderOverride)
+    }
+    val ladder = when {
+        selectedOption != null && selectedOption.reasoningEfforts.isNotEmpty() && caps?.reasoningEfforts?.isNotEmpty() == true ->
+            selectedOption.reasoningEfforts.filter { eff -> caps.supportsReasoningEffort(eff) }
+        caps?.reasoningEfforts?.isNotEmpty() == true -> caps.reasoningEfforts
+        else -> emptyList()
+    }
+    val reasoningVisible = caps?.supportsModelOptions() == true && ladder.isNotEmpty()
+
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            val routeLabel = when (state.sessionRoute) {
+                "sessions" -> "Sessione Hermes${state.hermesSessionId?.take(8)?.let { " · ${it}" }.orEmpty()}"
+                "legacy-fallback" -> "Legacy (sessions non riuscite)"
+                else -> "Legacy"
+            }
+            Text(routeLabel, color = AppColors.Muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
+            if (steerable) {
+                TextButton(onClick = { steerStatus = ""; showSteerDialog = true }) { Text("Correggi", fontSize = 12.sp) }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = { showModelDialog = true }, modifier = Modifier.weight(1f)) {
+                Text(
+                    if (state.chatModelOverride.isBlank()) "Modello: $effModel (default)"
+                    else "Modello: ${state.chatModelOverride}${effProvider.takeIf { it.isNotBlank() && !it.equals("hermes-agent", true) }?.let { " · $it" }.orEmpty()}",
+                    fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (reasoningVisible) {
+                Button(onClick = { showReasoningDialog = true }) {
+                    Text(if (state.chatReasoningEffort.isBlank()) "Reasoning: auto" else "Reasoning: ${state.chatReasoningEffort}", fontSize = 12.sp)
+                }
+            }
+        }
+        if (streaming?.pendingSteer?.isNotBlank() == true) {
+            Text("Steer non consegnato: riproponilo come turno successivo.", color = AppColors.Muted, fontSize = 11.sp)
+        }
+    }
+
+    if (showModelDialog) {
+        AlertDialog(
+            onDismissRequest = { showModelDialog = false },
+            title = { Text(if (catalog.models.isEmpty()) "Modello" else "Modello Hermes (${catalog.source})") },
+            text = {
+                LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
+                    if (catalog.models.isEmpty()) {
+                        item {
+                            Text(
+                                "Catalogo non caricato. Verifica gateway e API key, oppure digita provider/modello nelle Impostazioni.",
+                                color = AppColors.Muted, fontSize = 12.sp
+                            )
+                        }
+                    }
+                    item {
+                        TextButton(onClick = {
+                            state.chatModelOverride = ""
+                            state.chatProviderOverride = ""
+                            persistChatOverrides(context, state)
+                            showModelDialog = false
+                        }) { Text("Usa default server (${settings.model})") }
+                    }
+                    items(catalog.models.take(40), key = { it.id + "::" + it.provider }) { opt ->
+                        Column(modifier = Modifier.fillMaxWidth().clickable {
+                            state.chatModelOverride = opt.id
+                            state.chatProviderOverride = opt.provider
+                            // Se il nuovo modello non supporta l'effort corrente, resettalo.
+                            val okEffort = state.chatReasoningEffort.isBlank() ||
+                                (opt.reasoningEfforts.isEmpty() && ladder.contains(state.chatReasoningEffort)) ||
+                                opt.reasoningEfforts.any { it.equals(state.chatReasoningEffort, true) }
+                            if (!okEffort) state.chatReasoningEffort = ""
+                            persistChatOverrides(context, state)
+                            // Model lock persistente server-side (precedence #1 sui turni della sessione).
+                            // Fallimento MAI silenzioso: il turno usa comunque model/provider/model_options.
+                            val sid = state.hermesSessionId
+                            if (!sid.isNullOrBlank() && state.chatCapabilities?.sessionModelLock == true) {
+                                scope.launch {
+                                    val code = runCatching {
+                                        HermesSessionClient(botSettings, botApiKey, botProfile, botMultiplexEnabled, state.chatCapabilities)
+                                            .lockModel(sid, opt.id, opt.provider.takeIf { p -> p.isNotBlank() }).first
+                                    }.getOrElse { 0 }
+                                    hermesModelLockWarning(code, opt.displayName)?.let { warning ->
+                                        state.messages.add(ChatMessage("Hermes Hub", warning, fromUser = false, isAction = true))
+                                    }
+                                }
+                            }
+                            showModelDialog = false
+                        }.padding(vertical = 6.dp)) {
+                            Text(opt.displayName, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                buildString {
+                                    append(opt.provider.ifBlank { "default" })
+                                    opt.contextWindow?.let { append(" · ctx $it") }
+                                    if (opt.reasoningSupported) append(" · reasoning")
+                                    opt.warning?.let { append(" · $it") }
+                                },
+                                color = AppColors.Muted, fontSize = 11.sp
+                            )
+                            opt.pricing?.let { p ->
+                                Text("pricing: ${p.toString().take(120)}", color = AppColors.Faint, fontSize = 10.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showModelDialog = false }) { Text("Chiudi") } }
+        )
+    }
+    if (showReasoningDialog) {
+        AlertDialog(
+            onDismissRequest = { showReasoningDialog = false },
+            title = { Text("Reasoning effort") },
+            text = {
+                LazyColumn {
+                    item {
+                        TextButton(onClick = {
+                            state.chatReasoningEffort = ""
+                            persistChatOverrides(context, state)
+                            showReasoningDialog = false
+                        }) { Text("Auto (default server)") }
+                    }
+                    items(ladder) { eff ->
+                        TextButton(onClick = {
+                            state.chatReasoningEffort = eff
+                            persistChatOverrides(context, state)
+                            showReasoningDialog = false
+                        }) { Text(eff) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showReasoningDialog = false }) { Text("Chiudi") } }
+        )
+    }
+    if (showSteerDialog && runId != null) {
+        AlertDialog(
+            onDismissRequest = { showSteerDialog = false },
+            title = { Text("Correggi run in corso") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Inviata al run $runId. Consegna al prossimo tool boundary; non crea un nuovo turno.", fontSize = 12.sp, color = AppColors.Muted)
+                    TextField(value = steerText, onValueChange = { steerText = it }, placeholder = { Text("Nuova istruzione...") })
+                    if (steerStatus.isNotBlank()) Text(steerStatus, fontSize = 12.sp, color = AppColors.Muted)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val payload = steerText.trim()
+                    if (payload.isEmpty()) {
+                        steerStatus = "Testo obbligatorio."
+                        return@TextButton
+                    }
+                    scope.launch {
+                        // Singolo invio, niente retry su esito incerto.
+                        val (code, body) = steerHermesRun(botSettings, runId, payload, botApiKey, botProfile, botMultiplexEnabled)
+                        steerStatus = when {
+                            code in 200..299 -> "Guida accodata (consegna al prossimo tool boundary)."
+                            code == 409 -> "Run non più steerable (409): è terminato o in arresto."
+                            code == 401 || code == 403 -> "Chiave rifiutata per questo profilo (HTTP $code)."
+                            code == 404 -> "Run non trovato (404)."
+                            else -> "Steer fallito: HTTP $code ${body.take(160)}"
+                        }
+                        if (code in 200..299) {
+                            steerText = ""
+                        }
+                    }
+                }) { Text("Invia") }
+            },
+            dismissButton = { TextButton(onClick = { showSteerDialog = false }) { Text("Chiudi") } }
+        )
+    }
+}
+
+private fun persistChatOverrides(context: Context, state: ChatStateHolder) {
+    val cid = state.activeConversationId ?: return
+    runCatching {
+        val current = loadConversation(context, cid) ?: return
+        saveConversationSnapshot(
+            context = context,
+            conversationId = cid,
+            mode = "Chat",
+            prompt = current.prompt,
+            messages = current.messages,
+            source = current.description,
+            responseId = current.previousResponseId,
+            hermesSessionId = state.hermesSessionId ?: current.hermesSessionId,
+            modelOverride = state.chatModelOverride,
+            providerOverride = state.chatProviderOverride,
+            reasoningEffort = state.chatReasoningEffort,
+            syncAfterSave = false
+        )
+    }
+}
+
+@Composable
+internal fun ChatApprovalCards(
+    state: ChatStateHolder,
+    botSettings: AppSettings,
+    botApiKey: String?,
+    botProfile: String?,
+    botMultiplexEnabled: Boolean,
+    scope: kotlinx.coroutines.CoroutineScope,
+    context: Context
+) {
+    val approvals = state.streamingState?.pendingApprovals.orEmpty()
+    if (approvals.isEmpty()) return
+    var resolving by remember { mutableStateOf("") }
+    var status by remember { mutableStateOf("") }
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        approvals.take(3).forEach { approval ->
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF3A2A00))) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Approvazione Hermes richiesta", fontWeight = FontWeight.SemiBold, color = Color.White, fontSize = 13.sp)
+                    Text(
+                        listOf(approval.tool, approval.command, approval.description)
+                            .filter { it.isNotBlank() }.joinToString(" — ").take(300)
+                            .ifBlank { "Il run attende una decisione." },
+                        color = AppColors.Muted, fontSize = 12.sp
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Renderizza ESATTAMENTE le choices offerte dal server per questa richiesta.
+                        val offered = approval.choices.filter { it in HERMES_APPROVAL_CHOICES }
+                            .ifEmpty { listOf("once", "deny") }
+                        offered.forEach { choice ->
+                            val busy = resolving == "${approval.approvalId}::$choice"
+                            TextButton(
+                                enabled = resolving.isBlank(),
+                                onClick = {
+                                    resolving = "${approval.approvalId}::$choice"
+                                    status = ""
+                                    scope.launch {
+                                        val runId = approval.runId.ifBlank { state.streamingState?.activeRunId.orEmpty() }
+                                        if (runId.isBlank()) {
+                                            status = "Run non disponibile per questa approval."
+                                            resolving = ""
+                                            return@launch
+                                        }
+                                        val (code, body) = resolveHermesRunApproval(
+                                            botSettings, runId, choice, botApiKey,
+                                            approval.requestId.takeIf { it.isNotBlank() }, botProfile, botMultiplexEnabled
+                                        )
+                                        if (code in 200..299) {
+                                            val cur = state.streamingState
+                                            if (cur != null && state.activeConversationId != null) {
+                                                state.streamingState = cur.applyEvent(
+                                                    ChatStreamEvent.ApprovalResolved(runId, approval.approvalId, choice)
+                                                )
+                                            }
+                                            status = ""
+                                        } else {
+                                            status = when (code) {
+                                                401, 403 -> "Chiave rifiutata (HTTP $code)."
+                                                404 -> "Approval/run non trovato (404)."
+                                                409 -> "Run non in attesa di approval (409)."
+                                                else -> "Approval fallita: HTTP $code ${body.take(140)}"
+                                            }
+                                        }
+                                        resolving = ""
+                                    }
+                                }
+                            ) { Text(if (busy) "..." else choice, fontSize = 12.sp) }
+                        }
+                    }
+                    if (status.isNotBlank()) Text(status, color = AppColors.Muted, fontSize = 11.sp)
+                }
+            }
+        }
     }
 }
 

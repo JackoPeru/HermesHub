@@ -48,6 +48,10 @@ internal fun loadConversations(context: Context, includeDeleted: Boolean = false
                             messages = readMessages(obj.optJSONArray("messages") ?: JSONArray()),
                             previousResponseId = obj.optString("previousResponseId").takeIf { it.isNotBlank() },
                             serverConversationId = obj.optString("serverConversationId").takeIf { it.isNotBlank() },
+                            hermesSessionId = obj.optString("hermesSessionId").takeIf { it.isNotBlank() },
+                            modelOverride = obj.optString("modelOverride"),
+                            providerOverride = obj.optString("providerOverride"),
+                            reasoningEffort = obj.optString("reasoningEffort"),
                             projectId = obj.optString("projectId", obj.optString("project_id")),
                             workspacePath = obj.optString("workspacePath", obj.optString("workspace_path")),
                             repositoryUrl = obj.optString("repositoryUrl", obj.optString("repository_url")),
@@ -146,6 +150,10 @@ internal fun conversationsToJsonArray(conversations: List<LocalConversation>): J
                     .put("deletedAt", conversation.deletedAt ?: JSONObject.NULL)
                     .put("previousResponseId", conversation.previousResponseId ?: JSONObject.NULL)
                     .put("serverConversationId", conversation.serverConversationId ?: JSONObject.NULL)
+                    .put("hermesSessionId", conversation.hermesSessionId ?: JSONObject.NULL)
+                    .put("modelOverride", conversation.modelOverride.ifBlank { JSONObject.NULL })
+                    .put("providerOverride", conversation.providerOverride.ifBlank { JSONObject.NULL })
+                    .put("reasoningEffort", conversation.reasoningEffort.ifBlank { JSONObject.NULL })
                     .put("projectId", conversation.projectId.ifBlank { JSONObject.NULL })
                     .put("workspacePath", conversation.workspacePath.ifBlank { JSONObject.NULL })
                     .put("repositoryUrl", conversation.repositoryUrl.ifBlank { JSONObject.NULL })
@@ -187,6 +195,10 @@ internal fun readConversationsFromJsonArray(array: JSONArray): List<LocalConvers
                     messages = readMessages(obj.optJSONArray("messages") ?: JSONArray()),
                     previousResponseId = obj.optString("previousResponseId").takeIf { it.isNotBlank() },
                     serverConversationId = obj.optString("serverConversationId").takeIf { it.isNotBlank() },
+                    hermesSessionId = obj.optString("hermesSessionId").takeIf { it.isNotBlank() },
+                    modelOverride = obj.optString("modelOverride"),
+                    providerOverride = obj.optString("providerOverride"),
+                    reasoningEffort = obj.optString("reasoningEffort"),
                     projectId = obj.optString("projectId", obj.optString("project_id")),
                     workspacePath = obj.optString("workspacePath", obj.optString("workspace_path")),
                     repositoryUrl = obj.optString("repositoryUrl", obj.optString("repository_url")),

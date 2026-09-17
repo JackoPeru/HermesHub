@@ -14,6 +14,25 @@ internal fun hermesAuthCandidates(apiKey: String?, allowCompatAuth: Boolean = tr
     return (hermesAuthRetryCandidates(configured) + listOf(null)).distinct()
 }
 
+/**
+ * Fail-closed per profilo nominato (rif. breaking change luglio 2026):
+ * la default key non deve mai essere riusata su /p/<profile>/.
+ * Per richieste profilo: solo credenziale esplicita, nessun fallback null/compat.
+ */
+internal fun hermesProfileAuthCandidates(apiKey: String?, profile: String?): List<String?> {
+    if (profile.isNullOrBlank()) return hermesAuthCandidates(apiKey, allowCompatAuth = true)
+    val configured = apiKey?.trim()?.takeIf { it.isNotEmpty() }
+    // Profilo nominato senza key propria -> fail-closed (non inviare, il server rispondera' 401).
+    // Non includere mai null: evita riuso accidentale default key su prefisso /p/.
+    return listOf(configured)
+}
+
+internal fun isValidHermesSessionKey(value: String?): Boolean {
+    if (value.isNullOrBlank()) return false
+    if (value.length > 256) return false
+    return value.none { it == '\r' || it == '\n' || it == '\u0000' }
+}
+
 internal fun shouldUseResponsesFirst(settings: AppSettings, mode: String): Boolean {
     if (settings.preferredApi.equals("hermes-native", ignoreCase = true)) return true
     return settings.preferredApi.equals("openai-responses", ignoreCase = true) &&

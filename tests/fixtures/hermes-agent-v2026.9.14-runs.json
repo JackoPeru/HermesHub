@@ -1,0 +1,19 @@
+{
+  "fixture": "hermes-agent v2026.9.14 Runs API (forme minime)",
+  "create": {"run_id": "run_1", "status": "started", "session_id": "s1"},
+  "status_completed": {"object": "hermes.run", "run_id": "run_1", "status": "completed", "output": "ok"},
+  "status_waiting_approval": {"run_id": "run_2", "status": "waiting_for_approval"},
+  "terminal_pending_steer": {"type": "run.completed", "run_id": "run_3", "pending_steer": "riprova dopo"},
+  "events": [
+    "event: run.started\ndata: {\"type\":\"run.started\",\"run_id\":\"run_1\"}\n",
+    "event: tool.started\ndata: {\"type\":\"tool.started\",\"tool\":\"shell\",\"preview\":\"ls\"}\n",
+    "event: tool.completed\ndata: {\"type\":\"tool.completed\",\"tool\":\"shell\",\"preview\":\"ok\"}\n",
+    "event: approval.request\ndata: {\"type\":\"approval.request\",\"tool\":\"shell\",\"command\":\"rm x\"}\n",
+    "event: approval.responded\ndata: {\"type\":\"approval.responded\",\"choice\":\"once\"}\n",
+    "event: run.steered\ndata: {\"type\":\"run.steered\",\"accepted\":true}\n",
+    "event: run.completed\ndata: {\"type\":\"run.completed\",\"output\":\"fatto\"}\n",
+    ": keepalive\n"
+  ],
+  "steer_rejected": {"error": "run_not_accepting_steer"},
+  "reasoning_ladder": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+}

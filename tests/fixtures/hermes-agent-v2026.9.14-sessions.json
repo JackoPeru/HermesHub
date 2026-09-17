@@ -1,0 +1,15 @@
+{
+  "fixture": "hermes-agent v2026.9.14 Sessions API (forme minime)",
+  "list": {"sessions": [{"id": "s1", "title": "A", "source": "api"}, {"id": "s2", "title": "B", "parent_session_id": "s1"}]},
+  "single": {"session": {"id": "s1", "title": "A", "source": "api"}},
+  "messages": {"messages": [{"role": "user", "content": "ciao"}, {"role": "assistant", "content": "ok"}]},
+  "fork": {"session": {"id": "s3", "title": "fork", "parent_session_id": "s1"}},
+  "stream_events": [
+    "event: assistant.delta\ndata: {\"type\":\"assistant.delta\",\"delta\":\"ciao \"}\n",
+    "event: tool.started\ndata: {\"type\":\"tool.started\",\"tool\":\"search\",\"preview\":\"q\"}\n",
+    "event: tool.completed\ndata: {\"type\":\"tool.completed\",\"tool\":\"search\",\"preview\":\"ok\"}\n",
+    "event: run.completed\ndata: {\"type\":\"run.completed\",\"output\":\"fatto\"}\n",
+    ": keepalive\n",
+    "event: hermes.future.v9\ndata: {\"type\":\"hermes.future.v9\"}\n"
+  ]
+}

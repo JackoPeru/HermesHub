@@ -42,9 +42,13 @@ internal suspend fun httpGetResponse(
     apiKey: String? = null,
     requestContext: HermesRequestContext = HermesHubProtocol.newCorrelationContext()
 ): Pair<Int, String> = withContext(Dispatchers.IO) {
+    // Fail-closed profili: URL /p/<profile>/ richiede credenziale esplicita, mai fallback null.
+    val isProfileUrl = url.contains("/p/", ignoreCase = true)
     var last: Pair<Int, String>? = null
     for (candidateUrl in plugAndPlayUrlCandidates(url)) {
         for (token in hermesAuthCandidates(apiKey)) {
+            // Su profilo nominato senza key: non inviare fallback anonimo.
+            if (isProfileUrl && token.isNullOrBlank()) continue
             val response = try {
                 executeHttpGet(candidateUrl, token, requestContext)
             } catch (ex: Exception) {
@@ -76,13 +80,19 @@ internal suspend fun postJson(
     method: String = "POST",
     allowCompatAuth: Boolean = true,
     sessionId: String? = null,
-    requestContext: HermesRequestContext = HermesHubProtocol.newCorrelationContext()
+    requestContext: HermesRequestContext = HermesHubProtocol.newCorrelationContext(),
+    sessionKey: String? = null
 ): Pair<Int, String> = withContext(Dispatchers.IO) {
+    // Fail-closed profili: URL /p/<profile>/ richiede credenziale esplicita, mai fallback null.
+    val isProfileUrl = url.contains("/p/", ignoreCase = true)
+    val effectiveAllowCompat = if (isProfileUrl) false else allowCompatAuth
     var last: Pair<Int, String>? = null
     for (candidateUrl in plugAndPlayUrlCandidates(url)) {
-        for (token in hermesAuthCandidates(apiKey, allowCompatAuth)) {
+        for (token in hermesAuthCandidates(apiKey, effectiveAllowCompat)) {
+            // Su profilo nominato senza key: non inviare fallback anonimo.
+            if (isProfileUrl && token.isNullOrBlank()) continue
             val response = try {
-                executeJsonRequest(candidateUrl, payload, method, token, sessionId, requestContext)
+                executeJsonRequest(candidateUrl, payload, method, token, sessionId, requestContext, sessionKey)
             } catch (ex: Exception) {
                 last = 0 to (ex.message ?: ex.javaClass.simpleName)
                 continue
@@ -125,7 +135,8 @@ internal fun executeJsonRequest(
     method: String,
     bearerToken: String?,
     sessionId: String? = null,
-    requestContext: HermesRequestContext = HermesHubProtocol.newCorrelationContext()
+    requestContext: HermesRequestContext = HermesHubProtocol.newCorrelationContext(),
+    sessionKey: String? = null
 ): Pair<Int, String> {
     val builder = Request.Builder()
         .url(url)
@@ -134,6 +145,7 @@ internal fun executeJsonRequest(
     HermesHubProtocol.addCorrelationHeaders(builder, requestContext)
     bearerToken?.let { builder.header("Authorization", "Bearer $it") }
     sessionId?.takeIf { it.isNotBlank() }?.let { builder.header("X-Hermes-Session-Id", it) }
+    sessionKey?.takeIf { isValidHermesSessionKey(it) }?.let { builder.header("X-Hermes-Session-Key", it.trim()) }
     val normalizedMethod = method.uppercase()
     val request = when (normalizedMethod) {
         "DELETE" -> builder.method(

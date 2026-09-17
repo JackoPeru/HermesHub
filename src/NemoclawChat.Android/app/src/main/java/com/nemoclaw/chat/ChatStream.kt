@@ -47,7 +47,7 @@ private const val INLINE_ATTACHMENTS_TOTAL_MAX_BYTES = 12L * 1024 * 1024
 private const val SSE_LINE_MAX_BYTES = 256L * 1024L
 private val plugAndPlayStreamGatewayRoots = emptyList<String>()
 
-private val streamHttpClient: OkHttpClient = OkHttpClient.Builder()
+internal val streamHttpClient: OkHttpClient = OkHttpClient.Builder()
     .connectTimeout(10, TimeUnit.SECONDS)
     .readTimeout(0, TimeUnit.SECONDS)
     .writeTimeout(30, TimeUnit.SECONDS)
@@ -153,6 +153,20 @@ private const val MAX_ACTIVITY_TIMELINE_ENTRIES = 256
 private const val MAX_ACTIVITY_ENTRY_CHARS = 16_384
 private const val MAX_ACTIVITY_TIMELINE_CHARS = 96_000
 
+/** Approvazione server-side di un run (Hunter: approval.request). Distinta dal Visual Block locale "approval". */
+@androidx.compose.runtime.Immutable
+data class HermesServerApproval(
+    val approvalId: String = "",
+    val requestId: String = "",
+    val runId: String = "",
+    val tool: String = "",
+    val command: String = "",
+    val description: String = "",
+    /** Scelte offerte dal server per questa richiesta: renderizzare esattamente queste. */
+    val choices: List<String> = emptyList(),
+    val status: String = "pending"
+)
+
 @androidx.compose.runtime.Immutable
 data class StreamingState(
     val text: String = "",
@@ -166,6 +180,9 @@ data class StreamingState(
     val visualBlocksVersion: Int? = null,
     val responseId: String? = null,
     val activeRunId: String? = null,
+    val runStatus: String = "",
+    val pendingApprovals: List<HermesServerApproval> = emptyList(),
+    val pendingSteer: String = "",
     val stats: ChatStreamStats? = null,
     val status: String = "Invio prompt a Hermes...",
     val promptProgressPercent: Int? = null,
@@ -270,9 +287,43 @@ data class StreamingState(
         }
         is ChatStreamEvent.ResponseId -> copy(responseId = event.id).withActivity("Response id: ${event.id}")
         is ChatStreamEvent.RunId -> copy(activeRunId = event.id).withActivity("Run id: ${event.id}")
-        is ChatStreamEvent.EnvelopeMetadata -> copy(
-            status = "Evento Hermes correlato: ${event.type}"
-        )
+        is ChatStreamEvent.RunStatusChanged -> copy(
+            activeRunId = event.runId.takeIf { it.isNotBlank() } ?: activeRunId,
+            runStatus = event.status,
+            status = "Run Hermes: ${event.status}",
+            pendingSteer = event.pendingSteer ?: pendingSteer
+        ).withActivity("Run ${event.status}${event.pendingSteer?.let { " (steer in attesa)" }.orEmpty()}")
+        is ChatStreamEvent.ApprovalRequest -> {
+            val approval = HermesServerApproval(
+                approvalId = event.approvalId,
+                requestId = event.requestId,
+                runId = event.runId,
+                tool = event.tool,
+                command = event.command,
+                description = event.description,
+                choices = event.choices
+            )
+            val existing = pendingApprovals.filterNot {
+                it.approvalId.isNotBlank() && it.approvalId == approval.approvalId
+            }
+            copy(
+                pendingApprovals = existing + approval,
+                activeRunId = event.runId.takeIf { it.isNotBlank() } ?: activeRunId,
+                status = "Approvazione Hermes richiesta."
+            ).withActivity("Approvazione richiesta: ${event.tool} ${event.command}".trim())
+        }
+        is ChatStreamEvent.ApprovalResolved -> copy(
+            pendingApprovals = pendingApprovals.filterNot {
+                event.approvalId.isNotBlank() && it.approvalId == event.approvalId
+            },
+            status = "Approvazione Hermes risolta: ${event.choice}."
+        ).withActivity("Approvazione risolta: ${event.choice}")
+        is ChatStreamEvent.EnvelopeMetadata -> {
+            val next = if (!event.runId.isNullOrBlank() && event.runId != activeRunId) {
+                copy(activeRunId = event.runId)
+            } else this
+            next.copy(status = "Evento Hermes correlato: ${event.type}")
+        }
         is ChatStreamEvent.VisualBlocks -> copy(
             visualBlocks = mergeVisualBlocks(visualBlocks, event.blocks),
             visualBlocksVersion = event.version
@@ -458,6 +509,17 @@ sealed class ChatStreamEvent {
     data class ToolResult(val id: String?, val name: String?, val output: String) : ChatStreamEvent()
     data class ResponseId(val id: String) : ChatStreamEvent()
     data class RunId(val id: String) : ChatStreamEvent()
+    data class RunStatusChanged(val runId: String, val status: String, val pendingSteer: String? = null) : ChatStreamEvent()
+    data class ApprovalRequest(
+        val runId: String,
+        val approvalId: String,
+        val requestId: String,
+        val tool: String,
+        val command: String,
+        val description: String,
+        val choices: List<String>
+    ) : ChatStreamEvent()
+    data class ApprovalResolved(val runId: String, val approvalId: String, val choice: String) : ChatStreamEvent()
     data class VisualBlocks(val blocks: List<VisualBlock>, val version: Int) : ChatStreamEvent()
     data class Status(val message: String) : ChatStreamEvent()
     data class RawHermesEvent(
@@ -721,6 +783,7 @@ fun streamChatRequest(
                 .put("conversation", serverConversationId ?: JSONObject.NULL)
                 .put("previous_response_id", if (serverConversationId == null) candidatePreviousResponseId ?: JSONObject.NULL else JSONObject.NULL)
                 .put("metadata", visualBlocksMetadataJson(settings, conversationId, botProfile, botSessionId))
+            applyHermesModelOverrides(payload, settings, capabilities = null)
             payload.put(
                 "instructions",
                 (if (nativeMode) hermesNativeInstructions(mode) else
@@ -751,6 +814,9 @@ fun streamChatRequest(
                 "Hermes Responses API",
                 apiKey,
                 allowCompatAuth,
+                sessionId = serverConversationId,
+                sessionKey = settings.hermesSessionKey.takeIf { isValidHermesSessionKey(it) },
+                botProfile = botProfile,
                 requestContext = requestContext
             ) { ev ->
                 emitAndTrack(ev)
@@ -793,7 +859,8 @@ fun streamChatRequest(
             .put("timings_per_token", true)
             .put("session_id", serverConversationId ?: JSONObject.NULL)
             .put("metadata", visualBlocksMetadataJson(settings, conversationId, botProfile, botSessionId))
-            .put("messages", JSONArray().apply {
+        applyHermesModelOverrides(payload, settings, capabilities = null)
+        payload.put("messages", JSONArray().apply {
                 if (!nativeMode) {
                     put(
                         JSONObject()
@@ -838,6 +905,8 @@ fun streamChatRequest(
             apiKey,
             allowCompatAuth,
             sessionId = serverConversationId,
+            sessionKey = settings.hermesSessionKey.takeIf { isValidHermesSessionKey(it) },
+            botProfile = botProfile,
             requestContext = requestContext
         ) { ev ->
             emitAndTrack(ev)
@@ -893,7 +962,7 @@ private data class AttachmentPreparation(
     val uploadErrors: List<String>
 )
 
-private sealed interface SseAttemptSignal {
+internal sealed interface SseAttemptSignal {
     data object Accepted : SseAttemptSignal
     data class Event(val event: ChatStreamEvent) : SseAttemptSignal
     data class HttpFailure(val code: Int, val body: String) : SseAttemptSignal
@@ -908,11 +977,15 @@ private suspend fun openSseStream(
     apiKey: String?,
     allowCompatAuth: Boolean,
     sessionId: String? = null,
+    sessionKey: String? = null,
+    botProfile: String? = null,
     requestContext: HermesRequestContext = HermesHubProtocol.newCorrelationContext(),
     onEvent: suspend (ChatStreamEvent) -> Unit
 ): SseOpenResult {
     val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-    val authCandidates = hermesAuthCandidates(apiKey, allowCompatAuth)
+    // Isolamento profili: su /p/<profile>/ mai fallback null/compat (fail-closed, breaking change lug-2026).
+    val authCandidates = if (!botProfile.isNullOrBlank()) hermesProfileAuthCandidates(apiKey, botProfile)
+        else hermesAuthCandidates(apiKey, allowCompatAuth)
     var lastError: String? = null
 
     candidateLoop@ for (candidateUrl in plugAndPlayStreamUrlCandidates(url)) {
@@ -926,6 +999,7 @@ private suspend fun openSseStream(
             HermesHubProtocol.addCorrelationHeaders(builder, requestContext)
             bearerToken?.let { builder.header("Authorization", "Bearer $it") }
             sessionId?.takeIf { it.isNotBlank() }?.let { builder.header("X-Hermes-Session-Id", it) }
+            sessionKey?.takeIf { isValidHermesSessionKey(it) }?.let { builder.header("X-Hermes-Session-Key", it.trim()) }
             val request = builder.post(body).build()
             var accepted = false
             var terminal = false
@@ -979,7 +1053,7 @@ private suspend fun openSseStream(
     return SseOpenResult(false, false, lastError ?: "$label: Hermes Gateway non raggiungibile.")
 }
 
-private fun streamSseAttempt(request: Request): Flow<SseAttemptSignal> = callbackFlow {
+internal fun streamSseAttempt(request: Request): Flow<SseAttemptSignal> = callbackFlow {
     val call = streamHttpClient.newCall(request)
     fun sendSignal(signal: SseAttemptSignal): Boolean = trySendBlocking(signal).isSuccess
     call.enqueue(object : Callback {
@@ -1063,9 +1137,20 @@ internal fun isTerminalSseEvent(eventName: String?, data: String): Boolean {
     if (data.trim() == "[DONE]") return true
     val eventType = eventName.orEmpty().lowercase()
     if (eventType.contains("response.completed") || eventType.contains("response.done")) return true
+    if (eventType.contains("run.completed") || eventType.contains("run.failed") || eventType.contains("run.cancelled")) return true
+    if (eventType.contains("assistant.completed")) return true
     val root = runCatching { JSONObject(data) }.getOrNull() ?: return false
     val type = root.optString("type", "").lowercase()
     if (type.contains("response.completed") || type.contains("response.done")) return true
+    if (type.contains("run.completed") || type.contains("run.failed") || type.contains("run.cancelled")) return true
+    if (type.contains("assistant.completed")) return true
+    // Payload annidato run/status per stream sessioni/run (v2026.9.x).
+    val nestedStatus = root.optJSONObject("run")?.optString("status", "")
+        ?: root.optJSONObject("status")?.optString("status", "")
+    if (nestedStatus is String && (nestedStatus.equals("completed", true) || nestedStatus.equals("failed", true) || nestedStatus.equals("cancelled", true))) {
+        // Solo se l'evento e' esplicitamente terminale, non per status intermedi.
+        if (type.contains("completed") || type.contains("failed") || type.contains("cancelled")) return true
+    }
     val choices = root.optJSONArray("choices") ?: return false
     return (0 until choices.length()).any { index ->
         choices.optJSONObject(index)?.optString("finish_reason").orEmpty().isNotBlank()
@@ -1297,9 +1382,9 @@ private fun runDetachedAgent(
         }))
     emit(ChatStreamEvent.Status("Modalita Agente: avvio run server-side persistente..."))
     val runUrl = if (botProfile.isNullOrBlank()) {
-        "${settings.gatewayUrl.trimEnd('/')}/runs"
+        resolveHermesUrl(settings, "/v1/runs")
     } else {
-        resolveHermesProfileUrl(settings, botProfile, "/runs", botMultiplexEnabled)
+        resolveHermesProfileUrl(settings, botProfile, "/v1/runs", botMultiplexEnabled)
     }
     val startResponse = executeRunJsonRequest(runUrl, payload, apiKey, "POST", allowCompatAuth)
     if (startResponse.first !in 200..299) {
@@ -1324,8 +1409,7 @@ private fun runDetachedAgent(
             return@flow
         }
         kotlinx.coroutines.delay((2_000L * (consecutiveFailures + 1)).coerceAtMost(10_000L))
-        val statusPath = "/runs/$runId"
-        val statusUrl = if (botProfile.isNullOrBlank()) "${settings.gatewayUrl.trimEnd('/')}$statusPath" else resolveHermesProfileUrl(settings, botProfile, statusPath, botMultiplexEnabled)
+        val statusUrl = if (botProfile.isNullOrBlank()) resolveHermesUrl(settings, "/v1/runs/$runId") else resolveHermesProfileUrl(settings, botProfile, "/v1/runs/$runId", botMultiplexEnabled)
         val statusResponse = executeRunJsonRequest(statusUrl, null, apiKey, "GET", allowCompatAuth)
         if (statusResponse.first == 404) {
             consecutiveFailures++
@@ -1434,9 +1518,48 @@ internal suspend fun stopHermesRun(
     if (runId.isBlank()) {
         return@withContext 0 to "run_id assente"
     }
-    val path = "/runs/$runId/stop"
-    val url = if (botProfile.isNullOrBlank()) "${settings.gatewayUrl.trimEnd('/')}$path" else resolveHermesProfileUrl(settings, botProfile, path, botMultiplexEnabled)
-    executeRunJsonRequest(url, JSONObject().put("reason", "user_cancelled"), apiKey, "POST", allowCompatAuth)
+    // Percorso canonico Runs API (v2026.9.x): POST /v1/runs/{id}/stop. Mai solo cancel locale.
+    return@withContext try {
+        val client = HermesRunClient(settings, apiKey, botProfile, botMultiplexEnabled, capabilities = null)
+        client.stop(runId)
+    } catch (ex: Exception) {
+        0 to (ex.message ?: ex.javaClass.simpleName)
+    }
+}
+
+internal suspend fun steerHermesRun(
+    settings: AppSettings,
+    runId: String,
+    text: String,
+    apiKey: String?,
+    botProfile: String? = null,
+    botMultiplexEnabled: Boolean = false
+): Pair<Int, String> = withContext(Dispatchers.IO) {
+    if (runId.isBlank()) return@withContext 0 to "run_id assente"
+    if (text.isBlank()) return@withContext 400 to "Testo steer obbligatorio."
+    return@withContext try {
+        // Singolo tentativo: niente retry automatico su mutazione con esito incerto.
+        HermesRunClient(settings, apiKey, botProfile, botMultiplexEnabled, null).steer(runId, text)
+    } catch (ex: Exception) {
+        0 to (ex.message ?: ex.javaClass.simpleName)
+    }
+}
+
+internal suspend fun resolveHermesRunApproval(
+    settings: AppSettings,
+    runId: String,
+    choice: String,
+    apiKey: String?,
+    requestId: String? = null,
+    botProfile: String? = null,
+    botMultiplexEnabled: Boolean = false
+): Pair<Int, String> = withContext(Dispatchers.IO) {
+    if (runId.isBlank()) return@withContext 0 to "run_id assente"
+    return@withContext try {
+        HermesRunClient(settings, apiKey, botProfile, botMultiplexEnabled, null).approval(runId, choice, requestId)
+    } catch (ex: Exception) {
+        0 to (ex.message ?: ex.javaClass.simpleName)
+    }
 }
 
 private fun plugAndPlayStreamUrlCandidates(url: String): List<String> {
@@ -1501,6 +1624,14 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
     obj.tokensPerSecondOrNull()?.let { out += ChatStreamEvent.Usage(null, null, it) }
     val type = eventName ?: obj.optString("type", "")
     val t = type.lowercase()
+
+    // Percorso moderno Sessions/Runs (v2026.9.x): assistant.delta, tool.started/completed,
+    // run.* lifecycle, approval.*, hermes.tool.progress. Tollerante agli sconosciuti.
+    val modern = parseModernSessionRunEvents(eventName ?: obj.optString("type", "").takeIf { it.isNotBlank() }, obj)
+    if (modern.isNotEmpty()) {
+        out += modern
+        return out
+    }
 
     when {
         t.contains("hermes.context.usage") || t.contains("context.usage") -> {

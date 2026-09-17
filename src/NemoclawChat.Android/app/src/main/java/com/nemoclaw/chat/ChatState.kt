@@ -20,6 +20,13 @@ internal class ChatStateHolder {
     var mode: String by mutableStateOf("Chat")
     var activeConversationId: String? by mutableStateOf(null)
     var previousResponseId: String? by mutableStateOf(null)
+    var hermesSessionId: String? by mutableStateOf(null)
+    var chatCapabilities: HermesCapabilities? by mutableStateOf(null)
+    var chatModelCatalog: HermesModelCatalog by mutableStateOf(HermesModelCatalog())
+    var chatModelOverride: String by mutableStateOf("")
+    var chatProviderOverride: String by mutableStateOf("")
+    var chatReasoningEffort: String by mutableStateOf("")
+    var sessionRoute: String by mutableStateOf("legacy")
     var isRecordingVoiceNote: Boolean by mutableStateOf(false)
     var tempVoiceNoteFile: java.io.File? = null
 
@@ -60,6 +67,11 @@ internal class ChatStateHolder {
         pendingAttachments.clear()
         activeConversationId = null
         previousResponseId = null
+        hermesSessionId = null
+        chatModelOverride = ""
+        chatProviderOverride = ""
+        chatReasoningEffort = ""
+        sessionRoute = "legacy"
         draft = ""
     }
 }

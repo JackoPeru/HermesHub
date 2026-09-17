@@ -144,6 +144,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -415,13 +416,45 @@ internal fun ArchiveScreen(
                 onRename = { newTitle ->
                     if (item.id == null) {
                         status = "Apri o salva prima di rinominare."
-                    } else if (renameConversation(context, item.id, newTitle)) {
-                        status = "Rinominato: $newTitle"
-                        refreshKey++
                     } else {
-                        status = "Elemento non trovato."
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    renameHermesSessionForConversation(
+                                        context, loadSettings(context), loadGatewaySecret(context),
+                                        item.id, newTitle
+                                    )
+                                }.getOrNull()
+                            }
+                            status = when {
+                                result == null -> "Rinomino fallito: errore interno."
+                                result.ok && result.serverBound -> "Rinominato (locale + sessione Hermes): $newTitle"
+                                result.ok -> "Rinominato in locale: $newTitle"
+                                else -> "Rinomino NON applicato. ${result.error.orEmpty()}"
+                            }
+                            refreshKey++
+                        }
                     }
                 },
+                onForkHermes = if (item.id == null) null else ({
+                    scope.launch {
+                        status = "Fork sessione Hermes in corso..."
+                        val branched = withContext(Dispatchers.IO) {
+                            runCatching {
+                                forkHermesSessionForConversation(
+                                    context, loadSettings(context), loadGatewaySecret(context), item.id
+                                )
+                            }.getOrNull()
+                        }
+                        if (branched != null) {
+                            status = "Branch creata: ${branched.title}. La apro in chat."
+                            onOpenConversation(branched.id, "")
+                        } else {
+                            status = "Fork non disponibile: il server non espone session_fork o la sessione manca."
+                        }
+                        refreshKey++
+                    }
+                }),
                 onManage = { if (item.id != null) managingConversationId = item.id },
                 onDelete = {
                     if (item.id == null) {
@@ -430,6 +463,13 @@ internal fun ArchiveScreen(
                         pendingDelete = item
                     }
                 }
+            )
+        }
+        item {
+            HermesSessionSection(
+                onOpenSession = { localId -> onOpenConversation(localId, "") },
+                onStatus = { status = it },
+                onChanged = { refreshKey++ }
             )
         }
     }
@@ -454,13 +494,26 @@ internal fun ArchiveScreen(
                     color = AppColors.Muted
                 )
             },
-            confirmButton = {
+                confirmButton = {
                 Button(
                     onClick = {
                         pendingDelete = null
-                        if (item.id != null && deleteConversation(context, item.id)) {
-                            status = "Eliminato: ${item.title}"
-                            refreshKey++
+                        if (item.id != null) {
+                            scope.launch {
+                                val result = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        deleteHermesSessionForConversation(
+                                            context, loadSettings(context), loadGatewaySecret(context), item.id
+                                        )
+                                    }.getOrNull()
+                                }
+                                status = when {
+                                    result == null -> "Eliminazione fallita: errore interno."
+                                    result.ok -> "Eliminato (locale + sessione Hermes): ${item.title}"
+                                    else -> "Eliminazione NON applicata, conservata in locale. ${result.error.orEmpty()}"
+                                }
+                                refreshKey++
+                            }
                         } else {
                             status = "Elemento non trovato."
                         }
@@ -505,7 +558,8 @@ internal fun ArchiveCard(
     onPin: () -> Unit,
     onRename: (String) -> Unit,
     onManage: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onForkHermes: (() -> Unit)? = null
 ) {
     var renameText by remember(item.id, item.title) { mutableStateOf(item.title) }
 
@@ -538,6 +592,7 @@ internal fun ArchiveCard(
                 if (item.id != null) {
                     Button(onClick = onManage) { Text("Gestisci") }
                     Button(onClick = { onRename(renameText.trim()) }) { Text("Rinomina") }
+                    if (onForkHermes != null) Button(onClick = onForkHermes) { Text("Fork Hermes") }
                     Button(onClick = onDelete) { Text("Elimina") }
                 }
             }
@@ -645,6 +700,101 @@ internal fun createLocalBranch(context: Context, source: LocalConversation, mess
 }
 
 internal fun splitMetadata(value: String): List<String> = value.split(',', ';', '\n').map { it.trim() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(50)
+
+@Composable
+internal fun HermesSessionSection(
+    onOpenSession: (String) -> Unit,
+    onStatus: (String) -> Unit,
+    onChanged: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var sessions by remember { mutableStateOf<List<HermesSession>>(emptyList()) }
+    var supported by remember { mutableStateOf<Boolean?>(null) }
+    var loading by remember { mutableStateOf(false) }
+
+    fun refresh() {
+        scope.launch {
+            loading = true
+            val settings = withContext(Dispatchers.IO) { loadSettings(context) }
+            val apiKey = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+            val caps = withContext(Dispatchers.IO) {
+                runCatching { loadHermesCapabilitiesCached(settings, apiKey) }.getOrNull()
+            }
+            if (caps == null || !caps.sessionList) {
+                supported = false
+                loading = false
+                return@launch
+            }
+            supported = true
+            val (code, list) = withContext(Dispatchers.IO) {
+                runCatching { HermesSessionClient(settings, apiKey, null, false, caps).list(limit = 30) }
+                    .getOrElse { 0 to emptyList() }
+            }
+            if (code in 200..299) {
+                sessions = list
+                onStatus("Sessioni Hermes: ${list.size} trovate (autorevoli sul server).")
+            } else if (code == 401 || code == 403) {
+                onStatus("Sessioni Hermes: chiave rifiutata (HTTP $code).")
+            } else {
+                onStatus("Sessioni Hermes non leggibili (HTTP $code).")
+            }
+            loading = false
+        }
+    }
+    LaunchedEffect(Unit) { refresh() }
+
+    Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Sessioni Hermes (server)", color = Color.White, fontWeight = FontWeight.SemiBold)
+            Text(
+                when (supported) {
+                    null -> "Verifico supporto Sessions API..."
+                    false -> "Server senza Sessions API: l'archivio locale resta la sorgente."
+                    true -> "Sorgente autorevole: server. La cache locale serve solo per offline/rendering."
+                },
+                color = AppColors.Muted, fontSize = 12.sp
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { refresh() }, enabled = !loading) { Text(if (loading) "..." else "Aggiorna") }
+            }
+            sessions.take(15).forEach { s ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(s.title.ifBlank { s.id }, color = Color.White, fontSize = 13.sp, maxLines = 1)
+                        Text(s.id, color = AppColors.Faint, fontSize = 10.sp, maxLines = 1)
+                    }
+                    TextButton(onClick = {
+                        scope.launch {
+                            val settings = withContext(Dispatchers.IO) { loadSettings(context) }
+                            // Apri: crea/riusa chat locale collegata alla sessione server.
+                            val localId = "conv_${System.currentTimeMillis()}"
+                            val conv = LocalConversation(
+                                id = localId,
+                                title = s.title.ifBlank { "Sessione Hermes" },
+                                kind = "Chat",
+                                description = "Collegata a sessione Hermes ${s.id}.",
+                                prompt = "",
+                                updatedAt = System.currentTimeMillis(),
+                                messages = emptyList(),
+                                hermesSessionId = s.id
+                            )
+                            withContext(Dispatchers.IO) {
+                                val all = loadConversations(context, includeDeleted = true).toMutableList()
+                                all.add(0, conv)
+                                saveConversations(context, all, syncAfterSave = false)
+                                saveSessionBinding(context, localId, null, s.id)
+                            }
+                            onChanged()
+                            onOpenSession(localId)
+                        }
+                    }) { Text("Apri", fontSize = 12.sp) }
+                }
+            }
+            if (sessions.size > 15) Text("+${sessions.size - 15} altre...", color = AppColors.Muted, fontSize = 11.sp)
+        }
+    }
+}
 
 internal fun shareConversationExport(context: Context, conversation: LocalConversation, format: String) {
     val markdown = buildString { append("# ${conversation.title}\n\n${conversation.summary}\n\n"); conversation.messages.forEach { append("## ${it.author}\n\n${it.text}\n\n") } }

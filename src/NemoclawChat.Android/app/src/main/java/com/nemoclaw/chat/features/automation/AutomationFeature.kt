@@ -290,6 +290,7 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
     var notificationTemplate by rememberSaveable { mutableStateOf("") }
     var projectId by rememberSaveable { mutableStateOf(settings.activeProjectId) }
     var dependencies by rememberSaveable { mutableStateOf("") }
+    var cronSkills by rememberSaveable { mutableStateOf("") }
     var botRoster by remember { mutableStateOf<HermesBotRoster?>(null) }
     var selectedBotProfile by rememberSaveable { mutableStateOf("") }
     var botMenuExpanded by remember { mutableStateOf(false) }
@@ -312,6 +313,7 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
         editingId = ""; name = ""; taskPrompt = ""; frequency = "Giornaliera"; time = "08:00"
         days = "1,2,3,4,5"; advancedCron = ""; condition = ""; deliver = "local"; timeout = "900"
         retry = "0"; notificationTemplate = ""; projectId = settings.activeProjectId; dependencies = ""
+        cronSkills = ""
     }
 
     fun edit(job: CronJob, duplicate: Boolean = false) {
@@ -321,6 +323,7 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
         taskPrompt = decoded.taskPrompt; condition = decoded.condition; timeout = decoded.timeoutSeconds.toString()
         retry = decoded.retryCount.toString(); notificationTemplate = decoded.notificationTemplate
         projectId = decoded.projectId; dependencies = decoded.dependencies; deliver = job.deliver.ifBlank { "local" }
+        cronSkills = job.skills
         frequency = "Cron avanzato"; advancedCron = job.schedule
         status = if (duplicate) "Copia pronta: modifica e salva." else "Modifica ${job.name}."
     }
@@ -392,7 +395,13 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                     if (frequency == "Cron avanzato") SettingsField("Espressione cron", advancedCron, { advancedCron = it })
                     Text("Espressione: ${schedule().ifBlank { "non valida" }}", color = AppColors.Muted, fontSize = 12.sp)
                     SettingsField("Condizione opzionale", condition, { condition = it })
-                    SettingsField("Destinazione", deliver, { deliver = it })
+                    SettingsField("Destinazione (local, origin, telegram, ..., bot-chat, bot-chat:<profilo>, all)", deliver, { deliver = it })
+                    Text("Consegna bot-chat: l'output entra come messaggio nella Bot Chat del profilo (costa un turno). Mai inclusa in all.", color = AppColors.Muted, fontSize = 12.sp)
+                    SettingsField("Skill (separate da virgola, salvate sul server)", cronSkills, { cronSkills = it })
+                    Text(
+                        "Pin modello/provider/reasoning, workdir, script/no-agent, monitor, continuity e notepad vivono sulla superficie dashboard e non sono modificabili da qui: i valori eventualmente impostati da CLI restano visibili in sola lettura nella lista.",
+                        color = AppColors.Muted, fontSize = 12.sp
+                    )
                     SettingsField("Timeout secondi", timeout, { timeout = it })
                     SettingsField("Retry", retry, { retry = it })
                     SettingsField("Modello notifica", notificationTemplate, { notificationTemplate = it })
@@ -417,7 +426,8 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                                     deliver,
                                     loadGatewaySecret(context),
                                     selectedBotProfile.takeIf { it.isNotBlank() },
-                                    botRoster?.multiplexEnabled == true
+                                    botRoster?.multiplexEnabled == true,
+                                    cronSkills
                                 )
                                 if (!status.startsWith("Automazione non")) { clearEditor(); refreshNonce++ }
                             }
@@ -504,6 +514,16 @@ internal fun CronCard(
             CronDetail("Ultima esecuzione", job.lastRunAt)
             CronDetail("Stato", job.state)
             CronDetail("Consegna", job.deliver)
+            CronDetail("Profilo", job.profile)
+            CronDetail("Modello", job.model)
+            CronDetail("Provider", job.provider)
+            CronDetail("Reasoning", job.reasoningEffort)
+            CronDetail("Workdir", job.workdir)
+            CronDetail("Skill", job.skills)
+            CronDetail("Script", job.script)
+            CronDetail("No-agent", if (job.noAgent) "attivo (solo CLI/dashboard)" else "")
+            CronDetail("Context from", job.contextFrom)
+            CronDetail("Toolset abilitati", job.enabledToolsets)
             CronDetail("Origine", job.origin)
             CronDetail("Ultimo output", job.lastStatus)
             Text(job.prompt.ifBlank { "Prompt non disponibile." }, color = Color.White)

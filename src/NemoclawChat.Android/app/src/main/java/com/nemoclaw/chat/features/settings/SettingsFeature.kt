@@ -319,6 +319,12 @@ internal fun SettingsScreen(
     var voiceTranscript by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.showTranscript) }
     var voiceBluetooth by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.bluetooth) }
     var voiceParticleShape by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.particleShape) }
+    var reasoningEffort by remember(settings.reasoningEffort) { mutableStateOf(settings.reasoningEffort) }
+    var serviceTier by remember(settings.serviceTier) { mutableStateOf(settings.serviceTier) }
+    var hermesSessionKey by remember(settings.hermesSessionKey) { mutableStateOf(settings.hermesSessionKey) }
+    var modelCatalogStatus by remember { mutableStateOf("Picker Hermes non caricato.") }
+    var modelCatalogModels by remember { mutableStateOf<List<HermesModelOption>>(emptyList()) }
+    var reasoningLadder by remember { mutableStateOf<List<String>>(emptyList()) }
     var status by remember { mutableStateOf("Pronto.") }
     var showEraseHealthConfirm by remember { mutableStateOf(false) }
     var advancedVisible by rememberSaveable { mutableStateOf(false) }
@@ -340,6 +346,9 @@ internal fun SettingsScreen(
             inferenceEndpoint = inferenceEndpoint.trim(),
             preferredApi = preferredApi.trim(),
             model = model.trim(),
+            reasoningEffort = reasoningEffort.trim().lowercase(),
+            serviceTier = serviceTier.trim(),
+            hermesSessionKey = hermesSessionKey.trim(),
             voiceModel = voiceModel.trim(),
             accessMode = accessMode.trim(),
             visualBlocksMode = visualBlocksMode.trim(),
@@ -555,6 +564,56 @@ internal fun SettingsScreen(
                             SettingsField("Endpoint API lato server", inferenceEndpoint, { inferenceEndpoint = it })
                             SettingsField("API preferita", preferredApi, { preferredApi = it })
                             SettingsField("Modello", model, { model = it })
+                            SettingsField("Reasoning effort (vuoto = default server)", reasoningEffort, { reasoningEffort = it.lowercase().trim() })
+                            SettingsField("Service tier (vuoto = default)", serviceTier, { serviceTier = it })
+                            SettingsField("Session key stabile (X-Hermes-Session-Key, vuoto = disattivata)", hermesSessionKey, { hermesSessionKey = it })
+                            Text(
+                                if (reasoningLadder.isEmpty()) "Reasoning: ladder non ancora letta da /v1/capabilities. Premi sotto per caricare picker e ladder."
+                                else "Reasoning supportati dal server: ${reasoningLadder.joinToString(", ")}.",
+                                color = AppColors.Muted, fontSize = 12.sp
+                            )
+                            Text(modelCatalogStatus, color = AppColors.Muted, fontSize = 12.sp)
+                            Button(onClick = {
+                                scope.launch {
+                                    modelCatalogStatus = "Leggo capabilities e catalogo Hermes..."
+                                    try {
+                                        val capsBody = runCatching { httpGet("${gatewayUrl.trim().trimEnd('/')}/v1/capabilities", apiKey.takeIf { it.isNotBlank() }) }.getOrNull()
+                                        val caps = capsBody?.let { parseHermesCapabilities(it) }
+                                        if (caps != null && caps.reasoningEfforts.isNotEmpty()) reasoningLadder = caps.reasoningEfforts
+                                        // Primario /api/model/options, fallback /v1/models (nessun catalogo hardcodato).
+                                        val optionsBody = runCatching { httpGet("${gatewayUrl.trim().trimEnd('/')}/api/model/options", apiKey.takeIf { it.isNotBlank() }) }.getOrNull()
+                                        if (optionsBody != null && !optionsBody.contains("\"error\"", ignoreCase = true)) {
+                                            val catalog = parseModelOptionsPayload(optionsBody)
+                                            modelCatalogModels = catalog.models.take(200)
+                                            modelCatalogStatus = if (catalog.models.isEmpty()) "Model options vuoto: uso /v1/models come fallback."
+                                            else "${catalog.models.size} modelli da /api/model/options."
+                                            if (catalog.models.isEmpty()) throw IllegalStateException("empty")
+                                            else return@launch
+                                        }
+                                        val fallbackBody = runCatching { httpGet("${gatewayUrl.trim().trimEnd('/')}/v1/models", apiKey.takeIf { it.isNotBlank() }) }.getOrNull()
+                                        if (fallbackBody != null) {
+                                            val catalog = parseV1ModelsFallback(fallbackBody)
+                                            modelCatalogModels = catalog.models.take(200)
+                                            modelCatalogStatus = "${catalog.models.size} modelli da /v1/models (fallback)."
+                                        } else {
+                                            modelCatalogStatus = "Catalogo non disponibile: verifica gateway e API key."
+                                        }
+                                    } catch (ex: Exception) {
+                                        modelCatalogStatus = "Errore picker: ${ex.message ?: ex.javaClass.simpleName}"
+                                    }
+                                }
+                            }) { Text("Carica picker Hermes (/api/model/options)") }
+                            if (modelCatalogModels.isNotEmpty()) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    modelCatalogModels.take(12).forEach { opt ->
+                                        Text(
+                                            "${opt.displayName} — ${opt.provider.ifBlank { "default" }}${if (opt.contextWindow != null) " — ctx ${opt.contextWindow}" else ""}${if (opt.reasoningSupported) " — reasoning" else ""}${opt.warning?.let { " — $it" }.orEmpty()}",
+                                            color = AppColors.Muted, fontSize = 12.sp
+                                        )
+                                    }
+                                    if (modelCatalogModels.size > 12) Text("+${modelCatalogModels.size - 12} altri...", color = AppColors.Muted, fontSize = 12.sp)
+                                }
+                            }
                             SettingsField("Accesso", accessMode, { accessMode = it })
                             SettingsField("Modalita visuale (auto / always / never)", visualBlocksMode, { visualBlocksMode = it })
                         }

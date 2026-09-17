@@ -11,6 +11,9 @@ data class AppSettings(
     val inferenceEndpoint: String = AppDefaults.inferenceEndpoint,
     val preferredApi: String = AppDefaults.preferredApi,
     val model: String = AppDefaults.model,
+    val reasoningEffort: String = AppDefaults.reasoningEffort,
+    val serviceTier: String = AppDefaults.serviceTier,
+    val hermesSessionKey: String = AppDefaults.hermesSessionKey,
     val voiceModel: String = AppDefaults.voiceModel,
     val accessMode: String = AppDefaults.accessMode,
     val visualBlocksMode: String = AppDefaults.visualBlocksMode,
@@ -61,6 +64,9 @@ internal fun loadSettings(context: Context): AppSettings {
         inferenceEndpoint = prefs.getString("inferenceEndpoint", AppDefaults.inferenceEndpoint) ?: AppDefaults.inferenceEndpoint,
         preferredApi = prefs.getString("preferredApi", AppDefaults.preferredApi) ?: AppDefaults.preferredApi,
         model = prefs.getString("model", AppDefaults.model) ?: AppDefaults.model,
+        reasoningEffort = prefs.getString("reasoningEffort", AppDefaults.reasoningEffort) ?: AppDefaults.reasoningEffort,
+        serviceTier = prefs.getString("serviceTier", AppDefaults.serviceTier) ?: AppDefaults.serviceTier,
+        hermesSessionKey = prefs.getString("hermesSessionKey", AppDefaults.hermesSessionKey) ?: AppDefaults.hermesSessionKey,
         voiceModel = prefs.getString("voiceModel", AppDefaults.voiceModel) ?: AppDefaults.voiceModel,
         accessMode = prefs.getString("accessMode", AppDefaults.accessMode) ?: AppDefaults.accessMode,
         visualBlocksMode = prefs.getString("visualBlocksMode", AppDefaults.visualBlocksMode) ?: AppDefaults.visualBlocksMode,
@@ -149,6 +155,9 @@ internal fun saveSettings(context: Context, settings: AppSettings) {
         putString("inferenceEndpoint", normalizeUrl(settings.inferenceEndpoint))
         putString("preferredApi", settings.preferredApi.trim())
         putString("model", settings.model.trim())
+        putString("reasoningEffort", settings.reasoningEffort.trim())
+        putString("serviceTier", settings.serviceTier.trim())
+        putString("hermesSessionKey", settings.hermesSessionKey.trim())
         putString("voiceModel", settings.voiceModel.trim())
         putString("accessMode", settings.accessMode.trim())
         putString("visualBlocksMode", settings.visualBlocksMode.trim())
@@ -192,6 +201,9 @@ internal object AppDefaults {
     const val inferenceEndpoint = ""
     const val preferredApi = "hermes-native"
     const val model = "hermes-agent"
+    const val reasoningEffort = ""
+    const val serviceTier = ""
+    const val hermesSessionKey = ""
     const val voiceModel = "hermes-voice"
     const val accessMode = "Tailscale/LAN plug-and-play"
     const val visualBlocksMode = "auto"

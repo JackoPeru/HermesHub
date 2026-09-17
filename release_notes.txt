@@ -1,14 +1,12 @@
-Hermes Hub 0.6.185 (Bot Mode, gruppi multi-connessione e hardening DAT)
+Hermes Hub 0.6.186 (Sessions API nativa, Runs completi e Cron onesto)
 
-- Bot Mode usa profili reali di Hermes Agent per elenco, creazione, modifica, clonazione e rimozione; nessun runtime bot locale parallelo.
-- I gruppi supportano da 2 a 6 bot anche su connessioni diverse, routing per menzioni e richiesta utente originale preservata; ogni turno è limitato a 3 round e 10 risposte bot.
-- Connections supporta endpoint nominativi cross-machine e token sicuri separati per connessione: Windows usa PasswordVault, Android usa Android Keystore, mentre il catalogo persistito non contiene token.
-- Bot omonimi ricevono handle stabili per la disambiguazione. Errori di singoli membri sono riportati come fallimenti parziali, senza retry incerti dopo l'accettazione server; cancellazione e sostituzione invalidano lavoro e salvataggi tardivi.
-- Bot Chat è il percorso canonico per i profili Hermes e resta fail-closed quando il multiplexing profili non è esplicitamente disponibile; cron e chat rispettano lo scope del profilo.
-- Lifecycle Meta DAT/Jarvis rafforzato: inizializzazione process-wide idempotente, sessione/stream serializzati, stato attivo solo dopo `STREAMING`, cleanup deterministico e singola causa terminale osservabile.
-- Evidenza non eseguita: runtime APK finale (emulatore escluso), prova fisica Ray-Ban, runtime MSIX installato e gateway live cross-machine/chat/TTS/STT/archivio/SSE.
-- Versioni: Windows/AdminBridge `0.6.185`; Android `versionName 0.6.185`, `versionCode 189`.
-- Asset: `HermesHub-0.6.185-android.apk`, `NemoclawChat.Windows_0.6.185.0_x64.msix`, `HermesHub-0.6.185-linux-gateway.tar.gz`.
-- SHA-256 Android: `1805ea272a22f9a21b6133f713811b2ce6afddbd1c9c9fea4b36a32f3391c36b`.
-- SHA-256 Windows: `781940c6085b16c157a31043506564a08d7e39423185362fdc8ffe980645a24a`.
-- SHA-256 Linux gateway: `00f94f02517efa44010da74b549b2427bf954e9a292d62c7781cd2d24fd1dd09`.
+- Android usa la Sessions API nativa Hermes come percorso primario della Chat quando supportata, con fallback legacy esplicito.
+- Runs API completa: stop reale, steer con gestione 409/pending_steer, approval server-side con scelte dinamiche, eventi SSE nativi.
+- Model picker moderno con reasoning effort per-chat e model lock persistente per sessione.
+- Cron allineato al trasporto esterno /api/jobs; campi dashboard-only in sola lettura.
+- Rename/delete sessioni e model lock senza falsi successi; auth profili fail-closed.
+- Versioni: Windows/AdminBridge `0.6.186`; Android `versionName 0.6.186`, `versionCode 190`.
+- Asset: `HermesHub-0.6.186-android.apk`, `NemoclawChat.Windows_0.6.186.0_x64.msix`.
+- SHA-256 Android: `df07bf547c50e4fddb844f25e8ab0a3d5f8a927a935483fc9054c7f345a70041`.
+- SHA-256 Windows: `1e28921ce4b2f55de847464078634592c9774200c5d9287340b934f1c9b6698a`.
+- SHA-256 Linux gateway: `3190a815db7273fb8ffb103528fe3209b4ba6d26619dc0ec0211904a1f91c3b2`.

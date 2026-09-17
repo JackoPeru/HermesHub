@@ -1,0 +1,26 @@
+{
+  "fixture": "hermes-agent v2026.9.14 /api/model/options (forma minima)",
+  "providers": [
+    {"slug": "nous", "display_name": "Nous", "available": true},
+    {"slug": "openrouter", "display_name": "OpenRouter", "available": true}
+  ],
+  "models": [
+    {
+      "id": "hermes-test-1",
+      "display_name": "Hermes Test 1",
+      "provider": "nous",
+      "capabilities": ["reasoning", "tools"],
+      "context_window": 128000,
+      "pricing": {"input": 1.0, "output": 2.0},
+      "reasoning_supported": true,
+      "reasoning_efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+    },
+    {
+      "id": "hermes-test-2",
+      "display_name": "Hermes Test 2",
+      "provider": "openrouter",
+      "capabilities": ["tools"],
+      "context_window": 64000
+    }
+  ]
+}

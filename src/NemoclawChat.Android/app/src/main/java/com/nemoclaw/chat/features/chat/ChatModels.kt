@@ -379,7 +379,18 @@ data class AgentTask(
     val detail: String,
     val requiresApproval: Boolean = true,
     val source: String = "Locale",
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    // Primitive moderne Hermes Agent (server-side, esposte senza duplicare logica):
+    // continuity, persistent memory/notepad, monitor mode, bot-chat delivery, profilo, reasoning/model pin.
+    val schedule: String = "",
+    val deliver: String = "",
+    val profile: String = "",
+    val continuity: Boolean? = null,
+    val persistentMemory: Boolean? = null,
+    val monitorMode: Boolean? = null,
+    val reasoningEffort: String = "",
+    val modelPin: String = "",
+    val providerPin: String = ""
 )
 
 internal data class ArchiveItem(
@@ -400,6 +411,10 @@ data class LocalConversation(
     val messages: List<ChatMessage>,
     val previousResponseId: String? = null,
     val serverConversationId: String? = null,
+    val hermesSessionId: String? = null,
+    val modelOverride: String = "",
+    val providerOverride: String = "",
+    val reasoningEffort: String = "",
     val deletedAt: Long? = null,
     val projectId: String = "",
     val workspacePath: String = "",
@@ -662,7 +677,18 @@ internal data class CronJob(
     val lastRunAt: String,
     val lastStatus: String,
     val deliver: String,
-    val origin: String
+    val origin: String,
+    val profile: String = "",
+    // Valori server in sola lettura (impostabili via CLI/dashboard, non via /api/jobs esterno).
+    val model: String = "",
+    val provider: String = "",
+    val reasoningEffort: String = "",
+    val workdir: String = "",
+    val skills: String = "",
+    val script: String = "",
+    val noAgent: Boolean = false,
+    val contextFrom: String = "",
+    val enabledToolsets: String = ""
 )
 
 internal data class AutomationDefinition(
