@@ -67,7 +67,8 @@ internal data class MetricDisplayFilter(
     val outputTokens: Boolean = true,
     val promptTokens: Boolean = true,
     val contextTokens: Boolean = true,
-    val duration: Boolean = true
+    val duration: Boolean = true,
+    val acceptanceRate: Boolean = true
 )
 
 @Composable
@@ -126,6 +127,9 @@ internal fun StreamingBubbleView(
                 if (showMessageMetrics) {
                     state.stats?.ttftMs?.takeIf { metricFilter.ttft && it > 0 }?.let { parts += "TTFT ${String.format(java.util.Locale.US, "%.1f", it / 1000.0)}s" }
                     state.stats?.tokensPerSecond?.takeIf { metricFilter.tokensPerSecond && it > 0 }?.let { parts += "${String.format(java.util.Locale.US, "%.2f", it)} t/s" }
+                    state.stats?.acceptanceRate?.takeIf { metricFilter.acceptanceRate && it.isFinite() }?.let {
+                        parts += formatAcceptancePart(it, state.stats?.acceptanceLabel)
+                    }
                     state.stats?.tokensOut?.takeIf { metricFilter.outputTokens && it > 0 }?.let { parts += "$it tok" }
                     state.stats?.promptTokens?.takeIf { metricFilter.promptTokens && it > 0 }?.let { parts += "prompt $it" }
                     state.stats?.contextTokens()?.takeIf { metricFilter.contextTokens && it > 0 }?.let { parts += "ctx $it" }

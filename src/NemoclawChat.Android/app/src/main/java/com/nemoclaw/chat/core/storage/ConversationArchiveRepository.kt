@@ -306,11 +306,14 @@ private fun readChatStats(obj: JSONObject?): ChatStreamStats? {
         promptTokens = obj.optNullableInt("promptTokens"),
         contextTokens = obj.optNullableInt("contextTokens"),
         contextLength = obj.optNullableInt("contextLength"),
-        contextPercent = obj.optNullableInt("contextPercent")
+        contextPercent = obj.optNullableInt("contextPercent"),
+        acceptanceRate = obj.optNullableDouble("acceptanceRate"),
+        acceptanceLabel = obj.optString("acceptanceLabel").takeIf { it.isNotBlank() }
     ).takeIf {
         it.ttftMs != null || it.totalMs != null || it.tokensOut != null ||
             it.tokensPerSecond != null || it.promptTokens != null ||
-            it.contextTokens != null || it.contextLength != null || it.contextPercent != null
+            it.contextTokens != null || it.contextLength != null || it.contextPercent != null ||
+            it.acceptanceRate != null
     }
 }
 
@@ -325,6 +328,8 @@ private fun writeChatStats(stats: ChatStreamStats?): JSONObject? {
         .put("contextTokens", stats.contextTokens ?: JSONObject.NULL)
         .put("contextLength", stats.contextLength ?: JSONObject.NULL)
         .put("contextPercent", stats.contextPercent ?: JSONObject.NULL)
+        .put("acceptanceRate", stats.acceptanceRate ?: JSONObject.NULL)
+        .put("acceptanceLabel", stats.acceptanceLabel?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
 }
 
 internal fun String.streamingCheckpointPreview(): String {

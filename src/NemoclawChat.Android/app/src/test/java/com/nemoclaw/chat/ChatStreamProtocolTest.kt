@@ -295,4 +295,69 @@ class ChatStreamProtocolTest {
 
         assertEquals("  ", events.filterIsInstance<ChatStreamEvent.TextDelta>().single().delta)
     }
+
+    @Test
+    fun draftAcceptanceRateComesOnlyFromServerTimings() {
+        val events = parseSseData(
+            "response.completed",
+            """{"type":"response.completed","timings":{"predicted_n":200,"draft_n":335,"draft_n_accepted":72}}"""
+        )
+        val draft = events.filterIsInstance<ChatStreamEvent.DraftAcceptance>().single()
+        assertEquals(72.0 / 335.0, draft.rate, 1e-9)
+        assertEquals(null, draft.label)
+    }
+
+    @Test
+    fun draftAcceptanceLabelKeepsOnlyDeclaredSpecType() {
+        val events = parseSseData(
+            "response.completed",
+            """{"type":"response.completed","timings":{"draft_n":100,"draft_n_accepted":50,"spec_type":"draft-dflash"}}"""
+        )
+        assertEquals("dflash", events.filterIsInstance<ChatStreamEvent.DraftAcceptance>().single().label)
+    }
+
+    @Test
+    fun draftAcceptanceIsAbsentWithoutSpeculativeDecoding() {
+        val withoutDraft = parseSseData(
+            "response.completed",
+            """{"type":"response.completed","timings":{"predicted_n":200,"predicted_per_second":17.7}}"""
+        )
+        assertTrue(withoutDraft.none { it is ChatStreamEvent.DraftAcceptance })
+        val emptyDraft = parseSseData(
+            "response.completed",
+            """{"type":"response.completed","timings":{"draft_n":0,"draft_n_accepted":0}}"""
+        )
+        assertTrue(emptyDraft.none { it is ChatStreamEvent.DraftAcceptance })
+        val inconsistentDraft = parseSseData(
+            "response.completed",
+            """{"type":"response.completed","timings":{"draft_n":10,"draft_n_accepted":11}}"""
+        )
+        assertTrue(inconsistentDraft.none { it is ChatStreamEvent.DraftAcceptance })
+    }
+
+    @Test
+    fun specTypeLabelNormalizationRejectsJunk() {
+        assertEquals("mtp", normalizeSpecTypeLabel("draft-mtp"))
+        assertEquals("dspark", normalizeSpecTypeLabel("dspark"))
+        assertEquals(null, normalizeSpecTypeLabel(null))
+        assertEquals(null, normalizeSpecTypeLabel("  "))
+        assertEquals(null, normalizeSpecTypeLabel("a".repeat(25)))
+        assertEquals(null, normalizeSpecTypeLabel("../evil"))
+    }
+
+    @Test
+    fun statsLineShowsAcceptanceOnlyWhenEnabledAndPresent() {
+        val stats = ChatStreamStats(tokensPerSecond = 17.79, acceptanceRate = 72.0 / 335.0, acceptanceLabel = "mtp")
+        val shown = formatChatStatsLine(stats, MetricDisplayFilter())
+        assertTrue(shown.contains("Acc 21% (mtp)"))
+        val hidden = formatChatStatsLine(stats, MetricDisplayFilter(acceptanceRate = false))
+        assertFalse(hidden.contains("Acc"))
+        val unlabeled = formatChatStatsLine(
+            ChatStreamStats(acceptanceRate = 0.5, acceptanceLabel = null),
+            MetricDisplayFilter()
+        )
+        assertTrue(unlabeled.contains("Acc 50%"))
+        assertFalse(unlabeled.contains("("))
+        assertEquals("", formatChatStatsLine(ChatStreamStats(), MetricDisplayFilter()))
+    }
 }

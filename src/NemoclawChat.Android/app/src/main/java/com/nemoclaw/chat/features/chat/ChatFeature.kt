@@ -1596,6 +1596,9 @@ internal fun formatChatStatsLine(stats: ChatStreamStats?, filter: MetricDisplayF
     stats.tokensPerSecond?.takeIf { filter.tokensPerSecond && it > 0 }?.let {
         parts += "${String.format(java.util.Locale.US, "%.2f", it)} t/s"
     }
+    stats.acceptanceRate?.takeIf { filter.acceptanceRate && it.isFinite() }?.let {
+        parts += formatAcceptancePart(it, stats.acceptanceLabel)
+    }
     stats.tokensOut?.takeIf { filter.outputTokens && it > 0 }?.let { parts += "$it tok" }
     stats.promptTokens?.takeIf { filter.promptTokens && it > 0 }?.let { parts += "prompt $it" }
     stats.contextTokens().takeIf { filter.contextTokens && it > 0 }?.let { parts += "ctx $it" }

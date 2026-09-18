@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.187 - 2026-09-18
+
+- Nei parametri dei messaggi agente compare l'acceptance rate dello speculative decoding (`Acc NN%`, con tipo `mtp`/`dflash`/`dspark` quando dichiarato dal server), con toggle dedicato nelle metriche.
+- Progetto verticale su Android: la parte Windows e' esclusa dalle attivita' ordinarie (direttiva in `AGENTS.md`).
+
 ## 0.6.186 - 2026-09-17
 
 - Android usa la Sessions API nativa Hermes (`/api/sessions`, chat/stream, messaggi, fork, rename/delete propagate) come percorso primario della Chat quando `/v1/capabilities` la dichiara, con fallback legacy esplicito.

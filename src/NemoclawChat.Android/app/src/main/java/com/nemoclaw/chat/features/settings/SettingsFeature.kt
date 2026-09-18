@@ -303,6 +303,7 @@ internal fun SettingsScreen(
     var metricPromptTokens by remember(settings.metricPromptTokens) { mutableStateOf(settings.metricPromptTokens) }
     var metricContextTokens by remember(settings.metricContextTokens) { mutableStateOf(settings.metricContextTokens) }
     var metricDuration by remember(settings.metricDuration) { mutableStateOf(settings.metricDuration) }
+    var metricAcceptanceRate by remember(settings.metricAcceptanceRate) { mutableStateOf(settings.metricAcceptanceRate) }
     var maxAttachmentMb by remember(settings.maxAttachmentMb) { mutableIntStateOf(settings.maxAttachmentMb.coerceIn(1, 150)) }
     var strictNativeMode by remember(settings.strictNativeMode) { mutableStateOf(settings.strictNativeMode) }
     var demoMode by remember(settings.demoMode) { mutableStateOf(settings.demoMode) }
@@ -365,6 +366,7 @@ internal fun SettingsScreen(
             metricPromptTokens = metricPromptTokens,
             metricContextTokens = metricContextTokens,
             metricDuration = metricDuration,
+            metricAcceptanceRate = metricAcceptanceRate,
             maxAttachmentMb = maxAttachmentMb.coerceIn(1, 150),
             strictNativeMode = strictNativeMode,
             demoMode = demoMode,
@@ -644,6 +646,7 @@ internal fun SettingsScreen(
                         MetricSwitch("Token input", metricPromptTokens) { metricPromptTokens = it }
                         MetricSwitch("Contesto", metricContextTokens) { metricContextTokens = it }
                         MetricSwitch("Durata totale", metricDuration) { metricDuration = it }
+                        MetricSwitch("Acceptance rate (speculative)", metricAcceptanceRate) { metricAcceptanceRate = it }
                     }
                 }
             }

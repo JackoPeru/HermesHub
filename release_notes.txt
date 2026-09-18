@@ -1,12 +1,9 @@
-Hermes Hub 0.6.186 (Sessions API nativa, Runs completi e Cron onesto)
+Hermes Hub 0.6.187 (acceptance rate speculative decoding)
 
-- Android usa la Sessions API nativa Hermes come percorso primario della Chat quando supportata, con fallback legacy esplicito.
-- Runs API completa: stop reale, steer con gestione 409/pending_steer, approval server-side con scelte dinamiche, eventi SSE nativi.
-- Model picker moderno con reasoning effort per-chat e model lock persistente per sessione.
-- Cron allineato al trasporto esterno /api/jobs; campi dashboard-only in sola lettura.
-- Rename/delete sessioni e model lock senza falsi successi; auth profili fail-closed.
-- Versioni: Windows/AdminBridge `0.6.186`; Android `versionName 0.6.186`, `versionCode 190`.
-- Asset: `HermesHub-0.6.186-android.apk`, `NemoclawChat.Windows_0.6.186.0_x64.msix`.
-- SHA-256 Android: `df07bf547c50e4fddb844f25e8ab0a3d5f8a927a935483fc9054c7f345a70041`.
-- SHA-256 Windows: `1e28921ce4b2f55de847464078634592c9774200c5d9287340b934f1c9b6698a`.
-- SHA-256 Linux gateway: `3190a815db7273fb8ffb103528fe3209b4ba6d26619dc0ec0211904a1f91c3b2`.
+- Nei parametri dei messaggi agente compare l'acceptance rate (`Acc NN%`) quando lo speculative decoding è attivo, con tipo (`mtp`/`dflash`/`dspark`) quando dichiarato dal server.
+- Nuovo toggle “Acceptance rate (speculative)” nelle metriche; valore persistito in archivio.
+- Progetto verticale su Android (direttiva in `AGENTS.md`).
+- Versioni: Windows/AdminBridge `0.6.187`; Android `versionName 0.6.187`, `versionCode 191`.
+- Asset: `HermesHub-0.6.187-android.apk`, `NemoclawChat.Windows_0.6.187.0_x64.msix`.
+- SHA-256 Android: `16547abb0bf13b110f59691714de3f8114b4730d1667f66b5affceda688f04ee`.
+- SHA-256 Windows: `203ad255d473cf4a618eb249e60c46dd237f571a8b742b9c80809aefc1bbaf24`.

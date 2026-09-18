@@ -18,6 +18,11 @@ Hermes Hub e' il client operativo di Hermes Agent sul server personale:
 
 Il client non deve sostituire memoria, planning, tool loop o policy di Hermes Agent.
 
+## Ambito verticale Android
+
+- Il progetto e' verticale sul funzionamento di Android: ignora completamente la parte Windows (`src/NemoclawChat.Windows`, MSIX, build/lint dotnet) salvo esplicita richiesta contraria.
+- Non modificare, compilare o verificare codice Windows nelle attivita' ordinarie.
+
 ## Repository e Git
 
 - Remoto: `https://github.com/JackoPeru/HermesHub.git`.
@@ -169,4 +174,4 @@ Prima della pubblicazione:
 
 ## Release corrente
 
-Versione corrente: `0.6.186`.
+Versione corrente: `0.6.187`.

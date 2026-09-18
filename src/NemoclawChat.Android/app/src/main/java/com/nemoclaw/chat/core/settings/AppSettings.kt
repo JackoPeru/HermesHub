@@ -35,6 +35,7 @@ data class AppSettings(
     val metricPromptTokens: Boolean = AppDefaults.metricPromptTokens,
     val metricContextTokens: Boolean = AppDefaults.metricContextTokens,
     val metricDuration: Boolean = AppDefaults.metricDuration,
+    val metricAcceptanceRate: Boolean = AppDefaults.metricAcceptanceRate,
     val maxAttachmentMb: Int = AppDefaults.maxAttachmentMb,
     val strictNativeMode: Boolean = AppDefaults.strictNativeMode,
     val demoMode: Boolean = AppDefaults.demoMode,
@@ -51,7 +52,8 @@ internal fun AppSettings.metricFilter(): MetricDisplayFilter = MetricDisplayFilt
     outputTokens = metricOutputTokens,
     promptTokens = metricPromptTokens,
     contextTokens = metricContextTokens,
-    duration = metricDuration
+    duration = metricDuration,
+    acceptanceRate = metricAcceptanceRate
 )
 
 internal fun loadSettings(context: Context): AppSettings {
@@ -88,6 +90,7 @@ internal fun loadSettings(context: Context): AppSettings {
         metricPromptTokens = prefs.getBoolean("metricPromptTokens", AppDefaults.metricPromptTokens),
         metricContextTokens = prefs.getBoolean("metricContextTokens", AppDefaults.metricContextTokens),
         metricDuration = prefs.getBoolean("metricDuration", AppDefaults.metricDuration),
+        metricAcceptanceRate = prefs.getBoolean("metricAcceptanceRate", AppDefaults.metricAcceptanceRate),
         maxAttachmentMb = prefs.getInt("maxAttachmentMb", AppDefaults.maxAttachmentMb).let { if (it <= 0 || it == 6) 150 else it }.coerceIn(1, 150),
         strictNativeMode = prefs.getBoolean("strictNativeMode", AppDefaults.strictNativeMode),
         demoMode = prefs.getBoolean("demoMode", AppDefaults.demoMode),
@@ -179,6 +182,7 @@ internal fun saveSettings(context: Context, settings: AppSettings) {
         putBoolean("metricPromptTokens", settings.metricPromptTokens)
         putBoolean("metricContextTokens", settings.metricContextTokens)
         putBoolean("metricDuration", settings.metricDuration)
+        putBoolean("metricAcceptanceRate", settings.metricAcceptanceRate)
         putInt("maxAttachmentMb", settings.maxAttachmentMb.coerceIn(1, 150))
         putBoolean("strictNativeMode", settings.strictNativeMode)
         putBoolean("demoMode", settings.demoMode)
@@ -220,6 +224,7 @@ internal object AppDefaults {
     const val metricPromptTokens = true
     const val metricContextTokens = true
     const val metricDuration = true
+    const val metricAcceptanceRate = true
     const val maxAttachmentMb = 150
     const val strictNativeMode = false
     const val demoMode = false

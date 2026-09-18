@@ -91,6 +91,33 @@ private fun validateTokensPerSecond(value: Double?): Double? {
     return if (v.isFinite() && v > 0.0 && v <= 70.0) v else null
 }
 
+/**
+ * Acceptance rate dello speculative decoding (llama.cpp `timings.draft_n` /
+ * `draft_n_accepted`, esposti con `timings_per_token`). Solo server, mai stimato.
+ */
+private fun validateDraftAcceptance(accepted: Int?, total: Int?): Double? {
+    val n = total ?: return null
+    val a = accepted ?: return null
+    if (n <= 0 || a < 0 || a > n) return null
+    return (a.toDouble() / n.toDouble()).takeIf { it.isFinite() }
+}
+
+/** Tipo spec attivo dichiarato dal server (`draft-mtp` -> `mtp`). Mai inventato: null se assente. */
+internal fun normalizeSpecTypeLabel(raw: String?): String? {
+    val v = raw?.trim()?.lowercase() ?: return null
+    if (v.isEmpty()) return null
+    val stripped = v.removePrefix("draft-").removePrefix("draft_")
+    if (stripped.isEmpty() || stripped.length > 24) return null
+    if (!stripped[0].isLetterOrDigit()) return null
+    if (!stripped.all { it.isLetterOrDigit() || it == '-' || it == '_' }) return null
+    return stripped
+}
+
+internal fun formatAcceptancePart(rate: Double, label: String?): String {
+    val pct = String.format(java.util.Locale.US, "%.0f", rate * 100.0)
+    return if (label.isNullOrBlank()) "Acc $pct%" else "Acc $pct% ($label)"
+}
+
 @androidx.compose.runtime.Immutable
 data class ChatStreamStats(
     val ttftMs: Double? = null,
@@ -100,7 +127,9 @@ data class ChatStreamStats(
     val promptTokens: Int? = null,
     val contextTokens: Int? = null,
     val contextLength: Int? = null,
-    val contextPercent: Int? = null
+    val contextPercent: Int? = null,
+    val acceptanceRate: Double? = null,
+    val acceptanceLabel: String? = null
 )
 
 internal fun ChatStreamStats.contextTokens(): Int {
@@ -360,6 +389,8 @@ data class StreamingState(
         is ChatStreamEvent.Usage -> copy(
             status = "Usage ricevuta: prompt ${event.promptTokens ?: "-"}, output ${event.completionTokens ?: "-"}."
         ).withActivity("Usage ricevuta.")
+        // Acceptance aggregata dall'accumulatore stream nelle stats finali: nessuno stato live.
+        is ChatStreamEvent.DraftAcceptance -> this
         is ChatStreamEvent.ContextUsage -> copy(
             stats = (stats ?: ChatStreamStats()).copy(
                 contextTokens = event.tokens ?: stats?.contextTokens,
@@ -544,6 +575,7 @@ sealed class ChatStreamEvent {
         val runId: String?
     ) : ChatStreamEvent()
     data class Usage(val promptTokens: Int?, val completionTokens: Int?, val tokensPerSecond: Double? = null) : ChatStreamEvent()
+    data class DraftAcceptance(val rate: Double, val label: String? = null) : ChatStreamEvent()
     data class ContextUsage(val tokens: Int?, val length: Int?, val percent: Int?) : ChatStreamEvent()
     data class PromptProgress(
         val percent: Int,
@@ -597,6 +629,8 @@ fun streamChatRequest(
     var promptTokens: Int? = null
     var completionTokens: Int? = null
     var serverTokensPerSecond: Double? = null
+    var draftRate: Double? = null
+    var draftLabel: String? = null
     var contextTokens: Int? = null
     var contextLength: Int? = null
     var contextPercent: Int? = null
@@ -711,6 +745,11 @@ fun streamChatRequest(
                 promptTokens = ev.promptTokens ?: promptTokens
                 completionTokens = ev.completionTokens ?: completionTokens
                 serverTokensPerSecond = validateTokensPerSecond(ev.tokensPerSecond) ?: serverTokensPerSecond
+                return false
+            }
+            is ChatStreamEvent.DraftAcceptance -> {
+                draftRate = ev.rate
+                if (!ev.label.isNullOrBlank()) draftLabel = ev.label
                 return false
             }
             is ChatStreamEvent.ContextUsage -> {
@@ -946,7 +985,7 @@ fun streamChatRequest(
     if (retriedWithoutPreviousResponseId && emittedResponseId.isNullOrBlank()) {
         emit(ChatStreamEvent.ResponseId(""))
     }
-    emit(ChatStreamEvent.Done(ChatStreamStats(ttftMs, totalMs, tokensOut, tps, promptTokens, contextTokens, contextLength, contextPercent)))
+    emit(ChatStreamEvent.Done(ChatStreamStats(ttftMs, totalMs, tokensOut, tps, promptTokens, contextTokens, contextLength, contextPercent, draftRate, draftLabel)))
 }.flowOn(Dispatchers.IO)
 
 private data class SseOpenResult(
@@ -1622,6 +1661,7 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
     val out = mutableListOf<ChatStreamEvent>()
     obj.promptProgressEventOrNull()?.let { out += it }
     obj.tokensPerSecondOrNull()?.let { out += ChatStreamEvent.Usage(null, null, it) }
+    obj.draftAcceptanceOrNull()?.let { out += ChatStreamEvent.DraftAcceptance(it.rate, it.label) }
     val type = eventName ?: obj.optString("type", "")
     val t = type.lowercase()
 
@@ -2312,6 +2352,24 @@ private fun JSONObject.tokensPerSecondOrNull(): Double? {
         timings.optDoubleOrNull("predicted_per_second")
             ?: timings.optDoubleOrNull("tokens_per_second")
     )
+}
+
+internal data class DraftAcceptanceData(val rate: Double, val label: String?)
+
+/**
+ * Acceptance rate speculative decoding da `timings` llama.cpp
+ * (`draft_n` / `draft_n_accepted`, PR ggml-org/llama.cpp#12603).
+ * Null quando lo speculative decoding non è attivo: niente stime client-side.
+ */
+internal fun JSONObject.draftAcceptanceOrNull(): DraftAcceptanceData? {
+    val timings = optJSONObject("timings") ?: this
+    if (!timings.has("draft_n") && !timings.has("draft_n_accepted")) return null
+    val total = timings.optIntOrNull("draft_n") ?: return null
+    val accepted = timings.optIntOrNull("draft_n_accepted") ?: return null
+    val rate = validateDraftAcceptance(accepted, total) ?: return null
+    val label = normalizeSpecTypeLabel(timings.optString("spec_type", "").takeIf { it.isNotBlank() }
+        ?: timings.optString("draft_spec_type", "").takeIf { it.isNotBlank() })
+    return DraftAcceptanceData(rate, label)
 }
 
 private fun visualBlocksMetadataJson(
