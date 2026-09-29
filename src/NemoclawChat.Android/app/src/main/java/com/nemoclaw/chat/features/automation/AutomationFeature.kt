@@ -140,10 +140,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -294,6 +296,7 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
     var botRoster by remember { mutableStateOf<HermesBotRoster?>(null) }
     var selectedBotProfile by rememberSaveable { mutableStateOf("") }
     var botMenuExpanded by remember { mutableStateOf(false) }
+    var pendingDeleteJob by remember { mutableStateOf<CronJob?>(null) }
 
     fun schedule(): String {
         if (frequency == "Ogni ora") return "0 * * * *"
@@ -483,14 +486,27 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                         refreshNonce++
                     }
                 },
-                onDelete = {
-                    scope.launch {
-                        status = cronAction(settings, job.id, "delete", loadGatewaySecret(context), selectedBotProfile.takeIf { it.isNotBlank() }, botRoster?.multiplexEnabled == true)
-                        refreshNonce++
-                    }
-                }
+                onDelete = { pendingDeleteJob = job }
             )
         }
+    }
+
+    pendingDeleteJob?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteJob = null },
+            title = { Text("Elimina ${target.name}") },
+            text = { Text("Eliminare la routine \"${target.name}\" (${target.schedule})? L'operazione non si pu├▓ annullare.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingDeleteJob = null
+                    scope.launch {
+                        status = cronAction(settings, target.id, "delete", loadGatewaySecret(context), selectedBotProfile.takeIf { it.isNotBlank() }, botRoster?.multiplexEnabled == true)
+                        refreshNonce++
+                    }
+                }) { Text("Elimina", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { pendingDeleteJob = null }) { Text("Annulla") } }
+        )
     }
 }
 @Composable

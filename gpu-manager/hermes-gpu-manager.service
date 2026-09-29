@@ -1,0 +1,18 @@
+[Unit]
+Description=Hermes GPU Manager (CPU-only LLM/MEDIA orchestrator)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=matteo
+Group=matteo
+WorkingDirectory=/opt/hermes/gpu-manager
+ExecStart=/opt/hermes/gpu-manager/venv/bin/python /opt/hermes/gpu-manager/manager.py
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

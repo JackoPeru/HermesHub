@@ -2,6 +2,14 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.188 - 2026-09-29
+
+- Sidebar con sezioni collassabili persistenti (Operatività, Controllo, Contenuti, Account, Recenti ridotti con link all'archivio).
+- Sezione Bot ripresentata: gerarchia azioni, stati vuoti con CTA, conferma rimozione connessioni, errori di validazione visibili, esiti turno in italiano.
+- Conferme distruttive su Cron, Archivio, Reset impostazioni e manutenzione server; label Impostazioni chiarite.
+- Reasoning effort `max`/`ultra` normalizzato a `xhigh` senza capabilities note (niente più HTTP 400 dai template EXL3); override `null` dell'archivio riletti come vuoti.
+- Sezione Server con stato GPU Manager (Modalità GPU, VRAM, coda media) e label gateway leggibile.
+
 ## 0.6.187 - 2026-09-18
 
 - Nei parametri dei messaggi agente compare l'acceptance rate dello speculative decoding (`Acc NN%`, con tipo `mtp`/`dflash`/`dspark` quando dichiarato dal server), con toggle dedicato nelle metriche.

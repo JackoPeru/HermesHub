@@ -573,5 +573,39 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
             self.assertGreaterEqual(launcher.count(key), 3, key)
 
 
+    def test_compact_observer_prompt_is_minimal_and_agent_run_stays_behind_needs_agent(self) -> None:
+        patcher_source = (
+            ROOT
+            / "scripts"
+            / "hermes_hub_gateway"
+            / "adapters"
+            / "hermes"
+            / "legacy_patcher.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Act as Perceptor and Senser", patcher_source)
+        self.assertIn("Set needs_agent=true only for tools", patcher_source)
+        self.assertIn(
+            'needs_agent = raw.get("needs_agent", action == "escalate")', patcher_source
+        )
+        self.assertIn('if fast.get("needs_agent"):', patcher_source)
+        self.assertEqual(1, self.patched.count("adapter._run_agent("))
+
+    def test_direct_voice_turn_suppresses_passive_observer_output(self) -> None:
+        patcher_source = (
+            ROOT
+            / "scripts"
+            / "hermes_hub_gateway"
+            / "adapters"
+            / "hermes"
+            / "legacy_patcher.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"direct_turns_pending": 0', patcher_source)
+        self.assertGreaterEqual(
+            patcher_source.count('int(session.get("direct_turns_pending") or 0) > 0'),
+            2,
+        )
+        self.assertIn("direct_turns_pending", self.patched)
+
+
 if __name__ == "__main__":
     unittest.main()

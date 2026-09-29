@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# hermes-gpu: tiny CLI for hermes-gpu-manager (for shell use and Hermes agent tool calls).
+# Usage: hermes-gpu status | mode llm|media|auto | submit <workflow.json> [image|video] | job <id> | cancel <id> | jobs | logs
+set -euo pipefail
+BASE="${HERMES_GPU_MANAGER_URL:-http://127.0.0.1:8643}"
+cmd="${1:-status}"
+case "$cmd" in
+  status)
+    curl -fsS "$BASE/status" | python3 -m json.tool
+    ;;
+  mode)
+    target="${2:-auto}"
+    curl -fsS -X POST "$BASE/mode/$target" | python3 -m json.tool
+    ;;
+  submit)
+    file="${2:?workflow json file required}"
+    kind="${3:-image}"
+    curl -fsS -X POST -H 'Content-Type: application/json' --data @"$file" "$BASE/jobs/$kind"
+    echo
+    ;;
+  job)
+    jid="${2:?job id required}"
+    curl -fsS "$BASE/jobs/$jid" | python3 -m json.tool
+    ;;
+  jobs)
+    curl -fsS "$BASE/jobs" | python3 -m json.tool | head -100
+    ;;
+  cancel)
+    jid="${2:?job id required}"
+    curl -fsS -X POST "$BASE/jobs/$jid/cancel" | python3 -m json.tool
+    ;;
+  logs)
+    journalctl -u hermes-gpu-manager --no-pager --lines="${2:-40}"
+    ;;
+  *)
+    echo "usage: hermes-gpu status|mode|submit|job|jobs|cancel|logs" >&2
+    exit 2
+    ;;
+esac

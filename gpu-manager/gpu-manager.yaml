@@ -1,0 +1,44 @@
+# Hermes GPU Manager configuration. Safe to edit; daemon re-reads on restart.
+default_mode: auto
+host: 0.0.0.0
+port: 8643
+# Optional bearer token for the manager API itself. Empty = LAN trust
+# (same posture as TabbyAPI disable_auth on loopback).
+api_key: ""
+db_path: /var/lib/hermes-gpu-manager/state.db
+output_dir: /opt/hermes/gpu-manager/outputs
+
+llm:
+  backend: tabbyapi
+  base_url: http://127.0.0.1:8000
+  service: hermes-tabby.service
+  startup_timeout: 420
+  health_model: Qwen3.8-27B-Uncensored-EXL3-3.07bpw
+
+media:
+  backend: comfyui
+  service: hermes-comfyui.service
+  base_url: http://127.0.0.1:8188
+  output_dir: /opt/hermes/runtimes/comfyui/app/output
+  input_dir: /opt/hermes/runtimes/comfyui/app/input
+  startup_timeout: 300
+  job_timeout_image: 1200
+  job_timeout_video: 3600
+  poll_interval: 2.0
+
+switching:
+  media_idle_timeout: 30
+  llm_drain_timeout: 10
+  llm_shutdown_timeout: 60
+  vram_free_mb: 2500
+  post_unload_settle: 5
+
+recovery:
+  max_retries: 3
+  retry_backoff: [10, 30, 60]
+
+# MiniMax H3: DISABLED_LICENSE_GATE (EU/Italy excluded by MiniMax community license).
+# Do NOT download or run H3 weights without separate written MiniMax authorization.
+h3:
+  enabled: false
+  license_state: DISABLED_LICENSE_GATE

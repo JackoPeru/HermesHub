@@ -78,6 +78,18 @@ def bash_path(bash: str, path: Path) -> str:
     return f"/{drive[0].lower()}{resolved.as_posix()[2:]}"
 
 
+def bash_path_preserving_symlink(bash: str, path: Path) -> str:
+    """Convert an absolute Windows path for Git Bash without resolving symlinks."""
+    del bash
+    absolute = path.absolute()
+    if os.name != "nt":
+        return str(absolute)
+    drive = absolute.drive
+    if len(drive) != 2 or drive[1] != ":":
+        raise ValueError(f"Git Bash fixture requires a drive-qualified path: {absolute}")
+    return f"/{drive[0].lower()}{absolute.as_posix()[2:]}"
+
+
 def load_patcher():
     spec = importlib.util.spec_from_file_location("hermes_gateway_patcher", PATCHER_PATH)
     module = importlib.util.module_from_spec(spec)
@@ -96,6 +108,7 @@ class GatewayScriptTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.patcher = load_patcher()
+
 
     def test_auto_update_timer_runs_every_two_minutes_and_restarts_gateway(self):
         timer = (SCRIPTS / "hermes-hub-linux-update.timer").read_text(encoding="utf-8")
@@ -1523,6 +1536,8 @@ class GatewayScriptTests(unittest.TestCase):
         real_python = Path(sys.executable)
         python_wrapper = bin_dir / "python"
         python_wrapper.write_text(f'#!/usr/bin/env bash\nif [ "$1" = "-m" ] && [ "${{2:-}}" = "pip" ]; then exit 0; fi\nexec "{real_python}" "$@"\n', encoding="utf-8")
+        python3_wrapper = bin_dir / "python3"
+        python3_wrapper.write_text(f'#!/usr/bin/env bash\nif [ "$1" = "-m" ] && [ "${{2:-}}" = "pip" ]; then exit 0; fi\nexec "{real_python}" "$@"\n', encoding="utf-8")
         hermes = bin_dir / "hermes"
         hermes.write_text("#!/usr/bin/env bash\necho candidate\n", encoding="utf-8")
         curl = bin_dir / "curl"
@@ -1548,7 +1563,7 @@ class GatewayScriptTests(unittest.TestCase):
             [ "$FAKE_FAIL_RESTART_ON" = "$count" ] && exit 1
             exit 0
             """), encoding="utf-8")
-        for executable in (python_wrapper, hermes, curl, systemctl):
+        for executable in (python_wrapper, python3_wrapper, hermes, curl, systemctl):
             executable.chmod(0o755)
         counter_dir = root / "counters"
         counter_dir.mkdir()
@@ -1700,6 +1715,53 @@ class GatewayScriptTests(unittest.TestCase):
             state = json.loads((fixture["home"] / "hub_gateway_runtime.json").read_text(encoding="utf-8"))
             self.assertEqual("rollback_failed", state["status"])
             self.assertIn("restart during rollback", state["failure"]["reason"])
+
+
+    def test_jarvis_stt_emits_single_final_transcript_without_partial_streaming(self):
+        patched, _ = self.patcher._patch_text(UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8"))
+        transcribe_start = patched.index("def _hermes_hub_transcribe_file")
+        transcribe_block = patched[
+            transcribe_start:patched.index(
+                "def _hermes_hub_cached_hardware_snapshot", transcribe_start
+            )
+        ]
+        self.assertIn(
+            'return "".join(segment.text for segment in segments).strip()', transcribe_block
+        )
+        self.assertNotIn("yield", transcribe_block)
+        self.assertNotIn("partial", transcribe_block)
+        self.assertNotIn("overlap", transcribe_block)
+        handler_start = patched.index("async def _handle_audio_transcriptions")
+        handler_block = patched[
+            handler_start:patched.index("async def _handle_audio_speech", handler_start)
+        ]
+        self.assertEqual(
+            1, handler_block.count('web.json_response({"text": result_text})')
+        )
+        self.assertNotIn("StreamResponse", handler_block)
+        self.assertNotIn("partial", handler_block)
+        self.assertNotIn("overlap", handler_block)
+        self.assertNotIn("yield", handler_block)
+        self.assertIn("max(1, min(10", handler_block)
+
+    def test_streaming_tts_uses_framed_wav_segments_with_plain_wav_fallback(self):
+        patched, _ = self.patcher._patch_text(UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8"))
+        self.assertIn("# HERMES_HUB_STREAMING_TTS_V1", patched)
+        handler_start = patched.index("async def _handle_audio_speech")
+        handler_block = patched[
+            handler_start:patched.index("def _hermes_hub_preload_kokoro", handler_start)
+        ]
+        self.assertIn(
+            '"Content-Type": "application/vnd.hermes.framed-wav"', handler_block
+        )
+        self.assertIn('"X-Hermes-Audio-Stream": "framed-wav-v1"', handler_block)
+        self.assertIn('body.get("stream") is True', handler_block)
+        self.assertIn(
+            'return web.Response(body=first_audio, content_type="audio/wav")', handler_block
+        )
+        self.assertIn('len(first_audio).to_bytes(4, "big")', handler_block)
+        self.assertIn('await response.write((0).to_bytes(4, "big"))', handler_block)
+        self.assertIn("for chunk in chunks[1:]:", handler_block)
 
 
 if __name__ == "__main__":

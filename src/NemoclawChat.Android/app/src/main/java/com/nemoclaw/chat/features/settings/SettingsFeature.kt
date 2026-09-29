@@ -144,6 +144,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -328,6 +329,7 @@ internal fun SettingsScreen(
     var reasoningLadder by remember { mutableStateOf<List<String>>(emptyList()) }
     var status by remember { mutableStateOf("Pronto.") }
     var showEraseHealthConfirm by remember { mutableStateOf(false) }
+    var showResetConfirm by remember { mutableStateOf(false) }
     var advancedVisible by rememberSaveable { mutableStateOf(false) }
     val wakePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         voiceWakeWord = granted
@@ -448,9 +450,9 @@ internal fun SettingsScreen(
                 PremiumPanel {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Connessione Hermes", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        SettingsField("Hermes API URL", gatewayUrl, { gatewayUrl = it })
+                        SettingsField("Indirizzo server Hermes", gatewayUrl, { gatewayUrl = it })
                         SettingsPasswordField("API key Hermes", apiKey, { apiKey = it })
-                        SettingsField("Cartella video Hermes (sync server)", videoLibraryPath, { })
+                        SettingsField("Cartella video Hermes (dal server)", videoLibraryPath, { }, readOnly = true)
                         SettingsField("Cartella news Hermes", newsLibraryPath, { newsLibraryPath = it })
                         SettingsField("Limite allegati file (MB, max 150)", maxAttachmentMb.toString(), { value ->
                             maxAttachmentMb = value.filter { it.isDigit() }.toIntOrNull()?.coerceIn(1, 150) ?: maxAttachmentMb
@@ -546,9 +548,9 @@ internal fun SettingsScreen(
                             color = AppColors.Muted,
                             fontSize = 12.sp
                         )
-                        MetricSwitch("Push-to-talk", voicePushToTalk) { voicePushToTalk = it }
+                        MetricSwitch("Tieni premuto per parlare", voicePushToTalk) { voicePushToTalk = it }
                         MetricSwitch("Mostra trascrizione", voiceTranscript) { voiceTranscript = it }
-                        MetricSwitch("Instrada su Bluetooth", voiceBluetooth) { voiceBluetooth = it }
+                        MetricSwitch("Audio su Bluetooth", voiceBluetooth) { voiceBluetooth = it }
                     }
                 }
             }
@@ -563,8 +565,8 @@ internal fun SettingsScreen(
                         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text("Avanzate", color = Color.White, fontWeight = FontWeight.SemiBold)
                             SettingsField("Provider", provider, { provider = it })
-                            SettingsField("Endpoint API lato server", inferenceEndpoint, { inferenceEndpoint = it })
-                            SettingsField("API preferita", preferredApi, { preferredApi = it })
+                            SettingsField("Endpoint inferenza server", inferenceEndpoint, { inferenceEndpoint = it })
+                            SettingsField("Protocollo preferito", preferredApi, { preferredApi = it })
                             SettingsField("Modello", model, { model = it })
                             SettingsField("Reasoning effort (vuoto = default server)", reasoningEffort, { reasoningEffort = it.lowercase().trim() })
                             SettingsField("Service tier (vuoto = default)", serviceTier, { serviceTier = it })
@@ -652,7 +654,7 @@ internal fun SettingsScreen(
             }
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Strict native mode", color = Color.White, modifier = Modifier.weight(1f))
+                    Text("Solo modalit├á nativa", color = Color.White, modifier = Modifier.weight(1f))
                     Switch(checked = strictNativeMode, onCheckedChange = { strictNativeMode = it })
                 }
                 Text(
@@ -663,7 +665,7 @@ internal fun SettingsScreen(
             }
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Fallback locale", color = Color.White, modifier = Modifier.weight(1f))
+                    Text("Risposta offline di emergenza", color = Color.White, modifier = Modifier.weight(1f))
                     Switch(checked = demoMode, onCheckedChange = { demoMode = it })
                 }
             }
@@ -812,7 +814,7 @@ internal fun SettingsScreen(
                             Text("Ripristina API key")
                         }
                         Button(onClick = {
-                            val error = validateHttpUrl(gatewayUrl, "Hermes API URL")
+                            val error = validateHttpUrl(gatewayUrl, "Indirizzo server Hermes")
                             if (error != null) {
                                 status = error
                                 return@Button
@@ -826,25 +828,37 @@ internal fun SettingsScreen(
                         }) {
                             Text("Test Hermes")
                         }
-                        Button(onClick = {
-                            apiKey = ""
-                            val defaults = VoiceProfile()
-                            voiceName = defaults.voice
-                            voiceSpeed = defaults.speed
-                            voiceWakeWord = defaults.wakeWord
-                            voiceWakePhrase = defaults.wakePhrase
-                            voicePushToTalk = defaults.pushToTalk
-                            voiceTranscript = defaults.showTranscript
-                            voiceBluetooth = defaults.bluetooth
-                            voiceParticleShape = defaults.particleShape
-                            scope.launch {
-                                withContext(Dispatchers.IO) {
-                                    saveVoiceProfile(context, settings.activeProjectId, defaults)
-                                }
-                                onReset()
-                            }
-                        }) {
+                        Button(onClick = { showResetConfirm = true }) {
                             Text("Reset")
+                        }
+                        if (showResetConfirm) {
+                            AlertDialog(
+                                onDismissRequest = { showResetConfirm = false },
+                                title = { Text("Ripristinare tutto?") },
+                                text = { Text("Verranno rimossi API key (Keystore), profilo voce e impostazioni. L'operazione non si pu├▓ annullare.") },
+                                confirmButton = {
+                                    TextButton(onClick = {
+                                        showResetConfirm = false
+                                        apiKey = ""
+                                        val defaults = VoiceProfile()
+                                        voiceName = defaults.voice
+                                        voiceSpeed = defaults.speed
+                                        voiceWakeWord = defaults.wakeWord
+                                        voiceWakePhrase = defaults.wakePhrase
+                                        voicePushToTalk = defaults.pushToTalk
+                                        voiceTranscript = defaults.showTranscript
+                                        voiceBluetooth = defaults.bluetooth
+                                        voiceParticleShape = defaults.particleShape
+                                        scope.launch {
+                                            withContext(Dispatchers.IO) {
+                                                saveVoiceProfile(context, settings.activeProjectId, defaults)
+                                            }
+                                            onReset()
+                                        }
+                                    }) { Text("Ripristina") }
+                                },
+                                dismissButton = { TextButton(onClick = { showResetConfirm = false }) { Text("Annulla") } }
+                            )
                         }
                         Button(onClick = {
                             status = runCatching { exportLocalBackup(context) }
@@ -933,11 +947,12 @@ internal fun FontScaleControl(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SettingsField(label: String, value: String, onValueChange: (String) -> Unit) {
+internal fun SettingsField(label: String, value: String, onValueChange: (String) -> Unit, readOnly: Boolean = false) {
     TextField(
         modifier = Modifier.fillMaxWidth(),
         value = value,
         onValueChange = { v -> onValueChange(v.take(SETTINGS_FIELD_MAX_LENGTH)) },
+        readOnly = readOnly,
         label = { Text(label, color = AppColors.Muted) },
         colors = TextFieldDefaults.colors(
             focusedContainerColor = AppColors.Composer,

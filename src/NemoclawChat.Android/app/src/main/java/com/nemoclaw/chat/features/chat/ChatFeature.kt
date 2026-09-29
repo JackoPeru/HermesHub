@@ -1211,7 +1211,9 @@ internal fun TopBar(
                     Text(
                         gatewayRuntimeLabel(connected, gatewayRuntime),
                         color = AppColors.Faint,
-                        fontSize = 10.sp
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

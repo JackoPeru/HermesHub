@@ -1,9 +1,8 @@
-Hermes Hub 0.6.187 (acceptance rate speculative decoding)
+Hermes Hub 0.6.188 (sidebar collassabile, Bot, GPU Manager UI, fix reasoning effort)
 
-- Nei parametri dei messaggi agente compare l'acceptance rate (`Acc NN%`) quando lo speculative decoding è attivo, con tipo (`mtp`/`dflash`/`dspark`) quando dichiarato dal server.
-- Nuovo toggle “Acceptance rate (speculative)” nelle metriche; valore persistito in archivio.
-- Progetto verticale su Android (direttiva in `AGENTS.md`).
-- Versioni: Windows/AdminBridge `0.6.187`; Android `versionName 0.6.187`, `versionCode 191`.
-- Asset: `HermesHub-0.6.187-android.apk`, `NemoclawChat.Windows_0.6.187.0_x64.msix`.
-- SHA-256 Android: `16547abb0bf13b110f59691714de3f8114b4730d1667f66b5affceda688f04ee`.
-- SHA-256 Windows: `203ad255d473cf4a618eb249e60c46dd237f571a8b742b9c80809aefc1bbaf24`.
+- Sidebar con sezioni collassabili persistenti; Recenti ridotti con link all'archivio.
+- Sezione Bot ripresentata; conferme distruttive; label chiarite; stato GPU Manager nel Server.
+- Reasoning effort max/ultra normalizzato a xhigh senza capabilities note; override null sanati.
+- Versioni: Windows/AdminBridge `0.6.188`; Android `versionName 0.6.188`, `versionCode 192`.
+- Asset: `HermesHub-0.6.188-android.apk`, `NemoclawChat.Windows_0.6.187.0_x64.msix` (binario Windows invariato).
+- SHA-256 Android: `2715dd9fa22e76ab3b217cf55a607e445d977dfbac30dc4f95e6a80e17b7f7e8`.

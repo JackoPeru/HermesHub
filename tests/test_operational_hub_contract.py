@@ -80,7 +80,7 @@ class OperationalHubContractTests(unittest.TestCase):
         for label in ("if_sara", "im_nicola", "Push-to-talk", "Trascrizione"):
             with self.subTest(client="windows-settings", label=label):
                 self.assertIn(label, windows_settings)
-        for label in ("SupportedVoiceNames", "Push-to-talk", "Mostra trascrizione"):
+        for label in ("SupportedVoiceNames", "Tieni premuto per parlare", "Mostra trascrizione"):
             with self.subTest(client="android-settings", label=label):
                 self.assertIn(label, android_settings)
         for source in (windows_voice, android_voice):

@@ -108,6 +108,8 @@ import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Image
@@ -320,10 +322,12 @@ internal fun SectionTopBar(tab: Tab, onOpenSidebar: () -> Unit, onBackToChat: ()
 internal fun HermesSidebar(
     context: Context,
     selectedTab: Tab,
+    settings: AppSettings,
     onClose: () -> Unit,
     onNewChat: () -> Unit,
     onOpenConversation: (String) -> Unit,
-    onOpenTab: (Tab) -> Unit
+    onOpenTab: (Tab) -> Unit,
+    onToggleSidebarSection: (String) -> Unit
 ) {
     val conversations = remember { loadConversations(context).sortedByDescending { it.updatedAt } }
     Surface(
@@ -379,86 +383,105 @@ internal fun HermesSidebar(
                 )
             }
             item {
-                SidebarSectionLabel("OPERATIVITA")
+                SidebarSectionLabel("OPERATIVIT├Ç", settings.sidebarOperativita) { onToggleSidebarSection("operativita") }
+            }
+            if (settings.sidebarOperativita) {
+                item {
+                    SidebarTabRow(Tab.Chat, selectedTab == Tab.Chat, onOpenTab)
+                }
+                item {
+                    SidebarTabRow(Tab.Voice, selectedTab == Tab.Voice, onOpenTab)
+                }
+                item {
+                    SidebarTabRow(Tab.Jarvis, selectedTab == Tab.Jarvis, onOpenTab)
+                }
+                item {
+                    SidebarTabRow(Tab.Projects, selectedTab == Tab.Projects, onOpenTab)
+                }
+                item {
+                    SidebarTabRow(Tab.Bots, selectedTab == Tab.Bots, onOpenTab)
+                }
+                item {
+                    SidebarTabRow(Tab.Artifacts, selectedTab == Tab.Artifacts, onOpenTab)
+                }
+                item {
+                    SidebarTabRow(Tab.Search, selectedTab == Tab.Search, onOpenTab)
+                }
+                item {
+                    SidebarTabRow(Tab.Archive, selectedTab == Tab.Archive, onOpenTab)
+                }
             }
             item {
-                SidebarTabRow(Tab.Chat, selectedTab == Tab.Chat, onOpenTab)
+                SidebarSectionLabel("CONTROLLO", settings.sidebarControllo) { onToggleSidebarSection("controllo") }
+            }
+            if (settings.sidebarControllo) {
+                items(listOf(Tab.Server, Tab.Hardware, Tab.Health, Tab.Cron, Tab.Notifications, Tab.Continuity, Tab.Audit), key = { "control-${it.name}" }) { tab ->
+                    SidebarTabRow(tab, selectedTab == tab, onOpenTab)
+                }
             }
             item {
-                SidebarTabRow(Tab.Voice, selectedTab == Tab.Voice, onOpenTab)
+                SidebarSectionLabel("CONTENUTI", settings.sidebarContenuti) { onToggleSidebarSection("contenuti") }
+            }
+            if (settings.sidebarContenuti) {
+                items(listOf(Tab.News, Tab.Video), key = { "content-${it.name}" }) { tab ->
+                    SidebarTabRow(tab, selectedTab == tab, onOpenTab)
+                }
             }
             item {
-                SidebarTabRow(Tab.Jarvis, selectedTab == Tab.Jarvis, onOpenTab)
+                SidebarSectionLabel("ACCOUNT", settings.sidebarAccount) { onToggleSidebarSection("account") }
             }
-            item {
-                SidebarTabRow(Tab.Projects, selectedTab == Tab.Projects, onOpenTab)
-            }
-            item {
-                SidebarTabRow(Tab.Bots, selectedTab == Tab.Bots, onOpenTab)
-            }
-            item {
-                SidebarTabRow(Tab.Artifacts, selectedTab == Tab.Artifacts, onOpenTab)
-            }
-            item {
-                SidebarTabRow(Tab.Search, selectedTab == Tab.Search, onOpenTab)
-            }
-            item {
-                SidebarTabRow(Tab.Archive, selectedTab == Tab.Archive, onOpenTab)
-            }
-            item {
-                SidebarSectionLabel("CONTROLLO")
-            }
-            items(listOf(Tab.Server, Tab.Hardware, Tab.Health, Tab.Cron, Tab.Notifications, Tab.Continuity, Tab.Audit), key = { "control-${it.name}" }) { tab ->
-                SidebarTabRow(tab, selectedTab == tab, onOpenTab)
-            }
-            item {
-                SidebarSectionLabel("CONTENUTI")
-            }
-            items(listOf(Tab.News, Tab.Video), key = { "content-${it.name}" }) { tab ->
-                SidebarTabRow(tab, selectedTab == tab, onOpenTab)
-            }
-            item {
-                SidebarSectionLabel("ACCOUNT")
-            }
-            items(listOf(Tab.Settings, Tab.Profile), key = { "account-${it.name}" }) { tab ->
-                SidebarTabRow(tab, selectedTab == tab, onOpenTab)
+            if (settings.sidebarAccount) {
+                items(listOf(Tab.Settings, Tab.Profile), key = { "account-${it.name}" }) { tab ->
+                    SidebarTabRow(tab, selectedTab == tab, onOpenTab)
+                }
             }
             item {
                 HorizontalDivider(color = AppColors.Border, modifier = Modifier.padding(vertical = 8.dp))
-                Text("RECENTI", color = AppColors.Faint, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
+                SidebarSectionLabel("RECENTI", settings.sidebarRecenti) { onToggleSidebarSection("recenti") }
             }
-            if (conversations.isEmpty()) {
-                item {
-                    Column(
-                        modifier = Modifier.padding(vertical = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text("Nessuna chat ancora.", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Tocca + per iniziarne una.", color = AppColors.Muted, fontSize = 12.sp)
+            if (settings.sidebarRecenti) {
+                if (conversations.isEmpty()) {
+                    item {
+                        Column(
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text("Nessuna chat ancora.", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Tocca + per iniziarne una.", color = AppColors.Muted, fontSize = 12.sp)
+                        }
                     }
-                }
-            } else {
-                items(conversations.take(40), key = { it.id }) { conversation ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpenConversation(conversation.id) }
-                            .padding(horizontal = 4.dp, vertical = 8.dp)
-                    ) {
-                        Text(
-                            conversation.title,
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            conversation.description.ifBlank { conversation.prompt },
-                            color = AppColors.Muted,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                } else {
+                    items(conversations.take(15), key = { it.id }) { conversation ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenConversation(conversation.id) }
+                                .padding(horizontal = 4.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                conversation.title,
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                conversation.description.ifBlank { conversation.prompt },
+                                color = AppColors.Muted,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    item {
+                        SidebarRow(
+                            icon = Icons.Rounded.FolderOpen,
+                            title = "Tutte le conversazioni",
+                            subtitle = "Apri l'archivio completo",
+                            selected = false,
+                            onClick = { onOpenTab(Tab.Archive) }
                         )
                     }
                 }
@@ -490,15 +513,30 @@ internal fun SidebarRow(icon: ImageVector, title: String, subtitle: String, sele
 }
 
 @Composable
-internal fun SidebarSectionLabel(title: String) {
-    Text(
-        title,
-        color = AppColors.Faint,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 1.1.sp,
-        modifier = Modifier.padding(start = 12.dp, top = 10.dp, bottom = 2.dp)
-    )
+internal fun SidebarSectionLabel(title: String, expanded: Boolean, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onToggle)
+            .padding(start = 12.dp, top = 10.dp, bottom = 2.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            title,
+            color = AppColors.Faint,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.1.sp,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+            contentDescription = if (expanded) "Chiudi $title" else "Apri $title",
+            tint = AppColors.Muted,
+            modifier = Modifier.size(18.dp)
+        )
+    }
 }
 
 @Composable

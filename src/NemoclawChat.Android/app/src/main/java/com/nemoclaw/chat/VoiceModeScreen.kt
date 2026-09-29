@@ -58,9 +58,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.view.WindowInsetsCompat
@@ -431,14 +433,14 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
                 text = status,
                 color = Color(0xCCFFFFFF),
                 textAlign = TextAlign.Center,
-                maxLines = 2,
+                maxLines = 4,
                 overflow = TextOverflow.Ellipsis
             )
         }
 
         if (voiceProfile.showTranscript) {
             Card(modifier = Modifier.align(Alignment.TopStart).padding(18.dp).fillMaxWidth(0.72f).heightIn(max = 420.dp), colors = CardDefaults.cardColors(containerColor = Color(0xDD151515))) {
-                androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { items(history.size) { index -> val message = history[index]; Text("${message.author}\n${message.text}", color = Color.White) } }
+                androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { items(history.size) { index -> val message = history[index]; Column(verticalArrangement = Arrangement.spacedBy(2.dp)) { Text(message.author, color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold); Text(message.text, color = Color.White, fontSize = 14.sp) } } }
             }
         }
     }

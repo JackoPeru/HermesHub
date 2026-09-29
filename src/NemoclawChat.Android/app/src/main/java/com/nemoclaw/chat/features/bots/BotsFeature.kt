@@ -20,6 +20,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -401,6 +403,7 @@ internal fun BotsScreen(
     var soulInput by remember { mutableStateOf("") }
     var deleteBot by remember { mutableStateOf<HermesBotItem?>(null) }
     var deleteConfirmation by remember { mutableStateOf("") }
+    var removeConnection by remember { mutableStateOf<HermesBotConnection?>(null) }
     var mutating by remember { mutableStateOf(false) }
     var showConnectionEditor by remember { mutableStateOf(false) }
     var connectionLabelInput by remember { mutableStateOf("") }
@@ -449,13 +452,13 @@ internal fun BotsScreen(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { openEditor(null) }) { Text("Nuovo bot") }
-                    Button(onClick = {
+                    OutlinedButton(onClick = {
                         connectionLabelInput = ""
                         connectionEndpointInput = ""
                         connectionTokenInput = ""
                         showConnectionEditor = true
                     }) { Text("Connessioni") }
-                    Button(onClick = { refreshNonce++ }) { Text("Aggiorna") }
+                    OutlinedButton(onClick = { refreshNonce++ }) { Text("Aggiorna") }
                 }
             }
             Text(status, color = AppColors.Muted, modifier = Modifier.padding(top = 12.dp))
@@ -475,11 +478,7 @@ internal fun BotsScreen(
                                 )
                             }
                             if (!connection.isPrimary) {
-                                TextButton(onClick = {
-                                    runCatching { deleteHermesBotConnection(context, settings, connection.id) }
-                                        .onSuccess { status = "Connessione rimossa."; refreshNonce++ }
-                                        .onFailure { status = it.message ?: "Connessione non rimossa." }
-                                }) { Text("Rimuovi") }
+                                TextButton(onClick = { removeConnection = connection }) { Text("Rimuovi") }
                             }
                         }
                     }
@@ -493,7 +492,7 @@ internal fun BotsScreen(
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Gruppi Hermes", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text("Seleziona da 2 a 6 bot anche su connessioni diverse. Il turno resta bounded a 3 round e 10 risposte.", color = AppColors.Muted, fontSize = 12.sp)
+                    Text("Seleziona da 2 a 6 bot anche su connessioni diverse. Max 3 turni e 10 risposte per turno.", color = AppColors.Muted, fontSize = 12.sp)
                     OutlinedTextField(
                         value = groupNameInput,
                         onValueChange = { groupNameInput = it },
@@ -521,6 +520,9 @@ internal fun BotsScreen(
                                 Text(bot.connectionLabel, color = AppColors.Muted, fontSize = 11.sp)
                             }
                         }
+                    }
+                    if (roster?.items.isNullOrEmpty()) {
+                        Text("Crea prima almeno 2 bot qui sopra per formare un gruppo.", color = AppColors.Muted, fontSize = 12.sp)
                     }
                     Text("Selezionati: ${selectedGroupMemberKeys.size}/6", color = AppColors.Muted, fontSize = 12.sp)
                     Button(
@@ -569,7 +571,19 @@ internal fun BotsScreen(
         if (roster?.items.isNullOrEmpty()) {
             item {
                 Card(colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble), shape = RoundedCornerShape(18.dp)) {
-                    Text("Nessun profilo restituito dal gateway.", color = Color.White, modifier = Modifier.padding(16.dp))
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Nessun profilo restituito dal gateway.", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text("Crea il primo bot oppure collega un altro endpoint Hermes.", color = AppColors.Muted, fontSize = 13.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { openEditor(null) }) { Text("Crea bot") }
+                            OutlinedButton(onClick = {
+                                connectionLabelInput = ""
+                                connectionEndpointInput = ""
+                                connectionTokenInput = ""
+                                showConnectionEditor = true
+                            }) { Text("Verifica connessioni") }
+                        }
+                    }
                 }
             }
         }
@@ -578,8 +592,10 @@ internal fun BotsScreen(
                 Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text(bot.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-                        Text("${bot.handle} · ${bot.connectionLabel}", color = AppColors.Muted, fontSize = 12.sp)
-                        Text(bot.profile, color = AppColors.Faint, fontSize = 11.sp)
+                        Text("@${bot.handle} · ${bot.connectionLabel}", color = AppColors.Muted, fontSize = 12.sp)
+                        if (!bot.profile.equals(bot.handle, ignoreCase = true)) {
+                            Text(bot.profile, color = AppColors.Faint, fontSize = 11.sp)
+                        }
                         if (bot.description.isNotBlank()) Text(bot.description, color = Color.White, fontSize = 13.sp)
                         if (bot.isDefault) Text("Profilo predefinito", color = AppColors.Faint, fontSize = 11.sp)
                     }
@@ -604,7 +620,7 @@ internal fun BotsScreen(
                                     deleteConfirmation = ""
                                 },
                                 enabled = !bot.isDefault && !bot.profile.equals("default", true) && mutating == false
-                            ) { Text("Elimina") }
+                            ) { Text("Elimina", color = MaterialTheme.colorScheme.error) }
                         }
                     }
                 }
@@ -632,8 +648,8 @@ internal fun BotsScreen(
                     )
                     if (groupRunning) Text("Esecuzione in corso...", color = AppColors.Muted)
                     groupResult?.let { result ->
-                        Text("Esito: ${result.outcome} · round: ${result.rounds} · risposte: ${result.botMessages}", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text("Pass/silenzio: ${result.memberResults.count { it.silent }}", color = AppColors.Muted, fontSize = 12.sp)
+                        Text("Esito: ${groupOutcomeLabel(result.outcome)} · turni: ${result.rounds} · risposte: ${result.botMessages}", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text("Silenziosi: ${result.memberResults.count { it.silent }}", color = AppColors.Muted, fontSize = 12.sp)
                         result.memberResults.filterNot { it.silent }.forEach { memberResult ->
                             val source = connections.items.firstOrNull { it.id.equals(memberResult.member.connectionId, true) }?.label ?: "Connessione Hermes"
                             Text(
@@ -693,7 +709,7 @@ internal fun BotsScreen(
                     OutlinedTextField(displayNameInput, { displayNameInput = it }, label = { Text("Nome visualizzato") }, singleLine = true)
                     OutlinedTextField(descriptionInput, { descriptionInput = it }, label = { Text("Descrizione") }, minLines = 2)
                     OutlinedTextField(soulInput, { soulInput = it }, label = { Text("SOUL.md (opzionale)") }, minLines = 4)
-                    Text("Endpoint proprietario", color = AppColors.Muted, fontSize = 12.sp)
+                    Text("Connessione", color = AppColors.Muted, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         connections.items.filter { it.enabled }.forEach { connection ->
                             TextButton(onClick = { selectedConnectionId = connection.id }, enabled = editing == null) {
@@ -729,7 +745,7 @@ internal fun BotsScreen(
                             mutating = false
                         }
                     }
-                ) { Text("Salva") }
+                ) { Text(if (mutating) "Salvo..." else "Salva") }
             },
             dismissButton = { TextButton(onClick = { showEditor = false }, enabled = !mutating) { Text("Annulla") } }
         )
@@ -761,9 +777,30 @@ internal fun BotsScreen(
                             mutating = false
                         }
                     }
-                ) { Text("Elimina") }
+                ) { Text("Elimina", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { deleteBot = null }, enabled = !mutating) { Text("Annulla") } }
+        )
+    }
+
+    removeConnection?.let { connection ->
+        AlertDialog(
+            onDismissRequest = { removeConnection = null },
+            title = { Text("Rimuovi ${connection.label}") },
+            text = { Text("La connessione endpoint verr├á eliminata dal dispositivo. I bot su questa connessione smetteranno di funzionare.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        removeConnection = null
+                        scope.launch {
+                            runCatching { deleteHermesBotConnection(context, settings, connection.id) }
+                                .onSuccess { status = "Connessione rimossa."; refreshNonce++ }
+                                .onFailure { status = it.message ?: "Connessione non rimossa." }
+                        }
+                    }
+                ) { Text("Rimuovi", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { removeConnection = null }) { Text("Annulla") } }
         )
     }
 
@@ -808,9 +845,19 @@ internal fun BotsScreen(
                             mutating = false
                         }
                     }
-                ) { Text("Salva") }
+                ) { Text(if (mutating) "Salvo..." else "Salva") }
             },
             dismissButton = { TextButton(onClick = { showConnectionEditor = false }, enabled = !mutating) { Text("Annulla") } }
         )
     }
+}
+
+private fun groupOutcomeLabel(outcome: String): String = when (outcome.lowercase()) {
+    "reply" -> "Risposte ricevute"
+    "bounded" -> "Limitato a 3 turni e 10 risposte"
+    "pass" -> "Nessun intervento"
+    "partial" -> "Parziale: alcuni membri falliti"
+    "error" -> "Errore"
+    "escalation" -> "Escalation"
+    else -> outcome
 }

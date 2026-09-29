@@ -161,14 +161,21 @@ internal fun buildHermesModelOptions(
         return opts
     }
     // Capabilities sconosciute: invia formato ufficiale verbatim, sara' il server a validare/clampare.
-    if (effort != null) {
+    // Unica eccezione: i template di inferenza dichiarano xhigh come tetto (es. TabbyAPI/EXL3
+    // rifiuta "max"/"ultra" con 400), mentre xhigh resta valido anche su Hermes-native.
+    // Clampare max/ultra->xhigh evita il 400 senza cambiare significato dove max era accettato.
+    val verbatimEffort = when (effort) {
+        "max", "ultra" -> "xhigh"
+        else -> effort
+    }
+    if (verbatimEffort != null) {
         val opts = JSONObject()
-        if (effort == "none") {
+        if (verbatimEffort == "none") {
             opts.put("reasoning", JSONObject().put("enabled", false))
             opts.put("reasoning_effort", "none")
         } else {
-            opts.put("reasoning", JSONObject().put("enabled", true).put("effort", effort))
-            opts.put("reasoning_effort", effort)
+            opts.put("reasoning", JSONObject().put("enabled", true).put("effort", verbatimEffort))
+            opts.put("reasoning_effort", verbatimEffort)
         }
         if (tier != null) opts.put("service_tier", tier)
         return opts

@@ -49,9 +49,9 @@ internal fun loadConversations(context: Context, includeDeleted: Boolean = false
                             previousResponseId = obj.optString("previousResponseId").takeIf { it.isNotBlank() },
                             serverConversationId = obj.optString("serverConversationId").takeIf { it.isNotBlank() },
                             hermesSessionId = obj.optString("hermesSessionId").takeIf { it.isNotBlank() },
-                            modelOverride = obj.optString("modelOverride"),
-                            providerOverride = obj.optString("providerOverride"),
-                            reasoningEffort = obj.optString("reasoningEffort"),
+                            modelOverride = obj.optNonNullString("modelOverride"),
+                            providerOverride = obj.optNonNullString("providerOverride"),
+                            reasoningEffort = obj.optNonNullString("reasoningEffort"),
                             projectId = obj.optString("projectId", obj.optString("project_id")),
                             workspacePath = obj.optString("workspacePath", obj.optString("workspace_path")),
                             repositoryUrl = obj.optString("repositoryUrl", obj.optString("repository_url")),
@@ -179,6 +179,10 @@ internal fun conversationsToJsonArray(conversations: List<LocalConversation>): J
     return array
 }
 
+/** Legge stringhe che possono essere null JSON: optString su JSONObject.NULL rende la stringa "null". */
+private fun JSONObject.optNonNullString(key: String): String =
+    optString(key).takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) } ?: ""
+
 internal fun readConversationsFromJsonArray(array: JSONArray): List<LocalConversation> {
     return buildList {
         for (i in 0 until array.length()) {
@@ -196,9 +200,9 @@ internal fun readConversationsFromJsonArray(array: JSONArray): List<LocalConvers
                     previousResponseId = obj.optString("previousResponseId").takeIf { it.isNotBlank() },
                     serverConversationId = obj.optString("serverConversationId").takeIf { it.isNotBlank() },
                     hermesSessionId = obj.optString("hermesSessionId").takeIf { it.isNotBlank() },
-                    modelOverride = obj.optString("modelOverride"),
-                    providerOverride = obj.optString("providerOverride"),
-                    reasoningEffort = obj.optString("reasoningEffort"),
+                    modelOverride = obj.optNonNullString("modelOverride"),
+                    providerOverride = obj.optNonNullString("providerOverride"),
+                    reasoningEffort = obj.optNonNullString("reasoningEffort"),
                     projectId = obj.optString("projectId", obj.optString("project_id")),
                     workspacePath = obj.optString("workspacePath", obj.optString("workspace_path")),
                     repositoryUrl = obj.optString("repositoryUrl", obj.optString("repository_url")),

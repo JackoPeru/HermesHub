@@ -588,11 +588,11 @@ internal fun ArchiveCard(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(onClick = onOpen) { Text("Apri") }
-                Button(onClick = onPin) { Text("Segna") }
+                Button(onClick = onPin) { Text("Segnalibro") }
                 if (item.id != null) {
                     Button(onClick = onManage) { Text("Gestisci") }
                     Button(onClick = { onRename(renameText.trim()) }) { Text("Rinomina") }
-                    if (onForkHermes != null) Button(onClick = onForkHermes) { Text("Fork Hermes") }
+                    if (onForkHermes != null) Button(onClick = onForkHermes) { Text("Copia sul server") }
                     Button(onClick = onDelete) { Text("Elimina") }
                 }
             }
@@ -616,6 +616,7 @@ internal fun ConversationManagerDialog(
     var summary by remember(conversationId, refresh) { mutableStateOf(conversation.summary) }
     val selected = remember(conversationId) { mutableStateListOf<String>() }
     var status by remember { mutableStateOf("Modifica, ramifica o esporta la chat.") }
+    var confirmBulkDelete by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onClose,
@@ -666,10 +667,7 @@ internal fun ConversationManagerDialog(
                     }
                 }
                 item {
-                    Button(onClick = {
-                        updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.filterNot { selected.contains(it.id) }, updatedAt = System.currentTimeMillis()) }
-                        selected.clear(); status = "Porzione eliminata."; refresh++
-                    }, enabled = selected.isNotEmpty()) { Text("Elimina messaggi selezionati") }
+                    Button(onClick = { confirmBulkDelete = true }, enabled = selected.isNotEmpty()) { Text("Elimina messaggi selezionati") }
                     val branches = loadConversations(context).filter { it.parentConversationId == conversation.id || conversation.linkedConversationIds.contains(it.id) }
                     branches.forEach { branch -> Text("Ramo: ${branch.title} · ${branch.messages.size} messaggi", color = AppColors.Muted, modifier = Modifier.clickable { onContinue(branch.id, "") }.padding(6.dp)) }
                 }
@@ -677,6 +675,23 @@ internal fun ConversationManagerDialog(
         },
         confirmButton = { Button(onClick = onClose) { Text("Chiudi") } }
     )
+
+    if (confirmBulkDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmBulkDelete = false },
+            containerColor = AppColors.Surface,
+            title = { Text("Elimina ${selected.size} messaggi", color = Color.White) },
+            text = { Text("Eliminare definitivamente i ${selected.size} messaggi selezionati? L'operazione non si pu├▓ annullare.", color = AppColors.Muted) },
+            confirmButton = {
+                Button(onClick = {
+                    confirmBulkDelete = false
+                    updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.filterNot { selected.contains(it.id) }, updatedAt = System.currentTimeMillis()) }
+                    selected.clear(); status = "Porzione eliminata."; refresh++
+                }) { Text("Elimina") }
+            },
+            dismissButton = { Button(onClick = { confirmBulkDelete = false }) { Text("Annulla") } }
+        )
+    }
 }
 
 internal fun updateLocalConversation(context: Context, id: String, transform: (LocalConversation) -> LocalConversation): Boolean {

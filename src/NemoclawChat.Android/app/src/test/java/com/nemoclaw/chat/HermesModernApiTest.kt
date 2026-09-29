@@ -104,6 +104,18 @@ class HermesModernApiTest {
         assertEquals("priority", buildHermesModelOptions("max", "priority", legacy)!!.getString("service_tier"))
     }
 
+    @Test fun unknownCapabilitiesClampMaxUltraToXhighInsteadOf400() {
+        // Senza capabilities (percorso legacy verbatim) i template che hanno xhigh come tetto
+        // rifiutano max/ultra con 400: clamp a xhigh, mai inviare max/ultra verbatim.
+        assertEquals("xhigh", buildHermesModelOptions("max", null, null)!!.getString("reasoning_effort"))
+        assertEquals("xhigh", buildHermesModelOptions("ultra", null, null)!!.getString("reasoning_effort"))
+        assertEquals("xhigh", buildHermesModelOptions("MAX", null, null)!!.getString("reasoning_effort"))
+        assertEquals("medium", buildHermesModelOptions("medium", null, null)!!.getString("reasoning_effort"))
+        assertEquals("none", buildHermesModelOptions("none", null, null)!!.getString("reasoning_effort"))
+        assertNull(buildHermesModelOptions("", null, null))
+        assertNull(buildHermesModelOptions(null, null, null))
+    }
+
     @Test fun keepaliveIsNotAnEvent() {
         assertTrue(isHermesKeepaliveLine(": keepalive"))
         assertTrue(isHermesKeepaliveLine(":keepalive"))

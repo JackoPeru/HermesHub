@@ -43,7 +43,12 @@ data class AppSettings(
     val healthIncludeSteps: Boolean = AppDefaults.healthIncludeSteps,
     val healthIncludeSleep: Boolean = AppDefaults.healthIncludeSleep,
     val healthIncludeWorkouts: Boolean = AppDefaults.healthIncludeWorkouts,
-    val healthIncludeHeartRate: Boolean = AppDefaults.healthIncludeHeartRate
+    val healthIncludeHeartRate: Boolean = AppDefaults.healthIncludeHeartRate,
+    val sidebarOperativita: Boolean = AppDefaults.sidebarOperativita,
+    val sidebarControllo: Boolean = AppDefaults.sidebarControllo,
+    val sidebarContenuti: Boolean = AppDefaults.sidebarContenuti,
+    val sidebarAccount: Boolean = AppDefaults.sidebarAccount,
+    val sidebarRecenti: Boolean = AppDefaults.sidebarRecenti
 )
 
 internal fun AppSettings.metricFilter(): MetricDisplayFilter = MetricDisplayFilter(
@@ -98,7 +103,12 @@ internal fun loadSettings(context: Context): AppSettings {
         healthIncludeSteps = prefs.getBoolean("healthIncludeSteps", AppDefaults.healthIncludeSteps),
         healthIncludeSleep = prefs.getBoolean("healthIncludeSleep", AppDefaults.healthIncludeSleep),
         healthIncludeWorkouts = prefs.getBoolean("healthIncludeWorkouts", AppDefaults.healthIncludeWorkouts),
-        healthIncludeHeartRate = prefs.getBoolean("healthIncludeHeartRate", AppDefaults.healthIncludeHeartRate)
+        healthIncludeHeartRate = prefs.getBoolean("healthIncludeHeartRate", AppDefaults.healthIncludeHeartRate),
+        sidebarOperativita = prefs.getBoolean("sidebarOperativita", AppDefaults.sidebarOperativita),
+        sidebarControllo = prefs.getBoolean("sidebarControllo", AppDefaults.sidebarControllo),
+        sidebarContenuti = prefs.getBoolean("sidebarContenuti", AppDefaults.sidebarContenuti),
+        sidebarAccount = prefs.getBoolean("sidebarAccount", AppDefaults.sidebarAccount),
+        sidebarRecenti = prefs.getBoolean("sidebarRecenti", AppDefaults.sidebarRecenti)
     )
     return normalizePlugAndPlaySettings(context, settings)
 }
@@ -191,6 +201,11 @@ internal fun saveSettings(context: Context, settings: AppSettings) {
         putBoolean("healthIncludeSleep", settings.healthIncludeSleep)
         putBoolean("healthIncludeWorkouts", settings.healthIncludeWorkouts)
         putBoolean("healthIncludeHeartRate", settings.healthIncludeHeartRate)
+        putBoolean("sidebarOperativita", settings.sidebarOperativita)
+        putBoolean("sidebarControllo", settings.sidebarControllo)
+        putBoolean("sidebarContenuti", settings.sidebarContenuti)
+        putBoolean("sidebarAccount", settings.sidebarAccount)
+        putBoolean("sidebarRecenti", settings.sidebarRecenti)
     }
 }
 
@@ -233,6 +248,11 @@ internal object AppDefaults {
     const val healthIncludeSleep = true
     const val healthIncludeWorkouts = true
     const val healthIncludeHeartRate = false
+    const val sidebarOperativita = true
+    const val sidebarControllo = true
+    const val sidebarContenuti = true
+    const val sidebarAccount = true
+    const val sidebarRecenti = true
     const val releasesPage = "https://github.com/JackoPeru/HermesHub/releases"
     const val latestReleaseApi = "https://api.github.com/repos/JackoPeru/HermesHub/releases/latest"
 }

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.187"
-EXPECTED_ANDROID_VERSION_CODE = 191
+EXPECTED_VERSION = "0.6.188"
+EXPECTED_ANDROID_VERSION_CODE = 192
 
 
 def read(relative_path: str) -> str:
@@ -380,6 +381,89 @@ class ReleaseConsistencyTests(unittest.TestCase):
 
         windows_home = read("src/NemoclawChat.Windows/Pages/HomePage.xaml.cs")
         self.assertIn("ResolveMediaUri(value, includeQueryToken: false)", windows_home)
+
+    def test_meta_dat_registration_is_not_repeated_and_runtime_is_not_reset(self) -> None:
+        bridge = read(
+            "src/NemoclawChat.Android/app/src/metaDat/java/com/nemoclaw/chat/jarvis/meta/MetaWearablesSetupBridgeImpl.kt"
+        )
+        frame = read(
+            "src/NemoclawChat.Android/app/src/metaDat/java/com/nemoclaw/chat/jarvis/meta/MetaWearablesFrameSource.kt"
+        )
+        runtime = read(
+            "src/NemoclawChat.Android/app/src/metaDat/java/com/nemoclaw/chat/jarvis/meta/MetaWearablesRuntime.kt"
+        )
+        self.assertIn('registrationStatus.equals("REGISTERED"', bridge)
+        self.assertIn("App gia registrata", bridge)
+        self.assertIn("MetaWearablesRuntime.initialize", frame)
+        self.assertIn("Wearables.initialize(", runtime)
+        self.assertNotIn("Wearables.initialize(", bridge)
+        self.assertNotIn("Wearables.initialize(", frame)
+        self.assertNotIn("MetaWearablesRuntime.reset", bridge + frame + runtime)
+
+    def test_meta_dat_device_selection_requires_connected_and_started_stream(self) -> None:
+        frame = read(
+            "src/NemoclawChat.Android/app/src/metaDat/java/com/nemoclaw/chat/jarvis/meta/MetaWearablesFrameSource.kt"
+        )
+        self.assertIn("LinkState.CONNECTED", frame)
+        self.assertIn("SpecificDeviceSelector(deviceId)", frame)
+        self.assertIn("Wearables.createSession(", frame)
+        self.assertIn("DeviceSessionState.STARTED", frame)
+
+    def test_android_manifest_declares_network_camera_and_meta_dat_integration(self) -> None:
+        manifest = read("src/NemoclawChat.Android/app/src/main/AndroidManifest.xml")
+        self.assertIn("android.permission.INTERNET", manifest)
+        self.assertIn("android.permission.CAMERA", manifest)
+        self.assertIn("android.permission.BLUETOOTH\"", manifest)
+        self.assertIn("android.permission.BLUETOOTH_CONNECT", manifest)
+        self.assertIn("mwdat.DAM_ENABLED", manifest)
+        self.assertIn('android:value="false"', manifest)
+
+    def test_linux_updater_uses_explicit_lock_and_refuses_downgrade_and_quarantines(self) -> None:
+        updater = read("scripts/hermes-hub-linux-update.sh")
+        self.assertIn("LOCK_FILE", updater)
+        self.assertIn("flock -n", updater)
+        self.assertIn("ALLOW_DOWNGRADE", updater)
+        self.assertIn("downgrade refused", updater)
+        self.assertIn("FAILED_RELEASE_FILE", updater)
+        self.assertIn("record_failed_release", updater)
+        self.assertIn("Quarantined failed release", updater)
+
+    def test_git_tracks_no_forbidden_artifacts_or_secrets(self) -> None:
+        tracked = (
+            subprocess.run(
+                ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True
+            )
+            .stdout.decode("utf-8", errors="replace")
+            .split("\0")
+        )
+        forbidden = (
+            ".apk",
+            ".msix",
+            ".tar.gz",
+            ".tgz",
+            ".jks",
+            ".keystore",
+            ".p12",
+            ".pem",
+            ".env",
+            "local.properties",
+            "__pycache__",
+        )
+        bad = [path for path in tracked if path.endswith(forbidden)]
+        self.assertEqual([], bad)
+
+    def test_jarvis_single_tap_uses_single_startup_job_under_lifecycle_mutex(self) -> None:
+        controller = read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/jarvis/JarvisSessionController.kt"
+        )
+        self.assertIn("private val lifecycleMutex = Mutex()", controller)
+        self.assertIn("startupJob?.cancel()", controller)
+        self.assertIn("lifecycleMutex.withLock", controller)
+        self.assertIn("startupJob = job", controller)
+        self.assertIn("job.start()", controller)
+        self.assertIn("if (startupJob === job) startupJob = null", controller)
+        self.assertNotIn("STARTUP_ATTEMPTS", controller)
+        self.assertNotIn("STARTUP_RETRY_DELAY", controller)
 
 
 if __name__ == "__main__":

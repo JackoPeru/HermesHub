@@ -1,0 +1,20 @@
+[Unit]
+Description=Hermes ComfyUI headless image/video backend (managed by hermes-gpu-manager)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=matteo
+Group=matteo
+WorkingDirectory=/opt/hermes/runtimes/comfyui/app
+Environment=PATH=/opt/hermes/runtimes/comfyui/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStartPre=/home/matteo/.local/bin/hermes-wait-nvidia.sh
+ExecStart=/opt/hermes/runtimes/comfyui/venv/bin/python main.py --listen 127.0.0.1 --port 8188 --disable-auto-launch
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=600
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

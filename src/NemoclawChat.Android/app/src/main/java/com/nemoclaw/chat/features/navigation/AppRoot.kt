@@ -431,6 +431,7 @@ internal fun ChatApp() {
                 HermesSidebar(
                 context = context,
                 selectedTab = selectedTab,
+                settings = settings,
                 onClose = { sidebarOpen = false },
                 onNewChat = {
                 chatState.resetForNewChat()
@@ -448,6 +449,17 @@ internal fun ChatApp() {
                 onOpenTab = { tab ->
                 setSelectedTab(tab)
                 sidebarOpen = false
+                },
+                onToggleSidebarSection = { key ->
+                val next = when (key) {
+                "operativita" -> settings.copy(sidebarOperativita = !settings.sidebarOperativita)
+                "controllo" -> settings.copy(sidebarControllo = !settings.sidebarControllo)
+                "contenuti" -> settings.copy(sidebarContenuti = !settings.sidebarContenuti)
+                "account" -> settings.copy(sidebarAccount = !settings.sidebarAccount)
+                else -> settings.copy(sidebarRecenti = !settings.sidebarRecenti)
+                }
+                settings = next
+                saveSettings(context.applicationContext, next)
                 }
                 )
                 }

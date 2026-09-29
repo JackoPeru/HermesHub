@@ -299,6 +299,14 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
     var controlOutput by remember { mutableStateOf("Centro controllo non ancora interrogato.") }
     var logFilter by rememberSaveable { mutableStateOf("") }
     var pendingControlAction by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var pendingMaintenanceAction by remember { mutableStateOf<String?>(null) }
+    val maintenanceLabels = mapOf(
+        "update" to "Aggiorna",
+        "rollback" to "Ripristina versione",
+        "backup" to "Salva backup",
+        "restore" to "Ripristina backup",
+        "diagnostic" to "Diagnostica"
+    )
 
     LaunchedEffect(settings) {
         snapshot = loadServerSnapshot(context, settings, loadGatewaySecret(context))
@@ -335,6 +343,9 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             ServerMetric("Cartella video Hermes", snapshot.videoLibraryPath.ifBlank { "In attesa di sync server" }, "Hermes decide path e app lo recepisce da /health/detailed.")
         }
         item {
+            GpuComputeCard(context = context, settings = settings)
+        }
+        item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Azioni", color = Color.White, fontWeight = FontWeight.SemiBold)
@@ -344,7 +355,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Button(onClick = {
-                            val error = validateHttpUrl(settings.gatewayUrl, "Hermes API URL")
+                            val error = validateHttpUrl(settings.gatewayUrl, "Indirizzo server Hermes")
                             if (error != null) {
                                 snapshot = snapshot.copy(statusMessage = error)
                                 return@Button
@@ -390,7 +401,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                     }
                     SettingsField("Filtro log", logFilter, { logFilter = it })
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("update", "rollback", "backup", "restore", "diagnostic").forEach { operation -> Button(onClick = { scope.launch { controlOutput = runCatching { postJson("${settings.gatewayUrl.trimEnd('/')}/hub/server/maintenance", JSONObject().put("operation", operation), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } }) { Text(operation) } }
+                        listOf("update", "rollback", "backup", "restore", "diagnostic").forEach { operation -> Button(onClick = { pendingMaintenanceAction = operation }) { Text(maintenanceLabels[operation] ?: operation) } }
                     }
                     SelectionContainer { Text(controlOutput, color = AppColors.Muted, fontSize = 11.sp) }
                 }
@@ -458,6 +469,17 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             text = { Text("Eseguire $action su $service? Le sessioni attive possono interrompersi.", color = AppColors.Muted) },
             confirmButton = { Button(onClick = { pendingControlAction = null; scope.launch { controlOutput = runCatching { postJson("${settings.gatewayUrl.trimEnd('/')}/hub/server/action", JSONObject().put("service", service).put("action", action), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } }) { Text("Conferma") } },
             dismissButton = { Button(onClick = { pendingControlAction = null }) { Text("Annulla") } }
+        )
+    }
+
+    pendingMaintenanceAction?.let { operation ->
+        AlertDialog(
+            onDismissRequest = { pendingMaintenanceAction = null },
+            containerColor = AppColors.Surface,
+            title = { Text("Conferma ${maintenanceLabels[operation] ?: operation}", color = Color.White) },
+            text = { Text("Eseguire \"${maintenanceLabels[operation] ?: operation}\" sul server? Update, rollback e restore possono interrompere il servizio.", color = AppColors.Muted) },
+            confirmButton = { Button(onClick = { pendingMaintenanceAction = null; scope.launch { controlOutput = runCatching { postJson("${settings.gatewayUrl.trimEnd('/')}/hub/server/maintenance", JSONObject().put("operation", operation), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } }) { Text("Conferma") } },
+            dismissButton = { Button(onClick = { pendingMaintenanceAction = null }) { Text("Annulla") } }
         )
     }
 }
@@ -2622,6 +2644,135 @@ internal fun WellbeingBarChart(
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 items.forEach { item -> Text(item.date.takeLast(2), color = AppColors.Faint, fontSize = 10.sp) }
+            }
+        }
+    }
+}
+
+internal fun gpuManagerBase(gatewayUrl: String): String {
+    val trimmed = gatewayUrl.trim().trimEnd('/')
+    val noPath = trimmed.substringBefore("/v1").substringBefore("/api")
+    return if (Regex(":[0-9]+$").containsMatchIn(noPath)) {
+        noPath.replace(Regex(":[0-9]+$"), ":8643")
+    } else {
+        "$noPath:8643"
+    }
+}
+
+@Composable
+internal fun GpuComputeCard(context: Context, settings: AppSettings) {
+    val scope = rememberCoroutineScope()
+    val base = remember(settings.gatewayUrl) { gpuManagerBase(settings.gatewayUrl) }
+    var body by remember(base) { mutableStateOf<JSONObject?>(null) }
+    var jobsBody by remember(base) { mutableStateOf<JSONArray?>(null) }
+    var error by remember(base) { mutableStateOf("") }
+    var busy by remember(base) { mutableStateOf(false) }
+
+    fun refresh() {
+        scope.launch {
+            busy = true
+            error = runCatching {
+                body = JSONObject(httpGet("$base/status", null))
+                jobsBody = JSONObject(httpGet("$base/jobs", null)).optJSONArray("jobs")
+            }.exceptionOrNull()?.message ?: ""
+            busy = false
+        }
+    }
+
+    LaunchedEffect(base) {
+        refresh()
+        while (true) {
+            delay(10_000)
+            if (!busy) refresh()
+        }
+    }
+
+    Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Modalità GPU (Qwen / ComfyUI)", color = Color.White, fontWeight = FontWeight.SemiBold)
+            if (body == null) {
+                Text(
+                    if (error.isBlank()) "Lettura stato GPU..." else "GPU Manager non raggiungibile ($base). Verifica che hermes-gpu-manager sia attivo.",
+                    color = AppColors.Muted,
+                    fontSize = 12.sp
+                )
+                Button(onClick = { refresh() }, enabled = !busy) { Text("Riprova") }
+            } else {
+            val status = body ?: JSONObject()
+            val desired = status.optString("desired_mode", "?")
+            val state = status.optString("current_state", "?")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("LLM", "MEDIA", "AUTO").forEach { mode ->
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                runCatching { postJson("$base/mode/${mode.lowercase()}", JSONObject(), null, allowCompatAuth = false) }
+                                refresh()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (desired == mode) AppColors.Accent else AppColors.AssistantBubble
+                        )
+                    ) { Text(if (desired == mode) "$mode ✓" else mode) }
+                }
+            }
+            Text("Stato: $state", color = Color.White, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Qwen: ${if (status.optBoolean("llm_loaded", false)) "Online" else if (status.optBoolean("llm_online", false)) "Avvio..." else "Offline"} · " +
+                    "ComfyUI: ${if (status.optBoolean("media_online", false)) "Online" else "Offline"}",
+                color = AppColors.Muted,
+                fontSize = 12.sp
+            )
+            val gpus = status.optJSONArray("gpu") ?: JSONArray()
+            for (i in 0 until gpus.length()) {
+                val gpu = gpus.optJSONObject(i) ?: continue
+                val usedGb = gpu.optDouble("memory_used_mb", 0.0) / 1024.0
+                val totalGb = gpu.optDouble("memory_total_mb", 1.0) / 1024.0
+                val pct = if (totalGb > 0) (usedGb / totalGb * 100).toInt() else 0
+                Text(
+                    "GPU${gpu.optInt("index")} %.1f / %.1f GB (%d%%)".format(usedGb, totalGb, pct),
+                    color = AppColors.Muted,
+                    fontSize = 12.sp
+                )
+            }
+            Text(
+                "Coda media: ${status.optInt("queue_length", 0)}" +
+                    (status.optString("current_job", "").takeIf { it.isNotBlank() }?.let { " · Job $it" } ?: ""),
+                color = AppColors.Muted,
+                fontSize = 12.sp
+            )
+            Text("Media jobs recenti", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            val recentJobs = jobsBody ?: JSONArray()
+            if (recentJobs.length() == 0) {
+                Text("Nessun job media.", color = AppColors.Muted, fontSize = 12.sp)
+            }
+            for (i in 0 until minOf(recentJobs.length(), 5)) {
+                val job = recentJobs.optJSONObject(i) ?: continue
+                val results = job.optJSONArray("result_paths")?.length() ?: 0
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "${job.optString("job_id", "?")} · ${job.optString("preset", job.optString("kind", "?"))} · ${job.optString("status", "?")}",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "Progresso ${(job.optDouble("progress", 0.0) * 100).toInt()}% · output $results" +
+                            (job.optString("phase", "").takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") +
+                            (job.optString("error", "").takeIf { it.isNotBlank() }?.let { " · Errore: $it" } ?: "") +
+                            (job.optString("model", "").takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                        color = AppColors.Muted,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+            status.optString("last_error", "").takeIf { it.isNotBlank() }?.let {
+                Text("Ultimo errore: $it", color = Color(0xFFFF9A7A), fontSize = 12.sp)
+            }
+            status.optString("h3_license_state", "").takeIf { it.isNotBlank() }?.let {
+                Text("Video H3: $it", color = AppColors.Muted, fontSize = 12.sp)
+            }
+            Button(onClick = { refresh() }, enabled = !busy) { Text("Aggiorna") }
             }
         }
     }
