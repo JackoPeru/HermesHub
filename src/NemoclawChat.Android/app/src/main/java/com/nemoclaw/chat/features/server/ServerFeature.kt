@@ -96,11 +96,34 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Article
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.automirrored.rounded.ManageSearch
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AccountCircle
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Archive
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.List
+import androidx.compose.material.icons.rounded.NetworkCheck
+import androidx.compose.material.icons.rounded.Newspaper
+import androidx.compose.material.icons.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Send
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Videocam
+import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
@@ -127,6 +150,8 @@ import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
@@ -354,11 +379,11 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Button(onClick = {
+                        IconButton(onClick = {
                             val error = validateHttpUrl(settings.gatewayUrl, "Indirizzo server Hermes")
                             if (error != null) {
                                 snapshot = snapshot.copy(statusMessage = error)
-                                return@Button
+                                return@IconButton
                             }
                             val healthUrl = "${hermesRoot(settings)}/health"
                             snapshot = snapshot.copy(statusMessage = "Test: $healthUrl")
@@ -366,20 +391,20 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                                 snapshot = snapshot.copy(statusMessage = testGateway(healthUrl, loadGatewaySecret(context)))
                             }
                         }) {
-                            Text("Test Hermes")
+                            Icon(Icons.Rounded.NetworkCheck, contentDescription = "Test Hermes", tint = Color.White)
                         }
-                        Button(onClick = {
+                        IconButton(onClick = {
                             scope.launch {
                                 snapshot = loadServerSnapshot(context, settings, loadGatewaySecret(context))
                                 diagnostics = runDiagnostics(settings, loadGatewaySecret(context))
                             }
                         }) {
-                            Text("Aggiorna stato")
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna stato", tint = Color.White)
                         }
-                        Button(onClick = {
+                        IconButton(onClick = {
                             snapshot = snapshot.copy(statusMessage = "Contratto Hermes: GET /health, GET /health/detailed, GET /v1/models, GET /v1/capabilities, POST /v1/responses, POST /v1/chat/completions, POST /v1/runs, GET/POST /api/jobs cron.")
                         }) {
-                            Text("Mostra API")
+                            Icon(Icons.Rounded.Visibility, contentDescription = "Mostra API", tint = Color.White)
                         }
                     }
                 }
@@ -394,10 +419,10 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                         listOf("hermes", "gateway", "llama", "tailscale").forEach { service -> Button(onClick = { controlService = service }, colors = ButtonDefaults.buttonColors(containerColor = if (controlService == service) AppColors.Accent else AppColors.AssistantBubble)) { Text(service) } }
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { pendingControlAction = controlService to "start" }) { Text("Avvia") }
-                        Button(onClick = { pendingControlAction = controlService to "stop" }) { Text("Ferma") }
-                        Button(onClick = { pendingControlAction = controlService to "restart" }) { Text("Riavvia") }
-                        Button(onClick = { scope.launch { controlOutput = runCatching { httpGet("${settings.gatewayUrl.trimEnd('/')}/hub/server/control?filter=${java.net.URLEncoder.encode(logFilter, "UTF-8")}", loadGatewaySecret(context)) }.getOrElse { it.message ?: "Errore" } } }) { Text("Aggiorna") }
+                        IconButton(onClick = { pendingControlAction = controlService to "start" }) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Avvia servizio", tint = Color.White) }
+                        IconButton(onClick = { pendingControlAction = controlService to "stop" }) { Icon(Icons.Rounded.Stop, contentDescription = "Ferma servizio", tint = Color.White) }
+                        IconButton(onClick = { pendingControlAction = controlService to "restart" }) { Icon(Icons.Rounded.Refresh, contentDescription = "Riavvia servizio", tint = Color.White) }
+                        IconButton(onClick = { scope.launch { controlOutput = runCatching { httpGet("${settings.gatewayUrl.trimEnd('/')}/hub/server/control?filter=${java.net.URLEncoder.encode(logFilter, "UTF-8")}", loadGatewaySecret(context)) }.getOrElse { it.message ?: "Errore" } } }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna output", tint = Color.White) }
                     }
                     SettingsField("Filtro log", logFilter, { logFilter = it })
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -433,7 +458,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Capabilities Hermes", color = Color.White, fontWeight = FontWeight.SemiBold)
                     Text(wsProbe.detail, color = AppColors.Muted)
-                    Button(onClick = {
+                    IconButton(onClick = {
                         wsProbe = wsProbe.copy(status = "Lettura capabilities...", detail = "Chiamata a /v1/capabilities e /v1/models.")
                         scope.launch {
                             val capabilities = runCatching { httpGet("${settings.gatewayUrl.trimEnd('/')}/capabilities", loadGatewaySecret(context)) }.getOrElse { it.message ?: it.javaClass.simpleName }
@@ -447,7 +472,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                             )
                         }
                     }) {
-                        Text("Leggi capabilities")
+                        Icon(Icons.Rounded.Visibility, contentDescription = "Leggi capabilities", tint = Color.White)
                     }
                     if (wsProbe.capabilityLines.isNotEmpty()) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -467,8 +492,8 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             containerColor = AppColors.Surface,
             title = { Text("Conferma $action", color = Color.White) },
             text = { Text("Eseguire $action su $service? Le sessioni attive possono interrompersi.", color = AppColors.Muted) },
-            confirmButton = { Button(onClick = { pendingControlAction = null; scope.launch { controlOutput = runCatching { postJson("${settings.gatewayUrl.trimEnd('/')}/hub/server/action", JSONObject().put("service", service).put("action", action), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } }) { Text("Conferma") } },
-            dismissButton = { Button(onClick = { pendingControlAction = null }) { Text("Annulla") } }
+            confirmButton = { IconButton(onClick = { pendingControlAction = null; scope.launch { controlOutput = runCatching { postJson("${settings.gatewayUrl.trimEnd('/')}/hub/server/action", JSONObject().put("service", service).put("action", action), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } }) { Icon(Icons.Rounded.Check, contentDescription = "Conferma azione server", tint = Color.White) } },
+            dismissButton = { IconButton(onClick = { pendingControlAction = null }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
         )
     }
 
@@ -478,8 +503,8 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             containerColor = AppColors.Surface,
             title = { Text("Conferma ${maintenanceLabels[operation] ?: operation}", color = Color.White) },
             text = { Text("Eseguire \"${maintenanceLabels[operation] ?: operation}\" sul server? Update, rollback e restore possono interrompere il servizio.", color = AppColors.Muted) },
-            confirmButton = { Button(onClick = { pendingMaintenanceAction = null; scope.launch { controlOutput = runCatching { postJson("${settings.gatewayUrl.trimEnd('/')}/hub/server/maintenance", JSONObject().put("operation", operation), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } }) { Text("Conferma") } },
-            dismissButton = { Button(onClick = { pendingMaintenanceAction = null }) { Text("Annulla") } }
+            confirmButton = { IconButton(onClick = { pendingMaintenanceAction = null; scope.launch { controlOutput = runCatching { postJson("${settings.gatewayUrl.trimEnd('/')}/hub/server/maintenance", JSONObject().put("operation", operation), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } }) { Icon(Icons.Rounded.Check, contentDescription = "Conferma manutenzione", tint = Color.White) } },
+            dismissButton = { IconButton(onClick = { pendingMaintenanceAction = null }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
         )
     }
 }
@@ -944,18 +969,18 @@ internal fun OperatorScreen(context: Context, settings: AppSettings) {
                     Text("Scrivi cosa deve fare Hermes. Non serve conoscere endpoint, JSON o ID tecnici.", color = AppColors.Muted, fontSize = 13.sp)
                     SettingsField("Cosa deve fare Hermes?", quickRunText, { quickRunText = it })
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(onClick = {
+                        IconButton(onClick = {
                             val input = quickRunText.ifBlank { "Controlla stato operativo Hermes e riassumi." }
                             runOperatorRpc(scope, context, settings, "POST /v1/runs", "{\"model\":\"hermes-agent\",\"input\":\"${input.jsonEscaped()}\"}", { status = it }, { summary = it }, { raw = it })
-                        }) { Text("Avvia lavoro") }
-                        Button(onClick = {
+                        }) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Avvia lavoro", tint = Color.White) }
+                        IconButton(onClick = {
                             val input = "Crea o prepara un video per l'utente. Salva il file finale nella cartella video configurata sul server cosi appare nella sezione Video."
                             quickRunText = input
                             runOperatorRpc(scope, context, settings, "POST /v1/runs", "{\"model\":\"hermes-agent\",\"input\":\"${input.jsonEscaped()}\"}", { status = it }, { summary = it }, { raw = it })
-                        }) { Text("Crea video") }
-                        Button(onClick = {
+                        }) { Icon(Icons.Rounded.Videocam, contentDescription = "Crea video", tint = Color.White) }
+                        IconButton(onClick = {
                             runOperatorRpc(scope, context, settings, "GET /api/jobs", "", { status = it }, { summary = it }, { raw = it })
-                        }) { Text("Vedi lavori") }
+                        }) { Icon(Icons.AutoMirrored.Rounded.List, contentDescription = "Vedi lavori", tint = Color.White) }
                     }
                     Text(status, color = AppColors.Muted, fontSize = 12.sp)
                 }
@@ -1033,7 +1058,7 @@ internal fun OperatorScreen(context: Context, settings: AppSettings) {
                     Text("Endpoint manuale", color = Color.White, fontWeight = FontWeight.SemiBold)
                     SettingsField("Metodo + path", method, { method = it })
                     SettingsField("Body JSON", params, { params = it })
-                    Button(onClick = {
+                    IconButton(onClick = {
                         status = "${method.trim()}..."
                         summary = "Attesa risposta Hermes..."
                         raw = ""
@@ -1044,7 +1069,7 @@ internal fun OperatorScreen(context: Context, settings: AppSettings) {
                             raw = result.rawJson.ifBlank { result.summary }
                         }
                     }) {
-                        Text("Esegui")
+                        Icon(Icons.Rounded.PlayArrow, contentDescription = "Esegui chiamata", tint = Color.White)
                     }
                     Text(status, color = AppColors.Muted)
                     Text(summary, color = AppColors.Muted, fontSize = 12.sp)
@@ -1144,10 +1169,10 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
                 VideoFeedChip("Tutti", selected = videoFilter == "Tutti") { videoFilter = "Tutti" }
                 VideoFeedChip("Recenti", selected = videoFilter == "Recenti") { videoFilter = "Recenti" }
                 VideoFeedChip("Feedback", selected = videoFilter == "Feedback") { videoFilter = "Feedback" }
-                VideoFeedChip("Aggiorna") {
+                IconButton(onClick = {
                     status = "Aggiorno feed video..."
                     refreshKey++
-                }
+                }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna feed video", tint = Color.White) }
             }
         }
         item {
@@ -1168,7 +1193,7 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
                         modifier = Modifier.fillMaxWidth()
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = {
+                        IconButton(onClick = {
                             val manual = createManualVideoItem(manualVideoUrl)
                             if (manual == null) {
                                 manualVideoError = "URL non valido. Usa un link http/https diretto."
@@ -1177,7 +1202,7 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
                                 selectedVideoId = manual.id
                             }
                         }) {
-                            Text("Apri URL")
+                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri URL video", tint = Color.White)
                         }
                         if (manualVideoError.isNotBlank()) {
                             Text(manualVideoError, color = AppColors.Accent, fontSize = 12.sp)
@@ -1538,7 +1563,9 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
         ) {
             item {
                 Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = onBack) { Text("Indietro") }
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = Color.White)
+                    }
                 }
                 Box(
                     modifier = Modifier
@@ -1614,10 +1641,10 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                         VideoFeedChip("Montaggio") { feedback = appendFeedbackSnippet(feedback, "Montaggio piu' pulito e meno ridondanza") }
                     }
                     SettingsField("Feedback per Hermes", feedback, { feedback = it })
-                    Button(onClick = {
+                    IconButton(onClick = {
                         if (feedback.isBlank()) {
                             status = "Scrivi feedback prima di inviare."
-                            return@Button
+                            return@IconButton
                         }
                         status = "Invio feedback a Hermes..."
                         scope.launch {
@@ -1625,7 +1652,7 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                             saveVideoFeedback(context, item.id, feedback, reaction, result)
                             status = result
                         }
-                    }) { Text("Invia feedback") }
+                    }) { Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Invia feedback", tint = Color.White) }
                 }
             }
         }
@@ -1778,7 +1805,7 @@ internal fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPromp
                 }
             }
             Spacer(modifier = Modifier.height(14.dp))
-            Button(onClick = {
+            IconButton(onClick = {
                 status = "Sincronizzo articoli Hermes..."
                 scope.launch {
                     val htmlStatus = loadNewsLibrary(settings, loadGatewaySecret(context))
@@ -1786,7 +1813,7 @@ internal fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPromp
                     status = htmlStatus.second
                     refreshKey++
                 }
-            }) { Text("Aggiorna") }
+            }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna news", tint = Color.White) }
         }
         item {
             Text(status, color = AppColors.Faint, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -1965,7 +1992,9 @@ internal fun NewsHtmlScreen(context: Context, settings: AppSettings, item: NewsH
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Button(onClick = onBack) { Text("Indietro") }
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = Color.White)
+                    }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(status, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -2029,7 +2058,7 @@ internal fun NewsArticleScreen(
     ) {
         item {
             Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Button(onClick = onBack) { Text("Indietro") }
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = Color.White) }
             }
         }
         item {
@@ -2051,10 +2080,10 @@ internal fun NewsArticleScreen(
                     VideoFeedChip("Tono") { feedback = appendFeedbackSnippet(feedback, "Tono piu' chiaro, diretto e operativo") }
                 }
                 SettingsField("Feedback per Hermes", feedback, { feedback = it })
-                Button(onClick = {
+                IconButton(onClick = {
                     if (feedback.isBlank()) {
                         status = "Scrivi feedback prima di inviare."
-                        return@Button
+                        return@IconButton
                     }
                     status = "Invio feedback a Hermes..."
                     scope.launch {
@@ -2063,7 +2092,7 @@ internal fun NewsArticleScreen(
                         status = result
                         onChanged(result)
                     }
-                }) { Text("Invia feedback") }
+                }) { Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Invia feedback", tint = Color.White) }
             }
         }
     }
@@ -2097,14 +2126,14 @@ internal fun WorkspaceFeedScreen(
             Text(description, color = AppColors.Muted)
             Spacer(modifier = Modifier.height(12.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(onClick = { onOpenChatPrompt(chatPrompt) }) { Text("Nuovo spunto in chat") }
-                Button(onClick = {
+                IconButton(onClick = { onOpenChatPrompt(chatPrompt) }) { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Nuovo spunto in chat", tint = Color.White) }
+                IconButton(onClick = {
                     status = "Sincronizzo artifact Hermes..."
                     scope.launch {
                         status = syncWorkspaceJobs(context, settings, kind, loadGatewaySecret(context))
                         refreshKey++
                     }
-                }) { Text("Sincronizza Hermes") }
+                }) { Icon(Icons.Rounded.Sync, contentDescription = "Sincronizza Hermes", tint = Color.White) }
             }
         }
         item {
@@ -2149,22 +2178,22 @@ internal fun WorkspaceFeedItem(
             item.remoteId?.let { Text("Job: $it", color = AppColors.Faint, fontSize = 12.sp) }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (item.streamUrl.isNotBlank()) {
-                    Button(onClick = { openAndroidIntent(context, Intent(Intent.ACTION_VIEW, resolveWorkspaceUrl(settings, item.streamUrl).toUri())) }) { Text("Streaming") }
+                    IconButton(onClick = { openAndroidIntent(context, Intent(Intent.ACTION_VIEW, resolveWorkspaceUrl(settings, item.streamUrl).toUri())) }) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Streaming", tint = Color.White) }
                 }
                 if (item.downloadUrl.isNotBlank()) {
-                    Button(onClick = { openAndroidIntent(context, Intent(Intent.ACTION_VIEW, resolveWorkspaceUrl(settings, item.downloadUrl).toUri())) }) { Text("Scarica") }
+                    IconButton(onClick = { openAndroidIntent(context, Intent(Intent.ACTION_VIEW, resolveWorkspaceUrl(settings, item.downloadUrl).toUri())) }) { Icon(Icons.Rounded.Download, contentDescription = "Scarica", tint = Color.White) }
                 }
                 if (item.remoteId != null) {
-                    Button(onClick = {
+                    IconButton(onClick = {
                         scope.launch { onChanged(runWorkspaceJobAction(settings, item, "run", loadGatewaySecret(context))) }
-                    }) { Text("Aggiorna") }
+                    }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna job", tint = Color.White) }
                 }
             }
             SettingsField("Feedback per Hermes", feedback, { feedback = it })
-            Button(onClick = {
+            IconButton(onClick = {
                 if (feedback.isBlank()) {
                     onChanged("Scrivi un feedback prima di inviarlo.")
-                    return@Button
+                    return@IconButton
                 }
                 scope.launch {
                     val result = sendWorkspaceFeedback(settings, item, feedback, loadGatewaySecret(context))
@@ -2172,7 +2201,7 @@ internal fun WorkspaceFeedItem(
                     feedback = ""
                     onChanged(result)
                 }
-            }) { Text("Invia feedback") }
+            }) { Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Invia feedback", tint = Color.White) }
             if (item.feedback.isNotBlank()) {
                 Text("Ultimo feedback: ${item.feedback}", color = AppColors.Muted, fontSize = 12.sp)
             }
@@ -2271,14 +2300,14 @@ internal fun ProfileScreen(
                     Text("Aree rapide", color = Color.White, fontWeight = FontWeight.SemiBold)
                     Text("Schermate secondarie spostate qui per lasciare la barra bassa pulita.", color = AppColors.Muted, fontSize = 12.sp)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { onOpenTab(Tab.Server) }) { Text("Hermes") }
-                        Button(onClick = { onOpenTab(Tab.Cron) }) { Text("Cron") }
-                        Button(onClick = { onOpenTab(Tab.Notifications) }) { Text("Notifiche") }
-                        Button(onClick = { onOpenTab(Tab.Hardware) }) { Text("Prestazioni") }
-                        Button(onClick = { onOpenTab(Tab.News) }) { Text("News") }
-                        Button(onClick = { onOpenTab(Tab.Settings) }) { Text("Impostazioni") }
-                        Button(onClick = { onOpenTab(Tab.Projects) }) { Text("Progetti") }
-                        Button(onClick = { onOpenTab(Tab.Archive) }) { Text("Archivio") }
+                        IconButton(onClick = { onOpenTab(Tab.Server) }) { Icon(Icons.Rounded.SmartToy, contentDescription = "Hermes", tint = Color.White) }
+                        IconButton(onClick = { onOpenTab(Tab.Cron) }) { Icon(Icons.Rounded.Schedule, contentDescription = "Cron", tint = Color.White) }
+                        IconButton(onClick = { onOpenTab(Tab.Notifications) }) { Icon(Icons.Rounded.Notifications, contentDescription = "Notifiche", tint = Color.White) }
+                        IconButton(onClick = { onOpenTab(Tab.Hardware) }) { Icon(Icons.Rounded.Speed, contentDescription = "Prestazioni", tint = Color.White) }
+                        IconButton(onClick = { onOpenTab(Tab.News) }) { Icon(Icons.Rounded.Newspaper, contentDescription = "News", tint = Color.White) }
+                        IconButton(onClick = { onOpenTab(Tab.Settings) }) { Icon(Icons.Rounded.Settings, contentDescription = "Impostazioni", tint = Color.White) }
+                        IconButton(onClick = { onOpenTab(Tab.Projects) }) { Icon(Icons.Rounded.Folder, contentDescription = "Progetti", tint = Color.White) }
+                        IconButton(onClick = { onOpenTab(Tab.Archive) }) { Icon(Icons.Rounded.Archive, contentDescription = "Archivio", tint = Color.White) }
                     }
                 }
             }
@@ -2288,7 +2317,7 @@ internal fun ProfileScreen(
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Progetto attivo", color = Color.White, fontWeight = FontWeight.SemiBold)
                     Text(if (settings.activeProjectId.isBlank()) "Nessun progetto selezionato." else "Attivo: ${settings.activeProjectName}", color = AppColors.Muted)
-                    Button(onClick = { onOpenTab(Tab.Projects) }) { Text("Apri Progetti") }
+                    IconButton(onClick = { onOpenTab(Tab.Projects) }) { Icon(Icons.Rounded.FolderOpen, contentDescription = "Apri Progetti", tint = Color.White) }
                 }
             }
         }
@@ -2303,16 +2332,16 @@ internal fun ProfileScreen(
                     SettingsField("Regole progetto", memory.projectRules, { memory = memory.copy(projectRules = it) })
                     SettingsField("Note generali", memory.generalNotes, { memory = memory.copy(generalNotes = it) })
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
+                        IconButton(onClick = {
                             memoryStatus = "Salvo memoria gateway..."
                             scope.launch {
                                 memoryStatus = saveHubMemory(settings, memory, loadGatewaySecret(context))
                             }
-                        }) { Text("Salva memoria") }
-                        Button(onClick = {
+                        }) { Icon(Icons.Rounded.Save, contentDescription = "Salva memoria", tint = Color.White) }
+                        IconButton(onClick = {
                             memory = HubMemoryState()
                             memoryStatus = "Contenuti locali svuotati. Premi Salva memoria per cancellare sul gateway."
-                        }) { Text("Svuota") }
+                        }) { Icon(Icons.Rounded.Delete, contentDescription = "Svuota memoria", tint = Color(0xFFFF7B8E)) }
                     }
                 }
             }
@@ -2350,7 +2379,7 @@ internal fun ProfileScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Button(onClick = {
+                        IconButton(onClick = {
                             updateState = updateState.copy(
                                 status = "Controllo GitHub Releases...",
                                 progress = null,
@@ -2384,7 +2413,7 @@ internal fun ProfileScreen(
                                 )
                             }
                         }) {
-                            Text("Controlla")
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Controlla aggiornamenti", tint = Color.White)
                         }
                         if (updateState.hasUpdate && updateState.releaseAssetUrl != null && updateState.downloadedApkPath == null && !updateState.isDownloading) {
                             Button(onClick = {
@@ -2428,16 +2457,16 @@ internal fun ProfileScreen(
                                     }
                                 }
                             }) {
-                                Text("Scarica")
+                                Icon(Icons.Rounded.Download, contentDescription = "Scarica APK", tint = Color.White)
                             }
                         }
                         if (updateState.downloadedApkPath != null && !updateState.isDownloading) {
-                            Button(onClick = {
-                                val apkPath = updateState.downloadedApkPath ?: return@Button
+                            IconButton(onClick = {
+                                val apkPath = updateState.downloadedApkPath ?: return@IconButton
                                 val status = installDownloadedApk(context, apkPath)
                                 updateState = updateState.copy(status = status)
                             }) {
-                                Text("Aggiorna")
+                                Icon(Icons.Rounded.SystemUpdate, contentDescription = "Installa aggiornamento", tint = Color.White)
                             }
                         }
                     }
@@ -2483,8 +2512,8 @@ internal fun HealthDashboardScreen(context: Context, settings: AppSettings, onOp
         }
         item {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { refreshRevision++ }, enabled = !loading) { Text(if (loading) "Aggiornamento..." else "Aggiorna") }
-                Button(onClick = onOpenSettings) { Text("Impostazioni salute") }
+                IconButton(onClick = { refreshRevision++ }, enabled = !loading) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna dati salute", tint = Color.White) }
+                IconButton(onClick = onOpenSettings) { Icon(Icons.Rounded.Settings, contentDescription = "Impostazioni salute", tint = Color.White) }
             }
         }
         when (val current = history) {
@@ -2495,7 +2524,7 @@ internal fun HealthDashboardScreen(context: Context, settings: AppSettings, onOp
                         Text("Dati non disponibili", color = Color.White, fontWeight = FontWeight.SemiBold)
                         Text(current.message, color = AppColors.Muted, fontSize = 13.sp)
                         Text("Apri Impostazioni salute, collega Health Connect e abilita almeno una categoria.", color = AppColors.Faint, fontSize = 12.sp)
-                        Button(onClick = onOpenSettings) { Text("Collega Health Connect") }
+                        IconButton(onClick = onOpenSettings) { Icon(Icons.Rounded.Link, contentDescription = "Collega Health Connect", tint = Color.White) }
                     }
                 }
             }
@@ -2696,7 +2725,7 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                     color = AppColors.Muted,
                     fontSize = 12.sp
                 )
-                Button(onClick = { refresh() }, enabled = !busy) { Text("Riprova") }
+                IconButton(onClick = { refresh() }, enabled = !busy) { Icon(Icons.Rounded.Refresh, contentDescription = "Riprova lettura GPU", tint = Color.White) }
             } else {
             val status = body ?: JSONObject()
             val desired = status.optString("desired_mode", "?")

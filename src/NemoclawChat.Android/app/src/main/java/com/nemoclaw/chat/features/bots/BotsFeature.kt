@@ -10,16 +10,33 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -451,14 +468,14 @@ internal fun BotsScreen(
                     Text("Profili reali con configurazione, memoria, skill e credenziali separate. Le routine bot richiedono multiplexing attivo.", color = AppColors.Muted, fontSize = 13.sp)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { openEditor(null) }) { Text("Nuovo bot") }
-                    OutlinedButton(onClick = {
+                    IconButton(onClick = { openEditor(null) }) { Icon(Icons.Rounded.Add, contentDescription = "Nuovo bot", tint = Color.White) }
+                    IconButton(onClick = {
                         connectionLabelInput = ""
                         connectionEndpointInput = ""
                         connectionTokenInput = ""
                         showConnectionEditor = true
-                    }) { Text("Connessioni") }
-                    OutlinedButton(onClick = { refreshNonce++ }) { Text("Aggiorna") }
+                    }) { Icon(Icons.Rounded.Link, contentDescription = "Gestisci connessioni", tint = Color.White) }
+                    IconButton(onClick = { refreshNonce++ }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna bot", tint = Color.White) }
                 }
             }
             Text(status, color = AppColors.Muted, modifier = Modifier.padding(top = 12.dp))
@@ -478,7 +495,7 @@ internal fun BotsScreen(
                                 )
                             }
                             if (!connection.isPrimary) {
-                                TextButton(onClick = { removeConnection = connection }) { Text("Rimuovi") }
+                                IconButton(onClick = { removeConnection = connection }) { Icon(Icons.Rounded.Delete, contentDescription = "Rimuovi connessione", tint = Color(0xFFFF7B8E)) }
                             }
                         }
                     }
@@ -525,7 +542,7 @@ internal fun BotsScreen(
                         Text("Crea prima almeno 2 bot qui sopra per formare un gruppo.", color = AppColors.Muted, fontSize = 12.sp)
                     }
                     Text("Selezionati: ${selectedGroupMemberKeys.size}/6", color = AppColors.Muted, fontSize = 12.sp)
-                    Button(
+                    IconButton(
                         enabled = groupNameInput.isNotBlank() && selectedGroupMemberKeys.size in 2..6,
                         onClick = {
                             runCatching {
@@ -544,7 +561,7 @@ internal fun BotsScreen(
                                 status = "Gruppo Hermes salvato."
                             }.onFailure { status = it.message ?: "Gruppo non salvato." }
                         }
-                    ) { Text("Salva gruppo") }
+                    ) { Icon(Icons.Rounded.Check, contentDescription = "Salva gruppo", tint = Color.White) }
                     groups.forEach { group ->
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column(modifier = Modifier.weight(1f)) {
@@ -552,16 +569,16 @@ internal fun BotsScreen(
                                 Text("${group.members.size} membri · sessioni Group persistenti", color = AppColors.Muted, fontSize = 11.sp)
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                TextButton(onClick = {
+                                IconButton(onClick = {
                                     openGroup = group
                                     groupPrompt = ""
                                     groupResult = null
-                                }) { Text("Apri") }
-                                TextButton(onClick = {
+                                }) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri gruppo", tint = Color.White) }
+                                IconButton(onClick = {
                                     runCatching { deleteHermesBotGroup(context, group.name) }
                                         .onSuccess { groups = loadHermesBotGroups(context); status = "Gruppo rimosso." }
                                         .onFailure { status = it.message ?: "Gruppo non rimosso." }
-                                }) { Text("Elimina") }
+                                }) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina gruppo", tint = Color(0xFFFF7B8E)) }
                             }
                         }
                     }
@@ -575,13 +592,13 @@ internal fun BotsScreen(
                         Text("Nessun profilo restituito dal gateway.", color = Color.White, fontWeight = FontWeight.SemiBold)
                         Text("Crea il primo bot oppure collega un altro endpoint Hermes.", color = AppColors.Muted, fontSize = 13.sp)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { openEditor(null) }) { Text("Crea bot") }
-                            OutlinedButton(onClick = {
+                            IconButton(onClick = { openEditor(null) }) { Icon(Icons.Rounded.Add, contentDescription = "Crea bot", tint = Color.White) }
+                            IconButton(onClick = {
                                 connectionLabelInput = ""
                                 connectionEndpointInput = ""
                                 connectionTokenInput = ""
                                 showConnectionEditor = true
-                            }) { Text("Verifica connessioni") }
+                            }) { Icon(Icons.Rounded.Link, contentDescription = "Verifica connessioni", tint = Color.White) }
                         }
                     }
                 }
@@ -600,7 +617,7 @@ internal fun BotsScreen(
                         if (bot.isDefault) Text("Profilo predefinito", color = AppColors.Faint, fontSize = 11.sp)
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Button(
+                        IconButton(
                             enabled = opening == null && roster?.chatSupported == true,
                             onClick = {
                                 opening = bot.identityKey
@@ -611,16 +628,16 @@ internal fun BotsScreen(
                                     opening = null
                                 }
                             }
-                        ) { Text(if (opening == bot.identityKey) "Apro..." else "Apri Bot Chat") }
+                        ) { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Apri Bot Chat", tint = Color.White) }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            TextButton(onClick = { openEditor(bot) }, enabled = mutating == false) { Text("Modifica") }
-                            TextButton(
+                            IconButton(onClick = { openEditor(bot) }, enabled = mutating == false) { Icon(Icons.Rounded.Edit, contentDescription = "Modifica bot", tint = Color.White) }
+                            IconButton(
                                 onClick = {
                                     deleteBot = bot
                                     deleteConfirmation = ""
                                 },
                                 enabled = !bot.isDefault && !bot.profile.equals("default", true) && mutating == false
-                            ) { Text("Elimina", color = MaterialTheme.colorScheme.error) }
+                            ) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina bot", tint = MaterialTheme.colorScheme.error) }
                         }
                     }
                 }
@@ -667,9 +684,9 @@ internal fun BotsScreen(
             },
             confirmButton = {
                 if (groupRunning) {
-                    TextButton(onClick = { groupJob?.cancel() }) { Text("Annulla turno") }
+                    IconButton(onClick = { groupJob?.cancel() }) { Icon(Icons.Rounded.Stop, contentDescription = "Annulla turno", tint = Color.White) }
                 } else {
-                    TextButton(
+                    IconButton(
                         enabled = groupPrompt.isNotBlank(),
                         onClick = {
                             groupRunning = true
@@ -690,10 +707,10 @@ internal fun BotsScreen(
                                 }
                             }
                         }
-                    ) { Text("Esegui turno") }
+                    ) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Esegui turno", tint = Color.White) }
                 }
             },
-            dismissButton = { TextButton(onClick = { openGroup = null }, enabled = !groupRunning) { Text("Chiudi") } }
+            dismissButton = { IconButton(onClick = { openGroup = null }, enabled = !groupRunning) { Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = Color.White) } }
         )
     }
 
@@ -721,7 +738,7 @@ internal fun BotsScreen(
                 }
             },
             confirmButton = {
-                TextButton(
+                IconButton(
                     enabled = profileInput.isNotBlank() && !mutating && selectedConnection?.enabled == true,
                     onClick = {
                         mutating = true
@@ -745,9 +762,9 @@ internal fun BotsScreen(
                             mutating = false
                         }
                     }
-                ) { Text(if (mutating) "Salvo..." else "Salva") }
+                ) { Icon(Icons.Rounded.Save, contentDescription = "Salva bot", tint = Color.White) }
             },
-            dismissButton = { TextButton(onClick = { showEditor = false }, enabled = !mutating) { Text("Annulla") } }
+            dismissButton = { IconButton(onClick = { showEditor = false }, enabled = !mutating) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
         )
     }
 
@@ -762,7 +779,7 @@ internal fun BotsScreen(
                 }
             },
             confirmButton = {
-                TextButton(
+                IconButton(
                     enabled = deleteConfirmation == bot.profile && !mutating,
                     onClick = {
                         mutating = true
@@ -777,9 +794,9 @@ internal fun BotsScreen(
                             mutating = false
                         }
                     }
-                ) { Text("Elimina", color = MaterialTheme.colorScheme.error) }
+                ) { Icon(Icons.Rounded.Delete, contentDescription = "Conferma eliminazione bot", tint = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { deleteBot = null }, enabled = !mutating) { Text("Annulla") } }
+            dismissButton = { IconButton(onClick = { deleteBot = null }, enabled = !mutating) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
         )
     }
 
@@ -789,7 +806,7 @@ internal fun BotsScreen(
             title = { Text("Rimuovi ${connection.label}") },
             text = { Text("La connessione endpoint verr├á eliminata dal dispositivo. I bot su questa connessione smetteranno di funzionare.") },
             confirmButton = {
-                TextButton(
+                IconButton(
                     onClick = {
                         removeConnection = null
                         scope.launch {
@@ -798,9 +815,9 @@ internal fun BotsScreen(
                                 .onFailure { status = it.message ?: "Connessione non rimossa." }
                         }
                     }
-                ) { Text("Rimuovi", color = MaterialTheme.colorScheme.error) }
+                ) { Icon(Icons.Rounded.Delete, contentDescription = "Conferma rimozione connessione", tint = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { removeConnection = null }) { Text("Annulla") } }
+            dismissButton = { IconButton(onClick = { removeConnection = null }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
         )
     }
 
@@ -824,7 +841,7 @@ internal fun BotsScreen(
                 }
             },
             confirmButton = {
-                TextButton(
+                IconButton(
                     enabled = connectionLabelInput.isNotBlank() && connectionEndpointInput.isNotBlank() && !mutating,
                     onClick = {
                         mutating = true
@@ -845,9 +862,9 @@ internal fun BotsScreen(
                             mutating = false
                         }
                     }
-                ) { Text(if (mutating) "Salvo..." else "Salva") }
+                ) { Icon(Icons.Rounded.Save, contentDescription = "Salva connessione", tint = Color.White) }
             },
-            dismissButton = { TextButton(onClick = { showConnectionEditor = false }, enabled = !mutating) { Text("Annulla") } }
+            dismissButton = { IconButton(onClick = { showConnectionEditor = false }, enabled = !mutating) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
         )
     }
 }

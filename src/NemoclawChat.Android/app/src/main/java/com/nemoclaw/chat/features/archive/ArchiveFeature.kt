@@ -96,11 +96,24 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Article
+import androidx.compose.material.icons.automirrored.rounded.CallSplit
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.AccountCircle
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.CallSplit
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.CloudUpload
+import androidx.compose.material.icons.rounded.ContentPaste
+import androidx.compose.material.icons.rounded.CreateNewFolder
+import androidx.compose.material.icons.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
@@ -321,34 +334,34 @@ internal fun ArchiveScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Button(onClick = {
+                        IconButton(onClick = {
                             copyArchiveToClipboard(context)
                             status = "Archivio copiato negli appunti."
                         }) {
-                            Text("Export")
+                            Icon(Icons.Rounded.ContentCopy, contentDescription = "Esporta archivio negli appunti", tint = Color.White)
                         }
-                        Button(onClick = {
+                        IconButton(onClick = {
                             status = importArchiveFromClipboard(context)
                             refreshKey++
                         }) {
-                            Text("Importa appunti")
+                            Icon(Icons.Rounded.ContentPaste, contentDescription = "Importa archivio dagli appunti", tint = Color.White)
                         }
-                        Button(onClick = {
+                        IconButton(onClick = {
                             status = "Carico archivio sul gateway..."
                             scope.launch {
                                 status = syncConversationsToHub(context, loadSettings(context), loadGatewaySecret(context))
                             }
                         }) {
-                            Text("Carica server")
+                            Icon(Icons.Rounded.CloudUpload, contentDescription = "Carica archivio sul server", tint = Color.White)
                         }
-                        Button(onClick = {
+                        IconButton(onClick = {
                             status = "Scarico archivio dal gateway..."
                             scope.launch {
                                 status = restoreConversationsFromHub(context, loadSettings(context), loadGatewaySecret(context))
                                 refreshKey++
                             }
                         }) {
-                            Text("Scarica server")
+                            Icon(Icons.Rounded.CloudDownload, contentDescription = "Scarica archivio dal server", tint = Color.White)
                         }
                         Button(onClick = {
                             filter = "Progetto"
@@ -495,7 +508,7 @@ internal fun ArchiveScreen(
                 )
             },
                 confirmButton = {
-                Button(
+                IconButton(
                     onClick = {
                         pendingDelete = null
                         if (item.id != null) {
@@ -517,24 +530,14 @@ internal fun ArchiveScreen(
                         } else {
                             status = "Elemento non trovato."
                         }
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF8E2E3F),
-                        contentColor = Color.White
-                    )
+                    }
                 ) {
-                    Text("Elimina")
+                    Icon(Icons.Rounded.Delete, contentDescription = "Conferma eliminazione", tint = Color(0xFFFF7B8E))
                 }
             },
             dismissButton = {
-                Button(
-                    onClick = { pendingDelete = null },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AppColors.AssistantBubble,
-                        contentColor = Color.White
-                    )
-                ) {
-                    Text("Annulla")
+                IconButton(onClick = { pendingDelete = null }) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Annulla eliminazione", tint = Color.White)
                 }
             }
         )
@@ -587,13 +590,13 @@ internal fun ArchiveCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Button(onClick = onOpen) { Text("Apri") }
-                Button(onClick = onPin) { Text("Segnalibro") }
+                IconButton(onClick = onOpen) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri conversazione", tint = Color.White) }
+                IconButton(onClick = onPin) { Icon(Icons.Rounded.Bookmark, contentDescription = "Segnalibro conversazione", tint = Color.White) }
                 if (item.id != null) {
-                    Button(onClick = onManage) { Text("Gestisci") }
-                    Button(onClick = { onRename(renameText.trim()) }) { Text("Rinomina") }
-                    if (onForkHermes != null) Button(onClick = onForkHermes) { Text("Copia sul server") }
-                    Button(onClick = onDelete) { Text("Elimina") }
+                    IconButton(onClick = onManage) { Icon(Icons.Rounded.Settings, contentDescription = "Gestisci conversazione", tint = Color.White) }
+                    IconButton(onClick = { onRename(renameText.trim()) }) { Icon(Icons.Rounded.Edit, contentDescription = "Rinomina conversazione", tint = Color.White) }
+                    if (onForkHermes != null) IconButton(onClick = onForkHermes) { Icon(Icons.Rounded.CloudUpload, contentDescription = "Copia sul server", tint = Color.White) }
+                    IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina conversazione", tint = Color(0xFFFF7B8E)) }
                 }
             }
         }
@@ -632,14 +635,14 @@ internal fun ConversationManagerDialog(
                         SettingsField("Chat collegate (ID)", links, { links = it })
                         SettingsField("Riepilogo", summary, { summary = it })
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = {
+                            IconButton(onClick = {
                                 updateLocalConversation(context, conversationId) { item -> item.copy(folder = folder.trim(), tags = splitMetadata(tags), projectId = project.trim(), linkedConversationIds = splitMetadata(links).filter { it != conversationId }, summary = summary.trim(), updatedAt = System.currentTimeMillis()) }
                                 status = "Metadata salvati."; refresh++
-                            }) { Text("Salva") }
-                            Button(onClick = {
+                            }) { Icon(Icons.Rounded.Save, contentDescription = "Salva metadata", tint = Color.White) }
+                            IconButton(onClick = {
                                 val transcript = conversation.messages.takeLast(40).joinToString("\n") { "${it.author}: ${it.text}" }
                                 onContinue(conversation.id, "Riassumi questa conversazione con decisioni e attività aperte:\n\n$transcript")
-                            }) { Text("Riassumi") }
+                            }) { Icon(Icons.Rounded.AutoAwesome, contentDescription = "Riassumi conversazione", tint = Color.White) }
                             listOf("md", "json", "html", "pdf").forEach { format -> Button(onClick = { shareConversationExport(context, conversation, format) }) { Text(format.uppercase()) } }
                         }
                         Text(status, color = AppColors.Muted, fontSize = 12.sp)
@@ -656,24 +659,24 @@ internal fun ConversationManagerDialog(
                                 Text("Seleziona", color = AppColors.Muted)
                             }
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                                Button(onClick = { updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.map { if (it.id == message.id) it.copy(text = text) else it }, updatedAt = System.currentTimeMillis()) }; refresh++ }) { Text("Modifica") }
-                                Button(onClick = { updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.map { if (it.id == message.id) it.copy(isBookmarked = !it.isBookmarked) else it }, updatedAt = System.currentTimeMillis()) }; refresh++ }) { Text("Segnalibro") }
-                                Button(onClick = { val branch = createLocalBranch(context, conversation, message.id); status = "Ramo ${branch.title} creato."; refresh++ }) { Text("Ramo") }
-                                Button(onClick = { val branch = createLocalBranch(context, conversation, message.id, "${conversation.title} · alternativa"); onContinue(branch.id, "Rigenera una risposta alternativa all'ultimo messaggio.") }) { Text("Alternativa") }
-                                Button(onClick = { onContinue(null, "Continua da questo messaggio:\n\n${message.text}") }) { Text("Nuova chat") }
-                                Button(onClick = { saveProjectConversation(context, "Progetto da ${conversation.title}", message.text, message.text); status = "Nuovo progetto creato." }) { Text("Progetto") }
+                                IconButton(onClick = { updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.map { if (it.id == message.id) it.copy(text = text) else it }, updatedAt = System.currentTimeMillis()) }; refresh++ }) { Icon(Icons.Rounded.Edit, contentDescription = "Modifica messaggio", tint = Color.White) }
+                                IconButton(onClick = { updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.map { if (it.id == message.id) it.copy(isBookmarked = !it.isBookmarked) else it }, updatedAt = System.currentTimeMillis()) }; refresh++ }) { Icon(Icons.Rounded.Bookmark, contentDescription = "Segnalibro messaggio", tint = Color.White) }
+                                IconButton(onClick = { val branch = createLocalBranch(context, conversation, message.id); status = "Ramo ${branch.title} creato."; refresh++ }) { Icon(Icons.AutoMirrored.Rounded.CallSplit, contentDescription = "Crea ramo", tint = Color.White) }
+                                IconButton(onClick = { val branch = createLocalBranch(context, conversation, message.id, "${conversation.title} · alternativa"); onContinue(branch.id, "Rigenera una risposta alternativa all'ultimo messaggio.") }) { Icon(Icons.Rounded.Refresh, contentDescription = "Crea risposta alternativa", tint = Color.White) }
+                                IconButton(onClick = { onContinue(null, "Continua da questo messaggio:\n\n${message.text}") }) { Icon(Icons.Rounded.Add, contentDescription = "Nuova chat da qui", tint = Color.White) }
+                                IconButton(onClick = { saveProjectConversation(context, "Progetto da ${conversation.title}", message.text, message.text); status = "Nuovo progetto creato." }) { Icon(Icons.Rounded.CreateNewFolder, contentDescription = "Crea progetto", tint = Color.White) }
                             }
                         }
                     }
                 }
                 item {
-                    Button(onClick = { confirmBulkDelete = true }, enabled = selected.isNotEmpty()) { Text("Elimina messaggi selezionati") }
+                    IconButton(onClick = { confirmBulkDelete = true }, enabled = selected.isNotEmpty()) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina messaggi selezionati", tint = Color(0xFFFF7B8E)) }
                     val branches = loadConversations(context).filter { it.parentConversationId == conversation.id || conversation.linkedConversationIds.contains(it.id) }
                     branches.forEach { branch -> Text("Ramo: ${branch.title} · ${branch.messages.size} messaggi", color = AppColors.Muted, modifier = Modifier.clickable { onContinue(branch.id, "") }.padding(6.dp)) }
                 }
             }
         },
-        confirmButton = { Button(onClick = onClose) { Text("Chiudi") } }
+        confirmButton = { IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, contentDescription = "Chiudi gestione", tint = Color.White) } }
     )
 
     if (confirmBulkDelete) {
@@ -683,13 +686,13 @@ internal fun ConversationManagerDialog(
             title = { Text("Elimina ${selected.size} messaggi", color = Color.White) },
             text = { Text("Eliminare definitivamente i ${selected.size} messaggi selezionati? L'operazione non si pu├▓ annullare.", color = AppColors.Muted) },
             confirmButton = {
-                Button(onClick = {
+                IconButton(onClick = {
                     confirmBulkDelete = false
                     updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.filterNot { selected.contains(it.id) }, updatedAt = System.currentTimeMillis()) }
                     selected.clear(); status = "Porzione eliminata."; refresh++
-                }) { Text("Elimina") }
+                }) { Icon(Icons.Rounded.Delete, contentDescription = "Conferma eliminazione", tint = Color(0xFFFF7B8E)) }
             },
-            dismissButton = { Button(onClick = { confirmBulkDelete = false }) { Text("Annulla") } }
+            dismissButton = { IconButton(onClick = { confirmBulkDelete = false }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla eliminazione", tint = Color.White) } }
         )
     }
 }
@@ -771,7 +774,7 @@ internal fun HermesSessionSection(
                 color = AppColors.Muted, fontSize = 12.sp
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { refresh() }, enabled = !loading) { Text(if (loading) "..." else "Aggiorna") }
+                IconButton(onClick = { refresh() }, enabled = !loading) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna sessioni server", tint = Color.White) }
             }
             sessions.take(15).forEach { s ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -779,7 +782,7 @@ internal fun HermesSessionSection(
                         Text(s.title.ifBlank { s.id }, color = Color.White, fontSize = 13.sp, maxLines = 1)
                         Text(s.id, color = AppColors.Faint, fontSize = 10.sp, maxLines = 1)
                     }
-                    TextButton(onClick = {
+                    IconButton(onClick = {
                         scope.launch {
                             val settings = withContext(Dispatchers.IO) { loadSettings(context) }
                             // Apri: crea/riusa chat locale collegata alla sessione server.
@@ -803,7 +806,7 @@ internal fun HermesSessionSection(
                             onChanged()
                             onOpenSession(localId)
                         }
-                    }) { Text("Apri", fontSize = 12.sp) }
+                    }) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri sessione in chat", tint = Color.White) }
                 }
             }
             if (sessions.size > 15) Text("+${sessions.size - 15} altre...", color = AppColors.Muted, fontSize = 11.sp)

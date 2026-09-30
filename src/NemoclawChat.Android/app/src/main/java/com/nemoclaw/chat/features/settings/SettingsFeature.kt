@@ -101,6 +101,18 @@ import androidx.compose.material.icons.rounded.AccountCircle
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Clear
+import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.NetworkCheck
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
@@ -408,7 +420,7 @@ internal fun SettingsScreen(
             title = { Text("Eliminare riepiloghi salute?") },
             text = { Text("Verranno eliminati dal gateway Hermes tutti i riepiloghi salute sincronizzati. I dati in Samsung Health e Health Connect non vengono toccati.") },
             confirmButton = {
-                Button(onClick = {
+                IconButton(onClick = {
                     showEraseHealthConfirm = false
                     scope.launch {
                         when (val result = HealthSync.eraseAllFromHermes(context)) {
@@ -419,9 +431,9 @@ internal fun SettingsScreen(
                             is HealthEraseResult.Failed -> status = result.message
                         }
                     }
-                }) { Text("Elimina da Hermes") }
+                }) { Icon(Icons.Rounded.Delete, contentDescription = "Conferma eliminazione salute", tint = Color(0xFFFF7B8E)) }
             },
-            dismissButton = { Button(onClick = { showEraseHealthConfirm = false }) { Text("Annulla") } }
+            dismissButton = { IconButton(onClick = { showEraseHealthConfirm = false }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
         )
     }
 
@@ -493,9 +505,7 @@ internal fun SettingsScreen(
                                         "Anteprima completata."
                                     }.getOrElse { "Anteprima non disponibile: ${it.message ?: it.javaClass.simpleName}" }
                                 }
-                            }) {
-                                Text("Anteprima")
-                            }
+                            }) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Anteprima voce", tint = Color.White) }
                         }
                         Text("Velocita: ${String.format(java.util.Locale.ROOT, "%.2f", voiceSpeed)}x", color = Color.White)
                         Slider(
@@ -555,8 +565,12 @@ internal fun SettingsScreen(
                 }
             }
             item {
-                Button(onClick = { advancedVisible = !advancedVisible }) {
-                    Text(if (advancedVisible) "Nascondi avanzate" else "Mostra avanzate")
+                IconButton(onClick = { advancedVisible = !advancedVisible }) {
+                    Icon(
+                        if (advancedVisible) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = if (advancedVisible) "Nascondi avanzate" else "Mostra avanzate",
+                        tint = Color.White
+                    )
                 }
             }
             if (advancedVisible) {
@@ -606,7 +620,7 @@ internal fun SettingsScreen(
                                         modelCatalogStatus = "Errore picker: ${ex.message ?: ex.javaClass.simpleName}"
                                     }
                                 }
-                            }) { Text("Carica picker Hermes (/api/model/options)") }
+                            }) { Icon(Icons.Rounded.Download, contentDescription = "Carica picker Hermes", tint = Color.White) }
                             if (modelCatalogModels.isNotEmpty()) {
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     modelCatalogModels.take(12).forEach { opt ->
@@ -685,7 +699,7 @@ internal fun SettingsScreen(
                         MetricSwitch("Frequenza cardiaca aggregata", healthIncludeHeartRate) { healthIncludeHeartRate = it }
                         Text(HealthSync.sdkStatus(context), color = AppColors.Muted, fontSize = 12.sp)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = {
+                            IconButton(onClick = {
                                 val candidate = currentSettings().copy(healthSyncEnabled = true)
                                 val error = validateHttpUrl(candidate.gatewayUrl, "Hermes API URL")
                                 if (error != null) {
@@ -695,11 +709,11 @@ internal fun SettingsScreen(
                                 } else {
                                     healthPermissionLauncher.launch(HealthSync.permissionsForRequest(context, candidate))
                                 }
-                            }) { Text("Collega e autorizza") }
-                            Button(onClick = {
+                            }) { Icon(Icons.Rounded.Link, contentDescription = "Collega e autorizza salute", tint = Color.White) }
+                            IconButton(onClick = {
                                 if (!HealthSync.openSettings(context)) status = "Impossibile aprire Health Connect."
-                            }) { Text("Gestisci accesso") }
-                            Button(onClick = {
+                            }) { Icon(Icons.Rounded.Key, contentDescription = "Gestisci accesso salute", tint = Color.White) }
+                            IconButton(onClick = {
                                 val candidate = currentSettings()
                                 if (!candidate.healthSyncEnabled) {
                                     status = "Attiva e autorizza prima la sincronizzazione salute."
@@ -716,8 +730,8 @@ internal fun SettingsScreen(
                                         }
                                     }
                                 }
-                            }) { Text("Sincronizza ora") }
-                            Button(onClick = { showEraseHealthConfirm = true }) { Text("Elimina da Hermes") }
+                            }) { Icon(Icons.Rounded.Sync, contentDescription = "Sincronizza ora", tint = Color.White) }
+                            IconButton(onClick = { showEraseHealthConfirm = true }) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina da Hermes", tint = Color(0xFFFF7B8E)) }
                         }
                     }
                 }
@@ -737,7 +751,7 @@ internal fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Button(onClick = {
+                        IconButton(onClick = {
                             val candidate = currentSettings()
                             val error = validateSettings(candidate)
                             if (error == null) {
@@ -777,14 +791,14 @@ internal fun SettingsScreen(
                                 status = error
                             }
                         }) {
-                            Text("Salva")
+                            Icon(Icons.Rounded.Save, contentDescription = "Salva impostazioni", tint = Color.White)
                         }
-                        Button(onClick = {
+                        IconButton(onClick = {
                             val candidate = currentSettings()
                             val error = validateHttpUrl(candidate.gatewayUrl, "Hermes API URL")
                             if (error != null) {
                                 status = error
-                                return@Button
+                                return@IconButton
                             }
                         status = "Leggo capabilities Hermes..."
                         scope.launch {
@@ -792,14 +806,14 @@ internal fun SettingsScreen(
                                 .getOrElse { "Capabilities non leggibili: ${it.message ?: it.javaClass.simpleName}" }
                         }
                         }) {
-                            Text("Capabilities")
+                            Icon(Icons.Rounded.Visibility, contentDescription = "Leggi capabilities", tint = Color.White)
                         }
                     }
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Button(onClick = {
+                        IconButton(onClick = {
                             apiKey = ""
                             scope.launch {
                                 val removed = withContext(Dispatchers.IO) { saveGatewaySecret(context, null) }
@@ -811,13 +825,13 @@ internal fun SettingsScreen(
                                 }
                             }
                         }) {
-                            Text("Ripristina API key")
+                            Icon(Icons.Rounded.Clear, contentDescription = "Rimuovi API key", tint = Color.White)
                         }
-                        Button(onClick = {
+                        IconButton(onClick = {
                             val error = validateHttpUrl(gatewayUrl, "Indirizzo server Hermes")
                             if (error != null) {
                                 status = error
-                                return@Button
+                                return@IconButton
                             }
 
                             val healthUrl = "${hermesRoot(AppSettings(gatewayUrl = gatewayUrl.trim()))}/health"
@@ -826,10 +840,10 @@ internal fun SettingsScreen(
                                 status = testGateway(healthUrl, apiKey)
                             }
                         }) {
-                            Text("Test Hermes")
+                            Icon(Icons.Rounded.NetworkCheck, contentDescription = "Test Hermes", tint = Color.White)
                         }
-                        Button(onClick = { showResetConfirm = true }) {
-                            Text("Reset")
+                        IconButton(onClick = { showResetConfirm = true }) {
+                            Icon(Icons.Rounded.DeleteForever, contentDescription = "Reset impostazioni", tint = Color(0xFFFF7B8E))
                         }
                         if (showResetConfirm) {
                             AlertDialog(
@@ -855,16 +869,16 @@ internal fun SettingsScreen(
                                             }
                                             onReset()
                                         }
-                                    }) { Text("Ripristina") }
+                                    }) { Text("Ripristina", color = Color(0xFFFF7B8E)) }
                                 },
-                                dismissButton = { TextButton(onClick = { showResetConfirm = false }) { Text("Annulla") } }
+                                dismissButton = { IconButton(onClick = { showResetConfirm = false }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla reset", tint = Color.White) } }
                             )
                         }
-                        Button(onClick = {
+                        IconButton(onClick = {
                             status = runCatching { exportLocalBackup(context) }
                                 .getOrElse { "Backup non riuscito: ${it.message ?: it.javaClass.simpleName}" }
                         }) {
-                            Text("Backup locale")
+                            Icon(Icons.Rounded.Save, contentDescription = "Backup locale", tint = Color.White)
                         }
                     }
                 }

@@ -96,11 +96,28 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Article
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.AccountCircle
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Archive
+import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ContentPaste
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.Snooze
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Unarchive
+import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
@@ -363,7 +380,7 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text(if (editingId.isBlank()) "Nuova automazione" else "Modifica automazione", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                        Button(onClick = { clearEditor() }) { Text("Nuova") }
+                        IconButton(onClick = { clearEditor() }) { Icon(Icons.Rounded.Add, contentDescription = "Nuova automazione", tint = Color.White) }
                     }
                     Box {
                         Button(onClick = { botMenuExpanded = true }) {
@@ -411,7 +428,7 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                     SettingsField("Progetto associato", projectId, { projectId = it })
                     SettingsField("Dipendenze job", dependencies, { dependencies = it })
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
+                        IconButton(onClick = {
                             val cron = schedule()
                             if (name.isBlank() || taskPrompt.isBlank() || cron.isBlank()) {
                                 status = "Nome, attività e programmazione obbligatori."
@@ -434,15 +451,15 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                                 )
                                 if (!status.startsWith("Automazione non")) { clearEditor(); refreshNonce++ }
                             }
-                        }) { Text("Salva") }
-                        Button(onClick = {
+                        }) { Icon(Icons.Rounded.Save, contentDescription = "Salva automazione", tint = Color.White) }
+                        IconButton(onClick = {
                             if (taskPrompt.isBlank()) status = "Attività obbligatoria per prova." else scope.launch {
                                 status = "Prova in corso, job non salvato..."
                                 val result = sendWorkspaceRunRequest(settings, "Automation", encodeAutomationPrompt(definition()), loadGatewaySecret(context))
                                 status = "${result.status} ${result.result}".trim()
                             }
-                        }) { Text("Prova senza salvare") }
-                        Button(onClick = { editingId = ""; name = if (name.isBlank()) "" else "$name copia"; status = "Copia pronta." }) { Text("Duplica") }
+                        }) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Prova senza salvare", tint = Color.White) }
+                        IconButton(onClick = { editingId = ""; name = if (name.isBlank()) "" else "$name copia"; status = "Copia pronta." }) { Icon(Icons.Rounded.ContentCopy, contentDescription = "Duplica automazione", tint = Color.White) }
                     }
                 }
             }
@@ -452,10 +469,10 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(status, color = Color.White, fontWeight = FontWeight.SemiBold)
                     Text("Fonte: API Hermes jobs. Profilo: ${selectedBotProfile.ifBlank { "Globale / default" }}. Le routine bot usano /p/{profilo}/api/jobs quando il multiplexing è pronto.", color = AppColors.Muted, fontSize = 12.sp)
-                    Button(onClick = {
+                    IconButton(onClick = {
                         status = "Aggiorno cron..."
                         refreshNonce++
-                    }) { Text("Aggiorna") }
+                    }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna cron", tint = Color.White) }
                 }
             }
         }
@@ -497,15 +514,15 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
             title = { Text("Elimina ${target.name}") },
             text = { Text("Eliminare la routine \"${target.name}\" (${target.schedule})? L'operazione non si pu├▓ annullare.") },
             confirmButton = {
-                TextButton(onClick = {
+                IconButton(onClick = {
                     pendingDeleteJob = null
                     scope.launch {
                         status = cronAction(settings, target.id, "delete", loadGatewaySecret(context), selectedBotProfile.takeIf { it.isNotBlank() }, botRoster?.multiplexEnabled == true)
                         refreshNonce++
                     }
-                }) { Text("Elimina", color = MaterialTheme.colorScheme.error) }
+                }) { Icon(Icons.Rounded.Delete, contentDescription = "Conferma eliminazione routine", tint = Color(0xFFFF7B8E)) }
             },
-            dismissButton = { TextButton(onClick = { pendingDeleteJob = null }) { Text("Annulla") } }
+            dismissButton = { IconButton(onClick = { pendingDeleteJob = null }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla eliminazione", tint = Color.White) } }
         )
     }
 }
@@ -547,11 +564,17 @@ internal fun CronCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Button(onClick = onEdit) { Text("Modifica") }
-                Button(onClick = onDuplicate) { Text("Duplica") }
-                Button(onClick = onRun) { Text("Esegui ora") }
-                Button(onClick = onPauseResume) { Text(if (job.enabled) "Pausa" else "Riprendi") }
-                Button(onClick = onDelete) { Text("Elimina") }
+                IconButton(onClick = onEdit) { Icon(Icons.Rounded.Edit, contentDescription = "Modifica routine", tint = Color.White) }
+                IconButton(onClick = onDuplicate) { Icon(Icons.Rounded.ContentCopy, contentDescription = "Duplica routine", tint = Color.White) }
+                IconButton(onClick = onRun) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Esegui ora", tint = Color.White) }
+                IconButton(onClick = onPauseResume) {
+                    Icon(
+                        if (job.enabled) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        contentDescription = if (job.enabled) "Pausa routine" else "Riprendi routine",
+                        tint = Color.White
+                    )
+                }
+                IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina routine", tint = Color(0xFFFF7B8E)) }
             }
         }
     }
@@ -597,7 +620,7 @@ internal fun NotificationsScreen(context: Context, settings: AppSettings, onOpen
                     Text(status, color = Color.White, fontWeight = FontWeight.SemiBold)
                     Text("Android controlla in background periodicamente e mostra notifiche di sistema.", color = AppColors.Muted, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
+                        IconButton(onClick = {
                             scope.launch {
                                 val unread = items.filter { it.readAt <= 0L }
                                 if (unread.isNotEmpty()) {
@@ -607,8 +630,8 @@ internal fun NotificationsScreen(context: Context, settings: AppSettings, onOpen
                                     refreshNonce++
                                 }
                             }
-                        }) { Text("Segna tutto") }
-                        Button(onClick = { refreshNonce++ }) { Text("Aggiorna") }
+                        }) { Icon(Icons.Rounded.Check, contentDescription = "Segna tutte lette", tint = Color.White) }
+                        IconButton(onClick = { refreshNonce++ }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna notifiche", tint = Color.White) }
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         listOf("Tutte", "Automazioni", "Run", "Sistema", "File", "Progetti").forEach { value -> VideoFeedChip(value, categoryFilter == value) { categoryFilter = value } }
@@ -683,11 +706,17 @@ internal fun NotificationCard(item: HubNotification, onRead: () -> Unit, onOpenC
             Text("${item.category} · ${item.priority} · ${item.source} · ${formatDateTime(item.createdAt)}", color = AppColors.Muted, fontSize = 12.sp)
             Text(item.message, color = Color.White)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onOpenChat) { Text("Apri chat") }
-                Button(onClick = onRead) { Text("Segna letta") }
-                Button(onClick = onSnooze) { Text("Tra 1 ora") }
-                Button(onClick = onArchive) { Text(if (item.archived) "Ripristina" else "Archivia") }
-                if (item.fileUrl.isNotBlank() || item.projectId.isNotBlank() || item.automationId.isNotBlank() || item.runId.isNotBlank()) Button(onClick = onReference) { Text("Riferimento") }
+                IconButton(onClick = onOpenChat) { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Apri chat", tint = Color.White) }
+                IconButton(onClick = onRead) { Icon(Icons.Rounded.Check, contentDescription = "Segna letta", tint = Color.White) }
+                IconButton(onClick = onSnooze) { Icon(Icons.Rounded.Snooze, contentDescription = "Tra 1 ora", tint = Color.White) }
+                IconButton(onClick = onArchive) {
+                    Icon(
+                        if (item.archived) Icons.Rounded.Unarchive else Icons.Rounded.Archive,
+                        contentDescription = if (item.archived) "Ripristina notifica" else "Archivia notifica",
+                        tint = Color.White
+                    )
+                }
+                if (item.fileUrl.isNotBlank() || item.projectId.isNotBlank() || item.automationId.isNotBlank() || item.runId.isNotBlank()) IconButton(onClick = onReference) { Icon(Icons.Rounded.Link, contentDescription = "Riferimento", tint = Color.White) }
             }
         }
     }
@@ -716,23 +745,23 @@ internal fun ContinuityScreen(context: Context, settings: AppSettings, onOpenCon
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text("$deviceId · Android", color = Color.White, fontWeight = FontWeight.SemiBold)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.presence", statusValue = "online", apiKey = loadGatewaySecret(context)); refresh++ } }) { Text("Presenza") }
-                        Button(onClick = { val latest = loadConversations(context).firstOrNull { it.kind in setOf("Chat", "Task") }; if (latest != null) { scope.launch { publishContinuity(context, settings, deviceId, "continuity.chat", latest.title, latest.id, latest.projectId, apiKey = loadGatewaySecret(context)); onOpenConversation(latest.id) } } }) { Text("Riprendi chat") }
-                        Button(onClick = { scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.voice", "handoff_requested", statusValue = "ringing", apiKey = loadGatewaySecret(context)); refresh++ } }) { Text("Trasferisci voce") }
-                        Button(onClick = { scope.launch { status = flushContinuityQueue(context, settings, loadGatewaySecret(context)); refresh++ } }) { Text("Sincronizza") }
+                        IconButton(onClick = { scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.presence", statusValue = "online", apiKey = loadGatewaySecret(context)); refresh++ } }) { Icon(Icons.Rounded.Person, contentDescription = "Pubblica presenza", tint = Color.White) }
+                        IconButton(onClick = { val latest = loadConversations(context).firstOrNull { it.kind in setOf("Chat", "Task") }; if (latest != null) { scope.launch { publishContinuity(context, settings, deviceId, "continuity.chat", latest.title, latest.id, latest.projectId, apiKey = loadGatewaySecret(context)); onOpenConversation(latest.id) } } }) { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Riprendi chat", tint = Color.White) }
+                        IconButton(onClick = { scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.voice", "handoff_requested", statusValue = "ringing", apiKey = loadGatewaySecret(context)); refresh++ } }) { Icon(Icons.Rounded.Call, contentDescription = "Trasferisci voce", tint = Color.White) }
+                        IconButton(onClick = { scope.launch { status = flushContinuityQueue(context, settings, loadGatewaySecret(context)); refresh++ } }) { Icon(Icons.Rounded.Sync, contentDescription = "Sincronizza", tint = Color.White) }
                     }
                     SettingsField("Clipboard condivisa", clipboardText, { clipboardText = it })
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { val clipboard = context.getSystemService(ClipboardManager::class.java); val value = clipboardText.ifBlank { clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty() }; scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.clipboard", value, apiKey = loadGatewaySecret(context)); refresh++ } }) { Text("Invia clipboard") }
-                        Button(onClick = { val remote = items.firstOrNull { it.type == "continuity.clipboard" && it.device != deviceId }; if (remote != null) { clipboardText = remote.value; context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Hermes Hub", remote.value)); status = "Clipboard ricevuta." } }) { Text("Ricevi") }
-                        Button(onClick = { filePicker.launch(arrayOf("*/*")) }) { Text("Invia file") }
+                        IconButton(onClick = { val clipboard = context.getSystemService(ClipboardManager::class.java); val value = clipboardText.ifBlank { clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty() }; scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.clipboard", value, apiKey = loadGatewaySecret(context)); refresh++ } }) { Icon(Icons.Rounded.ContentPaste, contentDescription = "Invia clipboard", tint = Color.White) }
+                        IconButton(onClick = { val remote = items.firstOrNull { it.type == "continuity.clipboard" && it.device != deviceId }; if (remote != null) { clipboardText = remote.value; context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Hermes Hub", remote.value)); status = "Clipboard ricevuta." } }) { Icon(Icons.Rounded.Download, contentDescription = "Ricevi clipboard", tint = Color.White) }
+                        IconButton(onClick = { filePicker.launch(arrayOf("*/*")) }) { Icon(Icons.Rounded.UploadFile, contentDescription = "Invia file", tint = Color.White) }
                     }
                     Text(status, color = AppColors.Muted, fontSize = 12.sp)
                 }
             }
         }
         items(items.take(80), key = { it.id + it.updatedAt }) { item ->
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble)) { Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { Text("${item.type} · ${item.device}", color = AppColors.Accent); Text(item.value.ifBlank { item.fileName }, color = Color.White); FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { if (item.conversationId.isNotBlank()) Button(onClick = { onOpenConversation(item.conversationId) }) { Text("Apri chat") }; if (item.type == "continuity.clipboard") Button(onClick = { context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Hermes Hub", item.value)) }) { Text("Copia") }; if (item.fileUrl.isNotBlank()) Button(onClick = { resolveMediaUrl(settings, item.fileUrl, allowExternalMedia = true)?.let { url -> context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) } }) { Text("Apri file") } } } }
+            Card(colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble)) { Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { Text("${item.type} · ${item.device}", color = AppColors.Accent); Text(item.value.ifBlank { item.fileName }, color = Color.White); FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { if (item.conversationId.isNotBlank()) IconButton(onClick = { onOpenConversation(item.conversationId) }) { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Apri chat", tint = Color.White) }; if (item.type == "continuity.clipboard") IconButton(onClick = { context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Hermes Hub", item.value)) }) { Icon(Icons.Rounded.ContentCopy, contentDescription = "Copia", tint = Color.White) }; if (item.fileUrl.isNotBlank()) IconButton(onClick = { resolveMediaUrl(settings, item.fileUrl, allowExternalMedia = true)?.let { url -> context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) } }) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri file", tint = Color.White) } } } }
         }
         item {
             val conflicts = items.groupBy { it.type }.filterValues { values -> values.map { it.device }.distinct().size > 1 && (values.maxOfOrNull { it.updatedAt } ?: 0L) - (values.minOfOrNull { it.updatedAt } ?: 0L) < 300_000L }

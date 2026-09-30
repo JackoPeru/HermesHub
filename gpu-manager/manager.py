@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -134,6 +135,8 @@ _state = {
     "active_media_model": "",
     "active_preset": "",
     "media_progress": 0.0,
+    "llm_watch_ts": 0.0,
+    "error_retry_ts": 0.0,
 }
 if _state["desired_mode"] not in MODES:
     _state["desired_mode"] = "AUTO"
@@ -151,9 +154,9 @@ PRESETS = {
     "journey_rgba": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1_bf16", "file": "qwen/rgba.json"},
     "journey_product": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1_bf16", "file": "qwen/edit.json"},
     "journey_video_preview": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8+turbo4", "file": "h3/i2v-turbo.json"},
-    "journey_video_quality": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8", "file": "h3/i2v.json"},
-    "journey_video_first_last": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8", "file": "h3/first_last.json"},
-    "journey_video_reference": {"kind": "video", "backend": "minimax-h3", "model": "h3", "file": "h3/reference.json", "disabled": "DISABLED_REFERENCE_WEIGHTS"},
+    "journey_video_quality": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8", "file": "h3/i2v.json", "disabled": "DISABLED_FULLSTEPS_OOM"},
+    "journey_video_first_last": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8", "file": "h3/first_last.json", "disabled": "DISABLED_FULLSTEPS_OOM"},
+    "journey_video_reference": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_ref2va_pruned_int8", "file": "h3/reference.json", "disabled": "DISABLED_FULLSTEPS_OOM"},
 }
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
@@ -182,6 +185,7 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
         "STEPS": str(params.get("steps", 20)),
         "CFG": str(params.get("cfg", default_cfg)),
         "RESOLUTION": str(params.get("resolution", 1024)),
+        "DENOISE": str(params.get("denoise", 0.8)),
         "WIDTH": str(params.get("width", 1344)),
         "HEIGHT": str(params.get("height", 768)),
     }
@@ -460,6 +464,38 @@ async def cleanup_stray_cuda() -> int:
     return killed
 
 
+def cleanup_stale_shm() -> int:
+    """Remove torch shared-memory segments of dead processes.
+
+    ExLlamaV3 leaks /dev/shm/torch_<pid>_* on crashes; a full shm makes the
+    next TabbyAPI load fail with 'No space left on device'. Only segments
+    whose PID is gone are removed; live ones are never touched.
+    """
+    removed = 0
+    try:
+        names = os.listdir("/dev/shm")
+    except OSError as exc:
+        log.warning("shm cleanup scan failed: %r", exc)
+        return 0
+    for name in names:
+        if not name.startswith("torch_"):
+            continue
+        pid: int | None = None
+        parts = name.split("_")
+        if len(parts) >= 2 and parts[1].isdigit():
+            pid = int(parts[1])
+        if pid is not None and os.path.exists(f"/proc/{pid}"):
+            continue
+        try:
+            os.remove(os.path.join("/dev/shm", name))
+            removed += 1
+        except OSError:
+            pass
+    if removed:
+        log.info("removed %d stale shm segments", removed)
+    return removed
+
+
 async def wait_llm_online(timeout: int) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -623,6 +659,7 @@ async def transition_to_llm() -> bool:
     set_state("MEDIA_STOPPING")
     await systemctl("stop", str(CONFIG["media"]["service"]))
     await asyncio.sleep(3)
+    await asyncio.to_thread(cleanup_stale_shm)
     if not await vram_free(float(CONFIG["switching"].get("vram_free_mb", 2500))):
         await cleanup_stray_cuda()
     set_state("LLM_LOADING")
@@ -860,6 +897,22 @@ async def comfy_queue_state(prompt_id: str) -> str:
 
 # ----------------------------------------------------------------- worker ---
 
+async def comfy_busy() -> bool:
+    """True when ComfyUI is executing or holding queued prompts.
+
+    Unknown (probe failure) counts as busy: never kill job tracking on a
+    failed probe.
+    """
+    code, body = await _http_async("GET", media_base() + "/queue", timeout=15)
+    if code != 200:
+        return True
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, AttributeError):
+        return True
+    return bool(data.get("queue_running") or data.get("queue_pending"))
+
+
 async def drive_auto_once() -> None:
     """One reconciliation step. Called in a loop; never raises."""
     try:
@@ -874,13 +927,64 @@ async def _drive() -> None:
         state = _state["current_state"]
         desired = _state["desired_mode"]
         if state in ("LLM_UNLOADING", "GPU_FREE", "MEDIA_STARTING", "MEDIA_STOPPING", "LLM_LOADING"):
+            # GPU_FREE is transient mid-transition, except after boot where it
+            # persists: with manual MEDIA (or AUTO with queued work) move to
+            # media instead of stalling here forever.
+            if state == "GPU_FREE" and (desired == "MEDIA" or (desired == "AUTO" and queued_jobs())):
+                if await transition_to_media():
+                    state = _state["current_state"]
+                    if state in ("MEDIA_READY", "MEDIA_BUSY"):
+                        await drain_media_queue()
+                return
             return  # transition already running elsewhere
+        if state == "MEDIA_BUSY":
+            # The tracking loop updates progress every poll; a job untouched
+            # for 10+ min while ComfyUI sits idle means the tracker died
+            # silently (seen live). Fail it instead of stalling forever.
+            # The "saving" phase (ffmpeg derivatives) is exempt: no updates
+            # happen there by design.
+            job = get_job(_state["current_job"]) if _state["current_job"] else None
+            if job is None:
+                _state["current_job"] = None
+                set_state("MEDIA_READY")
+                return
+            stale_s = time.time() - float(job.get("updated_at") or 0)
+            if stale_s > 600 and job.get("phase") != "saving" and not await comfy_busy():
+                log.warning("stale media job %s (%.0fs, backend idle); failing",
+                            job["job_id"], stale_s)
+                update_job(job["job_id"], status="failed",
+                           error="worker tracking lost (stale, backend idle)")
+                _state["current_job"] = None
+                set_state("MEDIA_READY")
+            return
         if state == "BOOT":
             await reconcile_boot()
             return
+        if state == "LLM_READY":
+            # Steady-state watchdog: the backend can die (OOM, shm, crash)
+            # while we still believe it is ready. Verify cheaply, throttled.
+            now = time.monotonic()
+            if now - float(_state.get("llm_watch_ts") or 0.0) >= 30:
+                _state["llm_watch_ts"] = now
+                if not await llm_loaded():
+                    log.warning("watchdog: LLM_READY but backend not loaded; restoring")
+                    await restore_llm_with_retries("watchdog")
+            return
         if state == "ERROR":
+            # Recover from any mode, throttled: a stuck ERROR used to need a
+            # human restart. Prefer the desired path, fall back to LLM so the
+            # chat survives a broken media stack.
+            now = time.monotonic()
+            if now - float(_state.get("error_retry_ts") or 0.0) < 120:
+                return
+            _state["error_retry_ts"] = now
             if desired == "LLM" or (desired == "AUTO" and not queued_jobs()):
                 await restore_llm_with_retries("error-recovery")
+            else:
+                log.warning("error-recovery: attempting media path for desired=%s", desired)
+                if not await transition_to_media():
+                    log.warning("error-recovery: media failed, falling back to LLM")
+                    await restore_llm_with_retries("error-media-failed")
             return
         if desired == "LLM":
             if state != "LLM_READY":
@@ -920,7 +1024,12 @@ async def drain_media_queue() -> None:
         _state["active_media_model"] = job.get("model", "") or job.get("backend", "")
         _state["media_idle_since"] = 0.0
         set_state("MEDIA_BUSY", job["job_id"])
-        ok = await run_media_job(job)
+        try:
+            ok = await run_media_job(job)
+        except Exception as exc:  # noqa: BLE001 - never leave a job stuck running
+            log.warning("media job %s tracking died: %r", job["job_id"], exc)
+            update_job(job["job_id"], status="failed", error=f"worker tracking lost: {exc!r}"[:300])
+            ok = False
         _state["current_job"] = None
         if not ok and _state["current_state"] == "ERROR":
             await restore_llm_with_retries("media-job-failed")
@@ -1004,6 +1113,8 @@ async def status(_: None = Depends(require_key)) -> dict:
         Path(WORKFLOWS_DIR) / "h3" / "i2v.json",
         Path(WORKFLOWS_DIR) / "h3" / "first_last.json",
         Path("/opt/hermes/models/minimax-h3/minimax_h3_fl2va_pruned_int8_convrot.safetensors"),
+        Path("/opt/hermes/models/minimax-h3/minimax_h3_ref2va_pruned_int8_convrot.safetensors"),
+        Path(WORKFLOWS_DIR) / "h3" / "reference.json",
         Path("/opt/hermes/models/minimax-h3/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"),
         Path("/opt/hermes/models/minimax-h3/minimax_h3_video_vae_fp16.safetensors"),
     ]
@@ -1069,7 +1180,7 @@ async def submit_job(request: Request, _: None = Depends(require_key)) -> JSONRe
     preset = str(body.get("preset", "") or "")
     params = body.get("parameters", {}) or {}
     for alias in ("prompt", "input_images", "negative_prompt", "seed", "steps",
-                  "resolution", "duration", "aspect_ratio", "quality"):
+                  "resolution", "duration", "aspect_ratio", "quality", "denoise"):
         if alias in body and alias not in params:
             params[alias] = body[alias]
     if preset:

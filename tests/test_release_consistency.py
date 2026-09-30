@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.193"
-EXPECTED_ANDROID_VERSION_CODE = 197
+EXPECTED_VERSION = "0.6.194"
+EXPECTED_ANDROID_VERSION_CODE = 198
 
 
 def read(relative_path: str) -> str:
@@ -336,7 +336,15 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn("val secretSaved = saveGatewaySecret(context, candidateSecret)", main)
         secret_save = main.index("val secretSaved = saveGatewaySecret(context, candidateSecret)")
         save_start = main.rfind("val saved = withContext(Dispatchers.IO) {", 0, secret_save)
-        save_block = main[save_start : main.index('Text("Salva")', secret_save)]
+        # Anchor alla fine del blocco salvataggio: prima il bottone testuale
+        # "Salva", ora l'icona con contentDescription (stesso intento fail-closed).
+        save_end_markers = ['Text("Salva")', '"Salva impostazioni"']
+        save_end = min(
+            (main.index(marker, secret_save) for marker in save_end_markers if marker in main[secret_save:]),
+            default=-1,
+        )
+        self.assertGreater(save_end, secret_save)
+        save_block = main[save_start:save_end]
         self.assertIn("if (!saved) {", save_block)
         self.assertIn("onSave(candidate)", save_block)
         self.assertLess(save_block.index("if (!saved) {"), save_block.index("onSave(candidate)"))

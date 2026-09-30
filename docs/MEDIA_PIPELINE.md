@@ -143,5 +143,7 @@ il percorso OOM condivide restore+retry ed è code-reviewed.
 - Preset: `journey_video_preview` (turbo 4-step), `journey_video_quality` (25-step),
   `journey_video_first_last` (I2V + last frame); `journey_video_reference` TODO
   (mancano pesi ref2va). Nessuna sostituzione silenziosa.
+- Scelta operatore 2026-09-30: solo turbo per i video (quality/first_last/reference
+  disabilitati via flag dopo OOM del 25-step su 2x16GB).
 - T2V/I2V/FL condividono lo stesso nodo (first/last opzionali). Audio mai generato
   (preset muted; VAE audio non scaricata).

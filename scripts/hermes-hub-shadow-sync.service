@@ -1,0 +1,10 @@
+[Unit]
+Description=Hermes Hub shadow sessions import (desktop sessions into Hub)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'exec flock -n /tmp/hermes-hub-shadow-sync.lock /usr/bin/python3 /home/matteo/.local/share/hermes-hub-shadow/shadow_sync.py'
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

@@ -9780,7 +9780,53 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
     changes.extend(sqlite_sync_changes)
     text, correlation_changes = _patch_agent_runtime_and_correlation_v1(text)
     changes.extend(correlation_changes)
+    text, shadow_changes = _patch_shadow_sessions_v1(text)
+    changes.extend(shadow_changes)
     return text, openai_routes_text, changes
+
+
+def _patch_shadow_sessions_v1(text: str) -> tuple[str, list[str]]:
+    """Mirror foreign agent sessions as shadow Hub conversations on Hub pulls.
+
+    Injects a best-effort hook at the top of
+    ``_hermes_hub_conversations_payload`` that imports agent sessions from
+    ``response_store.db`` (see adapters.hermes.shadow_sessions). No-ops when
+    the payload helper is absent (layouts without Hub conversations).
+    """
+    changes: list[str] = []
+    hook = (
+        "def _hermes_hub_maybe_import_shadows() -> None:\n"
+        '    """Import foreign agent sessions as shadow Hub conversations."""\n'
+        "    try:\n"
+        "        from hermes_hub_gateway.adapters.hermes.shadow_sessions import maybe_import_shadows\n"
+        "    except Exception:\n"
+        "        return\n"
+        "    try:\n"
+        "        maybe_import_shadows()\n"
+        "    except Exception:\n"
+        "        pass\n"
+    )
+    if "def _hermes_hub_maybe_import_shadows" not in text:
+        anchor = "def _hermes_hub_conversations_payload("
+        pos = text.find(anchor)
+        if pos < 0:
+            return text, changes
+        text = text[:pos] + hook + "\n\n" + text[pos:]
+        changes.append("shadow sessions import hook")
+    call = "\n    _hermes_hub_maybe_import_shadows()\n"
+    if call not in text:
+        marker = "def _hermes_hub_conversations_payload("
+        start = text.find(marker)
+        if start >= 0:
+            eol = text.find("\n", start)
+            if eol >= 0:
+                text = (
+                    text[: eol + 1]
+                    + "    _hermes_hub_maybe_import_shadows()\n"
+                    + text[eol + 1 :]
+                )
+                changes.append("shadow sessions import on Hub pull")
+    return text, changes
 
 
 def _patch_text(text: str) -> tuple[str, list[str]]:

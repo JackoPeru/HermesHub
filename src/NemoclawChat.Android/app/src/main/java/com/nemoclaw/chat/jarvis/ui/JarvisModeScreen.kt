@@ -18,10 +18,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.ThumbDown
+import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -204,13 +213,11 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                         )
                     }
                 }
-                Button(
+                IconButton(
                     onClick = { context.startActivity(Intent(context, JarvisMetaSetupActivity::class.java)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !state.active,
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Elevated)
+                    enabled = !state.active
                 ) {
-                    Text(if (BuildConfig.META_DAT_ENABLED) "Configura occhiali Meta" else "Info Meta DAT")
+                    Icon(Icons.Rounded.Settings, contentDescription = if (BuildConfig.META_DAT_ENABLED) "Configura occhiali Meta" else "Info Meta DAT", tint = Color.White)
                 }
             }
         }
@@ -247,17 +254,14 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Button(
+                            IconButton(
                                 onClick = { JarvisSessionController.sendFeedback(true) },
-                                modifier = Modifier.weight(1f),
                                 enabled = state.feedbackStatus == null
-                            ) { Text("Utile") }
-                            Button(
+                            ) { Icon(Icons.Rounded.ThumbUp, contentDescription = "Utile", tint = Color.White) }
+                            IconButton(
                                 onClick = { JarvisSessionController.sendFeedback(false) },
-                                modifier = Modifier.weight(1f),
-                                enabled = state.feedbackStatus == null,
-                                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Elevated)
-                            ) { Text("Non utile") }
+                                enabled = state.feedbackStatus == null
+                            ) { Icon(Icons.Rounded.ThumbDown, contentDescription = "Non utile", tint = Color.White) }
                         }
                         state.feedbackStatus?.let {
                             Text(it, color = AppColors.Muted, fontSize = 12.sp)
@@ -292,40 +296,39 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Button(
+                    IconButton(
                         onClick = {
                             if (state.visionActive) JarvisSessionController.pauseView(context)
                             else JarvisSessionController.resumeView(context)
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Elevated)
+                        }
                     ) {
-                        Text(if (state.visionActive) "Pausa vista" else "Riprendi vista")
+                        Icon(
+                            if (state.visionActive) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = if (state.visionActive) "Pausa vista" else "Riprendi vista",
+                            tint = Color.White
+                        )
                     }
-                    Button(
-                        onClick = { JarvisSessionController.stop(context) },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9E2424))
+                    IconButton(
+                        onClick = { JarvisSessionController.stop(context) }
                     ) {
-                        Text("Termina")
+                        Icon(Icons.Rounded.Stop, contentDescription = "Termina sessione", tint = Color(0xFFFF7B8E))
                     }
                 }
             } else {
-                Button(
+                IconButton(
                     onClick = {
                         if (settings.gatewayUrl.isBlank()) {
                             JarvisSessionController.rejectStart("Configura Hermes API URL nelle Impostazioni.")
-                            return@Button
+                            return@IconButton
                         }
                         val missing = requiredPermissions.filter {
                             ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
                         }
                         if (missing.isEmpty()) pendingStart = true
                         else permissionLauncher.launch(missing.toTypedArray())
-                    },
-                    modifier = Modifier.fillMaxWidth()
+                    }
                 ) {
-                    Text("Avvia Jarvis Mode")
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = "Avvia Jarvis Mode", tint = Color.White)
                 }
             }
         }

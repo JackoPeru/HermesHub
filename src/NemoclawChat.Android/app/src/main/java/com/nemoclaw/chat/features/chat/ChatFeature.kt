@@ -97,6 +97,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.automirrored.rounded.ManageSearch
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AccountCircle
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -118,14 +120,18 @@ import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.SmartToy
+import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.TaskAlt
 import androidx.compose.material.icons.rounded.Terminal
@@ -517,9 +523,7 @@ internal fun ChatScreen(
                         fontSize = 12.sp,
                         modifier = Modifier.weight(1f)
                     )
-                    Button(onClick = { onSwitchTab(Tab.Bots) }) {
-                        Text("Apri Bot Hermes")
-                    }
+                    IconButton(onClick = { onSwitchTab(Tab.Bots) }) { Icon(Icons.Rounded.SmartToy, contentDescription = "Apri Bot Hermes", tint = Color.White) }
                 }
             }
         }
@@ -755,9 +759,14 @@ internal fun ChatScreen(
                     val streamCid = state.activeConversationId
                         ?: "conv_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(8)}"
                     state.activeConversationId = streamCid
+                    // Un invio sopra uno stream esistente deve prima cancellarlo,
+                    // altrimenti il vecchio collector resta orfano e la sua finally
+                    // ripulisce lo stato del nuovo stream. Bug del blocco post-stop.
+                    state.activeStreams[streamCid]?.job?.cancel()
                     state.activeStreams[streamCid] = ActiveStreamState(StreamingState(), null)
 
                     val job = HermesStreamRuntime.scope.launch {
+                        val collectorJob = coroutineContext[kotlinx.coroutines.Job]
                         var localState = StreamingState()
                         val mode = state.mode
                         val convId = streamCid
@@ -1038,14 +1047,22 @@ internal fun ChatScreen(
                                     hermesSessionId = state.hermesSessionId,
                                     modelOverride = state.chatModelOverride,
                                     providerOverride = state.chatProviderOverride,
-                                    reasoningEffort = state.chatReasoningEffort
+                                    reasoningEffort = state.chatReasoningEffort,
+                                    // Su stop non spingere subito sul gateway: la rete in finally
+                                    // allungherebbe lo sblocco del composer; ci pensa l'autosync.
+                                    syncAfterSave = !interrupted
                                 )
                             }
                             if (state.activeConversationId == activeStreamCid) {
-                                state.activeConversationId = saved.id
-                                state.previousResponseId = saved.previousResponseId
-                                state.streamingState = null
-                                state.activeStreamJob = null
+                                // Ripulisci solo se nessun invio successivo ha preso il posto di
+                                // questo stream: altrimenti cancelleresti lo stato del nuovo turno.
+                                val current = state.activeStreams[activeStreamCid]
+                                if (current == null || current.job == null || current.job === collectorJob) {
+                                    state.activeConversationId = saved.id
+                                    state.previousResponseId = saved.previousResponseId
+                                    state.streamingState = null
+                                    state.activeStreamJob = null
+                                }
                             } else {
                                 state.activeStreams.remove(activeStreamCid)
                             }
@@ -1977,7 +1994,9 @@ internal fun ChatInlineVideoPlayer(
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { fullScreen = false; started = false }) { Text("Chiudi player", fontSize = 12.sp) }
+            IconButton(onClick = { fullScreen = false; started = false }, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.Rounded.Close, contentDescription = "Chiudi player", tint = Color.White, modifier = Modifier.size(20.dp))
+            }
             if (status != null) {
                 Text(status.orEmpty(), color = AppColors.Muted, fontSize = 12.sp)
             }
@@ -2357,7 +2376,7 @@ internal fun MediaFileBlock(block: VisualBlock) {
                     Text("media non proxy rifiutato.", color = AppColors.Muted, fontSize = 12.sp)
                 }
                 if (canOpen) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
+                    IconButton(
                         enabled = canOpen,
                         onClick = {
                             val url = resolvedMediaUrl
@@ -2368,23 +2387,22 @@ internal fun MediaFileBlock(block: VisualBlock) {
                             }
                             openAndroidIntent(context, intent)
                         }
-                    ) { Text("Apri") }
-                    Button(
+                    ) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri allegato", tint = Color.White) }
+                    IconButton(
                         enabled = canOpen && !isDownloading,
                         onClick = {
                             val url = resolvedMediaUrl.orEmpty()
                             val filename = block.filename.ifBlank { block.title.ifBlank { "hermes-file" } }
                             if (url.isNotBlank()) requestDownload(url, filename)
                         }
-                    ) { Text(if (isDownloading) "Scarico..." else "Scarica") }
-                    Button(
+                    ) { Icon(if (isDownloading) Icons.Rounded.Refresh else Icons.Rounded.Download, contentDescription = "Scarica allegato", tint = Color.White) }
+                    IconButton(
                         enabled = canOpen,
                         onClick = {
                             val url = resolvedMediaUrl
                             clipboard.setPrimaryClip(ClipData.newPlainText("hermes-media-url", url))
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Elevated)
-                    ) { Text("Copia link") }
+                        }
+                    ) { Icon(Icons.Rounded.ContentCopy, contentDescription = "Copia link", tint = Color.White) }
                 }
             }
         }
@@ -2859,7 +2877,7 @@ internal fun ChatModelSessionBar(
             }
             Text(routeLabel, color = AppColors.Muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
             if (steerable) {
-                TextButton(onClick = { steerStatus = ""; showSteerDialog = true }) { Text("Correggi", fontSize = 12.sp) }
+                IconButton(onClick = { steerStatus = ""; showSteerDialog = true }, modifier = Modifier.size(34.dp)) { Icon(Icons.Rounded.Edit, contentDescription = "Correggi run in corso", tint = AppColors.Muted, modifier = Modifier.size(20.dp)) }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -3024,9 +3042,9 @@ internal fun ChatModelSessionBar(
                             steerText = ""
                         }
                     }
-                }) { Text("Invia") }
+                }) { Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Invia correzione", tint = Color.White) }
             },
-            dismissButton = { TextButton(onClick = { showSteerDialog = false }) { Text("Chiudi") } }
+            dismissButton = { IconButton(onClick = { showSteerDialog = false }) { Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = Color.White) } }
         )
     }
 }
@@ -3504,7 +3522,7 @@ internal fun ProjectsScreen(
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("I tuoi progetti", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Button(onClick = { edit(null); status = "Inserisci nome e system prompt facoltativo." }) { Text("Nuovo") }
+                        IconButton(onClick = { edit(null); status = "Inserisci nome e system prompt facoltativo." }) { Icon(Icons.Rounded.Add, contentDescription = "Nuovo progetto", tint = Color.White) }
                     }
                     if (projects.isEmpty()) {
                         Text("Nessun progetto.", color = AppColors.Muted)
@@ -3526,7 +3544,7 @@ internal fun ProjectsScreen(
                     SettingsField("Nome progetto", title, { title = it })
                     SettingsField("System prompt (facoltativo)", instructions, { instructions = it })
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
+                        IconButton(onClick = {
                             runCatching {
                                 saveProjectWorkspace(
                                     context = context,
@@ -3545,13 +3563,13 @@ internal fun ProjectsScreen(
                                 onSettingsChanged(settings.withActiveProject(saved))
                                 status = "Progetto salvato e attivato."
                             }.onFailure { status = it.message ?: "Salvataggio progetto fallito." }
-                        }) { Text("Salva") }
-                        Button(enabled = selected != null, onClick = {
+                        }) { Icon(Icons.Rounded.Save, contentDescription = "Salva progetto", tint = Color.White) }
+                        IconButton(enabled = selected != null, onClick = {
                             selected?.let {
                                 onSettingsChanged(settings.withActiveProject(it))
                                 onNewChat()
                             }
-                        }) { Text("Nuova chat") }
+                        }) { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Nuova chat nel progetto", tint = Color.White) }
                     }
                     Text(status, color = AppColors.Muted, fontSize = 12.sp)
                 }
@@ -3693,17 +3711,17 @@ internal fun ArtifactLibraryScreen(
                         SettingsField("Nome", rename, { rename = it })
                         SettingsField("Tag", tags, { tags = it })
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = {
+                            IconButton(onClick = {
                                 saveArtifactMetadata(context, selected.id, rename, tags.split(',', ';').map { it.trim() }.filter { it.isNotBlank() })
                                 refresh++; status = "Metadata salvati; sync gateway in coda."
-                            }) { Text("Salva") }
-                            Button(onClick = { if (selected.sourceConversationId.isNotBlank()) onOpenConversation(selected.sourceConversationId) }) { Text("Anteprima origine") }
-                            Button(onClick = {
+                            }) { Icon(Icons.Rounded.Save, contentDescription = "Salva metadata", tint = Color.White) }
+                            IconButton(onClick = { if (selected.sourceConversationId.isNotBlank()) onOpenConversation(selected.sourceConversationId) }) { Icon(Icons.Rounded.Visibility, contentDescription = "Anteprima origine", tint = Color.White) }
+                            IconButton(onClick = {
                                 if (selected.artifactUrl.isBlank()) status = "Artifact senza URL apribile." else runCatching {
                                     context.startActivity(Intent(Intent.ACTION_VIEW, resolveHermesUrl(settings, selected.artifactUrl).toUri()))
                                 }.onFailure { status = "Apertura fallita: ${it.message}" }
-                            }) { Text("Apri / scarica") }
-                            Button(onClick = { onRegenerate("Rigenera artifact '${selected.title}' versione ${selected.version}, progetto ${selected.projectId}, sorgente chat ${selected.sourceConversationId}.") }) { Text("Rigenera") }
+                            }) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri artifact", tint = Color.White) }
+                            IconButton(onClick = { onRegenerate("Rigenera artifact '${selected.title}' versione ${selected.version}, progetto ${selected.projectId}, sorgente chat ${selected.sourceConversationId}.") }) { Icon(Icons.Rounded.Refresh, contentDescription = "Rigenera artifact", tint = Color.White) }
                         }
                         Text("Versioni", color = Color.White, fontWeight = FontWeight.SemiBold)
                         val key = selected.artifactFileName.ifBlank { selected.title }

@@ -1,9 +1,10 @@
-Hermes Hub 0.6.193 (flag tool unico, viewer media, freccia fine chat)
+Hermes Hub 0.6.194 (shadow desktop, icone, stop risanato, manager autosufficiente)
 
-- Android: tutti i tool in un unico flag richiudibile; bottone freccia-giù (solo icona) per tornare a fine chat.
-- Android: media senza card — immagine nuda con viewer e icona download, player inline video/audio, riga slim documenti; dedup per URL e fix kind.
-- Versioni: Windows/AdminBridge `0.6.193`; Android `versionName 0.6.193`, `versionCode 197`.
-- Asset: `HermesHub-0.6.193-android.apk` (binario Windows invariato).
-- SHA-256 Android: `d6cb238c0ed40f73a1a207193d08562ada64d7ecc66ce47e661c378b22ba1453`.
-- Asset: `HermesHub-0.6.193-linux-gateway.tar.gz` (invariato nei contenuti gateway).
-- SHA-256 gateway: `6d035940a2f20bc6fcd15ad713e33d2094519a4ee98635acc5a1c5dfa655e0bd`.
+- Gateway: sessioni desktop importate come shadow conversations (solo risposte agente, continuazione via previous_response_id); timer server ogni 2 minuti.
+- Android: bottoni azione a icone ovunque tranne selettori/conferme/wizard; stop senza più stream orfani né composer bloccato.
+- GPU manager: watchdog LLM, recovery ERROR, igiene shm, fix deadlock GPU_FREE, detection H3 reale.
+- Versioni: Windows/AdminBridge `0.6.194`; Android `versionName 0.6.194`, `versionCode 198`.
+- Asset: `HermesHub-0.6.194-android.apk` (binario Windows invariato).
+- SHA-256 Android: `783f504ab4c324233e20359322a0e06a499aa20059621cb10b13f69de09f67a4`.
+- Asset: `HermesHub-0.6.194-linux-gateway.tar.gz`.
+- SHA-256 gateway: `0721265f90348a164b1f7096c978a92346903f0787a5599407a1b1b09612cdb8`.
