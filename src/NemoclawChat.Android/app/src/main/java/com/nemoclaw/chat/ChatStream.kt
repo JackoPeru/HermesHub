@@ -450,12 +450,41 @@ private fun upsertToolResult(tools: List<ToolCallState>, event: ChatStreamEvent.
     }
 }
 
-private fun mergeVisualBlocks(current: List<VisualBlock>, incoming: List<VisualBlock>): List<VisualBlock> {
+/**
+ * Deduplica i blocchi per URL (case-insensitive, proxy e assoluti equivalenti):
+ * blocco agente + estrazione inline della stessa URL diventano una sola card,
+ * preferendo il kind più specifico (image/video/audio su document).
+ */
+internal fun dedupeVisualBlocks(current: List<VisualBlock>, incoming: List<VisualBlock>): List<VisualBlock> {
     if (incoming.isEmpty()) return current
-    val seen = current.map { if (it.mediaUrl.isNotBlank()) "${it.type}:media:${it.mediaUrl}" else it.id }.toMutableSet()
-    return current + incoming.filter {
-        seen.add(if (it.mediaUrl.isNotBlank()) "${it.type}:media:${it.mediaUrl}" else it.id)
+    fun keyOf(block: VisualBlock): String {
+        val url = block.mediaUrl.trim().lowercase()
+        if (url.isBlank()) return "id:${block.id}"
+        val proxy = url.substringAfterLast("/v1/media/", missingDelimiterValue = "")
+        if (proxy.isNotEmpty() && proxy != url) return "proxy:$proxy"
+        return "url:$url"
     }
+    fun specificity(block: VisualBlock): Int = when (block.mediaKind.lowercase()) {
+        "image", "video", "audio" -> 1
+        else -> 0
+    }
+    val out = current.toMutableList()
+    val indexByKey = out.mapIndexed { i, block -> keyOf(block) to i }.toMap().toMutableMap()
+    for (block in incoming) {
+        val key = keyOf(block)
+        val existing = indexByKey[key]
+        if (existing == null) {
+            indexByKey[key] = out.size
+            out += block
+        } else if (specificity(block) > specificity(out[existing])) {
+            out[existing] = block
+        }
+    }
+    return out
+}
+
+private fun mergeVisualBlocks(current: List<VisualBlock>, incoming: List<VisualBlock>): List<VisualBlock> {
+    return dedupeVisualBlocks(current, incoming)
 }
 
 private fun StreamingState.appendReasoningActivity(delta: String): List<AssistantActivity> {

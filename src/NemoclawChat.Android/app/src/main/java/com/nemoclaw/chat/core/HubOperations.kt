@@ -2219,7 +2219,12 @@ internal fun readVisualBlock(obj: JSONObject): VisualBlock {
     } else {
         obj.optString("filename")
     }
-    val mediaKind = if (isMediaFile) normalizeVisualBlockMediaKind(obj.optString("media_kind"), inferVisualBlockMediaKind(filename, mediaUrl)) else obj.optString("media_kind")
+    val inferredKind = inferVisualBlockMediaKind(filename, mediaUrl)
+    var mediaKind = if (isMediaFile) normalizeVisualBlockMediaKind(obj.optString("media_kind"), inferredKind) else obj.optString("media_kind")
+    if (isMediaFile && mediaKind == "document" && inferredKind != "document") {
+        // L'agente dichiara document ma URL/mime dicono image/video/audio: fidati dell'evidenza.
+        mediaKind = inferredKind
+    }
     val mimeType = if (isMediaFile) firstNonBlank(obj.optString("mime_type"), inferVisualBlockMimeType(filename, mediaUrl)) else obj.optString("mime_type")
     val alt = if (isMediaFile) firstNonBlank(obj.optString("alt"), obj.optString("title"), filename, "File Hermes") else obj.optString("alt")
 

@@ -289,10 +289,8 @@ internal fun HermesActivityTimeline(timeline: List<AssistantActivity>, active: B
         if (prefill != null) {
             PrefillPinnedRow(prefill.text, active)
         }
-        tools.forEach { tool ->
-            androidx.compose.runtime.key(tool.id.ifBlank { tool.name }) {
-                ToolActivityRow(tool)
-            }
+        if (tools.isNotEmpty()) {
+            ToolGroupExpander(tools)
         }
         if (reasoningText.isNotBlank()) {
             ReasoningCanvas(reasoningText, active)

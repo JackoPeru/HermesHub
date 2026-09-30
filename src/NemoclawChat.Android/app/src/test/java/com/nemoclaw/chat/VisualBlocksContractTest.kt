@@ -33,4 +33,33 @@ class VisualBlocksContractTest {
         assertEquals("Ray-Ban Meta", blocks[3].deviceName)
         assertTrue(blocks.last().rawJson.contains("future_widget"))
     }
+
+    @Test
+    fun `agent document kind upgrades to image on png evidence`() {
+        val blocks = extractVisualBlocks(
+            """
+            {
+              "visual_blocks":[
+                {"id":"m1","type":"media_file","media_kind":"document","media_url":"/v1/media/tramonto.png","filename":"tramonto","mime_type":""}
+              ]
+            }
+            """.trimIndent()
+        )
+        assertEquals(1, blocks.size)
+        assertEquals("image", blocks[0].mediaKind)
+        assertEquals("image/png", blocks[0].mimeType)
+    }
+
+    @Test
+    fun `duplicate agent and inline blocks collapse to one card`() {
+        val agent = VisualBlock(id = "a1", type = "media_file", filename = "tramonto", mediaUrl = "/v1/media/tramonto.png", mediaKind = "document")
+        val inline = VisualBlock(id = "a2", type = "media_file", filename = "tramonto.png", mediaUrl = "/v1/media/tramonto.png", mediaKind = "image")
+        val merged = dedupeVisualBlocks(listOf(agent), listOf(inline))
+        assertEquals(1, merged.size)
+        assertEquals("image", merged[0].mediaKind)
+        val absolute = VisualBlock(id = "a3", type = "media_file", filename = "x.png", mediaUrl = "http://gw:8642/v1/media/tramonto.png", mediaKind = "image")
+        assertEquals(1, dedupeVisualBlocks(listOf(agent), listOf(absolute)).size)
+        val other = VisualBlock(id = "a4", type = "media_file", filename = "altro.png", mediaUrl = "/v1/media/altro.png", mediaKind = "image")
+        assertEquals(2, dedupeVisualBlocks(listOf(agent), listOf(other)).size)
+    }
 }

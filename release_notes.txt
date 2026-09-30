@@ -1,10 +1,9 @@
-Hermes Hub 0.6.192 (reasoning unico, specifiche tool, contesto 262k)
+Hermes Hub 0.6.193 (flag tool unico, viewer media, freccia fine chat)
 
-- Android: tool prima e unico canvas di ragionamento sotto; nomi catturati al parse; argomenti/risultati visibili con segreti oscurati e persistiti.
-- Android: fallback contesto alla finestra reale 262k del backend; ricalcolo su cambio server/modello.
-- Gateway/manager: rilevamento H3 reale nel tar.
-- Versioni: Windows/AdminBridge `0.6.192`; Android `versionName 0.6.192`, `versionCode 196`.
-- Asset: `HermesHub-0.6.192-android.apk` (binario Windows invariato).
-- SHA-256 Android: `de88eb8729f2eb516893abcd99588952da893a5f1d9418a07389e78a26cce7d9`.
-- Asset: `HermesHub-0.6.192-linux-gateway.tar.gz`.
-- SHA-256 gateway: `27748be9eb970fe5a351f6265d25c5adfc0ca24db0ac2475e6ef2b9def5dcccf`.
+- Android: tutti i tool in un unico flag richiudibile; bottone freccia-giù (solo icona) per tornare a fine chat.
+- Android: media senza card — immagine nuda con viewer e icona download, player inline video/audio, riga slim documenti; dedup per URL e fix kind.
+- Versioni: Windows/AdminBridge `0.6.193`; Android `versionName 0.6.193`, `versionCode 197`.
+- Asset: `HermesHub-0.6.193-android.apk` (binario Windows invariato).
+- SHA-256 Android: `d6cb238c0ed40f73a1a207193d08562ada64d7ecc66ce47e661c378b22ba1453`.
+- Asset: `HermesHub-0.6.193-linux-gateway.tar.gz` (invariato nei contenuti gateway).
+- SHA-256 gateway: `6d035940a2f20bc6fcd15ad713e33d2094519a4ee98635acc5a1c5dfa655e0bd`.

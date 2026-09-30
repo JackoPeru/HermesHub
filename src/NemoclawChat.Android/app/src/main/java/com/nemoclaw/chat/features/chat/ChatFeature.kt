@@ -101,11 +101,14 @@ import androidx.compose.material.icons.rounded.AccountCircle
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FolderOpen
@@ -116,6 +119,7 @@ import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PhotoCamera
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -153,6 +157,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -552,6 +557,34 @@ internal fun ChatScreen(
             if (isEmptyChat) {
                 // Empty state must stay above the transparent LazyColumn or the list consumes taps.
                 EmptyState(onPrompt = { quickPrompt = it })
+            }
+            val showJumpToBottom by remember {
+                derivedStateOf {
+                    val info = listState.layoutInfo
+                    val total = info.totalItemsCount
+                    if (total <= 1) {
+                        false
+                    } else {
+                        val last = info.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf true
+                        (total - 1 - last.index) >= 2 ||
+                            (last.index == total - 1 && last.offset + last.size > info.viewportEndOffset + 150)
+                    }
+                }
+            }
+            if (showJumpToBottom) {
+                androidx.compose.material3.SmallFloatingActionButton(
+                    onClick = {
+                        scope.launch {
+                            val total = listState.layoutInfo.totalItemsCount
+                            if (total > 0) listState.animateScrollToItem(total - 1)
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 14.dp),
+                    containerColor = AppColors.Elevated,
+                    contentColor = Color.White
+                ) {
+                    Icon(Icons.Rounded.ArrowDownward, contentDescription = "Vai alla fine della chat")
+                }
             }
         }
         val slashMatches = remember(state.draft) { filterSlashCommands(state.draft) }
@@ -1972,6 +2005,222 @@ internal fun ChatInlineVideoPlayer(
 }
 
 @Composable
+internal fun ChatInlineImage(
+    settings: AppSettings,
+    block: VisualBlock,
+    mediaUrl: String,
+    apiKey: String?,
+    onDownload: (String, String) -> Unit,
+    isDownloading: Boolean
+) {
+    var viewer by remember(block.mediaUrl) { mutableStateOf(false) }
+    val bitmap by produceState<Bitmap?>(initialValue = null, mediaUrl) {
+        value = withContext(Dispatchers.IO) { loadRemoteBitmap(settings, mediaUrl, apiKey) }
+    }
+    val loaded = bitmap
+    if (loaded == null) {
+        Text(
+            "${block.alt.ifBlank { block.filename.ifBlank { "Immagine" } }}: caricamento immagine...",
+            color = AppColors.Muted,
+            fontSize = 13.sp
+        )
+        return
+    }
+    Image(
+        bitmap = loaded.asImageBitmap(),
+        contentDescription = block.alt.ifBlank { block.filename },
+        contentScale = ContentScale.FillWidth,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { viewer = true }
+    )
+    if (viewer) {
+        Dialog(onDismissRequest = { viewer = false }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.Black)
+            ) {
+                Image(
+                    bitmap = loaded.asImageBitmap(),
+                    contentDescription = block.alt.ifBlank { block.filename },
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { viewer = false },
+                        modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
+                    ) {
+                        Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = Color.White)
+                    }
+                    IconButton(
+                        onClick = {
+                            if (!isDownloading) {
+                                onDownload(mediaUrl, block.filename.ifBlank { block.title.ifBlank { "hermes-file" } })
+                            }
+                        },
+                        enabled = !isDownloading,
+                        modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
+                    ) {
+                        Icon(Icons.Rounded.Download, contentDescription = "Scarica immagine", tint = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+@androidx.annotation.OptIn(UnstableApi::class)
+internal fun ChatInlineAudioPlayer(
+    settings: AppSettings,
+    mediaUrl: String,
+    filename: String,
+    apiKey: String?
+) {
+    val context = LocalContext.current
+    var isPlaying by remember(mediaUrl) { mutableStateOf(false) }
+    var durationMs by remember(mediaUrl) { mutableStateOf(0L) }
+    var positionMs by remember(mediaUrl) { mutableStateOf(0L) }
+    var status by remember(mediaUrl) { mutableStateOf<String?>(null) }
+    val player = remember(mediaUrl, apiKey) {
+        val dataSourceFactory = DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(if (shouldAuthenticateHermesUrl(settings, mediaUrl)) authHeaders(apiKey) else emptyMap())
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .build()
+            .apply {
+                setMediaItem(MediaItem.fromUri(mediaUrl.toUri()))
+                prepare()
+                playWhenReady = false
+            }
+    }
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+            }
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_READY) {
+                    durationMs = player.duration.coerceAtLeast(0L)
+                }
+            }
+            override fun onPlayerError(error: PlaybackException) {
+                status = "Audio: ${error.errorCodeName}."
+            }
+        }
+        player.addListener(listener)
+        onDispose {
+            player.removeListener(listener)
+            player.release()
+        }
+    }
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            positionMs = player.currentPosition.coerceAtLeast(0L)
+            delay(500L)
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(AppColors.Composer)
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            IconButton(
+                onClick = { player.playWhenReady = !player.playWhenReady },
+                modifier = Modifier.size(38.dp)
+            ) {
+                Icon(
+                    if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = if (isPlaying) "Pausa" else "Riproduci",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Text(
+                formatMediaDuration(positionMs),
+                color = AppColors.Muted,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace
+            )
+            Slider(
+                value = positionMs.toFloat(),
+                onValueChange = { player.seekTo(it.toLong()); positionMs = it.toLong() },
+                valueRange = 0f..durationMs.coerceAtLeast(1L).toFloat(),
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                formatMediaDuration(durationMs),
+                color = AppColors.Muted,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+        if (filename.isNotBlank()) {
+            Text(filename, color = AppColors.Faint, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (status != null) {
+            Text(status.orEmpty(), color = AppColors.Muted, fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
+internal fun DocumentSlimRow(
+    settings: AppSettings,
+    block: VisualBlock,
+    mediaUrl: String
+) {
+    val context = LocalContext.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(AppColors.Composer)
+            .clickable {
+                val viewUrl = withHermesMediaQueryToken(settings, mediaUrl, loadGatewaySecret(context))
+                val intent = Intent(Intent.ACTION_VIEW, viewUrl.toUri())
+                if (block.mimeType.isNotBlank()) {
+                    intent.setDataAndType(viewUrl.toUri(), block.mimeType)
+                }
+                openAndroidIntent(context, intent)
+            }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Icon(Icons.Rounded.Description, contentDescription = null, tint = AppColors.Muted, modifier = Modifier.size(22.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                block.filename.ifBlank { block.title.ifBlank { "Documento" } },
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            val meta = listOf(block.mediaKind.ifBlank { "file" }, block.mimeType, formatMediaBytes(block.sizeBytes))
+                .filter { it.isNotBlank() }.joinToString(" · ")
+            if (meta.isNotBlank()) {
+                Text(meta, color = AppColors.Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+@Composable
 internal fun MediaFileBlock(block: VisualBlock) {
     val context = LocalContext.current
     val settings = remember { loadSettings(context) }
@@ -1991,7 +2240,6 @@ internal fun MediaFileBlock(block: VisualBlock) {
     var isDownloading by remember(block.mediaUrl) { mutableStateOf(false) }
     var pendingLegacyDownload by remember(block.id) { mutableStateOf<Pair<String, String>?>(null) }
     val canOpen = resolvedMediaUrl != null
-    val showInlinePlayer = block.mediaKind == "video" && canOpen && !isLocalAttachment
     val downloadNow: (String, String) -> Unit = { url, filename ->
         isDownloading = true
         android.widget.Toast.makeText(context, "Scaricamento: ${sanitizeDownloadFilename(filename)}", android.widget.Toast.LENGTH_SHORT).show()
@@ -2012,6 +2260,54 @@ internal fun MediaFileBlock(block: VisualBlock) {
             android.widget.Toast.makeText(context, "Permesso Download negato.", android.widget.Toast.LENGTH_LONG).show()
         }
     }
+    val requestDownload: (String, String) -> Unit = { url, filename ->
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+            androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingLegacyDownload = url to filename
+            legacyStoragePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        } else {
+            downloadNow(url, filename)
+        }
+    }
+
+    if (block.mediaKind == "image" && canOpen && !isLocalAttachment && resolvedMediaUrl != null) {
+        ChatInlineImage(
+            settings = settings,
+            block = block,
+            mediaUrl = resolvedMediaUrl,
+            apiKey = gatewaySecret,
+            onDownload = requestDownload,
+            isDownloading = isDownloading
+        )
+        return
+    }
+    if (!isLocalAttachment && canOpen && resolvedMediaUrl != null) {
+        when (block.mediaKind) {
+            "video" -> {
+                ChatInlineVideoPlayer(
+                    settings = settings,
+                    mediaUrl = resolvedMediaUrl,
+                    durationLabel = formatMediaDuration(block.durationMs),
+                    apiKey = gatewaySecret
+                )
+                return
+            }
+            "audio" -> {
+                ChatInlineAudioPlayer(
+                    settings = settings,
+                    mediaUrl = resolvedMediaUrl,
+                    filename = block.filename.ifBlank { block.title },
+                    apiKey = gatewaySecret
+                )
+                return
+            }
+            else -> {
+                DocumentSlimRow(settings = settings, block = block, mediaUrl = resolvedMediaUrl)
+                return
+            }
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (isLocalAttachment && block.mediaKind == "image") {
@@ -2023,13 +2319,6 @@ internal fun MediaFileBlock(block: VisualBlock) {
                     contentScale = ContentScale.Fit
                 )
             }
-        } else if (showInlinePlayer) {
-            ChatInlineVideoPlayer(
-                settings = settings,
-                mediaUrl = resolvedMediaUrl.orEmpty(),
-                durationLabel = formatMediaDuration(block.durationMs),
-                apiKey = gatewaySecret
-            )
         } else if (previewSource.isNotBlank()) {
             RemoteGalleryImage(
                 settings,
@@ -2083,16 +2372,9 @@ internal fun MediaFileBlock(block: VisualBlock) {
                     Button(
                         enabled = canOpen && !isDownloading,
                         onClick = {
-                            val url = resolvedMediaUrl
+                            val url = resolvedMediaUrl.orEmpty()
                             val filename = block.filename.ifBlank { block.title.ifBlank { "hermes-file" } }
-                            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
-                                androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED
-                            ) {
-                                pendingLegacyDownload = url to filename
-                                legacyStoragePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                            } else {
-                                downloadNow(url, filename)
-                            }
+                            if (url.isNotBlank()) requestDownload(url, filename)
                         }
                     ) { Text(if (isDownloading) "Scarico..." else "Scarica") }
                     Button(

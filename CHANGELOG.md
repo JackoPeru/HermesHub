@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.193 - 2026-09-30
+
+- Timeline: tutti i tool in un unico flag richiudibile; bottone freccia-giù per tornare a fine chat quando il fondo è lontano.
+- Media in chat senza card: immagine nuda con viewer e icona download, player inline per video e audio compatti, riga slim per documenti; dedup per URL e correzione kind document→image.
+
 ## 0.6.192 - 2026-09-30
 
 - Timeline: prima i tool (chiusi), sotto un unico canvas di ragionamento; nomi funzione catturati al parse, specifiche visibili con segreti oscurati e persistite in archivio.
