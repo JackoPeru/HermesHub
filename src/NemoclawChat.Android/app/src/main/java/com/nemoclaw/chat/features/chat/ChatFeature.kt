@@ -1344,7 +1344,6 @@ internal fun estimateChatContextUsage(
     val authoritativeStats = streamingState?.stats
         ?: messages.asReversed().firstNotNullOfOrNull { it.stats?.takeIf { stats -> stats.contextTokens() > 0 } }
     val contextWindow = authoritativeStats?.contextLength?.takeIf { it > 0 } ?: DEFAULT_CONTEXT_WINDOW_TOKENS
-    val explicitPercent = authoritativeStats?.contextPercent?.takeIf { it in 0..100 }
     val serverContextTokens = authoritativeStats?.contextTokens()
         ?: 0
     if (isHermesNative(settings) && serverContextTokens <= 0) {
@@ -1363,7 +1362,11 @@ internal fun estimateChatContextUsage(
         CONTEXT_SYSTEM_OVERHEAD_TOKENS + historyTokens + draftTokens
     }
     val tokens = if (isHermesNative(settings)) serverContextTokens else maxOf(estimated, serverContextTokens).coerceAtLeast(0)
-    val percent = explicitPercent ?: ((tokens.coerceAtMost(contextWindow).toDouble() / contextWindow) * 100.0)
+    // Percentuale sempre calcolata sui token rispetto alla finestra reale del
+    // modello (dichiarata dal server o fallback verificato): parte da 0 a chat
+    // vuota e sale col contesto. La percent del compattatore server non fa fede
+    // sul riempimento modello.
+    val percent = ((tokens.coerceAtMost(contextWindow).toDouble() / contextWindow) * 100.0)
         .roundToInt()
         .coerceIn(0, 100)
     return ContextUsage(tokens = tokens, maxTokens = contextWindow, percent = percent, delegatedToHermes = isHermesNative(settings))

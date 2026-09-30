@@ -577,7 +577,22 @@ internal fun mergeTextSnapshot(current: String, snapshot: String): String {
     if (snapshot.isEmpty()) return current
     if (current.isEmpty() || snapshot.startsWith(current)) return snapshot
     if (current.startsWith(snapshot) || current == snapshot) return current
-    return snapshot
+    // Stesso contenuto con wrapping diverso (es. "\n\nFinale..."): vince lo snapshot.
+    if (snapshot.contains(current)) return snapshot
+    if (current.contains(snapshot)) return current
+    // Snapshot non cumulativo (chunk sequenziali del server): accoda invece di
+    // sostituire, altrimenti resta visibile solo l'ultimo token generato.
+    // Se la coda di current coincide con la testa di snapshot (finestre
+    // sovrapposte), unisci sulla sovrapposizione per non duplicare.
+    val maxOverlap = minOf(current.length, snapshot.length, 512)
+    var overlap = 0
+    for (len in maxOverlap downTo 8) {
+        if (current.endsWith(snapshot.take(len))) {
+            overlap = len
+            break
+        }
+    }
+    return current + snapshot.drop(overlap)
 }
 
 private fun inferToolPendingStatus(tool: ToolCallState): Boolean {

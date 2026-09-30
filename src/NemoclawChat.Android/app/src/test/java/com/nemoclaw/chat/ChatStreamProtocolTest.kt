@@ -17,8 +17,25 @@ class ChatStreamProtocolTest {
     fun finalSnapshotIsAuthoritativeWithoutConcatenatingDivergentFormatting() {
         assertEquals("hello world", mergeTextSnapshot("hello", "hello world"))
         assertEquals("hello world", mergeTextSnapshot("hello world", "hello"))
-        assertEquals("xyz", mergeTextSnapshot("abc", "xyz"))
         assertEquals("\n\nFinale Markdown", mergeTextSnapshot("Finale Markdown", "\n\nFinale Markdown"))
+    }
+
+    @Test
+    fun nonCumulativeSnapshotsAppendInsteadOfReplacing() {
+        // Chunk sequenziali reasoning.available: nessun chunk è prefisso
+        // dell'altro, la traccia deve accumularsi invece di mostrare solo
+        // l'ultimo token generato.
+        assertEquals("abcxyz", mergeTextSnapshot("abc", "xyz"))
+        assertEquals(
+            "The user said \"ciao\" in Italian.",
+            mergeTextSnapshot(
+                mergeTextSnapshot("The user said", " \"ciao\" in"),
+                " Italian."
+            )
+        )
+        // Finestre sovrapposte (>=8 char): unione sulla sovrapposizione.
+        assertEquals("abcdefgh12345678efgh", mergeTextSnapshot("abcdefgh12345678", "12345678efgh"))
+        assertEquals("", mergeTextSnapshot("", ""))
     }
 
     @Test

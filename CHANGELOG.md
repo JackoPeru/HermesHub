@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.195 - 2026-10-01
+
+- Ragionamento e risposte: gli snapshot non cumulativi si accumulano invece di mostrare solo l'ultimo token; merge su finestre sovrapposte.
+- Cerchio contesto tarato sulla finestra reale (131072 token runtime): parte da 0 e sale col contesto, senza percent del compattatore.
+
 ## 0.6.194 - 2026-09-30
 
 - Shadow conversations: le sessioni agent fuori Hub (es. desktop ufficiale) compaiono in Hub con le risposte dell'assistente; continuazione via previous_response_id. Sync via timer server ogni 2 minuti.
