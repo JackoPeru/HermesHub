@@ -49,6 +49,7 @@ $files = @(
     "hermes-hub-agent-update.timer",
     "hermes-wait-tailscale.sh",
     "hermes-wait-llama.sh",
+    "rehub-patch.sh",
     "hermes-power-monitor.sh",
     "hermes-power-monitor.service"
 )

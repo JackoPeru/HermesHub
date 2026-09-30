@@ -45,6 +45,9 @@ _BOTS_CAPABILITIES_BEGIN = "            # HERMES_HUB_BOTS_CAPABILITIES_BEGIN"
 _BOTS_CAPABILITIES_END = "            # HERMES_HUB_BOTS_CAPABILITIES_END"
 _BOTS_ENDPOINTS_BEGIN = "                # HERMES_HUB_BOTS_ENDPOINTS_BEGIN"
 _BOTS_ENDPOINTS_END = "                # HERMES_HUB_BOTS_ENDPOINTS_END"
+_HUB_CAPABILITY_ENDPOINTS_BEGIN = "    # HERMES_HUB_CAPABILITY_ENDPOINTS_V1_BEGIN"
+_HUB_CAPABILITY_ENDPOINTS_END = "    # HERMES_HUB_CAPABILITY_ENDPOINTS_V1_END"
+_HUB_CAPABILITY_ENDPOINTS_MARKER = _HUB_CAPABILITY_ENDPOINTS_BEGIN
 _BOTS_DYNAMIC_ROUTES_BEGIN = "        # HERMES_HUB_BOTS_DYNAMIC_ROUTES_BEGIN"
 _BOTS_DYNAMIC_ROUTES_END = "        # HERMES_HUB_BOTS_DYNAMIC_ROUTES_END"
 _BOTS_LEGACY_ROUTES_BEGIN = "            # HERMES_HUB_BOTS_LEGACY_ROUTES_BEGIN"
@@ -211,6 +214,52 @@ def _find_agent_chat_completion_helpers(api_server_path: Path) -> Path | None:
     return None
 
 
+def _find_openai_routes_target(api_server_path: Path) -> Path | None:
+    """Resolve the OpenAI mixin file when upstream moved handlers out of api_server.py."""
+    source = api_server_path.read_text(encoding="utf-8")
+    module_import = "api_server_openai_routes" in source
+    if not module_import:
+        return None
+    route_target = api_server_path.with_name("api_server_openai_routes.py")
+    if not route_target.is_file():
+        raise PatchError(f"OpenAI routes module missing beside api_server.py: {route_target}")
+    if not re.search(
+        r"(?m)^from\s+gateway\.platforms\.api_server_openai_routes\s+import\s+OpenAICompatRoutesMixin\b",
+        source,
+    ):
+        raise PatchError("Unsupported api_server_openai_routes import layout")
+    return route_target
+
+
+def _find_runs_module_target(api_server_path: Path) -> Path | None:
+    """Resolve extracted run lifecycle code when api_server.py delegates to it."""
+    source = api_server_path.read_text(encoding="utf-8")
+    if "api_server_runs" not in source:
+        return None
+    run_target = api_server_path.with_name("api_server_runs.py")
+    if not run_target.is_file():
+        raise PatchError(f"Run lifecycle module missing beside api_server.py: {run_target}")
+    return run_target
+
+
+def _runs_module_preserves_active_tasks(text: str) -> bool:
+    """Verify upstream's extracted stream sweeper leaves live run tasks registered."""
+    sweep_start = text.find("def _sweep_orphaned_runs_once(")
+    if sweep_start < 0:
+        return False
+    sweep_end = text.find("\ndef ", sweep_start + 1)
+    sweep = text[sweep_start:sweep_end] if sweep_end >= 0 else text[sweep_start:]
+    transport_drop = sweep.find("_drop_run_transport(self, run_id)")
+    active_guard = sweep.find("if task is None or task.done():")
+    retire = sweep.find("_retire_live_run(self, run_id)")
+    return (
+        "task = self._active_run_tasks.get(run_id)" in sweep
+        and transport_drop >= 0
+        and active_guard > transport_drop
+        and retire > active_guard
+    )
+
+
 def _replace_once(text: str, old: str, new: str, label: str) -> tuple[str, bool]:
     if old not in text:
         raise RuntimeError(f"Patch anchor not found: {label}")
@@ -222,6 +271,539 @@ def _replace_regex_once(text: str, pattern: str, repl: str, label: str) -> tuple
     if count != 1:
         raise RuntimeError(f"Patch anchor not found: {label}")
     return patched, True
+
+
+def _patch_modular_openai_routes(text: str) -> tuple[str, list[str]]:
+    """Patch Hermes-native stream events in the extracted OpenAI route module."""
+    changes: list[str] = []
+
+    if '"type": "hermes.native.protocol"' not in text:
+        text, _ = _replace_once(
+            text,
+            "            await st.emit_created()\n",
+            '            await st.emit_created()\n'
+            '            await st.write_event("hermes.native.protocol", {\n'
+            '                "type": "hermes.native.protocol",\n'
+            '                "protocol": "hermes-native",\n'
+            '                "transport": "responses",\n'
+            '                "endpoint": "/v1/responses",\n'
+            '                "native_endpoint": "/v1/hermes/native",\n'
+            '                "context_owner": "hermes-agent",\n'
+            '                "raw_event_passthrough": True,\n'
+            '                "strict_native_compatible": True,\n'
+            '                "session_id": session_id,\n'
+            '            })\n',
+            "modular responses hermes.native.protocol",
+        )
+        changes.append("modular responses hermes.native.protocol")
+
+    if "async def emit_raw_hermes_event" not in text:
+        text, _ = _replace_once(
+            text,
+            "    # queue tag -> (method name, payload adapter)\n",
+            '    async def emit_raw_hermes_event(self, payload: Any) -> None:\n'
+            '        """Forward Hermes-native metadata as a custom SSE event."""\n'
+            '        if not isinstance(payload, dict):\n'
+            '            payload = {"type": "hermes.event", "payload": payload}\n'
+            '        event_type = str(payload.get("event") or payload.get("type") or "hermes.event")\n'
+            '        payload.setdefault("session_id", self.session_id)\n'
+            '        await self.write_event(event_type, payload)\n'
+            '\n'
+            '    # queue tag -> (method name, payload adapter)\n',
+            "modular Responses raw Hermes emitter",
+        )
+        changes.append("modular Responses raw Hermes emitter")
+
+    raw_dispatch = '            if tag == "__hermes_raw_event__":\n'
+    if raw_dispatch not in text:
+        text, _ = _replace_once(
+            text,
+            '            handler = self._TAG_HANDLERS.get(tag)\n'
+            '            if handler is not None:\n'
+            '                method, adapt = handler\n'
+            '                await getattr(self, method)(adapt(payload))',
+            '            if tag == "__hermes_raw_event__":\n'
+            '                await self.emit_raw_hermes_event(payload)\n'
+            '            else:\n'
+            '                handler = self._TAG_HANDLERS.get(tag)\n'
+            '                if handler is not None:\n'
+            '                    method, adapt = handler\n'
+            '                    await getattr(self, method)(adapt(payload))',
+            "modular Responses raw Hermes dispatch",
+        )
+        changes.append("modular Responses raw Hermes dispatch")
+
+    if 'delta[0] == "__hermes_raw_event__"' not in text:
+        text, _ = _replace_once(
+            text,
+            '                elif isinstance(delta, tuple) and len(delta) == 2 and delta[0] == "__reasoning__":\n',
+            '                elif isinstance(delta, tuple) and len(delta) == 2 and delta[0] == "__hermes_raw_event__":\n'
+            '                    payload = delta[1] if isinstance(delta[1], dict) else {"type": "hermes.event", "payload": delta[1]}\n'
+            '                    event_name = str(payload.get("event") or payload.get("type") or "hermes.event")\n'
+            '                    payload.setdefault("session_id", session_id)\n'
+            '                    await response.write(_sse_frame(payload, event=event_name))\n'
+            '                elif isinstance(delta, tuple) and len(delta) == 2 and delta[0] == "__reasoning__":\n',
+            "modular Chat Completions raw Hermes dispatch",
+        )
+        changes.append("modular Chat Completions raw Hermes dispatch")
+
+    chat_callback_marker = '                """Forward Hermes progress and reasoning without duplicating lifecycle callbacks."""\n'
+    if chat_callback_marker not in text:
+        chat_callback = (
+            '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
+            '                """Forward Hermes progress and reasoning without duplicating lifecycle callbacks."""\n'
+            '                event_name = str(event_type or "hermes.tool.progress")\n'
+            '                if event_name in {"tool.started", "tool.completed"}:\n'
+            '                    return\n'
+            '                is_reasoning = "reasoning" in event_name.lower()\n'
+            '                if str(name).startswith("_") and not is_reasoning:\n'
+            '                    return\n'
+            '                payload = {\n'
+            '                    "type": "hermes.reasoning.available" if is_reasoning else event_name,\n'
+            '                    "event": "reasoning.available" if is_reasoning else event_name,\n'
+            '                    "tool": name,\n'
+            '                    "label": preview,\n'
+            '                    "reasoning": (preview or "") if is_reasoning else None,\n'
+            '                    "arguments": args or {},\n'
+            '                    "session_id": session_id,\n'
+            '                }\n'
+            '                payload.update(kwargs or {})\n'
+            '                _stream_q.put_threadsafe(("__hermes_raw_event__", payload))\n'
+            '\n'
+        )
+        text, _ = _replace_once(
+            text,
+            '            # tool_progress_callback deliberately NOT wired: it would duplicate the structured\n',
+            chat_callback + '            # Tool lifecycle callbacks already carry exact call ids.\n',
+            "modular Chat Completions raw Hermes callback",
+        )
+        text, _ = _replace_once(
+            text,
+            '                tool_complete_callback=_on_tool_complete, approval_notify_callback=approval_notify,\n',
+            '                tool_complete_callback=_on_tool_complete, tool_progress_callback=_on_tool_progress,\n'
+            '                approval_notify_callback=approval_notify,\n',
+            "modular Chat Completions wire Hermes callback",
+        )
+        changes.append("modular Chat Completions raw Hermes callback")
+
+    response_callback_marker = '                """Forward Responses progress and reasoning without duplicating lifecycle callbacks."""\n'
+    if response_callback_marker not in text:
+        text, _ = _replace_once(
+            text,
+            '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
+            '                return  # structured start/complete callbacks carry the call id; progress ignored\n',
+            '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
+            '                """Forward Responses progress and reasoning without duplicating lifecycle callbacks."""\n'
+            '                event_name = str(event_type or "hermes.tool.progress")\n'
+            '                if event_name in {"tool.started", "tool.completed"}:\n'
+            '                    return\n'
+            '                is_reasoning = "reasoning" in event_name.lower()\n'
+            '                if str(name).startswith("_") and not is_reasoning:\n'
+            '                    return\n'
+            '                payload = {\n'
+            '                    "type": "hermes.reasoning.available" if is_reasoning else event_name,\n'
+            '                    "event": "reasoning.available" if is_reasoning else event_name,\n'
+            '                    "tool": name,\n'
+            '                    "label": preview,\n'
+            '                    "reasoning": (preview or "") if is_reasoning else None,\n'
+            '                    "arguments": args or {},\n'
+            '                    "session_id": session_id,\n'
+            '                }\n'
+            '                payload.update(kwargs or {})\n'
+            '                _stream_q.put_threadsafe(("__hermes_raw_event__", payload))\n',
+            "modular Responses progress and reasoning callback",
+        )
+        changes.append("modular Responses progress and reasoning callback")
+
+    if '"event": "tool.started"' not in text:
+        text, _ = _replace_once(
+            text,
+            '            def _on_tool_start(tool_call_id, function_name, function_args):\n'
+            '                _stream_q.put_threadsafe(("__tool_started__", {\n',
+            '            def _on_tool_start(tool_call_id, function_name, function_args):\n'
+            '                _stream_q.put_threadsafe(("__hermes_raw_event__", {\n'
+            '                    "type": "hermes.tool.progress", "event": "tool.started",\n'
+            '                    "tool": function_name, "toolCallId": tool_call_id,\n'
+            '                    "status": "running", "arguments": function_args or {},\n'
+            '                }))\n'
+            '                _stream_q.put_threadsafe(("__tool_started__", {\n',
+            "modular Responses raw tool-start event",
+        )
+        changes.append("modular Responses raw tool-start event")
+
+    if '"event": "tool.completed"' not in text:
+        text, _ = _replace_once(
+            text,
+            '            def _on_tool_complete(tool_call_id, function_name, function_args, function_result):\n'
+            '                _stream_q.put_threadsafe(("__tool_completed__", {\n',
+            '            def _on_tool_complete(tool_call_id, function_name, function_args, function_result):\n'
+            '                _stream_q.put_threadsafe(("__hermes_raw_event__", {\n'
+            '                    "type": "hermes.tool.progress", "event": "tool.completed",\n'
+            '                    "tool": function_name, "toolCallId": tool_call_id,\n'
+            '                    "status": "completed", "arguments": function_args or {},\n'
+            '                    "result": function_result,\n'
+            '                }))\n'
+            '                _stream_q.put_threadsafe(("__tool_completed__", {\n',
+            "modular Responses raw tool-complete event",
+        )
+        changes.append("modular Responses raw tool-complete event")
+
+    return text, changes
+
+
+def _patch_legacy_openai_routes(text: str) -> tuple[str, list[str]]:
+    """Keep the single-file stream transformations for older Hermes releases."""
+    changes: list[str] = []
+
+    if '"type": "hermes.native.protocol"' not in text:
+        text, _ = _replace_once(
+            text,
+            '            await _write_event("response.created", {\n'
+            '                "type": "response.created",\n'
+            '                "response": created_env,\n'
+            '            })\n'
+            '            _persist_response_snapshot(created_env)',
+            '            await _write_event("response.created", {\n'
+            '                "type": "response.created",\n'
+            '                "response": created_env,\n'
+            '            })\n'
+            '            await _write_event("hermes.native.protocol", {\n'
+            '                "type": "hermes.native.protocol",\n'
+            '                "protocol": "hermes-native",\n'
+            '                "transport": "responses",\n'
+            '                "endpoint": "/v1/responses",\n'
+            '                "native_endpoint": "/v1/hermes/native",\n'
+            '                "context_owner": "hermes-agent",\n'
+            '                "raw_event_passthrough": True,\n'
+            '                "strict_native_compatible": True,\n'
+            '                "session_id": session_id,\n'
+            '            })\n'
+            '            _persist_response_snapshot(created_env)',
+            "responses stream hermes.native.protocol",
+        )
+        changes.append("responses stream hermes.native.protocol")
+
+    if "def _emit_raw_hermes_event" not in text:
+        text, _ = _replace_once(
+            text,
+            "            async def _dispatch(it) -> None:",
+            '            async def _emit_raw_hermes_event(payload: Dict[str, Any]) -> None:\n'
+            '                """Forward Hermes-native metadata without forcing OpenAI shape."""\n'
+            '                event_type = str(payload.get("type") or payload.get("event") or "hermes.event")\n'
+            '                if not event_type.startswith("hermes."):\n'
+            '                    event_type = "hermes." + event_type\n'
+            '                payload["type"] = event_type\n'
+            '                payload.setdefault("session_id", session_id)\n'
+            '                await _write_event(event_type, payload)\n'
+            "\n"
+            "            async def _dispatch(it) -> None:",
+            "responses stream raw hermes emitter",
+        )
+        changes.append("responses stream raw hermes emitter")
+
+    if "def _agent_context_usage" not in text:
+        text, _ = _replace_once(
+            text,
+            '                await _write_event(event_type, payload)\n'
+            "\n"
+            "            async def _dispatch(it) -> None:",
+            '                await _write_event(event_type, payload)\n'
+            "\n"
+            '            def _agent_context_usage() -> Optional[Dict[str, Any]]:\n'
+            "                agent = agent_ref[0] if agent_ref else None\n"
+            '                compressor = getattr(agent, "context_compressor", None) if agent is not None else None\n'
+            "                if compressor is None:\n"
+            "                    return None\n"
+            '                context_tokens = int(getattr(compressor, "last_prompt_tokens", 0) or 0)\n'
+            '                context_length = int(getattr(compressor, "context_length", 0) or 0)\n'
+            "                if context_tokens <= 0 and context_length <= 0:\n"
+            "                    return None\n"
+            "                payload: Dict[str, Any] = {\n"
+            '                    "type": "hermes.context.usage",\n'
+            '                    "source": "hermes-cli-status",\n'
+            '                    "context_tokens": context_tokens,\n'
+            '                    "context_length": context_length,\n'
+            '                    "threshold_tokens": int(getattr(compressor, "threshold_tokens", 0) or 0),\n'
+            '                    "compressions": int(getattr(compressor, "compression_count", 0) or 0),\n'
+            "                }\n"
+            "                if context_length > 0:\n"
+            '                    payload["context_percent"] = max(0, min(100, round((context_tokens / context_length) * 100)))\n'
+            "                return payload\n"
+            "\n"
+            "            async def _dispatch(it) -> None:",
+            "responses stream cli context usage helper",
+        )
+        changes.append("responses stream cli context usage helper")
+
+    if "context_usage = _agent_context_usage()" not in text:
+        text, _ = _replace_once(
+            text,
+            "                result, agent_usage = await agent_task\n"
+            "                usage = agent_usage or usage\n"
+            "                # If the agent produced a final_response but no text",
+            "                result, agent_usage = await agent_task\n"
+            "                usage = agent_usage or usage\n"
+            "                context_usage = _agent_context_usage()\n"
+            "                if context_usage is not None:\n"
+            "                    await _emit_raw_hermes_event(context_usage)\n"
+            "                # If the agent produced a final_response but no text",
+            "responses stream emit cli context usage",
+        )
+        changes.append("responses stream emit cli context usage")
+
+    if "chat completions final_response fallback" not in text:
+        text, _ = _replace_once(
+            text,
+            "            async def _emit(item):\n"
+            "                \"\"\"Write a single queue item to the SSE stream.\n",
+            "            emitted_text = False\n"
+            "            # Hermes Hub patch: Chat Completions may receive only a final_response.\n"
+            "            # In that case emit it as one delta instead of returning an empty stream.\n"
+            "\n"
+            "            async def _emit(item):\n"
+            "                \"\"\"Write a single queue item to the SSE stream.\n",
+            "chat completions emitted_text tracker",
+        )
+        text, _ = _replace_once(
+            text,
+            "                    content_chunk = {\n"
+            "                        \"id\": completion_id, \"object\": \"chat.completion.chunk\",\n"
+            "                        \"created\": created, \"model\": model,\n"
+            "                        \"choices\": [{\"index\": 0, \"delta\": {\"content\": item}, \"finish_reason\": None}],\n"
+            "                    }\n"
+            "                    await response.write(f\"data: {json.dumps(content_chunk)}\\n\\n\".encode())",
+            "                    nonlocal emitted_text\n"
+            "                    if isinstance(item, str) and item:\n"
+            "                        emitted_text = True\n"
+            "                    content_chunk = {\n"
+            "                        \"id\": completion_id, \"object\": \"chat.completion.chunk\",\n"
+            "                        \"created\": created, \"model\": model,\n"
+            "                        \"choices\": [{\"index\": 0, \"delta\": {\"content\": item}, \"finish_reason\": None}],\n"
+            "                    }\n"
+            "                    await response.write(f\"data: {json.dumps(content_chunk)}\\n\\n\".encode())",
+            "chat completions mark emitted_text",
+        )
+        text, _ = _replace_once(
+            text,
+            "            try:\n"
+            "                result, agent_usage = await agent_task\n"
+            "                usage = agent_usage or usage\n"
+            "            except Exception as exc:",
+            "            try:\n"
+            "                result, agent_usage = await agent_task\n"
+            "                usage = agent_usage or usage\n"
+            "                agent_final = result.get(\"final_response\", \"\") if isinstance(result, dict) else \"\"\n"
+            "                if agent_final and not emitted_text:\n"
+            "                    # chat completions final_response fallback\n"
+            "                    last_activity = await _emit(agent_final)\n"
+            "            except Exception as exc:",
+            "chat completions final_response fallback",
+        )
+        changes.append("chat completions final_response fallback")
+
+    if 'tag == "__hermes_raw_event__"' not in text:
+        text, _ = _replace_once(
+            text,
+            '                    elif tag == "__tool_completed__":\n'
+            '                        await _emit_tool_completed(payload)',
+            '                    elif tag == "__tool_completed__":\n'
+            '                        await _emit_tool_completed(payload)\n'
+            '                    elif tag == "__hermes_raw_event__":\n'
+            '                        await _emit_raw_hermes_event(payload)',
+            "responses stream raw hermes dispatch",
+        )
+        changes.append("responses stream raw hermes dispatch")
+
+    if 'item[0] == "__hermes_raw_event__"' not in text:
+        text, _ = _replace_once(
+            text,
+            '                if isinstance(item, tuple) and len(item) == 2 and item[0] == "__tool_progress__":\n'
+            '                    event_data = json.dumps(item[1])\n'
+            '                    await response.write(\n'
+            '                        f"event: hermes.tool.progress\\ndata: {event_data}\\n\\n".encode()\n'
+            '                    )\n'
+            '                else:',
+            '                if isinstance(item, tuple) and len(item) == 2 and item[0] == "__tool_progress__":\n'
+            '                    event_data = json.dumps(item[1])\n'
+            '                    await response.write(\n'
+            '                        f"event: hermes.tool.progress\\ndata: {event_data}\\n\\n".encode()\n'
+            '                    )\n'
+            '                elif isinstance(item, tuple) and len(item) == 2 and item[0] == "__hermes_raw_event__":\n'
+            '                    payload = item[1] if isinstance(item[1], dict) else {"type": "hermes.event", "payload": item[1]}\n'
+            '                    event_name = str(payload.get("event") or payload.get("type") or "hermes.event")\n'
+            '                    await response.write(\n'
+            '                        f"event: {event_name}\\ndata: {json.dumps(payload)}\\n\\n".encode()\n'
+            '                    )\n'
+            '                else:',
+            "chat completions raw hermes dispatch",
+        )
+        changes.append("chat completions raw hermes dispatch")
+
+    if (
+        'def _on_tool_progress(event_type, name, preview, args, **kwargs):\n                """Forward real llama.cpp processing/timing events to Chat Completions SSE."""' not in text
+        and '"""Pass through Hermes-native tool/progress metadata' not in text
+    ):
+        text, _ = _replace_once(
+            text,
+            '            # Start agent in background.  agent_ref is a mutable container\n',
+            '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
+            '                """Forward real llama.cpp processing/timing events to Chat Completions SSE."""\n'
+            '                if str(event_type or "") != "hermes.processing.progress":\n'
+            '                    return\n'
+            '                payload = {\n'
+            '                    "type": "hermes.processing.progress",\n'
+            '                    "event": "hermes.processing.progress",\n'
+            '                    "tool": name,\n'
+            '                    "label": preview,\n'
+            '                    "arguments": args or {},\n'
+            '                    "estimated": False,\n'
+            '                }\n'
+            '                payload.update(kwargs or {})\n'
+            '                _stream_q.put(("__hermes_raw_event__", payload))\n'
+            '\n'
+            '            # Start agent in background.  agent_ref is a mutable container\n',
+            "chat completions processing progress callback",
+        )
+        text, _ = _replace_once(
+            text,
+            '                tool_start_callback=_on_tool_start,\n'
+            '                tool_complete_callback=_on_tool_complete,\n'
+            '                agent_ref=agent_ref,\n',
+            '                tool_start_callback=_on_tool_start,\n'
+            '                tool_complete_callback=_on_tool_complete,\n'
+            '                tool_progress_callback=_on_tool_progress,\n'
+            '                agent_ref=agent_ref,\n',
+            "chat completions wire processing progress callback",
+        )
+        changes.append("chat completions processing progress callback")
+
+    progress_passthrough = '"""Pass through Hermes-native tool/progress metadata including reasoning."""'
+    if progress_passthrough not in text:
+        text, count = re.subn(
+            r'(?m)^            def _on_tool_progress\(event_type, name, preview, args, \*\*kwargs\):\n'
+            r'(?:^ {16,}.*\n|^[ \t]*\n)*',
+            '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
+            '                """Pass through Hermes-native tool/progress metadata including reasoning."""\n'
+            '                event_name = str(event_type or "hermes.tool.progress")\n'
+            '                is_reasoning = "reasoning" in event_name.lower()\n'
+            '                if str(name).startswith("_") and not is_reasoning:\n'
+            "                    return\n"
+            "                payload = {\n"
+            '                    "type": "hermes.reasoning.available" if is_reasoning else event_name,\n'
+            '                    "event": "reasoning.available" if is_reasoning else event_name,\n'
+            '                    "tool": name,\n'
+            '                    "label": preview,\n'
+            '                    "reasoning": (preview or "") if is_reasoning else None,\n'
+            '                    "arguments": args or {},\n'
+            "                }\n"
+            "                payload.update(kwargs or {})\n"
+            '                _stream_q.put(("__hermes_raw_event__", payload))\n',
+            text,
+            count=1,
+        )
+        if count != 1:
+            raise RuntimeError("Patch anchor not found: responses tool_progress callback")
+        changes.append("responses tool_progress raw passthrough")
+
+    responses_reasoning_passthrough = '"""Forward Responses progress metadata and reasoning."""'
+    if responses_reasoning_passthrough not in text:
+        legacy_responses_progress = (
+            '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
+            '                """Pass through Hermes-native tool/progress metadata."""\n'
+            '                if str(name).startswith("_"):\n'
+            '                    return\n'
+            '                payload = {\n'
+            '                    "type": str(event_type or "hermes.tool.progress"),\n'
+            '                    "event": str(event_type or "hermes.tool.progress"),\n'
+            '                    "tool": name,\n'
+            '                    "label": preview,\n'
+            '                    "arguments": args or {},\n'
+            '                }\n'
+            '                payload.update(kwargs or {})\n'
+            '                _stream_q.put(("__hermes_raw_event__", payload))\n'
+        )
+        unpatched_responses_progress = (
+            '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
+            '                """Queue non-start tool progress events if needed in future.\n'
+            '\n'
+            '                The structured Responses stream uses ``tool_start_callback``\n'
+            '                and ``tool_complete_callback`` for exact call-id correlation,\n'
+            '                so progress events are currently ignored here.\n'
+            '                """\n'
+            '                return\n'
+        )
+        responses_progress_source = (
+            legacy_responses_progress
+            if legacy_responses_progress in text
+            else unpatched_responses_progress
+        )
+        text, _ = _replace_once(
+            text,
+            responses_progress_source,
+            '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
+            '                """Forward Responses progress metadata and reasoning."""\n'
+            '                event_name = str(event_type or "hermes.tool.progress")\n'
+            '                is_reasoning = "reasoning" in event_name.lower()\n'
+            '                if str(name).startswith("_") and not is_reasoning:\n'
+            '                    return\n'
+            '                payload = {\n'
+            '                    "type": "hermes.reasoning.available" if is_reasoning else event_name,\n'
+            '                    "event": "reasoning.available" if is_reasoning else event_name,\n'
+            '                    "tool": name,\n'
+            '                    "label": preview,\n'
+            '                    "reasoning": (preview or "") if is_reasoning else None,\n'
+            '                    "arguments": args or {},\n'
+            '                }\n'
+            '                payload.update(kwargs or {})\n'
+            '                _stream_q.put(("__hermes_raw_event__", payload))\n',
+            "responses reasoning passthrough callback",
+        )
+        changes.append("responses reasoning passthrough callback")
+
+    if '"event": "tool.started",' not in text:
+        text, _ = _replace_once(
+            text,
+            '            def _on_tool_start(tool_call_id, function_name, function_args):\n'
+            '                """Queue a started tool for live function_call streaming."""\n'
+            '                _stream_q.put(("__tool_started__", {',
+            '            def _on_tool_start(tool_call_id, function_name, function_args):\n'
+            '                """Queue a started tool for live function_call streaming."""\n'
+            '                _stream_q.put(("__hermes_raw_event__", {\n'
+            '                    "type": "hermes.tool.progress",\n'
+            '                    "event": "tool.started",\n'
+            '                    "tool": function_name,\n'
+            '                    "toolCallId": tool_call_id,\n'
+            '                    "status": "running",\n'
+            '                    "arguments": function_args or {},\n'
+            "                }))\n"
+            '                _stream_q.put(("__tool_started__", {',
+            "responses tool_start raw passthrough",
+        )
+        changes.append("responses tool_start raw passthrough")
+
+    if '"event": "tool.completed",' not in text:
+        text, _ = _replace_once(
+            text,
+            '            def _on_tool_complete(tool_call_id, function_name, function_args, function_result):\n'
+            '                """Queue a completed tool result for live function_call_output streaming."""\n'
+            '                _stream_q.put(("__tool_completed__", {',
+            '            def _on_tool_complete(tool_call_id, function_name, function_args, function_result):\n'
+            '                """Queue a completed tool result for live function_call_output streaming."""\n'
+            '                _stream_q.put(("__hermes_raw_event__", {\n'
+            '                    "type": "hermes.tool.progress",\n'
+            '                    "event": "tool.completed",\n'
+            '                    "tool": function_name,\n'
+            '                    "toolCallId": tool_call_id,\n'
+            '                    "status": "completed",\n'
+            '                    "arguments": function_args or {},\n'
+            '                    "result": function_result,\n'
+            "                }))\n"
+            '                _stream_q.put(("__tool_completed__", {',
+            "responses tool_complete raw passthrough",
+        )
+        changes.append("responses tool_complete raw passthrough")
+
+    return text, changes
 
 
 def _write_compiled_transaction(updates: list[tuple[Path, str]]) -> dict[Path, Path]:
@@ -3496,6 +4078,42 @@ def _route_registered(text: str, method: str, path: str, handler: str) -> bool:
     return legacy in text or declarative in text
 
 
+def _patch_modern_capability_endpoints(text: str) -> tuple[str, bool]:
+    """Advertise Hub endpoints in upstream's extracted capability endpoint table."""
+    if "_CAPABILITY_ENDPOINTS = (" not in text:
+        return text, False
+    block = r'''    # HERMES_HUB_CAPABILITY_ENDPOINTS_V1_BEGIN
+    ("hermes_native", ("POST", "/v1/hermes/native")),
+    ("hardware", ("GET", "/v1/hub/hardware")),
+    ("video_library", ("GET", "/v1/video/library")),
+    ("news_library", ("GET", "/v1/news/library")),
+    ("media_proxy", ("GET", "/v1/media/{media_id}")),
+    ("hub_memory", ("GET/PATCH", "/v1/hub/memory")),
+    ("hub_state", ("GET/POST", "/v1/hub/state")),
+    ("hub_conversations", ("GET/PUT/POST/DELETE", "/v1/hub/conversations")),
+    ("hub_notifications", ("GET/POST/PATCH", "/v1/hub/notifications")),
+    ("audio_speech", ("POST", "/v1/audio/speech")),
+    ("audio_transcriptions", ("POST", "/v1/audio/transcriptions")),
+    ("hub_wellbeing", ("GET/PUT/DELETE", "/v1/hub/wellbeing")),
+    ("hub_sync", ("GET", "/v1/hub/sync?since=revision")),
+    # HERMES_HUB_CAPABILITY_ENDPOINTS_V1_END'''
+    if _HUB_CAPABILITY_ENDPOINTS_BEGIN in text:
+        start = text.index(_HUB_CAPABILITY_ENDPOINTS_BEGIN)
+        if _HUB_CAPABILITY_ENDPOINTS_END not in text[start:]:
+            raise PatchError("Hermes Hub capability endpoint markers are unbalanced")
+        end = text.index(_HUB_CAPABILITY_ENDPOINTS_END, start) + len(_HUB_CAPABILITY_ENDPOINTS_END)
+        current = text[start:end]
+        if current == block:
+            return text, False
+        return text[:start] + block + text[end:], True
+
+    endpoint_table = re.search(r"(?ms)^_CAPABILITY_ENDPOINTS = \(.*?^\)\n", text)
+    if endpoint_table is None:
+        raise PatchError("Patch anchor not found: modern capability endpoint table")
+    insert_at = endpoint_table.end() - 2
+    return text[:insert_at] + block + "\n" + text[insert_at:], True
+
+
 def _patch_bot_profiles_v1(text: str) -> tuple[str, list[str]]:
     """Expose Hermes' real profiles without adding a second bot runtime."""
     changes: list[str] = []
@@ -3630,14 +4248,34 @@ def _patch_bot_profiles_v1(text: str) -> tuple[str, list[str]]:
     capabilities = r'''            # HERMES_HUB_BOTS_CAPABILITIES_BEGIN
             "bot_mode": __import__("hermes_hub_gateway.bot_profiles", fromlist=["readiness"]).readiness(self),
             # HERMES_HUB_BOTS_CAPABILITIES_END'''
-    text, changed = _upsert_versioned_block(
-        text,
-        begin=_BOTS_CAPABILITIES_BEGIN,
-        end=_BOTS_CAPABILITIES_END,
-        block=capabilities,
-        anchor='            "endpoints": {\n                "health": {"method": "GET", "path": "/health"},',
-        label="Hermes Hub bot capabilities v1",
-    )
+    capability_anchor = '            "endpoints": {\n                "health": {"method": "GET", "path": "/health"},'
+    if capability_anchor in text:
+        text, changed = _upsert_versioned_block(
+            text,
+            begin=_BOTS_CAPABILITIES_BEGIN,
+            end=_BOTS_CAPABILITIES_END,
+            block=capabilities,
+            anchor=capability_anchor,
+            label="Hermes Hub bot capabilities v1",
+        )
+    else:
+        # Newer upstream computes capabilities from feature flags + a separate
+        # endpoint table, so keep the same contract in those two explicit anchors.
+        modern_capabilities_anchor = (
+            '            "endpoints": {name: {"method": m, "path": p} '
+            'for name, (m, p) in _CAPABILITY_ENDPOINTS},'
+        )
+        if modern_capabilities_anchor in text:
+            text, changed = _upsert_versioned_block(
+                text,
+                begin=_BOTS_CAPABILITIES_BEGIN,
+                end=_BOTS_CAPABILITIES_END,
+                block=capabilities,
+                anchor=modern_capabilities_anchor,
+                label="Hermes Hub bot capabilities v1",
+            )
+        else:
+            raise PatchError("Patch anchor not found: Hermes Hub bot capabilities v1")
     if changed:
         changes.append("Hermes Hub bot capabilities v1")
     endpoint_entries = r'''                # HERMES_HUB_BOTS_ENDPOINTS_BEGIN
@@ -3648,14 +4286,55 @@ def _patch_bot_profiles_v1(text: str) -> tuple[str, list[str]]:
                 "hub_bots_chat": {"method": "POST", "path": "/v1/hub/bots/{bot_name}/chat"},
                 "hub_bots_group_turn": {"method": "POST", "path": "/v1/hub/bots/group-turn"},
                 # HERMES_HUB_BOTS_ENDPOINTS_END'''
-    text, changed = _upsert_versioned_block(
-        text,
-        begin=_BOTS_ENDPOINTS_BEGIN,
-        end=_BOTS_ENDPOINTS_END,
-        block=endpoint_entries,
-        anchor='                "models": {"method": "GET", "path": "/v1/models"},',
-        label="Hermes Hub bot endpoint capabilities v1",
-    )
+    endpoint_anchor = '                "models": {"method": "GET", "path": "/v1/models"},'
+    if endpoint_anchor in text or _BOTS_ENDPOINTS_BEGIN in text:
+        text, changed = _upsert_versioned_block(
+            text,
+            begin=_BOTS_ENDPOINTS_BEGIN,
+            end=_BOTS_ENDPOINTS_END,
+            block=endpoint_entries,
+            anchor=endpoint_anchor,
+            label="Hermes Hub bot endpoint capabilities v1",
+        )
+    elif "_CAPABILITY_ENDPOINTS = (" in text:
+        modern_endpoint_block = r'''    # HERMES_HUB_BOTS_CAPABILITY_ENDPOINTS_BEGIN
+    ("hub_bots", ("GET", "/v1/hub/bots")),
+    ("hub_bots_create", ("POST", "/v1/hub/bots")),
+    ("hub_bots_edit", ("PATCH", "/v1/hub/bots/{bot_name}")),
+    ("hub_bots_delete", ("DELETE", "/v1/hub/bots/{bot_name}")),
+    ("hub_bots_chat", ("POST", "/v1/hub/bots/{bot_name}/chat")),
+    ("hub_bots_group_turn", ("POST", "/v1/hub/bots/group-turn")),
+    # HERMES_HUB_BOTS_CAPABILITY_ENDPOINTS_END'''
+        endpoint_markers = (
+            "    # HERMES_HUB_BOTS_CAPABILITY_ENDPOINTS_BEGIN",
+            "    # HERMES_HUB_BOTS_CAPABILITY_ENDPOINTS_END",
+        )
+        if endpoint_markers[0] in text:
+            start = text.index(endpoint_markers[0])
+            end = text.index(endpoint_markers[1], start) + len(endpoint_markers[1])
+            current = text[start:end]
+            if current != modern_endpoint_block:
+                text = text[:start] + modern_endpoint_block + text[end:]
+                changed = True
+            else:
+                changed = False
+        else:
+            final_endpoint = (
+                '    ("artifact_download", ("GET", '
+                '"/v1/artifacts/download/{artifact_id}")))\n'
+            )
+            if text.count(final_endpoint) != 1:
+                raise PatchError("Patch anchor not found: Hermes Hub bot endpoint capabilities v1")
+            replacement = (
+                '    ("artifact_download", ("GET", '
+                '"/v1/artifacts/download/{artifact_id}")),\n'
+                + modern_endpoint_block
+                + "\n)\n"
+            )
+            text = text.replace(final_endpoint, replacement, 1)
+            changed = True
+    else:
+        raise PatchError("Patch anchor not found: Hermes Hub bot endpoint capabilities v1")
     if changed:
         changes.append("Hermes Hub bot endpoint capabilities v1")
     if "def _http_route_table(self)" in text:
@@ -4011,7 +4690,10 @@ def _hermes_hub_wellbeing_io(action: str, date: str = "", payload: Any = None) -
     if changed:
         changes.append("wellbeing authenticated handlers v1")
 
-    if '"hub_wellbeing": {"method": "GET/PUT/DELETE", "path": "/v1/hub/wellbeing"}' not in text:
+    if (
+        '"hub_wellbeing": {"method": "GET/PUT/DELETE", "path": "/v1/hub/wellbeing"}' not in text
+        and _HUB_CAPABILITY_ENDPOINTS_MARKER not in text
+    ):
         text, _ = _replace_regex_once(
             text,
             r'(^\s+"hub_state": \{"method": "GET/POST", "path": "/v1/hub/state"\},\n)',
@@ -4269,7 +4951,10 @@ def _hermes_hub_conversation_event_payload(reason, result=None):
             )
         changes.append("capabilities Hub sync feature")
 
-    if '"hub_sync": {"method": "GET", "path": "/v1/hub/sync?since=revision"}' not in text:
+    if (
+        '"hub_sync": {"method": "GET", "path": "/v1/hub/sync?since=revision"}' not in text
+        and _HUB_CAPABILITY_ENDPOINTS_MARKER not in text
+    ):
         hub_state_endpoint = r'(^\s+"hub_state": \{"method": "GET/POST", "path": "/v1/hub/state"\},\n)'
         text, _ = _replace_regex_once(
             text,
@@ -4320,7 +5005,11 @@ def _hermes_hub_conversation_event_payload(reason, result=None):
     return text, changes
 
 
-def _patch_text(text: str) -> tuple[str, list[str]]:
+def _patch_source_texts(
+    text: str,
+    openai_routes_text: str | None = None,
+    api_runs_text: str | None = None,
+) -> tuple[str, str | None, list[str]]:
     changes: list[str] = []
 
     text, dynamic_routes_changed = _patch_dynamic_http_routes(text)
@@ -4329,6 +5018,10 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
 
     text, bot_profile_changes = _patch_bot_profiles_v1(text)
     changes.extend(bot_profile_changes)
+
+    text, modern_capability_endpoints_changed = _patch_modern_capability_endpoints(text)
+    if modern_capability_endpoints_changed:
+        changes.append("dynamic capability endpoint table")
 
     if _MODEL_ROUTE_TOOLSETS_MARKER not in text:
         old_route_parser = '''        allowed_keys = ("model", "provider", "api_key", "base_url")
@@ -4369,12 +5062,38 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
                     "api_server model_routes: ignoring non-list toolsets for route %r", alias_str
                 )
 '''
-        text, _ = _replace_once(
-            text,
-            old_route_parser,
-            new_route_parser,
-            "model route toolsets parser",
-        )
+        if old_route_parser in text:
+            text = text.replace(old_route_parser, new_route_parser, 1)
+        else:
+            # Upstream 6f7 reformatted this mapping without changing its model
+            # validation boundary. Add route fields at that stable boundary.
+            parser_start = text.find("def _parse_model_routes(")
+            parser_end = text.find("\n    def ", parser_start + 1) if parser_start >= 0 else -1
+            if parser_start < 0:
+                raise PatchError("Patch anchor not found: model route toolsets parser")
+            if parser_end < 0:
+                parser_end = len(text)
+            parser = text[parser_start:parser_end]
+            allowed_line = '        allowed_keys = ("model", "provider", "api_key", "base_url")\n'
+            validate_line = '            if not route.get("model"):\n'
+            if parser.count(allowed_line) != 1 or parser.count(validate_line) != 1:
+                raise PatchError("Patch anchor not found or ambiguous: model route toolsets parser")
+            parser = parser.replace(
+                allowed_line,
+                f"        {_MODEL_ROUTE_TOOLSETS_MARKER}\n" + allowed_line,
+                1,
+            )
+            route_toolsets = (
+                '            configured_toolsets = cfg.get("toolsets")\n'
+                '            if isinstance(configured_toolsets, (list, tuple)):\n'
+                '                route["toolsets"] = sorted({str(item).strip() for item in configured_toolsets if str(item).strip()})\n'
+                '            elif configured_toolsets is not None:\n'
+                '                logger.warning(\n'
+                '                    "api_server model_routes: ignoring non-list toolsets for route %r", alias_str\n'
+                '                )\n'
+            )
+            parser = parser.replace(validate_line, route_toolsets + validate_line, 1)
+            text = text[:parser_start] + parser + text[parser_end:]
         old_toolset_resolution = '''        user_config = _load_gateway_config()
         enabled_toolsets = sorted(_get_platform_tools(user_config, "api_server"))
 '''
@@ -4534,6 +5253,10 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
             text = text.replace(new_route_log, new_route_tokens, 1)
         changes.append("fix per-model-route max tokens runtime override")
 
+    if openai_routes_text is not None:
+        core_text = text
+        text = openai_routes_text
+
     cleanup_patterns = [
         (
             r'\n\n            async def _emit_responses_prompt_progress\(percent: int, label: str\) -> None:\n[\s\S]*?                await _emit_raw_hermes_event\(payload\)\n',
@@ -4571,6 +5294,9 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
         if count == 0:
             raise RuntimeError("Patch anchor not found: force llama prompt progress and timings")
         changes.append("force llama prompt progress and timings")
+
+    if openai_routes_text is not None:
+        openai_routes_text, text = text, core_text
 
     if "import asyncio" not in text:
         if "import json\n" in text:
@@ -7213,7 +7939,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
                 '        expected_key = self._expected_api_key()\n'
                 '        # HERMES_HUB_AUTH_KEY_ALIASES_V2\n'
                 '        accepted_api_keys = (\n'
-                '            [expected_key] if is_named_profile and expected_key\n'
+                '            [expected_key] if (profile and profile != "default") and expected_key\n'
                 '            else _hermes_hub_api_keys(expected_key)\n'
                 '        )\n'
                 '        if not accepted_api_keys:\n',
@@ -7250,40 +7976,75 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             )
             changes.append("startup auth accepts hermes hub key aliases")
 
-    project_session_prompt = 'system_prompt = _hermes_hub_project_system_prompt(body) if _is_hermes_hub_request(request, body) else (body.get("system_message") or body.get("instructions"))'
-    if project_session_prompt not in text:
-        text = text.replace(
-            'system_prompt = None if _is_hermes_hub_request(request, body) else (body.get("system_message") or body.get("instructions"))',
-            project_session_prompt,
-        )
-        text = text.replace(
-            'system_prompt = body.get("system_message") or body.get("instructions")',
-            project_session_prompt,
-        )
-        changes.append("session chat allow bounded hermes hub project prompt")
+    if openai_routes_text is not None:
+        core_text = text
+        text = openai_routes_text
+        for handler_name in ("_handle_chat_completions", "_handle_responses"):
+            handler_start = text.find(f"    async def {handler_name}(")
+            if handler_start < 0:
+                raise PatchError(f"OpenAI routes handler missing: {handler_name}")
+            handler_end = text.find("\n    async def ", handler_start + 1)
+            if handler_end < 0:
+                handler_end = len(text)
+            handler = text[handler_start:handler_end]
+            prompt_import = (
+                "        from gateway.platforms.api_server import "
+                "_hermes_hub_project_system_prompt, _is_hermes_hub_request\n"
+            )
+            if prompt_import not in handler:
+                first_try = re.search(r"(?m)^        try:\n", handler)
+                if first_try is None:
+                    raise PatchError(f"OpenAI routes prompt import anchor missing: {handler_name}")
+                handler = handler[:first_try.start()] + prompt_import + handler[first_try.start():]
+                text = text[:handler_start] + handler + text[handler_end:]
 
     if "allow_client_system_prompt = not _is_hermes_hub_request(request, body)" not in text:
-        text, _ = _replace_once(
-            text,
-            '        # Extract system message (becomes ephemeral system prompt layered ON TOP of core)\n'
-            '        system_prompt = None\n'
-            '        conversation_messages: List[Dict[str, str]] = []',
-            '        # Extract system message (becomes ephemeral system prompt layered ON TOP of core)\n'
-            '        system_prompt = _hermes_hub_project_system_prompt(body) if _is_hermes_hub_request(request, body) else None\n'
-            '        allow_client_system_prompt = not _is_hermes_hub_request(request, body)\n'
-            '        conversation_messages: List[Dict[str, str]] = []',
-            "chat completions hermes hub system gate",
-        )
-        text, _ = _replace_once(
-            text,
-            '            if role == "system":\n'
-            '                # System messages don\'t support images',
-            '            if role == "system":\n'
-            '                if not allow_client_system_prompt:\n'
-            '                    continue\n'
-            '                # System messages don\'t support images',
-            "chat completions ignore hermes hub system prompts",
-        )
+        if openai_routes_text is not None:
+            text, _ = _replace_once(
+                text,
+                '        # System messages -> ephemeral system prompt layered ON TOP of core, flattened to text\n'
+                '        # (Anthropic rejects images there, OpenAI text models ignore them).\n'
+                '        system_prompt = None\n'
+                '        conversation_messages: List[Dict[str, str]] = []',
+                '        # System messages -> ephemeral system prompt layered ON TOP of core, flattened to text\n'
+                '        # (Anthropic rejects images there, OpenAI text models ignore them).\n'
+                '        system_prompt = _hermes_hub_project_system_prompt(body) if _is_hermes_hub_request(request, body) else None\n'
+                '        allow_client_system_prompt = not _is_hermes_hub_request(request, body)\n'
+                '        conversation_messages: List[Dict[str, str]] = []',
+                "chat completions hermes hub system gate",
+            )
+            text, _ = _replace_once(
+                text,
+                '            if role == "system":\n'
+                '                content = _normalize_chat_content(raw_content)\n',
+                '            if role == "system":\n'
+                '                if not allow_client_system_prompt:\n'
+                '                    continue\n'
+                '                content = _normalize_chat_content(raw_content)\n',
+                "chat completions ignore hermes hub system prompts",
+            )
+        else:
+            text, _ = _replace_once(
+                text,
+                '        # Extract system message (becomes ephemeral system prompt layered ON TOP of core)\n'
+                '        system_prompt = None\n'
+                '        conversation_messages: List[Dict[str, str]] = []',
+                '        # Extract system message (becomes ephemeral system prompt layered ON TOP of core)\n'
+                '        system_prompt = _hermes_hub_project_system_prompt(body) if _is_hermes_hub_request(request, body) else None\n'
+                '        allow_client_system_prompt = not _is_hermes_hub_request(request, body)\n'
+                '        conversation_messages: List[Dict[str, str]] = []',
+                "chat completions hermes hub system gate",
+            )
+            text, _ = _replace_once(
+                text,
+                '            if role == "system":\n'
+                '                # System messages don\'t support images',
+                '            if role == "system":\n'
+                '                if not allow_client_system_prompt:\n'
+                '                    continue\n'
+                '                # System messages don\'t support images',
+                "chat completions ignore hermes hub system prompts",
+            )
         changes.append("chat completions ignore hermes hub system prompts")
     else:
         text = text.replace(
@@ -7307,6 +8068,9 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             1,
         )
         changes.append("responses allow bounded hermes hub project prompt")
+
+    if openai_routes_text is not None:
+        openai_routes_text, text = text, core_text
 
     if '"native_protocol": {' not in text:
         native_protocol_block = (
@@ -7449,23 +8213,27 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             changes.append("runs stream ttl 6h")
 
     if "task = self._active_run_tasks.get(run_id)" not in text:
-        text, _ = _replace_once(
-            text,
-            '            for run_id in stale:\n'
-            '                logger.debug("[api_server] sweeping orphaned run %s", run_id)\n'
-            '                try:\n',
-            '            for run_id in stale:\n'
-            '                task = self._active_run_tasks.get(run_id)\n'
-            '                if task is not None and not task.done():\n'
-            '                    self._run_streams_created[run_id] = now\n'
-            '                    continue\n'
-            '                logger.debug("[api_server] sweeping orphaned run %s", run_id)\n'
-            '                try:\n',
-            "runs sweep keeps active tasks",
-        )
-        changes.append("runs sweep keeps active tasks")
+        if api_runs_text is None or not _runs_module_preserves_active_tasks(api_runs_text):
+            text, _ = _replace_once(
+                text,
+                '            for run_id in stale:\n'
+                '                logger.debug("[api_server] sweeping orphaned run %s", run_id)\n'
+                '                try:\n',
+                '            for run_id in stale:\n'
+                '                task = self._active_run_tasks.get(run_id)\n'
+                '                if task is not None and not task.done():\n'
+                '                    self._run_streams_created[run_id] = now\n'
+                '                    continue\n'
+                '                logger.debug("[api_server] sweeping orphaned run %s", run_id)\n'
+                '                try:\n',
+                "runs sweep keeps active tasks",
+            )
+            changes.append("runs sweep keeps active tasks")
 
-    if '"hardware": {"method": "GET", "path": "/v1/hub/hardware"}' not in text:
+    if (
+        '"hardware": {"method": "GET", "path": "/v1/hub/hardware"}' not in text
+        and _HUB_CAPABILITY_ENDPOINTS_MARKER not in text
+    ):
         text, _ = _replace_regex_once(
             text,
             r'(^\s+"health_detailed": \{"method": "GET", "path": "/health/detailed"\},\n)',
@@ -7475,7 +8243,10 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("capabilities hardware endpoint")
 
-    if '"video_library": {"method": "GET", "path": "/v1/video/library"}' not in text:
+    if (
+        '"video_library": {"method": "GET", "path": "/v1/video/library"}' not in text
+        and _HUB_CAPABILITY_ENDPOINTS_MARKER not in text
+    ):
         text, _ = _replace_regex_once(
             text,
             r'(^\s+"health_detailed": \{"method": "GET", "path": "/health/detailed"\},\n)',
@@ -7493,7 +8264,10 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("capabilities hub support endpoints")
     else:
-        if '"media_proxy": {"method": "GET", "path": "/v1/media/{media_id}"}' not in text:
+        if (
+            '"media_proxy": {"method": "GET", "path": "/v1/media/{media_id}"}' not in text
+            and _HUB_CAPABILITY_ENDPOINTS_MARKER not in text
+        ):
             text, _ = _replace_regex_once(
                 text,
                 r'(^\s+"video_library": \{"method": "GET", "path": "/v1/video/library"\},\n)',
@@ -7503,7 +8277,10 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             )
             changes.append("capabilities media proxy endpoint")
 
-        if '"news_library": {"method": "GET", "path": "/v1/news/library"}' not in text:
+        if (
+            '"news_library": {"method": "GET", "path": "/v1/news/library"}' not in text
+            and _HUB_CAPABILITY_ENDPOINTS_MARKER not in text
+        ):
             text, _ = _replace_regex_once(
                 text,
                 r'(^\s+"video_library": \{"method": "GET", "path": "/v1/video/library"\},\n)',
@@ -7513,7 +8290,10 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             )
             changes.append("capabilities news library endpoint")
 
-        if '"hub_notifications": {"method": "GET/POST/PATCH", "path": "/v1/hub/notifications"}' not in text:
+        if (
+            '"hub_notifications": {"method": "GET/POST/PATCH", "path": "/v1/hub/notifications"}' not in text
+            and _HUB_CAPABILITY_ENDPOINTS_MARKER not in text
+        ):
             text, _ = _replace_regex_once(
                 text,
                 r'(^\s+"hub_state": \{"method": "GET/POST", "path": "/v1/hub/state"\},\n)',
@@ -7523,7 +8303,10 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             )
             changes.append("capabilities hub notifications endpoint")
 
-        if '"hub_conversations": {"method": "GET/PUT/POST/DELETE", "path": "/v1/hub/conversations"}' not in text:
+        if (
+            '"hub_conversations": {"method": "GET/PUT/POST/DELETE", "path": "/v1/hub/conversations"}' not in text
+            and _HUB_CAPABILITY_ENDPOINTS_MARKER not in text
+        ):
             text, _ = _replace_regex_once(
                 text,
                 r'(^\s+"hub_state": \{"method": "GET/POST", "path": "/v1/hub/state"\},\n)',
@@ -7533,7 +8316,10 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             )
             changes.append("capabilities hub conversations endpoint")
 
-        if '"audio_transcriptions": {"method": "POST", "path": "/v1/audio/transcriptions"}' not in text:
+        if (
+            '"audio_transcriptions": {"method": "POST", "path": "/v1/audio/transcriptions"}' not in text
+            and _HUB_CAPABILITY_ENDPOINTS_MARKER not in text
+        ):
             text, _ = _replace_regex_once(
                 text,
                 r'(^\s+"hub_notifications": \{"method": "GET/POST/PATCH", "path": "/v1/hub/notifications"\},\n)',
@@ -7543,7 +8329,10 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             )
             changes.append("capabilities audio transcriptions endpoint")
 
-        if '"audio_speech": {"method": "POST", "path": "/v1/audio/speech"}' not in text:
+        if (
+            '"audio_speech": {"method": "POST", "path": "/v1/audio/speech"}' not in text
+            and _HUB_CAPABILITY_ENDPOINTS_MARKER not in text
+        ):
             text, _ = _replace_regex_once(
                 text,
                 r'(^\s+"hub_notifications": \{"method": "GET/POST/PATCH", "path": "/v1/hub/notifications"\},\n)',
@@ -7850,6 +8639,105 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("hub support endpoint handlers")
 
+    if "async def _handle_news_library" not in text:
+        text, _ = _replace_once(
+            text,
+            "    async def _handle_hub_memory(self, request: \"web.Request\") -> \"web.Response\":",
+            "    async def _handle_news_library(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_news_library_payload(request))\n"
+            "\n"
+            "    async def _handle_hub_memory(self, request: \"web.Request\") -> \"web.Response\":",
+            "gateway news library endpoint handler",
+        )
+        changes.append("gateway news library endpoint handler")
+
+    if "async def _handle_hub_media" not in text:
+        text, _ = _replace_once(
+            text,
+            "    async def _handle_hub_memory(self, request: \"web.Request\") -> \"web.Response\":",
+            "    async def _handle_hub_media(self, request: \"web.Request\") -> \"web.StreamResponse\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            if _hermes_hub_is_tailnet_peer(request):\n"
+            "                auth_error = None\n"
+            "            else:\n"
+            "                media_token = request.query.get(\"hub_token\") or request.query.get(\"api_key\") or request.query.get(\"token\")\n"
+            "                accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n"
+            "                if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):\n"
+            "                    return auth_error\n"
+            "        media_id = request.match_info.get(\"media_id\", \"\")\n"
+            "        loop = asyncio.get_running_loop()\n"
+            "        try:\n"
+            "            lookup_timeout = _hermes_hub_env_int(\"HERMES_HUB_MEDIA_LOOKUP_TIMEOUT\", 8, 1, 30)\n"
+            "            path = await asyncio.wait_for(\n"
+            "                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_resolve_media_path, media_id, request.query.get(\"root\")),\n"
+            "                timeout=lookup_timeout,\n"
+            "            )\n"
+            "            if path is None:\n"
+            "                return web.json_response({\"error\": \"Media not found\"}, status=404)\n"
+            "            if request.query.get(\"format\", \"\").lower() == \"mp4\" or request.query.get(\"transcode\", \"\").lower() in {\"1\", \"true\", \"mp4\"}:\n"
+            "                transcode_timeout = _hermes_hub_env_int(\"HERMES_HUB_TRANSCODE_TIMEOUT\", 900, 30, 7200) + 10\n"
+            "                path = await asyncio.wait_for(\n"
+            "                    loop.run_in_executor(_hermes_hub_transcode_executor(), _hermes_hub_transcode_mp4, path),\n"
+            "                    timeout=transcode_timeout,\n"
+            "                )\n"
+            "                return web.FileResponse(path, headers={\"Content-Type\": \"video/mp4\", \"Accept-Ranges\": \"bytes\", \"Cache-Control\": \"public, max-age=3600\"})\n"
+            "            import mimetypes as _mimetypes\n"
+            "            mime = _mimetypes.guess_type(path.name)[0] or \"application/octet-stream\"\n"
+            "            return web.FileResponse(path, headers={\"Content-Type\": mime, \"Accept-Ranges\": \"bytes\", \"Cache-Control\": \"public, max-age=3600\"})\n"
+            "        except asyncio.TimeoutError:\n"
+            "            return web.json_response({\"error\": \"Media operation timed out\"}, status=504)\n"
+            "        except Exception as exc:\n"
+            "            return web.json_response({\"error\": \"Media unavailable\", \"detail\": str(exc)}, status=500)\n"
+            "\n"
+            "    async def _handle_hub_memory(self, request: \"web.Request\") -> \"web.Response\":",
+            "gateway hub media endpoint handler",
+        )
+        changes.append("gateway hub media endpoint handler")
+
+    if "async def _handle_hub_media_upload" not in text:
+        text, _ = _replace_once(
+            text,
+            "    async def _handle_hub_memory(self, request: \"web.Request\") -> \"web.Response\":",
+            "    async def _handle_hub_media_upload(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        max_mb = _hermes_hub_env_int(\"HERMES_HUB_JSON_UPLOAD_MAX_MB\", 64, 1, 1024)\n"
+            "        encoded_limit = ((max_mb * 1024 * 1024 + 2) // 3) * 4 + 1024 * 1024\n"
+            "        if request.content_length is None:\n"
+            "            return web.json_response({\"error\": \"Content-Length required for JSON media upload\"}, status=411)\n"
+            "        if request.content_length > encoded_limit:\n"
+            "            return web.json_response({\"error\": f\"JSON media upload over limit ({max_mb} MB decoded)\"}, status=413)\n"
+            "        try:\n"
+            "            body = await request.json()\n"
+            "            if not isinstance(body, dict):\n"
+            "                raise ValueError(\"JSON body must be an object\")\n"
+            "            loop = asyncio.get_running_loop()\n"
+            "            result = await asyncio.wait_for(\n"
+            "                loop.run_in_executor(\n"
+            "                    _hermes_hub_io_executor(),\n"
+            "                    _hermes_hub_save_upload,\n"
+            "                    str(body.get(\"filename\") or \"attachment\"),\n"
+            "                    str(body.get(\"mime_type\") or body.get(\"mimeType\") or \"application/octet-stream\"),\n"
+            "                    str(body.get(\"data_url\") or body.get(\"dataUrl\") or \"\"),\n"
+            "                ),\n"
+            "                timeout=_hermes_hub_env_int(\"HERMES_HUB_UPLOAD_TIMEOUT_SECONDS\", 120, 10, 900),\n"
+            "            )\n"
+            "            return web.json_response(result)\n"
+            "        except asyncio.TimeoutError:\n"
+            "            return web.json_response({\"error\": \"Media upload timed out\"}, status=504)\n"
+            "        except Exception as exc:\n"
+            "            return web.json_response({\"error\": \"Media upload failed\", \"detail\": str(exc)}, status=400)\n"
+            "\n"
+            "    async def _handle_hub_memory(self, request: \"web.Request\") -> \"web.Response\":",
+            "gateway hub media upload endpoint handler",
+        )
+        changes.append("gateway hub media upload endpoint handler")
+
     if "async def _handle_get_hub_conversations" not in text and "async def _handle_get_hub_notifications" in text:
         text, _ = _replace_once(
             text,
@@ -8092,674 +8980,391 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "        return web.json_response(_hermes_hub_conversations_payload())\n"
             "\n"
             "    async def _handle_get_hub_conversations_events(self, request: \"web.Request\") -> \"web.StreamResponse\":\n"
-            "        auth_error = self._check_auth(request)\n"
-            "        if auth_error is not None:\n"
-            "            return auth_error\n"
-            "        import json as _json\n"
-            "        queue = asyncio.Queue()\n"
-            "        _hermes_hub_conversation_event_subscribers.add(queue)\n"
-            "        response = web.StreamResponse(status=200, headers={\"Content-Type\": \"text/event-stream\", \"Cache-Control\": \"no-cache\", \"Connection\": \"keep-alive\"})\n"
-            "        await response.prepare(request)\n"
-            "        try:\n"
-            "            await response.write(b\": connected\\n\\n\")\n"
-            "            await queue.put(_hermes_hub_conversation_event_payload(\"snapshot\"))\n"
-            "            while True:\n"
-            "                try:\n"
-            "                    payload = await asyncio.wait_for(queue.get(), timeout=25)\n"
-            "                except asyncio.TimeoutError:\n"
-            "                    await response.write(b\": keepalive\\n\\n\")\n"
-            "                    continue\n"
-            "                data = _json.dumps(payload, ensure_ascii=False)\n"
-            "                await response.write(f\"event: conversations.updated\\ndata: {data}\\n\\n\".encode(\"utf-8\"))\n"
-            "        except asyncio.CancelledError:\n"
-            "            raise\n"
-            "        except Exception:\n"
-            "            pass\n"
-            "        finally:\n"
-            "            _hermes_hub_conversation_event_subscribers.discard(queue)\n"
-            "        return response\n"
-            "\n"
-            "    async def _handle_put_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":\n"
-            "        auth_error = self._check_auth(request)\n"
-            "        if auth_error is not None:\n"
-            "            return auth_error\n"
-            "        try:\n"
-            "            body = await request.json()\n"
-            "        except Exception:\n"
-            "            body = {}\n"
-            "        if not isinstance(body, dict):\n"
-            "            body = {}\n"
-            "        body[\"id\"] = request.match_info.get(\"conversation_id\", body.get(\"id\", \"\"))\n"
-            "        merged = _hermes_hub_merge_conversations([body])\n"
-            "        _hermes_hub_publish_conversation_event(\"put\", merged)\n"
-            "        return web.json_response(merged)\n"
-            "\n"
-            "    async def _handle_post_hub_conversations_import(self, request: \"web.Request\") -> \"web.Response\":\n"
-            "        auth_error = self._check_auth(request)\n"
-            "        if auth_error is not None:\n"
-            "            return auth_error\n"
-            "        try:\n"
-            "            body = await request.json()\n"
-            "        except Exception:\n"
-            "            body = {}\n"
-            "        if not isinstance(body, dict):\n"
-            "            body = {}\n"
-            "        incoming = body.get(\"items\") if isinstance(body.get(\"items\"), list) else None\n"
-            "        if incoming is None:\n"
-            "            incoming = _hermes_hub_extract_backup_conversations(body)\n"
-            "        merged = _hermes_hub_merge_conversations(incoming if isinstance(incoming, list) else [])\n"
-            "        _hermes_hub_publish_conversation_event(\"import\", merged)\n"
-            "        return web.json_response(merged)\n"
-            "\n"
-            "    async def _handle_delete_hub_conversation(self, request: \"web.Request\") -> \"web.Response\":\n"
-            "        auth_error = self._check_auth(request)\n"
-            "        if auth_error is not None:\n"
-            "            return auth_error\n"
-            "        deleted = _hermes_hub_delete_conversation(request.match_info.get(\"conversation_id\", \"\"))\n"
-            "        _hermes_hub_publish_conversation_event(\"delete\", deleted)\n"
-            "        return web.json_response(deleted)\n"
-            "\n"
+            '''        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        import json as _json
+        queue = asyncio.Queue()
+        _hermes_hub_conversation_event_subscribers.add(queue)
+        response = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive"})
+        await response.prepare(request)
+        try:
+            await response.write(b": connected\\n\\n")
+            await queue.put(_hermes_hub_conversation_event_payload("snapshot"))
+            while True:
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=25)
+                except asyncio.TimeoutError:
+                    await response.write(b": keepalive\\n\\n")
+                    continue
+                data = _json.dumps(payload, ensure_ascii=False)
+                await response.write(f"event: conversations.updated\\ndata: {data}\\n\\n".encode("utf-8"))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        finally:
+            _hermes_hub_conversation_event_subscribers.discard(queue)
+        return response
+
+'''
             "    async def _handle_get_hub_notifications(self, request: \"web.Request\") -> \"web.Response\":",
-            "hub conversations endpoint handlers",
+            "hub conversations handler",
         )
-        changes.append("hub conversations endpoint handlers")
+        changes.append("hub conversations handler")
 
-    if "async def _handle_news_library" not in text:
-        text, _ = _replace_once(
-            text,
-            "    async def _handle_video_library(self, request: \"web.Request\") -> \"web.Response\":\n"
-            "        auth_error = self._check_auth(request)\n"
-            "        if auth_error is not None:\n"
-            "            return auth_error\n"
-            "        return web.json_response(_hermes_hub_video_library_payload(request))\n",
-            "    async def _handle_video_library(self, request: \"web.Request\") -> \"web.Response\":\n"
-            "        auth_error = self._check_auth(request)\n"
-            "        if auth_error is not None:\n"
-            "            return auth_error\n"
-            "        return web.json_response(_hermes_hub_video_library_payload(request))\n"
-            "\n"
-            "    async def _handle_news_library(self, request: \"web.Request\") -> \"web.Response\":\n"
-            "        auth_error = self._check_auth(request)\n"
-            "        if auth_error is not None:\n"
-            "            return auth_error\n"
-            "        return web.json_response(_hermes_hub_news_library_payload(request))\n",
-            "news library endpoint handler",
-        )
-        changes.append("news library endpoint handler")
+    if openai_routes_text is not None:
+        core_text = text
+        text = openai_routes_text
+        text, modular_route_changes = _patch_modular_openai_routes(text)
+        changes.extend(modular_route_changes)
+    else:
+        text, legacy_route_changes = _patch_legacy_openai_routes(text)
+        changes.extend(legacy_route_changes)
 
-    if "async def _handle_hub_media" not in text:
-        text, _ = _replace_once(
-            text,
-            "    async def _handle_models(self, request: \"web.Request\") -> \"web.Response\":",
-            "    async def _handle_hub_media(self, request: \"web.Request\") -> \"web.StreamResponse\":\n"
-            "        auth_error = self._check_auth(request)\n"
-            "        if auth_error is not None:\n"
-            "            if _hermes_hub_is_tailnet_peer(request):\n"
-            "                auth_error = None\n"
-            "            else:\n"
-            "                media_token = request.query.get(\"hub_token\") or request.query.get(\"api_key\") or request.query.get(\"token\")\n"
-            "                accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n"
-            "                if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):\n"
-            "                    return auth_error\n"
-            "        media_id = request.match_info.get(\"media_id\", \"\")\n"
-            "        path = _hermes_hub_resolve_media_path(media_id, request.query.get(\"root\"))\n"
-            "        if path is None:\n"
-            "            from pathlib import Path as _Path\n"
-            "            short_id = str(media_id or \"\").strip().strip(\"/\")\n"
-            "            if 4 <= len(short_id) <= 64 and \"/\" not in short_id:\n"
-            "                upload_root = _Path(os.environ.get(\"HERMES_HUB_UPLOAD_PATH\", str(_Path.home() / \".hermes\" / \"hub_uploads\"))).expanduser()\n"
-            "                matches = []\n"
-            "                try:\n"
-            "                    matches = [candidate.resolve() for candidate in upload_root.rglob(f\"{short_id}*\") if candidate.is_file()]\n"
-            "                except Exception:\n"
-            "                    matches = []\n"
-            "                unique = {str(candidate): candidate for candidate in matches}\n"
-            "                if len(unique) == 1:\n"
-            "                    path = next(iter(unique.values()))\n"
-            "                if path is None:\n"
-            "                    matches = []\n"
-            "                    for root in _hermes_hub_media_roots():\n"
-            "                        if root == upload_root:\n"
-            "                            continue\n"
-            "                        try:\n"
-            "                            matches.extend(candidate.resolve() for candidate in root.rglob(f\"{short_id}*\") if candidate.is_file())\n"
-            "                        except Exception:\n"
-            "                            continue\n"
-            "                    unique = {str(candidate): candidate for candidate in matches}\n"
-            "                    if len(unique) == 1:\n"
-            "                        path = next(iter(unique.values()))\n"
-            "        if path is None:\n"
-            "            return web.json_response({\"error\": \"Media not found\"}, status=404)\n"
-            "        try:\n"
-            "            if request.query.get(\"format\", \"\").lower() == \"mp4\" or request.query.get(\"transcode\", \"\").lower() in {\"1\", \"true\", \"mp4\"}:\n"
-            "                path = _hermes_hub_transcode_mp4(path)\n"
-            "                return web.FileResponse(path, headers={\"Content-Type\": \"video/mp4\", \"Accept-Ranges\": \"bytes\", \"Cache-Control\": \"public, max-age=3600\"})\n"
-            "            import mimetypes as _mimetypes\n"
-            "            mime = _mimetypes.guess_type(path.name)[0] or \"application/octet-stream\"\n"
-            "            return web.FileResponse(path, headers={\"Content-Type\": mime, \"Accept-Ranges\": \"bytes\", \"Cache-Control\": \"public, max-age=3600\"})\n"
-            "        except Exception as exc:\n"
-            "            try:\n"
-            "                logger.exception(\"Hermes Hub media proxy failed for %s\", path)\n"
-            "            except Exception:\n"
-            "                pass\n"
-            "            return web.json_response({\"error\": str(exc)}, status=500)\n"
-            "\n"
-            "    async def _handle_models(self, request: \"web.Request\") -> \"web.Response\":",
-            "media proxy endpoint handler",
-        )
-        changes.append("media proxy endpoint handler")
+        if "def _emit_raw_hermes_event" not in text:
+            text, _ = _replace_once(
+                text,
+                "            async def _dispatch(it) -> None:",
+                '            async def _emit_raw_hermes_event(payload: Dict[str, Any]) -> None:\n'
+                '                """Forward Hermes-native metadata without forcing OpenAI shape."""\n'
+                '                event_type = str(payload.get("type") or payload.get("event") or "hermes.event")\n'
+                '                if not event_type.startswith("hermes."):\n'
+                '                    event_type = "hermes." + event_type\n'
+                '                payload["type"] = event_type\n'
+                '                payload.setdefault("session_id", session_id)\n'
+                '                await _write_event(event_type, payload)\n'
+                "\n"
+                "            async def _dispatch(it) -> None:",
+                "responses stream raw hermes emitter",
+            )
+            changes.append("responses stream raw hermes emitter")
 
-    if '{"Content-Type": "video/mp4", "Cache-Control": "public, max-age=3600"}' in text:
-        text = text.replace(
-            '{"Content-Type": "video/mp4", "Cache-Control": "public, max-age=3600"}',
-            '{"Content-Type": "video/mp4", "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600"}',
-        )
-        changes.append("media proxy range headers")
+        if "def _agent_context_usage" not in text:
+            text, _ = _replace_once(
+                text,
+                '                await _write_event(event_type, payload)\n'
+                "\n"
+                "            async def _dispatch(it) -> None:",
+                '                await _write_event(event_type, payload)\n'
+                "\n"
+                '            def _agent_context_usage() -> Optional[Dict[str, Any]]:\n'
+                "                agent = agent_ref[0] if agent_ref else None\n"
+                '                compressor = getattr(agent, "context_compressor", None) if agent is not None else None\n'
+                "                if compressor is None:\n"
+                "                    return None\n"
+                '                context_tokens = int(getattr(compressor, "last_prompt_tokens", 0) or 0)\n'
+                '                context_length = int(getattr(compressor, "context_length", 0) or 0)\n'
+                "                if context_tokens <= 0 and context_length <= 0:\n"
+                "                    return None\n"
+                "                payload: Dict[str, Any] = {\n"
+                '                    "type": "hermes.context.usage",\n'
+                '                    "source": "hermes-cli-status",\n'
+                '                    "context_tokens": context_tokens,\n'
+                '                    "context_length": context_length,\n'
+                '                    "threshold_tokens": int(getattr(compressor, "threshold_tokens", 0) or 0),\n'
+                '                    "compressions": int(getattr(compressor, "compression_count", 0) or 0),\n'
+                "                }\n"
+                "                if context_length > 0:\n"
+                '                    payload["context_percent"] = max(0, min(100, round((context_tokens / context_length) * 100)))\n'
+                "                return payload\n"
+                "\n"
+                "            async def _dispatch(it) -> None:",
+                "responses stream cli context usage helper",
+            )
+            changes.append("responses stream cli context usage helper")
 
-    if '{"Content-Type": mime, "Cache-Control": "public, max-age=3600"}' in text:
-        text = text.replace(
-            '{"Content-Type": mime, "Cache-Control": "public, max-age=3600"}',
-            '{"Content-Type": mime, "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600"}',
-        )
-        changes.append("media proxy original range headers")
+        if "context_usage = _agent_context_usage()" not in text:
+            text, _ = _replace_once(
+                text,
+                "                result, agent_usage = await agent_task\n"
+                "                usage = agent_usage or usage\n"
+                "                # If the agent produced a final_response but no text",
+                "                result, agent_usage = await agent_task\n"
+                "                usage = agent_usage or usage\n"
+                "                context_usage = _agent_context_usage()\n"
+                "                if context_usage is not None:\n"
+                "                    await _emit_raw_hermes_event(context_usage)\n"
+                "                # If the agent produced a final_response but no text",
+                "responses stream emit cli context usage",
+            )
+            changes.append("responses stream emit cli context usage")
 
-    if 'media_token = request.query.get("hub_token")' not in text and 'async def _handle_hub_media' in text:
-        text = text.replace(
-            '    async def _handle_hub_media(self, request: "web.Request") -> "web.StreamResponse":\n'
-            '        auth_error = self._check_auth(request)\n'
-            '        if auth_error is not None:\n'
-            '            return auth_error\n',
-            '    async def _handle_hub_media(self, request: "web.Request") -> "web.StreamResponse":\n'
-            '        auth_error = self._check_auth(request)\n'
-            '        if auth_error is not None:\n'
-            '            if _hermes_hub_is_tailnet_peer(request):\n'
-            '                auth_error = None\n'
-            '            else:\n'
-            '                media_token = request.query.get("hub_token") or request.query.get("api_key") or request.query.get("token")\n'
-            '                accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n'
-            '                if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):\n'
-            '                    return auth_error\n',
-            1,
-        )
-        changes.append("media proxy query token auth")
+        if "chat completions final_response fallback" not in text:
+            text, _ = _replace_once(
+                text,
+                "            async def _emit(item):\n"
+                "                \"\"\"Write a single queue item to the SSE stream.\n",
+                "            emitted_text = False\n"
+                "            # Hermes Hub patch: Chat Completions may receive only a final_response.\n"
+                "            # In that case emit it as one delta instead of returning an empty stream.\n"
+                "\n"
+                "            async def _emit(item):\n"
+                "                \"\"\"Write a single queue item to the SSE stream.\n",
+                "chat completions emitted_text tracker",
+            )
+            text, _ = _replace_once(
+                text,
+                "                    content_chunk = {\n"
+                "                        \"id\": completion_id, \"object\": \"chat.completion.chunk\",\n"
+                "                        \"created\": created, \"model\": model,\n"
+                "                        \"choices\": [{\"index\": 0, \"delta\": {\"content\": item}, \"finish_reason\": None}],\n"
+                "                    }\n"
+                "                    await response.write(f\"data: {json.dumps(content_chunk)}\\n\\n\".encode())",
+                "                    nonlocal emitted_text\n"
+                "                    if isinstance(item, str) and item:\n"
+                "                        emitted_text = True\n"
+                "                    content_chunk = {\n"
+                "                        \"id\": completion_id, \"object\": \"chat.completion.chunk\",\n"
+                "                        \"created\": created, \"model\": model,\n"
+                "                        \"choices\": [{\"index\": 0, \"delta\": {\"content\": item}, \"finish_reason\": None}],\n"
+                "                    }\n"
+                "                    await response.write(f\"data: {json.dumps(content_chunk)}\\n\\n\".encode())",
+                "chat completions mark emitted_text",
+            )
+            text, _ = _replace_once(
+                text,
+                "            try:\n"
+                "                result, agent_usage = await agent_task\n"
+                "                usage = agent_usage or usage\n"
+                "            except Exception as exc:",
+                "            try:\n"
+                "                result, agent_usage = await agent_task\n"
+                "                usage = agent_usage or usage\n"
+                "                agent_final = result.get(\"final_response\", \"\") if isinstance(result, dict) else \"\"\n"
+                "                if agent_final and not emitted_text:\n"
+                "                    # chat completions final_response fallback\n"
+                "                    last_activity = await _emit(agent_final)\n"
+                "            except Exception as exc:",
+                "chat completions final_response fallback",
+            )
+            changes.append("chat completions final_response fallback")
 
-    if 'if _hermes_hub_is_tailnet_peer(request):' not in text and 'media_token = request.query.get("hub_token")' in text:
-        text = text.replace(
-            '        if auth_error is not None:\n'
-            '            media_token = request.query.get("hub_token") or request.query.get("api_key") or request.query.get("token")\n'
-            '            accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n'
-            '            if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):\n'
-            '                return auth_error\n'
-            '        media_id = request.match_info.get("media_id", "")\n',
-            '        if auth_error is not None:\n'
-            '            if _hermes_hub_is_tailnet_peer(request):\n'
-            '                auth_error = None\n'
-            '            else:\n'
-            '                media_token = request.query.get("hub_token") or request.query.get("api_key") or request.query.get("token")\n'
-            '                accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n'
-            '                if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):\n'
-            '                    return auth_error\n'
-            '        media_id = request.match_info.get("media_id", "")\n',
-            1,
-        )
-        changes.append("media proxy tailnet auth")
+        if 'tag == "__hermes_raw_event__"' not in text:
+            text, _ = _replace_once(
+                text,
+                '                    elif tag == "__tool_completed__":\n'
+                '                        await _emit_tool_completed(payload)',
+                '                    elif tag == "__tool_completed__":\n'
+                '                        await _emit_tool_completed(payload)\n'
+                '                    elif tag == "__hermes_raw_event__":\n'
+                '                        await _emit_raw_hermes_event(payload)',
+                "responses stream raw hermes dispatch",
+            )
+            changes.append("responses stream raw hermes dispatch")
 
-    if 'short_id = str(media_id or "").strip().strip("/")' not in text and 'path = _hermes_hub_resolve_media_path(media_id, request.query.get("root"))' in text:
-        text = text.replace(
-            '        path = _hermes_hub_resolve_media_path(media_id, request.query.get("root"))\n'
-            '        if path is None:\n'
-            '            return web.json_response({"error": "Media not found"}, status=404)\n',
-            '        path = _hermes_hub_resolve_media_path(media_id, request.query.get("root"))\n'
-            '        if path is None:\n'
-            '            from pathlib import Path as _Path\n'
-            '            short_id = str(media_id or "").strip().strip("/")\n'
-            '            if 4 <= len(short_id) <= 64 and "/" not in short_id:\n'
-            '                upload_root = _Path(os.environ.get("HERMES_HUB_UPLOAD_PATH", str(_Path.home() / ".hermes" / "hub_uploads"))).expanduser()\n'
-            '                matches = []\n'
-            '                try:\n'
-            '                    matches = [candidate.resolve() for candidate in upload_root.rglob(f"{short_id}*") if candidate.is_file()]\n'
-            '                except Exception:\n'
-            '                    matches = []\n'
-            '                unique = {str(candidate): candidate for candidate in matches}\n'
-            '                if len(unique) == 1:\n'
-            '                    path = next(iter(unique.values()))\n'
-            '                if path is None:\n'
-            '                    matches = []\n'
-            '                    for root in _hermes_hub_media_roots():\n'
-            '                        if root == upload_root:\n'
-            '                            continue\n'
-            '                        try:\n'
-            '                            matches.extend(candidate.resolve() for candidate in root.rglob(f"{short_id}*") if candidate.is_file())\n'
-            '                        except Exception:\n'
-            '                            continue\n'
-            '                    unique = {str(candidate): candidate for candidate in matches}\n'
-            '                    if len(unique) == 1:\n'
-            '                        path = next(iter(unique.values()))\n'
-            '        if path is None:\n'
-            '            return web.json_response({"error": "Media not found"}, status=404)\n',
-            1,
-        )
-        changes.append("media proxy short id fallback")
+        if 'item[0] == "__hermes_raw_event__"' not in text:
+            text, _ = _replace_once(
+                text,
+                '                if isinstance(item, tuple) and len(item) == 2 and item[0] == "__tool_progress__":\n'
+                '                    event_data = json.dumps(item[1])\n'
+                '                    await response.write(\n'
+                '                        f"event: hermes.tool.progress\\ndata: {event_data}\\n\\n".encode()\n'
+                '                    )\n'
+                '                else:',
+                '                if isinstance(item, tuple) and len(item) == 2 and item[0] == "__tool_progress__":\n'
+                '                    event_data = json.dumps(item[1])\n'
+                '                    await response.write(\n'
+                '                        f"event: hermes.tool.progress\\ndata: {event_data}\\n\\n".encode()\n'
+                '                    )\n'
+                '                elif isinstance(item, tuple) and len(item) == 2 and item[0] == "__hermes_raw_event__":\n'
+                '                    payload = item[1] if isinstance(item[1], dict) else {"type": "hermes.event", "payload": item[1]}\n'
+                '                    event_name = str(payload.get("event") or payload.get("type") or "hermes.event")\n'
+                '                    await response.write(\n'
+                '                        f"event: {event_name}\\ndata: {json.dumps(payload)}\\n\\n".encode()\n'
+                '                    )\n'
+                '                else:',
+                "chat completions raw hermes dispatch",
+            )
+            changes.append("chat completions raw hermes dispatch")
 
-    if 'roots = [_Path(os.environ.get("HERMES_HUB_UPLOAD_PATH", str(_Path.home() / ".hermes" / "hub_uploads"))).expanduser()] + _hermes_hub_media_roots()' in text:
-        text = text.replace(
-            '                roots = [_Path(os.environ.get("HERMES_HUB_UPLOAD_PATH", str(_Path.home() / ".hermes" / "hub_uploads"))).expanduser()] + _hermes_hub_media_roots()\n'
-            '                matches = []\n'
-            '                for root in roots:\n'
-            '                    try:\n'
-            '                        matches.extend(candidate.resolve() for candidate in root.rglob(f"{short_id}*") if candidate.is_file())\n'
-            '                    except Exception:\n'
-            '                        continue\n'
-            '                unique = {str(candidate): candidate for candidate in matches}\n'
-            '                if len(unique) == 1:\n'
-            '                    path = next(iter(unique.values()))\n',
-            '                upload_root = _Path(os.environ.get("HERMES_HUB_UPLOAD_PATH", str(_Path.home() / ".hermes" / "hub_uploads"))).expanduser()\n'
-            '                matches = []\n'
-            '                try:\n'
-            '                    matches = [candidate.resolve() for candidate in upload_root.rglob(f"{short_id}*") if candidate.is_file()]\n'
-            '                except Exception:\n'
-            '                    matches = []\n'
-            '                unique = {str(candidate): candidate for candidate in matches}\n'
-            '                if len(unique) == 1:\n'
-            '                    path = next(iter(unique.values()))\n'
-            '                if path is None:\n'
-            '                    matches = []\n'
-            '                    for root in _hermes_hub_media_roots():\n'
-            '                        if root == upload_root:\n'
-            '                            continue\n'
-            '                        try:\n'
-            '                            matches.extend(candidate.resolve() for candidate in root.rglob(f"{short_id}*") if candidate.is_file())\n'
-            '                        except Exception:\n'
-            '                            continue\n'
-            '                    unique = {str(candidate): candidate for candidate in matches}\n'
-            '                    if len(unique) == 1:\n'
-            '                        path = next(iter(unique.values()))\n',
-            1,
-        )
-        changes.append("media proxy upload short id priority")
+        if (
+            'def _on_tool_progress(event_type, name, preview, args, **kwargs):\n                """Forward real llama.cpp processing/timing events to Chat Completions SSE."""' not in text
+            and '"""Pass through Hermes-native tool/progress metadata' not in text
+        ):
+            text, _ = _replace_once(
+                text,
+                '            # Start agent in background.  agent_ref is a mutable container\n',
+                '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
+                '                """Forward real llama.cpp processing/timing events to Chat Completions SSE."""\n'
+                '                if str(event_type or "") != "hermes.processing.progress":\n'
+                '                    return\n'
+                '                payload = {\n'
+                '                    "type": "hermes.processing.progress",\n'
+                '                    "event": "hermes.processing.progress",\n'
+                '                    "tool": name,\n'
+                '                    "label": preview,\n'
+                '                    "arguments": args or {},\n'
+                '                    "estimated": False,\n'
+                '                }\n'
+                '                payload.update(kwargs or {})\n'
+                '                _stream_q.put(("__hermes_raw_event__", payload))\n'
+                '\n'
+                '            # Start agent in background.  agent_ref is a mutable container\n',
+                "chat completions processing progress callback",
+            )
+            text, _ = _replace_once(
+                text,
+                '                tool_start_callback=_on_tool_start,\n'
+                '                tool_complete_callback=_on_tool_complete,\n'
+                '                agent_ref=agent_ref,\n',
+                '                tool_start_callback=_on_tool_start,\n'
+                '                tool_complete_callback=_on_tool_complete,\n'
+                '                tool_progress_callback=_on_tool_progress,\n'
+                '                agent_ref=agent_ref,\n',
+                "chat completions wire processing progress callback",
+            )
+            changes.append("chat completions processing progress callback")
 
-    if "async def _handle_hub_media_upload" not in text:
-        text, _ = _replace_once(
-            text,
-            "    async def _handle_models(self, request: \"web.Request\") -> \"web.Response\":",
-            "    async def _handle_hub_media_upload(self, request: \"web.Request\") -> \"web.Response\":\n"
-            "        auth_error = self._check_auth(request)\n"
-            "        if auth_error is not None:\n"
-            "            return auth_error\n"
-            "        try:\n"
-            "            body = await request.json()\n"
-            "            result = _hermes_hub_save_upload(\n"
-            "                str(body.get(\"filename\") or \"attachment\"),\n"
-            "                str(body.get(\"mime_type\") or body.get(\"mimeType\") or \"application/octet-stream\"),\n"
-            "                str(body.get(\"data_url\") or body.get(\"dataUrl\") or \"\"),\n"
-            "            )\n"
-            "            return web.json_response(result)\n"
-            "        except Exception as exc:\n"
-            "            return web.json_response({\"error\": str(exc)}, status=400)\n"
-            "\n"
-            "    async def _handle_models(self, request: \"web.Request\") -> \"web.Response\":",
-            "media upload endpoint handler",
-        )
-        changes.append("media upload endpoint handler")
+        progress_passthrough = '"""Pass through Hermes-native tool/progress metadata including reasoning."""'
+        if progress_passthrough not in text:
+            text, count = re.subn(
+                r'(?m)^            def _on_tool_progress\(event_type, name, preview, args, \*\*kwargs\):\n'
+                r'(?:^ {16,}.*\n|^[ \t]*\n)*',
+                '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
+                '                """Pass through Hermes-native tool/progress metadata including reasoning."""\n'
+                '                event_name = str(event_type or "hermes.tool.progress")\n'
+                '                is_reasoning = "reasoning" in event_name.lower()\n'
+                '                if str(name).startswith("_") and not is_reasoning:\n'
+                "                    return\n"
+                "                payload = {\n"
+                '                    "type": "hermes.reasoning.available" if is_reasoning else event_name,\n'
+                '                    "event": "reasoning.available" if is_reasoning else event_name,\n'
+                '                    "tool": name,\n'
+                '                    "label": preview,\n'
+                '                    "reasoning": (preview or "") if is_reasoning else None,\n'
+                '                    "arguments": args or {},\n'
+                "                }\n"
+                "                payload.update(kwargs or {})\n"
+                '                _stream_q.put(("__hermes_raw_event__", payload))\n',
+                text,
+                count=1,
+            )
+            if count != 1:
+                raise RuntimeError("Patch anchor not found: responses tool_progress callback")
+            changes.append("responses tool_progress raw passthrough")
 
-    if '"hermes_native": {"method": "POST", "path": "/v1/hermes/native"}' not in text:
-        text, _ = _replace_regex_once(
-            text,
-            r'(^\s+"responses": \{"method": "POST", "path": "/v1/responses"\},\n)(^\s+"runs": \{"method": "POST", "path": "/v1/runs"\},)',
-            r'\1'
-            r'                "hermes_native": {"method": "POST", "path": "/v1/hermes/native"},' "\n"
-            r'\2',
-            "capabilities hermes_native endpoint",
-        )
-        changes.append("capabilities hermes_native endpoint")
+        responses_reasoning_passthrough = '"""Forward Responses progress metadata and reasoning."""'
+        if responses_reasoning_passthrough not in text:
+            legacy_responses_progress = (
+                '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
+                '                """Pass through Hermes-native tool/progress metadata."""\n'
+                '                if str(name).startswith("_"):\n'
+                '                    return\n'
+                '                payload = {\n'
+                '                    "type": str(event_type or "hermes.tool.progress"),\n'
+                '                    "event": str(event_type or "hermes.tool.progress"),\n'
+                '                    "tool": name,\n'
+                '                    "label": preview,\n'
+                '                    "arguments": args or {},\n'
+                '                }\n'
+                '                payload.update(kwargs or {})\n'
+                '                _stream_q.put(("__hermes_raw_event__", payload))\n'
+            )
+            unpatched_responses_progress = (
+                '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
+                '                """Queue non-start tool progress events if needed in future.\n'
+                '\n'
+                '                The structured Responses stream uses ``tool_start_callback``\n'
+                '                and ``tool_complete_callback`` for exact call-id correlation,\n'
+                '                so progress events are currently ignored here.\n'
+                '                """\n'
+                '                return\n'
+            )
+            responses_progress_source = (
+                legacy_responses_progress
+                if legacy_responses_progress in text
+                else unpatched_responses_progress
+            )
+            text, _ = _replace_once(
+                text,
+                responses_progress_source,
+                '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
+                '                """Forward Responses progress metadata and reasoning."""\n'
+                '                event_name = str(event_type or "hermes.tool.progress")\n'
+                '                is_reasoning = "reasoning" in event_name.lower()\n'
+                '                if str(name).startswith("_") and not is_reasoning:\n'
+                '                    return\n'
+                '                payload = {\n'
+                '                    "type": "hermes.reasoning.available" if is_reasoning else event_name,\n'
+                '                    "event": "reasoning.available" if is_reasoning else event_name,\n'
+                '                    "tool": name,\n'
+                '                    "label": preview,\n'
+                '                    "reasoning": (preview or "") if is_reasoning else None,\n'
+                '                    "arguments": args or {},\n'
+                '                }\n'
+                '                payload.update(kwargs or {})\n'
+                '                _stream_q.put(("__hermes_raw_event__", payload))\n',
+                "responses reasoning passthrough callback",
+            )
+            changes.append("responses reasoning passthrough callback")
 
-    if 'await _write_event("hermes.native.protocol"' not in text:
-        text, _ = _replace_once(
-            text,
-            '            await _write_event("response.created", {\n'
-            '                "type": "response.created",\n'
-            '                "response": created_env,\n'
-            '            })\n'
-            '            _persist_response_snapshot(created_env)',
-            '            await _write_event("response.created", {\n'
-            '                "type": "response.created",\n'
-            '                "response": created_env,\n'
-            '            })\n'
-            '            await _write_event("hermes.native.protocol", {\n'
-            '                "type": "hermes.native.protocol",\n'
-            '                "protocol": "hermes-native",\n'
-            '                "transport": "responses",\n'
-            '                "endpoint": "/v1/responses",\n'
-            '                "native_endpoint": "/v1/hermes/native",\n'
-            '                "context_owner": "hermes-agent",\n'
-            '                "raw_event_passthrough": True,\n'
-            '                "strict_native_compatible": True,\n'
-            '                "session_id": session_id,\n'
-            '            })\n'
-            '            _persist_response_snapshot(created_env)',
-            "responses stream hermes.native.protocol",
-        )
-        changes.append("responses stream hermes.native.protocol")
+        if '"event": "tool.started",' not in text:
+            text, _ = _replace_once(
+                text,
+                '            def _on_tool_start(tool_call_id, function_name, function_args):\n'
+                '                """Queue a started tool for live function_call streaming."""\n'
+                '                _stream_q.put(("__tool_started__", {',
+                '            def _on_tool_start(tool_call_id, function_name, function_args):\n'
+                '                """Queue a started tool for live function_call streaming."""\n'
+                '                _stream_q.put(("__hermes_raw_event__", {\n'
+                '                    "type": "hermes.tool.progress",\n'
+                '                    "event": "tool.started",\n'
+                '                    "tool": function_name,\n'
+                '                    "toolCallId": tool_call_id,\n'
+                '                    "status": "running",\n'
+                '                    "arguments": function_args or {},\n'
+                "                }))\n"
+                '                _stream_q.put(("__tool_started__", {',
+                "responses tool_start raw passthrough",
+            )
+            changes.append("responses tool_start raw passthrough")
 
-    if "def _emit_raw_hermes_event" not in text:
-        text, _ = _replace_once(
-            text,
-            "            async def _dispatch(it) -> None:",
-            '            async def _emit_raw_hermes_event(payload: Dict[str, Any]) -> None:\n'
-            '                """Forward Hermes-native metadata without forcing OpenAI shape."""\n'
-            '                event_type = str(payload.get("type") or payload.get("event") or "hermes.event")\n'
-            '                if not event_type.startswith("hermes."):\n'
-            '                    event_type = "hermes." + event_type\n'
-            '                payload["type"] = event_type\n'
-            '                payload.setdefault("session_id", session_id)\n'
-            '                await _write_event(event_type, payload)\n'
-            "\n"
-            "            async def _dispatch(it) -> None:",
-            "responses stream raw hermes emitter",
-        )
-        changes.append("responses stream raw hermes emitter")
+        if '"event": "tool.completed",' not in text:
+            text, _ = _replace_once(
+                text,
+                '            def _on_tool_complete(tool_call_id, function_name, function_args, function_result):\n'
+                '                """Queue a completed tool result for live function_call_output streaming."""\n'
+                '                _stream_q.put(("__tool_completed__", {',
+                '            def _on_tool_complete(tool_call_id, function_name, function_args, function_result):\n'
+                '                """Queue a completed tool result for live function_call_output streaming."""\n'
+                '                _stream_q.put(("__hermes_raw_event__", {\n'
+                '                    "type": "hermes.tool.progress",\n'
+                '                    "event": "tool.completed",\n'
+                '                    "tool": function_name,\n'
+                '                    "toolCallId": tool_call_id,\n'
+                '                    "status": "completed",\n'
+                '                    "arguments": function_args or {},\n'
+                '                    "result": function_result,\n'
+                "                }))\n"
+                '                _stream_q.put(("__tool_completed__", {',
+                "responses tool_complete raw passthrough",
+            )
+            changes.append("responses tool_complete raw passthrough")
 
-    if "def _agent_context_usage" not in text:
-        text, _ = _replace_once(
-            text,
-            '                await _write_event(event_type, payload)\n'
-            "\n"
-            "            async def _dispatch(it) -> None:",
-            '                await _write_event(event_type, payload)\n'
-            "\n"
-            '            def _agent_context_usage() -> Optional[Dict[str, Any]]:\n'
-            "                agent = agent_ref[0] if agent_ref else None\n"
-            '                compressor = getattr(agent, "context_compressor", None) if agent is not None else None\n'
-            "                if compressor is None:\n"
-            "                    return None\n"
-            '                context_tokens = int(getattr(compressor, "last_prompt_tokens", 0) or 0)\n'
-            '                context_length = int(getattr(compressor, "context_length", 0) or 0)\n'
-            "                if context_tokens <= 0 and context_length <= 0:\n"
-            "                    return None\n"
-            "                payload: Dict[str, Any] = {\n"
-            '                    "type": "hermes.context.usage",\n'
-            '                    "source": "hermes-cli-status",\n'
-            '                    "context_tokens": context_tokens,\n'
-            '                    "context_length": context_length,\n'
-            '                    "threshold_tokens": int(getattr(compressor, "threshold_tokens", 0) or 0),\n'
-            '                    "compressions": int(getattr(compressor, "compression_count", 0) or 0),\n'
-            "                }\n"
-            "                if context_length > 0:\n"
-            '                    payload["context_percent"] = max(0, min(100, round((context_tokens / context_length) * 100)))\n'
-            "                return payload\n"
-            "\n"
-            "            async def _dispatch(it) -> None:",
-            "responses stream cli context usage helper",
-        )
-        changes.append("responses stream cli context usage helper")
+    if openai_routes_text is not None:
+        openai_routes_text, text = text, core_text
 
-    if "context_usage = _agent_context_usage()" not in text:
-        text, _ = _replace_once(
-            text,
-            "                result, agent_usage = await agent_task\n"
-            "                usage = agent_usage or usage\n"
-            "                # If the agent produced a final_response but no text",
-            "                result, agent_usage = await agent_task\n"
-            "                usage = agent_usage or usage\n"
-            "                context_usage = _agent_context_usage()\n"
-            "                if context_usage is not None:\n"
-            "                    await _emit_raw_hermes_event(context_usage)\n"
-            "                # If the agent produced a final_response but no text",
-            "responses stream emit cli context usage",
+    # Session-chat project prompt lives in the CORE api_server module (not in the
+    # extracted OpenAI routes): patch it here, after the routes/core swap above.
+    project_session_prompt = 'system_prompt = _hermes_hub_project_system_prompt(body) if _is_hermes_hub_request(request, body) else (body.get("system_message") or body.get("instructions"))'
+    if project_session_prompt not in text:
+        updated_text = text.replace(
+            'system_prompt = None if _is_hermes_hub_request(request, body) else (body.get("system_message") or body.get("instructions"))',
+            project_session_prompt,
         )
-        changes.append("responses stream emit cli context usage")
-
-    if "chat completions final_response fallback" not in text:
-        text, _ = _replace_once(
-            text,
-            "            async def _emit(item):\n"
-            "                \"\"\"Write a single queue item to the SSE stream.\n",
-            "            emitted_text = False\n"
-            "            # Hermes Hub patch: Chat Completions may receive only a final_response.\n"
-            "            # In that case emit it as one delta instead of returning an empty stream.\n"
-            "\n"
-            "            async def _emit(item):\n"
-            "                \"\"\"Write a single queue item to the SSE stream.\n",
-            "chat completions emitted_text tracker",
+        updated_text = updated_text.replace(
+            'system_prompt = body.get("system_message") or body.get("instructions")',
+            project_session_prompt,
         )
-        text, _ = _replace_once(
-            text,
-            "                    content_chunk = {\n"
-            "                        \"id\": completion_id, \"object\": \"chat.completion.chunk\",\n"
-            "                        \"created\": created, \"model\": model,\n"
-            "                        \"choices\": [{\"index\": 0, \"delta\": {\"content\": item}, \"finish_reason\": None}],\n"
-            "                    }\n"
-            "                    await response.write(f\"data: {json.dumps(content_chunk)}\\n\\n\".encode())",
-            "                    nonlocal emitted_text\n"
-            "                    if isinstance(item, str) and item:\n"
-            "                        emitted_text = True\n"
-            "                    content_chunk = {\n"
-            "                        \"id\": completion_id, \"object\": \"chat.completion.chunk\",\n"
-            "                        \"created\": created, \"model\": model,\n"
-            "                        \"choices\": [{\"index\": 0, \"delta\": {\"content\": item}, \"finish_reason\": None}],\n"
-            "                    }\n"
-            "                    await response.write(f\"data: {json.dumps(content_chunk)}\\n\\n\".encode())",
-            "chat completions mark emitted_text",
-        )
-        text, _ = _replace_once(
-            text,
-            "            try:\n"
-            "                result, agent_usage = await agent_task\n"
-            "                usage = agent_usage or usage\n"
-            "            except Exception as exc:",
-            "            try:\n"
-            "                result, agent_usage = await agent_task\n"
-            "                usage = agent_usage or usage\n"
-            "                agent_final = result.get(\"final_response\", \"\") if isinstance(result, dict) else \"\"\n"
-            "                if agent_final and not emitted_text:\n"
-            "                    # chat completions final_response fallback\n"
-            "                    last_activity = await _emit(agent_final)\n"
-            "            except Exception as exc:",
-            "chat completions final_response fallback",
-        )
-        changes.append("chat completions final_response fallback")
-
-    if 'tag == "__hermes_raw_event__"' not in text:
-        text, _ = _replace_once(
-            text,
-            '                    elif tag == "__tool_completed__":\n'
-            '                        await _emit_tool_completed(payload)',
-            '                    elif tag == "__tool_completed__":\n'
-            '                        await _emit_tool_completed(payload)\n'
-            '                    elif tag == "__hermes_raw_event__":\n'
-            '                        await _emit_raw_hermes_event(payload)',
-            "responses stream raw hermes dispatch",
-        )
-        changes.append("responses stream raw hermes dispatch")
-
-    if 'item[0] == "__hermes_raw_event__"' not in text:
-        text, _ = _replace_once(
-            text,
-            '                if isinstance(item, tuple) and len(item) == 2 and item[0] == "__tool_progress__":\n'
-            '                    event_data = json.dumps(item[1])\n'
-            '                    await response.write(\n'
-            '                        f"event: hermes.tool.progress\\ndata: {event_data}\\n\\n".encode()\n'
-            '                    )\n'
-            '                else:',
-            '                if isinstance(item, tuple) and len(item) == 2 and item[0] == "__tool_progress__":\n'
-            '                    event_data = json.dumps(item[1])\n'
-            '                    await response.write(\n'
-            '                        f"event: hermes.tool.progress\\ndata: {event_data}\\n\\n".encode()\n'
-            '                    )\n'
-            '                elif isinstance(item, tuple) and len(item) == 2 and item[0] == "__hermes_raw_event__":\n'
-            '                    payload = item[1] if isinstance(item[1], dict) else {"type": "hermes.event", "payload": item[1]}\n'
-            '                    event_name = str(payload.get("event") or payload.get("type") or "hermes.event")\n'
-            '                    await response.write(\n'
-            '                        f"event: {event_name}\\ndata: {json.dumps(payload)}\\n\\n".encode()\n'
-            '                    )\n'
-            '                else:',
-            "chat completions raw hermes dispatch",
-        )
-        changes.append("chat completions raw hermes dispatch")
-
-    if (
-        'def _on_tool_progress(event_type, name, preview, args, **kwargs):\n                """Forward real llama.cpp processing/timing events to Chat Completions SSE."""' not in text
-        and '"""Pass through Hermes-native tool/progress metadata' not in text
-    ):
-        text, _ = _replace_once(
-            text,
-            '            # Start agent in background.  agent_ref is a mutable container\n',
-            '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
-            '                """Forward real llama.cpp processing/timing events to Chat Completions SSE."""\n'
-            '                if str(event_type or "") != "hermes.processing.progress":\n'
-            '                    return\n'
-            '                payload = {\n'
-            '                    "type": "hermes.processing.progress",\n'
-            '                    "event": "hermes.processing.progress",\n'
-            '                    "tool": name,\n'
-            '                    "label": preview,\n'
-            '                    "arguments": args or {},\n'
-            '                    "estimated": False,\n'
-            '                }\n'
-            '                payload.update(kwargs or {})\n'
-            '                _stream_q.put(("__hermes_raw_event__", payload))\n'
-            '\n'
-            '            # Start agent in background.  agent_ref is a mutable container\n',
-            "chat completions processing progress callback",
-        )
-        text, _ = _replace_once(
-            text,
-            '                tool_start_callback=_on_tool_start,\n'
-            '                tool_complete_callback=_on_tool_complete,\n'
-            '                agent_ref=agent_ref,\n',
-            '                tool_start_callback=_on_tool_start,\n'
-            '                tool_complete_callback=_on_tool_complete,\n'
-            '                tool_progress_callback=_on_tool_progress,\n'
-            '                agent_ref=agent_ref,\n',
-            "chat completions wire processing progress callback",
-        )
-        changes.append("chat completions processing progress callback")
-
-    progress_passthrough = '"""Pass through Hermes-native tool/progress metadata including reasoning."""'
-    if progress_passthrough not in text:
-        text, count = re.subn(
-            r'(?m)^            def _on_tool_progress\(event_type, name, preview, args, \*\*kwargs\):\n'
-            r'(?:^ {16,}.*\n|^[ \t]*\n)*',
-            '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
-            '                """Pass through Hermes-native tool/progress metadata including reasoning."""\n'
-            '                event_name = str(event_type or "hermes.tool.progress")\n'
-            '                is_reasoning = "reasoning" in event_name.lower()\n'
-            '                if str(name).startswith("_") and not is_reasoning:\n'
-            "                    return\n"
-            "                payload = {\n"
-            '                    "type": "hermes.reasoning.available" if is_reasoning else event_name,\n'
-            '                    "event": "reasoning.available" if is_reasoning else event_name,\n'
-            '                    "tool": name,\n'
-            '                    "label": preview,\n'
-            '                    "reasoning": (preview or "") if is_reasoning else None,\n'
-            '                    "arguments": args or {},\n'
-            "                }\n"
-            "                payload.update(kwargs or {})\n"
-            '                _stream_q.put(("__hermes_raw_event__", payload))\n',
-            text,
-            count=1,
-        )
-        if count != 1:
-            raise RuntimeError("Patch anchor not found: responses tool_progress callback")
-        changes.append("responses tool_progress raw passthrough")
-
-    responses_reasoning_passthrough = '"""Forward Responses progress metadata and reasoning."""'
-    if responses_reasoning_passthrough not in text:
-        legacy_responses_progress = (
-            '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
-            '                """Pass through Hermes-native tool/progress metadata."""\n'
-            '                if str(name).startswith("_"):\n'
-            '                    return\n'
-            '                payload = {\n'
-            '                    "type": str(event_type or "hermes.tool.progress"),\n'
-            '                    "event": str(event_type or "hermes.tool.progress"),\n'
-            '                    "tool": name,\n'
-            '                    "label": preview,\n'
-            '                    "arguments": args or {},\n'
-            '                }\n'
-            '                payload.update(kwargs or {})\n'
-            '                _stream_q.put(("__hermes_raw_event__", payload))\n'
-        )
-        unpatched_responses_progress = (
-            '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
-            '                """Queue non-start tool progress events if needed in future.\n'
-            '\n'
-            '                The structured Responses stream uses ``tool_start_callback``\n'
-            '                and ``tool_complete_callback`` for exact call-id correlation,\n'
-            '                so progress events are currently ignored here.\n'
-            '                """\n'
-            '                return\n'
-        )
-        responses_progress_source = (
-            legacy_responses_progress
-            if legacy_responses_progress in text
-            else unpatched_responses_progress
-        )
-        text, _ = _replace_once(
-            text,
-            responses_progress_source,
-            '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
-            '                """Forward Responses progress metadata and reasoning."""\n'
-            '                event_name = str(event_type or "hermes.tool.progress")\n'
-            '                is_reasoning = "reasoning" in event_name.lower()\n'
-            '                if str(name).startswith("_") and not is_reasoning:\n'
-            '                    return\n'
-            '                payload = {\n'
-            '                    "type": "hermes.reasoning.available" if is_reasoning else event_name,\n'
-            '                    "event": "reasoning.available" if is_reasoning else event_name,\n'
-            '                    "tool": name,\n'
-            '                    "label": preview,\n'
-            '                    "reasoning": (preview or "") if is_reasoning else None,\n'
-            '                    "arguments": args or {},\n'
-            '                }\n'
-            '                payload.update(kwargs or {})\n'
-            '                _stream_q.put(("__hermes_raw_event__", payload))\n',
-            "responses reasoning passthrough callback",
-        )
-        changes.append("responses reasoning passthrough callback")
-
-    if '"event": "tool.started",' not in text:
-        text, _ = _replace_once(
-            text,
-            '            def _on_tool_start(tool_call_id, function_name, function_args):\n'
-            '                """Queue a started tool for live function_call streaming."""\n'
-            '                _stream_q.put(("__tool_started__", {',
-            '            def _on_tool_start(tool_call_id, function_name, function_args):\n'
-            '                """Queue a started tool for live function_call streaming."""\n'
-            '                _stream_q.put(("__hermes_raw_event__", {\n'
-            '                    "type": "hermes.tool.progress",\n'
-            '                    "event": "tool.started",\n'
-            '                    "tool": function_name,\n'
-            '                    "toolCallId": tool_call_id,\n'
-            '                    "status": "running",\n'
-            '                    "arguments": function_args or {},\n'
-            "                }))\n"
-            '                _stream_q.put(("__tool_started__", {',
-            "responses tool_start raw passthrough",
-        )
-        changes.append("responses tool_start raw passthrough")
-
-    if '"event": "tool.completed",' not in text:
-        text, _ = _replace_once(
-            text,
-            '            def _on_tool_complete(tool_call_id, function_name, function_args, function_result):\n'
-            '                """Queue a completed tool result for live function_call_output streaming."""\n'
-            '                _stream_q.put(("__tool_completed__", {',
-            '            def _on_tool_complete(tool_call_id, function_name, function_args, function_result):\n'
-            '                """Queue a completed tool result for live function_call_output streaming."""\n'
-            '                _stream_q.put(("__hermes_raw_event__", {\n'
-            '                    "type": "hermes.tool.progress",\n'
-            '                    "event": "tool.completed",\n'
-            '                    "tool": function_name,\n'
-            '                    "toolCallId": tool_call_id,\n'
-            '                    "status": "completed",\n'
-            '                    "arguments": function_args or {},\n'
-            '                    "result": function_result,\n'
-            "                }))\n"
-            '                _stream_q.put(("__tool_completed__", {',
-            "responses tool_complete raw passthrough",
-        )
-        changes.append("responses tool_complete raw passthrough")
+        if updated_text != text:
+            text = updated_text
+            changes.append("session chat allow bounded hermes hub project prompt")
+        elif (
+            "_hermes_hub_project_system_prompt(body)" not in text
+            or "_is_hermes_hub_request(request, body)" not in text
+        ):
+            raise PatchError("Patch anchor not found: session chat bounded hermes hub project prompt")
 
     if not _route_registered(text, "POST", "/v1/hermes/native", "_handle_responses"):
         text, _ = _replace_regex_once(
@@ -9175,7 +9780,13 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
     changes.extend(sqlite_sync_changes)
     text, correlation_changes = _patch_agent_runtime_and_correlation_v1(text)
     changes.extend(correlation_changes)
-    return text, changes
+    return text, openai_routes_text, changes
+
+
+def _patch_text(text: str) -> tuple[str, list[str]]:
+    """Patch the legacy single-file API server layout."""
+    patched, _, changes = _patch_source_texts(text)
+    return patched, changes
 
 
 def _patch_agent_chat_completion_helpers(text: str) -> tuple[str, list[str]]:
@@ -9324,18 +9935,35 @@ def _patch_agent_chat_completion_helpers(text: str) -> tuple[str, list[str]]:
         )
         changes.append("agent request real llama prompt progress and timings")
 
-    if 'agent._touch_activity("receiving stream response")\n            _hermes_hub_emit_llama_stream_metadata(agent, chunk)' not in text:
-        text, _ = _replace_once(
-            text,
+    if (
+        'agent._touch_activity("receiving stream response")\n            _hermes_hub_emit_llama_stream_metadata(agent, chunk)' not in text
+        and 'self.agent._touch_activity("receiving stream response")\n        _hermes_hub_emit_llama_stream_metadata(self.agent, chunk)' not in text
+    ):
+        legacy_anchor = (
             '            agent._touch_activity("receiving stream response")\n'
             '\n'
-            '            # Update per-attempt diagnostic counters.',
-            '            agent._touch_activity("receiving stream response")\n'
-            '            _hermes_hub_emit_llama_stream_metadata(agent, chunk)\n'
-            '\n'
-            '            # Update per-attempt diagnostic counters.',
-            "agent emit real llama prompt progress and timings",
+            '            # Update per-attempt diagnostic counters.'
         )
+        modular_anchor = '        self.agent._touch_activity("receiving stream response")\n'
+        if legacy_anchor in text:
+            text, _ = _replace_once(
+                text,
+                legacy_anchor,
+                '            agent._touch_activity("receiving stream response")\n'
+                '            _hermes_hub_emit_llama_stream_metadata(agent, chunk)\n'
+                '\n'
+                '            # Update per-attempt diagnostic counters.',
+                "agent emit real llama prompt progress and timings",
+            )
+        elif text.count(modular_anchor) == 1 and "def _count_chunk(self, diag, chunk)" in text:
+            text, _ = _replace_once(
+                text,
+                modular_anchor,
+                modular_anchor + '        _hermes_hub_emit_llama_stream_metadata(self.agent, chunk)\n',
+                "agent emit real llama prompt progress and timings",
+            )
+        else:
+            raise RuntimeError("Patch anchor not found: agent emit real llama prompt progress and timings")
         changes.append("agent emit real llama prompt progress and timings")
 
     return text, changes
@@ -9436,6 +10064,10 @@ def _patch_agent_runtime_and_correlation_v1(text: str) -> tuple[str, list[str]]:
             1,
         )
         wrapper_anchor = "\n    # ------------------------------------------------------------------\n    # /v1/runs"
+        if wrapper_anchor not in text:
+            # Hermes 6f7 moved /v1/runs to a dedicated module and exposes thin
+            # delegators after _run_agent instead of the legacy section header.
+            wrapper_anchor = "\n    # -- /v1/runs, room grants, room dispatch: thin delegators"
         wrapper = r'''    # HERMES_HUB_AGENT_RUNTIME_ADAPTER_V1
     async def _run_agent(
         self,
@@ -9453,6 +10085,8 @@ def _patch_agent_runtime_and_correlation_v1(text: str) -> tuple[str, list[str]]:
         request_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
         run_id: Optional[str] = None,
+        relay_metadata: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> tuple:
         from hermes_hub_gateway.adapters.hermes.agent_runtime import AgentRunRequest
 
@@ -9480,6 +10114,8 @@ def _patch_agent_runtime_and_correlation_v1(text: str) -> tuple[str, list[str]]:
             metadata={
                 "surface": "hermes-gateway",
                 "_hermes_hub_legacy_kwargs": legacy_kwargs,
+                "relay_metadata": relay_metadata or {},
+                "extra_kwargs": sorted(kwargs.keys()),
             },
         )
         adapter_result = await _hermes_hub_agent_runtime_adapter(self).run(request)

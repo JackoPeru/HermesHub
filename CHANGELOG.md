@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.189 - 2026-09-30
+
+- Reasoning effort con fallback template-safe `xhigh/medium/low` quando il server non dichiara la ladder; selettore sempre visibile, mai più `max`/`ultra`/`none` verso i template EXL3.
+- Patcher gateway multi-modulo (`api_server.py` + `api_server_openai_routes.py` + `api_server_runs.py`): re-patch dopo ogni aggiornamento agent via `rehub-patch`, senza più route `/v1/hub/*` in 404.
+- Launcher Linux con `readlink -f` per symlink e documentazione re-patch in `docs/hermes-hub-linux.md`.
+
 ## 0.6.188 - 2026-09-29
 
 - Sidebar con sezioni collassabili persistenti (Operatività, Controllo, Contenuti, Account, Recenti ridotti con link all'archivio).

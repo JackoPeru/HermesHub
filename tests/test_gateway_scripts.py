@@ -39,6 +39,7 @@ UPDATER_REQUIRED_FILES = (
     "hermes-hub-agent-update.timer",
     "hermes-wait-tailscale.sh",
     "hermes-wait-llama.sh",
+    "rehub-patch.sh",
     "hermes-power-monitor.sh",
     "hermes-power-monitor.service",
 )
@@ -1507,6 +1508,7 @@ class GatewayScriptTests(unittest.TestCase):
             "hermes-hub-agent-update.sh",
             "hermes-hub-linux.sh",
             "hermes-power-monitor.sh",
+            "rehub-patch.sh",
             "hermes-wait-llama.sh",
             "hermes-wait-tailscale.sh",
         ):
@@ -1762,6 +1764,85 @@ class GatewayScriptTests(unittest.TestCase):
         self.assertIn('len(first_audio).to_bytes(4, "big")', handler_block)
         self.assertIn('await response.write((0).to_bytes(4, "big"))', handler_block)
         self.assertIn("for chunk in chunks[1:]:", handler_block)
+
+
+    def test_modular_openai_routes_add_native_events_idempotently(self):
+        source = textwrap.dedent(
+            '''
+            class _ResponsesStream:
+                async def emit_status(self, payload):
+                    pass
+
+                # queue tag -> (method name, payload adapter)
+                _TAG_HANDLERS = {}
+
+                async def dispatch(self, item):
+                    if isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str):
+                        tag, payload = item
+                        await self.flush_batch()
+                        handler = self._TAG_HANDLERS.get(tag)
+                        if handler is not None:
+                            method, adapt = handler
+                            await getattr(self, method)(adapt(payload))
+
+            class _OpenAIRoutes:
+                async def write_chat(self, response, stream_q):
+                    try:
+                        async for delta in stream_q:
+                            if delta is None:
+                                break
+                            elif isinstance(delta, tuple) and len(delta) == 2 and delta[0] == "__reasoning__":
+                                pass
+                    except Exception:
+                        pass
+
+                async def write_responses(self, st, stream_q):
+                    try:
+                        await st.emit_created()
+                    except Exception:
+                        pass
+
+                async def _handle_chat_completions(self, request):
+                    if stream:
+                        def _on_tool_complete(tool_call_id, function_name, function_args, function_result):
+                            pass
+
+                        # tool_progress_callback deliberately NOT wired: it would duplicate the structured
+                        # start/complete callbacks (which carry the tool_call id).
+                        agent_task, agent_ref = self._spawn_stream_agent(
+                            _stream_q, on_done=end_stream_run, tool_start_callback=_on_tool_start,
+                            tool_complete_callback=_on_tool_complete, approval_notify_callback=approval_notify,
+                            approval_session_key=completion_id, **run_kwargs)
+
+                async def _handle_responses(self, request):
+                    if stream:
+                        def _on_tool_progress(event_type, name, preview, args, **kwargs):
+                            return  # structured start/complete callbacks carry the call id; progress ignored
+
+                        def _on_tool_start(tool_call_id, function_name, function_args):
+                            _stream_q.put_threadsafe(("__tool_started__", {
+                                "tool_call_id": tool_call_id, "name": function_name,
+                                "arguments": function_args or {}}))
+
+                        def _on_tool_complete(tool_call_id, function_name, function_args, function_result):
+                            _stream_q.put_threadsafe(("__tool_completed__", {
+                                "tool_call_id": tool_call_id, "name": function_name,
+                                "arguments": function_args or {}, "result": function_result}))
+            '''
+        )
+
+        patched, changes = self.patcher._patch_modular_openai_routes(source)
+        compile(patched, "<modular-openai-routes>", "exec")
+        self.assertIn('"type": "hermes.native.protocol"', patched)
+        self.assertIn('tag == "__hermes_raw_event__"', patched)
+        self.assertIn('delta[0] == "__hermes_raw_event__"', patched)
+        self.assertIn('"event": "tool.started"', patched)
+        self.assertIn('"event": "tool.completed"', patched)
+        self.assertTrue(any("reasoning" in change for change in changes))
+
+        second_pass, second_changes = self.patcher._patch_modular_openai_routes(patched)
+        self.assertEqual(patched, second_pass)
+        self.assertEqual([], second_changes)
 
 
 if __name__ == "__main__":

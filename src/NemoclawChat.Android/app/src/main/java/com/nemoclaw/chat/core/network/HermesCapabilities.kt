@@ -141,6 +141,12 @@ internal fun parseHermesCapabilities(root: JSONObject): HermesCapabilities {
 internal val HERMES_REASONING_EFFORT_LADDER = listOf("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 
 /**
+ * Fallback quando il server non dichiara nessuna ladder: solo valori validi sia su
+ * Hermes-native sia sui template TabbyAPI/EXL3 (xhigh = tetto documentato). Mai max/ultra.
+ */
+internal val FALLBACK_REASONING_EFFORTS = listOf("xhigh", "medium", "low")
+
+/**
  * Risolve l'effort da inviare: se il server pubblicizza la ladder, invia solo valori pubblicizzati.
  * Ritorna null se non supportato (il chiamante deve nascondere/disabilitare la UI, non simulare).
  */

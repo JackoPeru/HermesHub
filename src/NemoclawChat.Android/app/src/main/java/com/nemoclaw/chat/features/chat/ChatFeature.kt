@@ -2382,9 +2382,9 @@ internal fun ChatModelSessionBar(
         selectedOption != null && selectedOption.reasoningEfforts.isNotEmpty() && caps?.reasoningEfforts?.isNotEmpty() == true ->
             selectedOption.reasoningEfforts.filter { eff -> caps.supportsReasoningEffort(eff) }
         caps?.reasoningEfforts?.isNotEmpty() == true -> caps.reasoningEfforts
-        else -> emptyList()
+        else -> FALLBACK_REASONING_EFFORTS
     }
-    val reasoningVisible = caps?.supportsModelOptions() == true && ladder.isNotEmpty()
+    val reasoningVisible = ladder.isNotEmpty()
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

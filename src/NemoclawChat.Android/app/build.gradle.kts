@@ -30,8 +30,8 @@ android {
         applicationId = "com.nemoclaw.chat"
         minSdk = if (enableMetaDat) 29 else 26
         targetSdk = 36
-        versionCode = 192
-        versionName = "0.6.188"
+        versionCode = 193
+        versionName = "0.6.189"
         buildConfigField("boolean", "META_DAT_ENABLED", enableMetaDat.toString())
         manifestPlaceholders["mwdat_application_id"] = mwdatApplicationId
         manifestPlaceholders["mwdat_client_token"] = mwdatClientToken
@@ -69,7 +69,7 @@ android {
     lint {
         warningsAsErrors = true
         abortOnError = true
-        disable += listOf("GradleDependency", "MissingTranslation", "NewerVersionAvailable", "OldTargetApi")
+        disable += listOf("GradleDependency", "MissingTranslation", "NewerVersionAvailable", "OldTargetApi", "AndroidGradlePluginVersion")
         if (enableMetaDat) {
             // DAT requires minSdk 29. Shared sources intentionally retain API 26-28
             // branches because the standard Hermes Hub artifact still supports minSdk 26.

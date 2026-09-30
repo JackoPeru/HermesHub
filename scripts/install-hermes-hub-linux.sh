@@ -100,6 +100,9 @@ install -m 0755 "$SCRIPT_DIR/install-hermes-hub-linux.sh" "$RELEASE_DIR/install-
 install -m 0644 "$SCRIPT_DIR/hermes-hub-linux.service" "$RELEASE_DIR/hermes-hub-linux.service"
 install -m 0755 "$SCRIPT_DIR/hermes-wait-tailscale.sh" "$RELEASE_DIR/hermes-wait-tailscale.sh"
 install -m 0755 "$SCRIPT_DIR/hermes-wait-llama.sh" "$RELEASE_DIR/hermes-wait-llama.sh"
+if [ -f "$SCRIPT_DIR/rehub-patch.sh" ]; then
+  install -m 0755 "$SCRIPT_DIR/rehub-patch.sh" "$RELEASE_DIR/rehub-patch.sh"
+fi
 mkdir -p "$RELEASE_DIR/hermes_hub_gateway"
 cp -a "$SCRIPT_DIR/hermes_hub_gateway/." "$RELEASE_DIR/hermes_hub_gateway/"
 find "$RELEASE_DIR/hermes_hub_gateway" -type d -name __pycache__ -prune -exec rm -rf {} +

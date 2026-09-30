@@ -1,8 +1,9 @@
-Hermes Hub 0.6.188 (sidebar collassabile, Bot, GPU Manager UI, fix reasoning effort)
+Hermes Hub 0.6.189 (fallback reasoning template-safe, patcher gateway multi-modulo, rehub-patch)
 
-- Sidebar con sezioni collassabili persistenti; Recenti ridotti con link all'archivio.
-- Sezione Bot ripresentata; conferme distruttive; label chiarite; stato GPU Manager nel Server.
-- Reasoning effort max/ultra normalizzato a xhigh senza capabilities note; override null sanati.
-- Versioni: Windows/AdminBridge `0.6.188`; Android `versionName 0.6.188`, `versionCode 192`.
-- Asset: `HermesHub-0.6.188-android.apk`, `NemoclawChat.Windows_0.6.187.0_x64.msix` (binario Windows invariato).
-- SHA-256 Android: `2715dd9fa22e76ab3b217cf55a607e445d977dfbac30dc4f95e6a80e17b7f7e8`.
+- Android: fallback reasoning `xhigh/medium/low` senza capabilities; selettore sempre visibile; niente più HTTP 400 dai template EXL3.
+- Gateway: patcher multi-modulo + `scripts/rehub-patch.sh`; launcher con `readlink -f`; docs re-patch.
+- Versioni: Windows/AdminBridge `0.6.189`; Android `versionName 0.6.189`, `versionCode 193`.
+- Asset: `HermesHub-0.6.189-android.apk` (binario Windows invariato).
+- SHA-256 Android: `753e7ca30c7ae37e54f8bb59cec0631a1019e4b613872aecd7b84253e9aa1bcc`.
+- Asset: `HermesHub-0.6.189-linux-gateway.tar.gz` (include `rehub-patch.sh`).
+- SHA-256 gateway: `9fbc6ff8d57b93ac3e5fe6df570fc9073d738072e8e35a60c6b1c60abc47461b`.

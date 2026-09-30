@@ -151,3 +151,7 @@ Override operativi principali:
 - `HERMES_WHISPER_PRELOAD_REQUIRED=1`, `HERMES_WHISPER_DEVICE=cuda`, `HERMES_WHISPER_DEVICE_INDEX=1`;
 - `HERMES_KOKORO_PRELOAD_REQUIRED=1`, `HERMES_KOKORO_REQUIRE_GPU=1`, `HERMES_KOKORO_CUDA_DEVICE=1`;
 - `HERMES_WHISPER_PRELOAD_TIMEOUT_SECONDS=300` e `HERMES_KOKORO_PRELOAD_TIMEOUT_SECONDS=180`.
+
+## Aggiornamenti agent e re-patch
+
+Il patcher supporta sia il layout single-file sia quello multi-modulo (pi_server_openai_routes.py, pi_server_runs.py): dopo OGNI aggiornamento dell'agent eseguire ehub-patch (in ~/.local/bin), che ricontrolla, riapplica se serve, riavvia il gateway solo in caso di modifiche e verifica gli endpoint Hub. Senza re-patch, le route /v1/hub/* restano 404 sul nuovo layout.

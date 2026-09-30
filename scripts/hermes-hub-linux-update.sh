@@ -486,6 +486,7 @@ declare -A FILE_MODE=(
   [hermes-hub-agent-update.timer]=0644
   [hermes-wait-tailscale.sh]=0755
   [hermes-wait-llama.sh]=0755
+  [rehub-patch.sh]=0755
   [hermes-power-monitor.sh]=0755
   [hermes-power-monitor.service]=0644
 )

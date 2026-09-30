@@ -104,6 +104,16 @@ class HermesModernApiTest {
         assertEquals("priority", buildHermesModelOptions("max", "priority", legacy)!!.getString("service_tier"))
     }
 
+    @Test fun fallbackLadderIsAlwaysTemplateSafe() {
+        assertEquals(listOf("xhigh", "medium", "low"), FALLBACK_REASONING_EFFORTS)
+        val legacy = parseHermesCapabilities("""{"features":{"model_options":true}}""")!!
+        for (effort in FALLBACK_REASONING_EFFORTS) {
+            assertEquals(effort, resolveReasoningEffortForServer(legacy, effort))
+            val opts = buildHermesModelOptions(effort, null, legacy)!!
+            assertEquals(effort, opts.getString("reasoning_effort"))
+        }
+    }
+
     @Test fun unknownCapabilitiesClampMaxUltraToXhighInsteadOf400() {
         // Senza capabilities (percorso legacy verbatim) i template che hanno xhigh come tetto
         // rifiutano max/ultra con 400: clamp a xhigh, mai inviare max/ultra verbatim.
