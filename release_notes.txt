@@ -1,9 +1,9 @@
-Hermes Hub 0.6.190 (fix SSE risposte vuote, stato scorrevole, provider nel picker modelli)
+Hermes Hub 0.6.191 (timeline compatta, nomi tool umani, Accept)
 
-- Gateway: ogni frame SSE termina con riga vuota; niente più risposte vuote su Android né dump raw; fix già attivo sul server, incluso nel tar.
-- Android: stato gateway a scorrimento orizzontale; dialog modello con provider e warning server; player video inline nelle card media_file (controlli, fullscreen, fallback MP4).
-- Versioni: Windows/AdminBridge `0.6.190`; Android `versionName 0.6.190`, `versionCode 194`.
-- Asset: `HermesHub-0.6.190-android.apk` (binario Windows invariato).
-- SHA-256 Android: `aa2b4a4f08a9cea581d378ec624fc1f446578da93874744c5e4bc87e882c8d87`.
-- Asset: `HermesHub-0.6.190-linux-gateway.tar.gz`.
-- SHA-256 gateway: `21515024db945aa598ce7bdea5d3e3379312896bd782dec74ce54a4bfd332f3c`.
+- Android: prefill mostrato una sola volta sopra i tool; tool in righe compatte richiudibili; ragionamento compattato; nomi funzione invece di call_xxx (id corto come fallback).
+- Android: metrica acceptance "Accept" invece di "Acc"; cerchio contesto con ricalcolo su cambio server/modello.
+- Versioni: Windows/AdminBridge `0.6.191`; Android `versionName 0.6.191`, `versionCode 195`.
+- Asset: `HermesHub-0.6.191-android.apk` (binario Windows invariato).
+- SHA-256 Android: `521a54d467fe74294154682d45838e391443ee5f03e23561e4a40fb8c537785b`.
+- Asset: `HermesHub-0.6.191-linux-gateway.tar.gz` (invariato nei contenuti gateway).
+- SHA-256 gateway: `473fb232d0cc70962619db17a69ec3c93854b2260fcf57deeec1ed71efdd09d4`.

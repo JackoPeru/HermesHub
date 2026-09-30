@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.191 - 2026-09-30
+
+- Timeline attività compatta: prefill mostrato una sola volta sopra i tool, tool e ragionamento in righe richiudibili dentro il flag Attività Hermes.
+- Nomi tool leggibili (nome funzione, id corto come fallback); metrica acceptance "Accept".
+- Cerchio contesto ricalcolato anche su cambio server/modello.
+
 ## 0.6.190 - 2026-09-30
 
 - Fix framing SSE gateway (`_enrich_sse_chunk` ora termina ogni frame con riga vuota): niente più risposte vuote su Android né dump di eventi raw; verificato sul flusso live `/v1/responses`, con regression test.

@@ -115,7 +115,7 @@ internal fun normalizeSpecTypeLabel(raw: String?): String? {
 
 internal fun formatAcceptancePart(rate: Double, label: String?): String {
     val pct = String.format(java.util.Locale.US, "%.0f", rate * 100.0)
-    return if (label.isNullOrBlank()) "Acc $pct%" else "Acc $pct% ($label)"
+    return if (label.isNullOrBlank()) "Accept $pct%" else "Accept $pct% ($label)"
 }
 
 @androidx.compose.runtime.Immutable

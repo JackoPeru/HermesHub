@@ -445,6 +445,8 @@ internal fun ChatScreen(
         state.streamingState?.stats?.contextLength,
         state.streamingState?.stats?.contextPercent,
         streamingTextLen,
+        settings.gatewayUrl,
+        settings.model,
         settings.preferredApi
     ) {
         estimateChatContextUsage(

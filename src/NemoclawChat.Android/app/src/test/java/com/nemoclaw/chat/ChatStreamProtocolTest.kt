@@ -349,15 +349,44 @@ class ChatStreamProtocolTest {
     fun statsLineShowsAcceptanceOnlyWhenEnabledAndPresent() {
         val stats = ChatStreamStats(tokensPerSecond = 17.79, acceptanceRate = 72.0 / 335.0, acceptanceLabel = "mtp")
         val shown = formatChatStatsLine(stats, MetricDisplayFilter())
-        assertTrue(shown.contains("Acc 21% (mtp)"))
+        assertTrue(shown.contains("Accept 21% (mtp)"))
         val hidden = formatChatStatsLine(stats, MetricDisplayFilter(acceptanceRate = false))
-        assertFalse(hidden.contains("Acc"))
+        assertFalse(hidden.contains("Accept"))
         val unlabeled = formatChatStatsLine(
             ChatStreamStats(acceptanceRate = 0.5, acceptanceLabel = null),
             MetricDisplayFilter()
         )
-        assertTrue(unlabeled.contains("Acc 50%"))
+        assertTrue(unlabeled.contains("Accept 50%"))
         assertFalse(unlabeled.contains("("))
         assertEquals("", formatChatStatsLine(ChatStreamStats(), MetricDisplayFilter()))
+    }
+
+    @Test
+    fun toolNamePrefersHumanNameOverCallId() {
+        assertEquals("get_weather", humanToolName("get_weather", "call_abc123", ""))
+        assertEquals("get_weather", humanToolName("call_abc123", "call_abc123", """{"name":"get_weather"}"""))
+        assertEquals("call_abc…c123", humanToolName("", "call_abc123456789c123", ""))
+        assertEquals("tool", humanToolName("", "", ""))
+        assertEquals("call_1", humanToolName("call_1", "call_1", "Argomenti ricevuti; contenuto omesso."))
+    }
+
+    @Test
+    fun prefillPinnedOnceAboveTools() {
+        val timeline = listOf(
+            AssistantActivity(AssistantActivity.Kind.Reasoning, text = "penso"),
+            AssistantActivity(AssistantActivity.Kind.PromptProgress, text = "Elaborazione prompt 12%"),
+            AssistantActivity(AssistantActivity.Kind.Tool, tool = ToolCallState("call_1", "tool_a")),
+            AssistantActivity(AssistantActivity.Kind.PromptProgress, text = "Elaborazione prompt 100%"),
+            AssistantActivity(AssistantActivity.Kind.Tool, tool = ToolCallState("call_2", "tool_b"))
+        )
+        val (pinned, rest) = splitTimelinePrefill(timeline)
+        assertEquals("Elaborazione prompt 100%", pinned?.text)
+        assertEquals(3, rest.size)
+        assertTrue(rest.none { it.kind == AssistantActivity.Kind.PromptProgress })
+        val (none, all) = splitTimelinePrefill(
+            listOf(AssistantActivity(AssistantActivity.Kind.Tool, tool = ToolCallState("c", "t")))
+        )
+        assertEquals(null, none)
+        assertEquals(1, all.size)
     }
 }

@@ -999,6 +999,15 @@ async def status(_: None = Depends(require_key)) -> dict:
         Path("/opt/hermes/models/qwen-image-2.1/qwen3vl_8b_int8_convrot.safetensors"),
         Path("/opt/hermes/models/qwen-image-2.1/qwen_image_2.1_vae_bf16.safetensors"),
     ]
+    h3_files = [
+        Path(WORKFLOWS_DIR) / "h3" / "i2v-turbo.json",
+        Path(WORKFLOWS_DIR) / "h3" / "i2v.json",
+        Path(WORKFLOWS_DIR) / "h3" / "first_last.json",
+        Path("/opt/hermes/models/minimax-h3/minimax_h3_fl2va_pruned_int8_convrot.safetensors"),
+        Path("/opt/hermes/models/minimax-h3/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"),
+        Path("/opt/hermes/models/minimax-h3/minimax_h3_video_vae_fp16.safetensors"),
+    ]
+    h3_ready = all(p.is_file() for p in h3_files)
     return {
         "desired_mode": _state["desired_mode"],
         "current_state": _state["current_state"],
@@ -1012,8 +1021,8 @@ async def status(_: None = Depends(require_key)) -> dict:
         "active_media_model": _state["active_media_model"],
         "qwen_image_installed": all(p.is_file() for p in qwen_files),
         "qwen_image_ready": all(p.is_file() for p in qwen_files),
-        "h3_installed": False,
-        "h3_ready": False,
+        "h3_installed": h3_ready,
+        "h3_ready": h3_ready,
         "h3_license_state": "OVERRIDDEN_LOCAL_TEST",
         "presets": sorted(PRESETS),
         "last_error": _state["last_error"] if _state["current_state"] == "ERROR" else "",

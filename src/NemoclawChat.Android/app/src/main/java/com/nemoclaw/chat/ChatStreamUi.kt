@@ -58,6 +58,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -278,15 +279,19 @@ internal fun HermesActivityDisclosure(timeline: List<AssistantActivity>) {
 
 @Composable
 internal fun HermesActivityTimeline(timeline: List<AssistantActivity>, active: Boolean) {
+    val (prefill, rest) = remember(timeline) { splitTimelinePrefill(timeline) }
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        timeline.forEachIndexed { index, item ->
+        if (prefill != null) {
+            PrefillPinnedRow(prefill.text, active)
+        }
+        rest.forEachIndexed { index, item ->
             androidx.compose.runtime.key("${item.kind}-$index-${item.tool?.id.orEmpty()}") {
                 when (item.kind) {
-                    AssistantActivity.Kind.Reasoning -> ActivityTimelineText("Ragionamento", item.text, active, monospaced = true)
-                    AssistantActivity.Kind.PromptProgress -> ActivityTimelineText("Progresso", item.text, active, monospaced = false)
+                    AssistantActivity.Kind.Reasoning -> ReasoningTimelineRow(item.text, active)
+                    AssistantActivity.Kind.PromptProgress -> Unit
                     AssistantActivity.Kind.Tool -> {
                         val tool = item.tool
                         if (tool != null) ToolActivityRow(tool)
@@ -297,24 +302,109 @@ internal fun HermesActivityTimeline(timeline: List<AssistantActivity>, active: B
     }
 }
 
+/**
+ * Il prefill/progresso prompt viene mostrato una sola volta, in alto sopra
+ * l'elenco tool: usa l'ultimo valore (percentuale finale) invece di ripetere
+ * una card per ogni tool.
+ */
+internal fun splitTimelinePrefill(timeline: List<AssistantActivity>): Pair<AssistantActivity?, List<AssistantActivity>> {
+    val pinned = timeline.lastOrNull { it.kind == AssistantActivity.Kind.PromptProgress }
+        ?: return null to timeline
+    return pinned to timeline.filter { it.kind != AssistantActivity.Kind.PromptProgress }
+}
+
 @Composable
-private fun ActivityTimelineText(label: String, text: String, active: Boolean, monospaced: Boolean) {
-    Surface(
-        color = AppColors.Composer.copy(alpha = 0.62f),
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.fillMaxWidth()
+private fun PrefillPinnedRow(text: String, active: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (active) ShimmerText(label) else Text(label, color = AppColors.Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text("Prefill", color = AppColors.Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        if (active) {
+            ShimmerText(text.ifBlank { "…" })
+        } else {
             Text(
-                text = text,
+                text.ifBlank { "—" },
                 color = AppColors.Muted,
-                fontFamily = if (monospaced) FontFamily.Monospace else FontFamily.Default,
-                fontSize = 12.sp,
-                modifier = Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
             )
         }
     }
+}
+
+@Composable
+private fun ReasoningTimelineRow(text: String, active: Boolean) {
+    var expanded by remember(text.take(64)) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 40.dp)
+                .clickable { expanded = !expanded },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (active) {
+                ShimmerText("Ragionamento")
+            } else {
+                Text("Ragionamento", color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Text(
+                text.take(90).replace("\n", " "),
+                color = AppColors.Faint,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = if (expanded) "Chiudi ragionamento" else "Mostra ragionamento",
+                tint = AppColors.Muted,
+                modifier = Modifier.size(15.dp)
+            )
+        }
+        if (expanded) {
+            Surface(
+                color = AppColors.Composer.copy(alpha = 0.62f),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = text.ifBlank { "—" },
+                    color = AppColors.Muted,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    modifier = Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Nome tool leggibile: se il server manda solo un id (es. call_xxx), prova a
+ * leggere il nome funzione dagli argomenti, altrimenti mostra un id corto.
+ */
+internal fun humanToolName(name: String, id: String, args: String): String {
+    val clean = name.trim()
+    if (clean.isNotEmpty() && clean != id && !clean.matches(Regex("^call_[0-9a-fA-F]+$"))) return clean
+    val fromArgs = runCatching {
+        val obj = org.json.JSONObject(args)
+        obj.optString("name").ifBlank {
+            obj.optString("function").ifBlank {
+                obj.optString("tool").ifBlank { obj.optString("command") }
+            }
+        }
+    }.getOrNull().orEmpty().trim()
+    if (fromArgs.isNotEmpty()) return fromArgs
+    if (id.isBlank()) return "tool"
+    return if (id.length > 16) id.take(8) + "…" + id.takeLast(4) else id
 }
 
 internal fun friendlyActivityStatus(status: String): String {
@@ -565,7 +655,15 @@ internal fun ToolActivityRow(tool: ToolCallState) {
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Icon(statusIcon, contentDescription = null, tint = statusColor, modifier = Modifier.size(18.dp))
-            Text(tool.name, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text(
+                humanToolName(tool.name, tool.id, tool.args),
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
             Text(outcome.label, color = statusColor, fontSize = 11.sp)
             Icon(
                 imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
@@ -614,10 +712,12 @@ internal fun ToolCallCard(tool: ToolCallState) {
             ) {
                 Icon(statusIcon, contentDescription = null, tint = statusColor, modifier = Modifier.size(14.dp))
                 Text(
-                    text = "Tool · ${tool.name}",
+                    text = "Tool · ${humanToolName(tool.name, tool.id, tool.args)}",
                     color = Color.White,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
                 Text(text = tool.status, color = AppColors.Muted, fontSize = 11.sp)
