@@ -4061,7 +4061,9 @@ internal fun readAssistantActivityTimeline(array: JSONArray): List<AssistantActi
                 name = it.optString("name", it.optString("toolName", it.optString("ToolName", id))),
                 args = it.optString("args", it.optString("toolArguments", it.optString("ToolArguments"))),
                 status = it.optString("status", it.optString("toolStatus", it.optString("ToolStatus", "in esecuzione…"))),
-                result = it.optString("result", it.optString("toolResult", it.optString("ToolResult"))).takeIf(String::isNotEmpty)
+                result = it.optString("result", it.optString("toolResult", it.optString("ToolResult"))).takeIf(String::isNotEmpty),
+                argsPreview = it.optString("argsPreview", it.optString("toolArgsPreview", "")),
+                resultPreview = it.optString("resultPreview", it.optString("toolResultPreview", ""))
             )
         }
         if (kind != AssistantActivity.Kind.Tool || tool != null) {
@@ -4080,6 +4082,8 @@ internal fun writeAssistantActivityTimeline(items: List<AssistantActivity>): JSO
             .put("toolName", tool?.name ?: JSONObject.NULL)
             .put("toolArguments", tool?.args ?: JSONObject.NULL)
             .put("toolResult", tool?.result ?: JSONObject.NULL)
+            .put("toolArgsPreview", tool?.argsPreview.orEmpty())
+            .put("toolResultPreview", tool?.resultPreview.orEmpty())
             .put("toolStatus", tool?.status ?: JSONObject.NULL))
     }
 }
@@ -4236,6 +4240,7 @@ private const val CURRENT_WORKSPACE_PREFS = "chatclaw_workspace_requests"
 internal const val SHOW_RAW_HERMES_EVENTS_IN_CHAT = false
 internal const val CHAT_HISTORY_MAX_MESSAGES = 30
 internal const val STREAMING_CHECKPOINT_INTERVAL_MS = 5000L
-internal const val DEFAULT_CONTEXT_WINDOW_TOKENS = 90000
+/** Finestra di fallback quando il server non dichiara context_length: 262144 = n_ctx_train del backend Qwen/EXL3 (verificato su /v1/models di TabbyAPI). */
+internal const val DEFAULT_CONTEXT_WINDOW_TOKENS = 262144
 internal const val CONTEXT_SYSTEM_OVERHEAD_TOKENS = 900
 internal const val MESSAGE_CONTEXT_OVERHEAD_TOKENS = 6

@@ -145,7 +145,9 @@ data class ToolCallState(
     val name: String,
     val args: String = "",
     val status: String = "in esecuzione…",
-    val result: String? = null
+    val result: String? = null,
+    val argsPreview: String = "",
+    val resultPreview: String = ""
 )
 
 private const val SAFE_TOOL_ARGUMENTS_SUMMARY = "Argomenti ricevuti; contenuto omesso."
@@ -299,9 +301,19 @@ data class StreamingState(
         is ChatStreamEvent.ToolCallArgs -> copy(
             status = "Preparazione tool...",
             toolCalls = toolCalls.map {
-                if (it.id == event.id) it.copy(args = safeToolPayloadSummary(event.delta, result = false).orEmpty()) else it
+                if (it.id == event.id) it.copy(
+                    name = humanToolName(it.name, it.id, event.delta),
+                    args = safeToolPayloadSummary(event.delta, result = false).orEmpty(),
+                    argsPreview = scrubToolPayloadPreview(event.delta, result = false)
+                ) else it
             }
-        ).withTimelineTool(event.id, null) { it.copy(args = safeToolPayloadSummary(event.delta, result = false).orEmpty()) }
+        ).withTimelineTool(event.id, null) {
+            it.copy(
+                name = humanToolName(it.name, it.id, event.delta),
+                args = safeToolPayloadSummary(event.delta, result = false).orEmpty(),
+                argsPreview = scrubToolPayloadPreview(event.delta, result = false)
+            )
+        }
         is ChatStreamEvent.ToolCallEnd -> copy(
             status = "Tool completato.",
             toolCalls = toolCalls.map {
@@ -312,7 +324,12 @@ data class StreamingState(
             status = "Risultato tool ricevuto.",
             toolCalls = upsertToolResult(toolCalls, event)
         ).withTimelineTool(event.id ?: event.name ?: "tool-result", event.name) {
-            it.copy(result = safeToolPayloadSummary(event.output, result = true), status = "risultato pronto")
+            it.copy(
+                name = if (!event.name.isNullOrBlank()) humanToolName(event.name, it.id, "") else it.name,
+                result = safeToolPayloadSummary(event.output, result = true),
+                resultPreview = scrubToolPayloadPreview(event.output, result = true),
+                status = "risultato pronto"
+            )
         }
         is ChatStreamEvent.ResponseId -> copy(responseId = event.id).withActivity("Response id: ${event.id}")
         is ChatStreamEvent.RunId -> copy(activeRunId = event.id).withActivity("Run id: ${event.id}")
@@ -412,11 +429,21 @@ private fun StreamingState.withActivity(message: String?): StreamingState {
 private fun upsertToolResult(tools: List<ToolCallState>, event: ChatStreamEvent.ToolResult): List<ToolCallState> {
     val id = event.id ?: event.name ?: "tool-result"
     if (tools.none { it.id == id }) {
-        return tools + ToolCallState(id = id, name = event.name ?: id, status = "risultato pronto", result = safeToolPayloadSummary(event.output, result = true))
+        return tools + ToolCallState(
+            id = id,
+            name = event.name ?: id,
+            status = "risultato pronto",
+            result = safeToolPayloadSummary(event.output, result = true),
+            resultPreview = scrubToolPayloadPreview(event.output, result = true)
+        )
     }
     return tools.map {
         if ((event.id != null && it.id == event.id) || (event.id == null && event.name != null && it.name == event.name)) {
-            it.copy(result = safeToolPayloadSummary(event.output, result = true), status = "risultato pronto")
+            it.copy(
+                result = safeToolPayloadSummary(event.output, result = true),
+                resultPreview = scrubToolPayloadPreview(event.output, result = true),
+                status = "risultato pronto"
+            )
         } else {
             it
         }

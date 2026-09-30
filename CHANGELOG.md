@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.192 - 2026-09-30
+
+- Timeline: prima i tool (chiusi), sotto un unico canvas di ragionamento; nomi funzione catturati al parse, specifiche visibili con segreti oscurati e persistite in archivio.
+- Cerchio contesto: fallback alla finestra reale 262k del backend Qwen/EXL3; ricalcolo su cambio server/modello.
+- Manager GPU: rilevamento H3 reale (era hardcoded non pronto).
+
 ## 0.6.191 - 2026-09-30
 
 - Timeline attività compatta: prefill mostrato una sola volta sopra i tool, tool e ragionamento in righe richiudibili dentro il flag Attività Hermes.

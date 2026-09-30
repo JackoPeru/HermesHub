@@ -280,6 +280,8 @@ internal fun HermesActivityDisclosure(timeline: List<AssistantActivity>) {
 @Composable
 internal fun HermesActivityTimeline(timeline: List<AssistantActivity>, active: Boolean) {
     val (prefill, rest) = remember(timeline) { splitTimelinePrefill(timeline) }
+    val tools = remember(rest) { rest.filter { it.kind == AssistantActivity.Kind.Tool }.mapNotNull { it.tool } }
+    val reasoningText = remember(rest) { mergeReasoningCanvas(rest) }
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -287,17 +289,13 @@ internal fun HermesActivityTimeline(timeline: List<AssistantActivity>, active: B
         if (prefill != null) {
             PrefillPinnedRow(prefill.text, active)
         }
-        rest.forEachIndexed { index, item ->
-            androidx.compose.runtime.key("${item.kind}-$index-${item.tool?.id.orEmpty()}") {
-                when (item.kind) {
-                    AssistantActivity.Kind.Reasoning -> ReasoningTimelineRow(item.text, active)
-                    AssistantActivity.Kind.PromptProgress -> Unit
-                    AssistantActivity.Kind.Tool -> {
-                        val tool = item.tool
-                        if (tool != null) ToolActivityRow(tool)
-                    }
-                }
+        tools.forEach { tool ->
+            androidx.compose.runtime.key(tool.id.ifBlank { tool.name }) {
+                ToolActivityRow(tool)
             }
+        }
+        if (reasoningText.isNotBlank()) {
+            ReasoningCanvas(reasoningText, active)
         }
     }
 }
@@ -307,6 +305,17 @@ internal fun HermesActivityTimeline(timeline: List<AssistantActivity>, active: B
  * l'elenco tool: usa l'ultimo valore (percentuale finale) invece di ripetere
  * una card per ogni tool.
  */
+/**
+ * Unisce tutti i segmenti di ragionamento in un unico canvas, sotto i tool.
+ */
+internal fun mergeReasoningCanvas(items: List<AssistantActivity>): String {
+    return items.asSequence()
+        .filter { it.kind == AssistantActivity.Kind.Reasoning }
+        .map { it.text.trim() }
+        .filter { it.isNotEmpty() }
+        .joinToString("\n\n")
+}
+
 internal fun splitTimelinePrefill(timeline: List<AssistantActivity>): Pair<AssistantActivity?, List<AssistantActivity>> {
     val pinned = timeline.lastOrNull { it.kind == AssistantActivity.Kind.PromptProgress }
         ?: return null to timeline
@@ -337,7 +346,7 @@ private fun PrefillPinnedRow(text: String, active: Boolean) {
 }
 
 @Composable
-private fun ReasoningTimelineRow(text: String, active: Boolean) {
+private fun ReasoningCanvas(text: String, active: Boolean) {
     var expanded by remember(text.take(64)) { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
@@ -387,6 +396,87 @@ private fun ReasoningTimelineRow(text: String, active: Boolean) {
     }
 }
 
+/**
+ * Anteprima leggibile di argomenti/risultati tool: mostra struttura e valori,
+ * ma oscura i valori delle chiavi sensibili e tronca i testi lunghi.
+ * L'archivio conserva comunque solo il placeholder redatto.
+ */
+private val SENSITIVE_TOOL_KEY = Regex("api[_-]?key|token|secret|password|passwd|credential|authorization|authkey|private[_-]?key", RegexOption.IGNORE_CASE)
+private const val SCRUB_PREVIEW_MAX_CHARS = 4000
+private const val SCRUB_SCALAR_MAX_CHARS = 300
+
+internal fun scrubToolPayloadPreview(payload: String, result: Boolean = false): String {
+    val trimmed = payload.trim()
+    if (trimmed.isEmpty()) return ""
+    if (trimmed == "Argomenti ricevuti; contenuto omesso." || trimmed == "Risultato ricevuto; contenuto omesso.") return ""
+    val root = runCatching {
+        when {
+            trimmed.startsWith("{") -> org.json.JSONObject(trimmed)
+            trimmed.startsWith("[") -> org.json.JSONArray(trimmed)
+            else -> null
+        }
+    }.getOrNull()
+    if (root == null) {
+        return if (trimmed.length > 1500) trimmed.take(1500) + "…[+${trimmed.length - 1500} char]" else trimmed
+    }
+    val out = StringBuilder()
+    appendScrubbedJson(out, root, indent = 0, depth = 0)
+    val text = out.toString()
+    return if (text.length > SCRUB_PREVIEW_MAX_CHARS) {
+        text.take(SCRUB_PREVIEW_MAX_CHARS) + "\n…[+${text.length - SCRUB_PREVIEW_MAX_CHARS} char]"
+    } else text
+}
+
+private fun scrubScalarPreview(key: String, value: String): String {
+    if (SENSITIVE_TOOL_KEY.containsMatchIn(key)) return "***"
+    val v = value.replace("\n", " ")
+    return if (v.length > SCRUB_SCALAR_MAX_CHARS) v.take(SCRUB_SCALAR_MAX_CHARS) + "…[+${v.length - SCRUB_SCALAR_MAX_CHARS}]" else v
+}
+
+private fun appendScrubbedJson(out: StringBuilder, value: Any?, indent: Int, depth: Int) {
+    if (out.length > SCRUB_PREVIEW_MAX_CHARS + 500) return
+    val pad = "  ".repeat(indent.coerceAtMost(8))
+    when (value) {
+        null, org.json.JSONObject.NULL -> out.append("null")
+        is org.json.JSONObject -> {
+            if (depth >= 4) {
+                out.append("{…${value.length()} chiavi}")
+                return
+            }
+            out.append("{\n")
+            val keys = value.keys().asSequence().toList().take(40)
+            keys.forEachIndexed { i, k ->
+                out.append(pad).append("  \"").append(k).append("\": ")
+                val v = value.opt(k)
+                if (v is String) out.append("\"").append(scrubScalarPreview(k, v)).append("\"")
+                else appendScrubbedJson(out, v, indent + 1, depth + 1)
+                if (i < keys.size - 1) out.append(",")
+                out.append("\n")
+            }
+            if (value.length() > 40) out.append(pad).append("  …[+${value.length() - 40} chiavi]\n")
+            out.append(pad).append("}")
+        }
+        is org.json.JSONArray -> {
+            if (depth >= 4) {
+                out.append("[…${value.length()} elem]")
+                return
+            }
+            out.append("[\n")
+            for (i in 0 until minOf(value.length(), 10)) {
+                out.append(pad).append("  ")
+                val v = value.opt(i)
+                if (v is String) out.append("\"").append(scrubScalarPreview("#$i", v)).append("\"")
+                else appendScrubbedJson(out, v, indent + 1, depth + 1)
+                if (i < minOf(value.length(), 10) - 1) out.append(",")
+                out.append("\n")
+            }
+            if (value.length() > 10) out.append(pad).append("  …[+${value.length() - 10} elem]\n")
+            out.append(pad).append("]")
+        }
+        is String -> out.append("\"").append(scrubScalarPreview("", value)).append("\"")
+        else -> out.append(value.toString())
+    }
+}
 /**
  * Nome tool leggibile: se il server manda solo un id (es. call_xxx), prova a
  * leggere il nome funzione dagli argomenti, altrimenti mostra un id corto.
@@ -673,9 +763,15 @@ internal fun ToolActivityRow(tool: ToolCallState) {
             )
         }
         if (expanded) {
-            ActivityLine("Argomenti", if (tool.args.isBlank()) "-" else prettifyJson(tool.args), monospaced = true)
-            tool.result?.takeIf { it.isNotBlank() }?.let { result ->
-                ActivityLine("Risultato", prettifyJson(result), monospaced = true)
+            val argsText = tool.argsPreview.ifBlank {
+                if (tool.args.isBlank()) "-" else prettifyJson(tool.args)
+            }
+            ActivityLine("Argomenti", argsText, monospaced = true)
+            val resultText = tool.resultPreview.ifBlank {
+                tool.result?.takeIf { it.isNotBlank() }?.let { prettifyJson(it) }.orEmpty()
+            }
+            if (resultText.isNotBlank()) {
+                ActivityLine("Risultato", resultText, monospaced = true)
             }
         }
     }

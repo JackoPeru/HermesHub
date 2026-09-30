@@ -1,9 +1,10 @@
-Hermes Hub 0.6.191 (timeline compatta, nomi tool umani, Accept)
+Hermes Hub 0.6.192 (reasoning unico, specifiche tool, contesto 262k)
 
-- Android: prefill mostrato una sola volta sopra i tool; tool in righe compatte richiudibili; ragionamento compattato; nomi funzione invece di call_xxx (id corto come fallback).
-- Android: metrica acceptance "Accept" invece di "Acc"; cerchio contesto con ricalcolo su cambio server/modello.
-- Versioni: Windows/AdminBridge `0.6.191`; Android `versionName 0.6.191`, `versionCode 195`.
-- Asset: `HermesHub-0.6.191-android.apk` (binario Windows invariato).
-- SHA-256 Android: `521a54d467fe74294154682d45838e391443ee5f03e23561e4a40fb8c537785b`.
-- Asset: `HermesHub-0.6.191-linux-gateway.tar.gz` (invariato nei contenuti gateway).
-- SHA-256 gateway: `473fb232d0cc70962619db17a69ec3c93854b2260fcf57deeec1ed71efdd09d4`.
+- Android: tool prima e unico canvas di ragionamento sotto; nomi catturati al parse; argomenti/risultati visibili con segreti oscurati e persistiti.
+- Android: fallback contesto alla finestra reale 262k del backend; ricalcolo su cambio server/modello.
+- Gateway/manager: rilevamento H3 reale nel tar.
+- Versioni: Windows/AdminBridge `0.6.192`; Android `versionName 0.6.192`, `versionCode 196`.
+- Asset: `HermesHub-0.6.192-android.apk` (binario Windows invariato).
+- SHA-256 Android: `de88eb8729f2eb516893abcd99588952da893a5f1d9418a07389e78a26cce7d9`.
+- Asset: `HermesHub-0.6.192-linux-gateway.tar.gz`.
+- SHA-256 gateway: `27748be9eb970fe5a351f6265d25c5adfc0ca24db0ac2475e6ef2b9def5dcccf`.

@@ -389,4 +389,31 @@ class ChatStreamProtocolTest {
         assertEquals(null, none)
         assertEquals(1, all.size)
     }
+
+    @Test
+    fun reasoningMergesIntoSingleCanvasAfterTools() {
+        val timeline = listOf(
+            AssistantActivity(AssistantActivity.Kind.Reasoning, text = "penso A"),
+            AssistantActivity(AssistantActivity.Kind.Tool, tool = ToolCallState("c1", "tool_a")),
+            AssistantActivity(AssistantActivity.Kind.Reasoning, text = "penso B"),
+            AssistantActivity(AssistantActivity.Kind.Reasoning, text = "  ")
+        )
+        assertEquals("penso A\n\npenso B", mergeReasoningCanvas(timeline))
+        assertEquals("", mergeReasoningCanvas(emptyList()))
+    }
+
+    @Test
+    fun toolPreviewScrubsSecretsAndTruncates() {
+        assertEquals("", scrubToolPayloadPreview(""))
+        assertEquals("", scrubToolPayloadPreview("Argomenti ricevuti; contenuto omesso."))
+        val masked = scrubToolPayloadPreview("""{"query":"meteo Roma","api_key":"sk-secret-123"}""")
+        assertTrue(masked.contains("meteo Roma"))
+        assertFalse(masked.contains("sk-secret-123"))
+        assertTrue(masked.contains("***"))
+        val long = scrubToolPayloadPreview("""{"data":"${"x".repeat(2000)}"}""")
+        assertTrue(long.contains("…[+"))
+        assertFalse(long.contains("x".repeat(2000)))
+        val plain = scrubToolPayloadPreview("ok")
+        assertEquals("ok", plain)
+    }
 }
