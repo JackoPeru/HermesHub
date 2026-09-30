@@ -313,6 +313,35 @@ class HermesModernApiTest {
         assertEquals("hermes-agent", fallback.models.single().id)
     }
 
+    @Test fun modelOptionsProvidersOnlyCatalogKeepsWarnings() {
+        // Il server dichiara model_options ma senza singoli modelli: il catalogo
+        // conserva comunque i provider con warning (niente scelte inventate).
+        val catalog = parseModelOptionsPayload("""
+        {"providers":[{"slug":"nous","name":"Nous Portal","warning":"run `hermes model` to configure"}]}
+        """.trimIndent())
+        assertTrue(catalog.models.isEmpty())
+        assertEquals(1, catalog.providers.size)
+        assertEquals("nous", catalog.providers[0].slug)
+        assertTrue(catalog.providers[0].warning!!.contains("hermes model"))
+    }
+
+    @Test fun chatVideoCompatUrlAddsMp4FormatOnlyForMediaProxy() {
+        val settings = AppSettings()
+        assertEquals(
+            "https://h.test/v1/media/mov.mp4?format=mp4",
+            chatVideoCompatUrl(settings, "https://h.test/v1/media/mov.mp4")
+        )
+        assertEquals(
+            "https://h.test/v1/media/mov.mp4?token=a&format=mp4",
+            chatVideoCompatUrl(settings, "https://h.test/v1/media/mov.mp4?token=a")
+        )
+        assertEquals(
+            "https://h.test/v1/media/mov.mp4?format=mp4",
+            chatVideoCompatUrl(settings, "https://h.test/v1/media/mov.mp4?format=mp4")
+        )
+        assertEquals("https://cdn.test/x.mp4", chatVideoCompatUrl(settings, "https://cdn.test/x.mp4"))
+    }
+
     @Test fun sessionWriteOutcomeMappingIsExplicit() {
         assertEquals(HermesSessionWrite.APPLIED, sessionWriteOutcome(200))
         assertEquals(HermesSessionWrite.APPLIED, sessionWriteOutcome(201))

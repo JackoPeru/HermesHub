@@ -118,6 +118,7 @@ import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.PlayCircle
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.SmartToy
@@ -229,6 +230,9 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
+import com.nemoclaw.chat.createVideoPlayerView
+import com.nemoclaw.chat.FullscreenVideoOrientationEffect
+import com.nemoclaw.chat.findActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -387,7 +391,7 @@ internal fun ChatScreen(
                     }.getOrNull()
                 }
             }
-            if (catalog != null && catalog.models.isNotEmpty()) state.chatModelCatalog = catalog
+            if (catalog != null && (catalog.models.isNotEmpty() || catalog.providers.isNotEmpty())) state.chatModelCatalog = catalog
         } else {
             val fallback = withContext(Dispatchers.IO) {
                 runCatching { httpGet("${botSettings.gatewayUrl.trimEnd('/')}/v1/models", botApiKey) }.getOrNull()
@@ -1213,7 +1217,7 @@ internal fun TopBar(
                         color = AppColors.Faint,
                         fontSize = 12.sp,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        modifier = Modifier.horizontalScroll(rememberScrollState())
                     )
                 }
             }
@@ -1798,6 +1802,173 @@ internal fun GalleryBlock(block: VisualBlock) {
     }
 }
 
+/**
+ * URL MP4 compatibile per i video proxy Hermes (stessa regola del feed Video):
+ * aggiunge ?format=mp4 quando manca.
+ */
+internal fun chatVideoCompatUrl(settings: AppSettings, url: String): String {
+    if (!url.contains("/v1/media/", ignoreCase = true) || url.contains("format=mp4", ignoreCase = true)) return url
+    val separator = if (url.contains("?")) "&" else "?"
+    return "$url${separator}format=mp4"
+}
+
+@Composable
+@androidx.annotation.OptIn(UnstableApi::class)
+internal fun ChatInlineVideoPlayer(
+    settings: AppSettings,
+    mediaUrl: String,
+    durationLabel: String,
+    apiKey: String?
+) {
+    val context = LocalContext.current
+    val compatUrl = remember(settings.gatewayUrl, mediaUrl) { chatVideoCompatUrl(settings, mediaUrl) }
+    var started by remember(mediaUrl) { mutableStateOf(false) }
+    var fullScreen by remember(mediaUrl) { mutableStateOf(false) }
+    var useCompat by remember(mediaUrl) { mutableStateOf(false) }
+    var status by remember(mediaUrl) { mutableStateOf<String?>(null) }
+    val activeUrl = if (useCompat && compatUrl.isNotBlank()) compatUrl else mediaUrl
+    val poster by produceState<Bitmap?>(initialValue = null, mediaUrl) {
+        value = withContext(Dispatchers.IO) { loadVideoThumbnail(settings, mediaUrl, apiKey) }
+    }
+
+    if (!started) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.Black)
+                .clickable { started = true },
+            contentAlignment = Alignment.Center
+        ) {
+            val bitmap = poster
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.PlayArrow, contentDescription = "Riproduci video", tint = Color.White, modifier = Modifier.size(34.dp))
+            }
+            if (durationLabel.isNotBlank()) {
+                Text(
+                    durationLabel,
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp)
+                        .background(Color.Black.copy(alpha = 0.62f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                )
+            }
+        }
+        return
+    }
+
+    val player = remember(activeUrl, apiKey) {
+        val dataSourceFactory = DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(if (shouldAuthenticateHermesUrl(settings, activeUrl)) authHeaders(apiKey) else emptyMap())
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .build()
+            .apply {
+                setMediaItem(MediaItem.fromUri(activeUrl.toUri()))
+                prepare()
+                playWhenReady = true
+            }
+    }
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                if (!useCompat && compatUrl.isNotBlank() && compatUrl != activeUrl) {
+                    useCompat = true
+                    status = "Passo al proxy MP4 compatibile Hermes."
+                } else {
+                    status = "Player video: ${error.errorCodeName}."
+                }
+            }
+        }
+        player.addListener(listener)
+        onDispose {
+            player.removeListener(listener)
+            player.release()
+        }
+    }
+    val activity = remember(context) { context.findActivity() }
+    FullscreenVideoOrientationEffect(enabled = fullScreen, activity = activity)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!fullScreen) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { viewContext -> createVideoPlayerView(viewContext, player) },
+                    update = { view -> view.player = player }
+                )
+            } else {
+                val bitmap = poster
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+            }
+            IconButton(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.62f), CircleShape),
+                onClick = { fullScreen = true }
+            ) {
+                Icon(Icons.Rounded.CropFree, contentDescription = "Schermo intero", tint = Color.White)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = { fullScreen = false; started = false }) { Text("Chiudi player", fontSize = 12.sp) }
+            if (status != null) {
+                Text(status.orEmpty(), color = AppColors.Muted, fontSize = 12.sp)
+            }
+        }
+    }
+    if (fullScreen) {
+        Dialog(
+            onDismissRequest = { fullScreen = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { viewContext -> createVideoPlayerView(viewContext, player) },
+                    update = { view -> view.player = player }
+                )
+            }
+        }
+    }
+}
+
 @Composable
 internal fun MediaFileBlock(block: VisualBlock) {
     val context = LocalContext.current
@@ -1814,9 +1985,11 @@ internal fun MediaFileBlock(block: VisualBlock) {
     }
     val clipboard = remember(context) { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
     val scope = rememberCoroutineScope()
+    val gatewaySecret = remember { loadGatewaySecret(context) }
     var isDownloading by remember(block.mediaUrl) { mutableStateOf(false) }
     var pendingLegacyDownload by remember(block.id) { mutableStateOf<Pair<String, String>?>(null) }
     val canOpen = resolvedMediaUrl != null
+    val showInlinePlayer = block.mediaKind == "video" && canOpen && !isLocalAttachment
     val downloadNow: (String, String) -> Unit = { url, filename ->
         isDownloading = true
         android.widget.Toast.makeText(context, "Scaricamento: ${sanitizeDownloadFilename(filename)}", android.widget.Toast.LENGTH_SHORT).show()
@@ -1848,6 +2021,13 @@ internal fun MediaFileBlock(block: VisualBlock) {
                     contentScale = ContentScale.Fit
                 )
             }
+        } else if (showInlinePlayer) {
+            ChatInlineVideoPlayer(
+                settings = settings,
+                mediaUrl = resolvedMediaUrl.orEmpty(),
+                durationLabel = formatMediaDuration(block.durationMs),
+                apiKey = gatewaySecret
+            )
         } else if (previewSource.isNotBlank()) {
             RemoteGalleryImage(
                 settings,
@@ -2420,13 +2600,21 @@ internal fun ChatModelSessionBar(
     if (showModelDialog) {
         AlertDialog(
             onDismissRequest = { showModelDialog = false },
-            title = { Text(if (catalog.models.isEmpty()) "Modello" else "Modello Hermes (${catalog.source})") },
+            title = { Text(if (catalog.models.isEmpty() && catalog.providers.isEmpty()) "Modello" else "Modello Hermes (${catalog.source})") },
             text = {
                 LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
-                    if (catalog.models.isEmpty()) {
+                    if (catalog.models.isEmpty() && catalog.providers.isEmpty()) {
                         item {
                             Text(
                                 "Catalogo non caricato. Verifica gateway e API key, oppure digita provider/modello nelle Impostazioni.",
+                                color = AppColors.Muted, fontSize = 12.sp
+                            )
+                        }
+                    }
+                    if (catalog.models.isEmpty() && catalog.providers.isNotEmpty()) {
+                        item {
+                            Text(
+                                "Il server non espone singoli modelli (solo provider). Il backend LLM resta quello configurato sul server.",
                                 color = AppColors.Muted, fontSize = 12.sp
                             )
                         }
@@ -2438,6 +2626,16 @@ internal fun ChatModelSessionBar(
                             persistChatOverrides(context, state)
                             showModelDialog = false
                         }) { Text("Usa default server (${settings.model})") }
+                    }
+                    items(catalog.providers.take(20), key = { "provider::${it.slug}" }) { row ->
+                        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                            Text(row.displayName, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (!row.available) "non disponibile"
+                                else row.warning ?: "provider server",
+                                color = AppColors.Muted, fontSize = 11.sp
+                            )
+                        }
                     }
                     items(catalog.models.take(40), key = { it.id + "::" + it.provider }) { opt ->
                         Column(modifier = Modifier.fillMaxWidth().clickable {

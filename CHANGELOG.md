@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.190 - 2026-09-30
+
+- Fix framing SSE gateway (`_enrich_sse_chunk` ora termina ogni frame con riga vuota): niente più risposte vuote su Android né dump di eventi raw; verificato sul flusso live `/v1/responses`, con regression test.
+- Android: riga di stato gateway a scorrimento orizzontale, leggibile per intero.
+- Android: dialog modello mostra i provider server con warning quando non ci sono singoli modelli selezionabili (il backend LLM resta quello configurato sul server).
+- Android: player video inline nelle card media_file della chat (anteprima, controlli, schermo intero, fallback MP4 compatibile); i video restano salvati automaticamente negli Artefatti versionati.
+
 ## 0.6.189 - 2026-09-30
 
 - Reasoning effort con fallback template-safe `xhigh/medium/low` quando il server non dichiara la ladder; selettore sempre visibile, mai più `max`/`ultra`/`none` verso i template EXL3.

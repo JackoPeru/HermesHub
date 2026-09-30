@@ -119,7 +119,11 @@ def _enrich_sse_chunk(response: Any, data: bytes | bytearray) -> bytes:
                 + [f"data: {encoded}"]
             )
         )
-    return "\n\n".join(output).encode("utf-8")
+    # Every flushed frame must be blank-line terminated: without the trailing
+    # "\n\n", consecutive write() calls concatenate on the wire as
+    # "data: {...}event: <next>", which SSE clients cannot split and end up
+    # dumping as raw text.
+    return ("\n\n".join(output) + "\n\n").encode("utf-8")
 
 
 def install(web_module: Any = None) -> None:

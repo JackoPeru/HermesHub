@@ -1,9 +1,9 @@
-Hermes Hub 0.6.189 (fallback reasoning template-safe, patcher gateway multi-modulo, rehub-patch)
+Hermes Hub 0.6.190 (fix SSE risposte vuote, stato scorrevole, provider nel picker modelli)
 
-- Android: fallback reasoning `xhigh/medium/low` senza capabilities; selettore sempre visibile; niente più HTTP 400 dai template EXL3.
-- Gateway: patcher multi-modulo + `scripts/rehub-patch.sh`; launcher con `readlink -f`; docs re-patch.
-- Versioni: Windows/AdminBridge `0.6.189`; Android `versionName 0.6.189`, `versionCode 193`.
-- Asset: `HermesHub-0.6.189-android.apk` (binario Windows invariato).
-- SHA-256 Android: `753e7ca30c7ae37e54f8bb59cec0631a1019e4b613872aecd7b84253e9aa1bcc`.
-- Asset: `HermesHub-0.6.189-linux-gateway.tar.gz` (include `rehub-patch.sh`).
-- SHA-256 gateway: `9fbc6ff8d57b93ac3e5fe6df570fc9073d738072e8e35a60c6b1c60abc47461b`.
+- Gateway: ogni frame SSE termina con riga vuota; niente più risposte vuote su Android né dump raw; fix già attivo sul server, incluso nel tar.
+- Android: stato gateway a scorrimento orizzontale; dialog modello con provider e warning server; player video inline nelle card media_file (controlli, fullscreen, fallback MP4).
+- Versioni: Windows/AdminBridge `0.6.190`; Android `versionName 0.6.190`, `versionCode 194`.
+- Asset: `HermesHub-0.6.190-android.apk` (binario Windows invariato).
+- SHA-256 Android: `aa2b4a4f08a9cea581d378ec624fc1f446578da93874744c5e4bc87e882c8d87`.
+- Asset: `HermesHub-0.6.190-linux-gateway.tar.gz`.
+- SHA-256 gateway: `21515024db945aa598ce7bdea5d3e3379312896bd782dec74ce54a4bfd332f3c`.

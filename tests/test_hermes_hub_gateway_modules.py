@@ -273,6 +273,27 @@ class CorrelationSseGoldenTests(unittest.TestCase):
             if name == "run.cancelled":
                 self.assertEqual("run_test", parsed.run_id)
 
+    def test_sequential_frames_stay_blank_line_terminated(self):
+        context = CorrelationContext("req_frames", "corr_frames")
+
+        class Response:
+            _hermes_hub_correlation_context = context
+
+        response = Response()
+        wire = ""
+        for name in ("response.created", "response.output_text.delta"):
+            raw = f"event: {name}\ndata: {json.dumps({'type': name})}\n\n".encode()
+            chunk = _enrich_sse_chunk(response, raw).decode("utf-8")
+            self.assertTrue(chunk.endswith("\n\n"), chunk[-20:])
+            wire += chunk
+        frames = [frame for frame in wire.split("\n\n") if frame.strip()]
+        self.assertEqual(2, len(frames))
+        for frame, name in zip(frames, ("response.created", "response.output_text.delta")):
+            lines = frame.split("\n")
+            self.assertEqual(f"event: {name}", lines[0])
+            self.assertTrue(lines[1].startswith("data: "))
+            json.loads(lines[1][len("data: "):])
+
     def test_invalid_ingress_ids_are_replaced_as_a_pair(self):
         context = correlation_context_from_headers(
             {
