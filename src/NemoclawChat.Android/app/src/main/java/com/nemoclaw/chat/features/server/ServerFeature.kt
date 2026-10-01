@@ -9,8 +9,6 @@ import android.app.PendingIntent
 import android.content.ContentValues
 import android.content.Context
 import android.content.ContextWrapper
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
@@ -169,6 +167,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -2242,6 +2241,27 @@ internal fun ProfileScreen(
     var updateState by remember { mutableStateOf(UpdateDownloadState()) }
     var memory by remember { mutableStateOf(HubMemoryState()) }
     var memoryStatus by remember { mutableStateOf("Memoria gateway non ancora letta.") }
+    val managerBase = remember(settings.gatewayUrl) { gpuManagerBase(settings.gatewayUrl) }
+    var showRebootConfirm by remember { mutableStateOf(false) }
+    var rebootBusy by remember { mutableStateOf(false) }
+    var rebootStatus by remember { mutableStateOf("") }
+
+    fun doReboot() {
+        scope.launch {
+            rebootBusy = true
+            rebootStatus = try {
+                val (code, _) = postJson("$managerBase/system/reboot", JSONObject(), null, allowCompatAuth = false)
+                if (code == 200) {
+                    "Comando di riavvio inviato. Il server tornerà online tra circa un minuto."
+                } else {
+                    "Riavvio rifiutato (HTTP $code). Verifica che hermes-gpu-manager sia aggiornato."
+                }
+            } catch (ex: Exception) {
+                "Errore invio riavvio: ${ex.message ?: ex.javaClass.simpleName}"
+            }
+            rebootBusy = false
+        }
+    }
 
     LaunchedEffect(settings.gatewayUrl) {
         val loaded = loadHubMemory(settings, loadGatewaySecret(context))
@@ -2308,6 +2328,28 @@ internal fun ProfileScreen(
                         IconButton(onClick = { onOpenTab(Tab.Settings) }) { Icon(Icons.Rounded.Settings, contentDescription = "Impostazioni", tint = Color.White) }
                         IconButton(onClick = { onOpenTab(Tab.Projects) }) { Icon(Icons.Rounded.Folder, contentDescription = "Progetti", tint = Color.White) }
                         IconButton(onClick = { onOpenTab(Tab.Archive) }) { Icon(Icons.Rounded.Archive, contentDescription = "Archivio", tint = Color.White) }
+                    }
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Server Hermes", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Riavvio completo del server (come sudo reboot now). Da usare se il server non risponde più.",
+                        color = AppColors.Muted,
+                        fontSize = 12.sp
+                    )
+                    if (rebootStatus.isNotBlank()) {
+                        Text(rebootStatus, color = AppColors.Muted, fontSize = 12.sp)
+                    }
+                    Button(
+                        onClick = { showRebootConfirm = true },
+                        enabled = !rebootBusy,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9E2424))
+                    ) {
+                        Text(if (rebootBusy) "Riavvio in corso..." else "Riavvia server")
                     }
                 }
             }
@@ -2473,6 +2515,21 @@ internal fun ProfileScreen(
                 }
             }
         }
+    }
+    if (showRebootConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRebootConfirm = false },
+            title = { Text("Riavviare il server?") },
+            text = { Text("Il server Hermes si riavvierà completamente (come sudo reboot now). Chat, modelli e code media si interromperanno e torneranno online da soli.") },
+            confirmButton = {
+                TextButton(onClick = { showRebootConfirm = false; doReboot() }) {
+                    Text("Riavvia ora", color = Color(0xFFFF8A7A))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRebootConfirm = false }) { Text("Annulla") }
+            }
+        )
     }
 }
 

@@ -161,7 +161,7 @@ fun streamHermesSessionChat(
                 .header("User-Agent", "HermesHub-Android")
             HermesHubProtocol.addCorrelationHeaders(builder, requestContext)
             token?.let { builder.header("Authorization", "Bearer $it") }
-            if (isValidHermesSessionKey(sessionKey)) builder.header("X-Hermes-Session-Key", sessionKey!!.trim())
+            if (isValidHermesSessionKey(sessionKey)) builder.header("X-Hermes-Session-Key", sessionKey?.trim().orEmpty())
             val request = builder.post(body).build()
             // Trasporto condiviso cancellabile (stesso di Chat Completions/Responses):
             // keepalive ignorato, terminale rilevato, stop utente abbatte la connessione.

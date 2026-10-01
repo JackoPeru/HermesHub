@@ -239,7 +239,10 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
@@ -1503,6 +1506,8 @@ internal val archiveEventsHttpClient: OkHttpClient by lazy {
 internal var activeTtsMediaPlayer: MediaPlayer? = null
 @Volatile
 internal var activeTtsFile: File? = null
+private val ttsPlaybackMutex = Mutex()
+private const val TTS_REQUEST_TIMEOUT_MS = 90_000L
 
 internal data class TtsRequestResult(
     val statusCode: Int,
@@ -1527,7 +1532,9 @@ internal suspend fun speakChatMessage(context: Context, settings: AppSettings, t
     for (candidateUrl in ttsUrlCandidates(resolveTtsSpeechUrl(settings))) {
         for (token in hermesAuthCandidates(apiKey)) {
             val response = try {
-                executeTtsRequest(dir, candidateUrl, payload, token)
+                withTimeout(TTS_REQUEST_TIMEOUT_MS) {
+                    executeTtsRequest(dir, candidateUrl, payload, token)
+                }
             } catch (ex: Exception) {
                 if (lastHttpError == null) {
                     lastError = ex.message ?: ex.javaClass.simpleName
@@ -1536,9 +1543,10 @@ internal suspend fun speakChatMessage(context: Context, settings: AppSettings, t
             }
             val file = response.audioFile
             if (response.statusCode in 200..299 && file != null) {
-                withContext(Dispatchers.Main) {
-                    runCatching { activeTtsMediaPlayer?.release() }
-                    activeTtsFile?.let { runCatching { it.delete() } }
+                ttsPlaybackMutex.withLock {
+                    withContext(Dispatchers.Main) {
+                        runCatching { activeTtsMediaPlayer?.release() }
+                        activeTtsFile?.let { runCatching { it.delete() } }
                     val player = MediaPlayer()
                     activeTtsMediaPlayer = player
                     activeTtsFile = file
@@ -1562,6 +1570,7 @@ internal suspend fun speakChatMessage(context: Context, settings: AppSettings, t
                     } catch (ex: Exception) {
                         cleanup()
                         throw ex
+                    }
                     }
                 }
                 return@withContext

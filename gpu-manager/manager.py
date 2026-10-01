@@ -128,6 +128,7 @@ _state = {
     "current_state": "BOOT",
     "desired_mode": str(CONFIG.get("default_mode", "auto")).upper(),
     "current_job": None,
+    "current_prompt_id": None,
     "last_error": "",
     "last_transition": "",
     "media_idle_since": 0.0,
@@ -163,6 +164,16 @@ IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 MAX_INPUT_MB = 50
 
 
+def _json_text(value: object) -> str:
+    """JSON-escape a string for textual {{PLACEHOLDER}} substitution.
+
+    Templates quote string slots (e.g. "prompt": "{{PROMPT}}"), so the value
+    must be escaped without the surrounding quotes: json.dumps()[1:-1].
+    Numeric-looking strings stay bare, keeping unquoted numeric slots valid.
+    """
+    return json.dumps(str(value))[1:-1]
+
+
 def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, str]:
     """Render a versioned workflow template. Returns (workflow, error)."""
     spec = PRESETS.get(preset)
@@ -179,8 +190,8 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
     default_cfg = "6.0" if (PRESETS.get(preset) or {}).get("kind") == "video" else "1.0"
     mapping = {
         "JOB_ID": job_id,
-        "PROMPT": str(params.get("prompt", "")),
-        "NEGATIVE_PROMPT": str(params.get("negative_prompt", " ")),
+        "PROMPT": _json_text(params.get("prompt", "")),
+        "NEGATIVE_PROMPT": _json_text(params.get("negative_prompt", " ")),
         "SEED": str(params.get("seed", 7)),
         "STEPS": str(params.get("steps", 20)),
         "CFG": str(params.get("cfg", default_cfg)),
@@ -199,7 +210,7 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
     else:
         mapping["LENGTH"] = str(params.get("length", 124))
     for key, value in params.items():
-        mapping[str(key).upper()] = str(value)
+        mapping[str(key).upper()] = _json_text(value) if isinstance(value, str) else str(value)
     workflow_text = template
     staged: list[str] = []
     input_images = params.get("input_images") or []
@@ -734,6 +745,7 @@ async def run_media_job(job: dict) -> bool:
         update_job(jid, status="failed", error="ComfyUI submit refused")
         return False
     log.info("job %s prompt %s started", jid, prompt_id)
+    _state["current_prompt_id"] = prompt_id
     update_job(jid, status="running", progress=0.05, phase="submitted")
     deadline = time.monotonic() + timeout
     poll = float(CONFIG["media"].get("poll_interval", 2.0))
@@ -744,6 +756,9 @@ async def run_media_job(job: dict) -> bool:
         for g in await asyncio.to_thread(gpu_snapshot):
             vram_peak = max(vram_peak, float(g.get("memory_used_mb", 0)))
         update_job(jid, progress=0.5, vram_peak_mb=vram_peak)
+        if (get_job(jid) or {}).get("status") == "cancelled":
+            await comfy_cancel(prompt_id)
+            return False
         entry = await comfy_history(prompt_id)
         if not entry:
             phase = await comfy_queue_state(prompt_id)
@@ -1031,6 +1046,7 @@ async def drain_media_queue() -> None:
             update_job(job["job_id"], status="failed", error=f"worker tracking lost: {exc!r}"[:300])
             ok = False
         _state["current_job"] = None
+        _state["current_prompt_id"] = None
         if not ok and _state["current_state"] == "ERROR":
             await restore_llm_with_retries("media-job-failed")
             return
@@ -1169,6 +1185,24 @@ async def mode_auto(_: None = Depends(require_key)) -> dict:
     return {"desired_mode": "AUTO"}
 
 
+@app.post("/system/reboot")
+async def system_reboot(_: None = Depends(require_key)) -> dict:
+    """Reboot the whole server. Fire-and-forget: the response is returned
+    before the reboot is issued so the caller sees the acknowledgement."""
+    log.warning("remote full-server reboot requested via API")
+    try:
+        subprocess.Popen(
+            ["sh", "-c", "sleep 2; exec sudo -n /usr/sbin/shutdown -r now 'Hermes Hub remote reboot'"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("reboot spawn failed: %r", exc)
+        raise HTTPException(500, "reboot spawn failed")
+    return {"rebooting": True}
+
+
 @app.post("/jobs/image")
 @app.post("/jobs/video")
 async def submit_job(request: Request, _: None = Depends(require_key)) -> JSONResponse:
@@ -1177,6 +1211,10 @@ async def submit_job(request: Request, _: None = Depends(require_key)) -> JSONRe
     except Exception:  # noqa: BLE001
         raise HTTPException(400, "invalid JSON")
     kind = "video" if request.url.path.endswith("/video") else "image"
+    max_queued = int(CONFIG["media"].get("max_queued", 10))
+    backlog = len(queued_jobs()) + (1 if _state.get("current_job") else 0)
+    if backlog >= max_queued:
+        raise HTTPException(429, f"media queue full ({backlog}/{max_queued})")
     preset = str(body.get("preset", "") or "")
     params = body.get("parameters", {}) or {}
     for alias in ("prompt", "input_images", "negative_prompt", "seed", "steps",
@@ -1242,6 +1280,14 @@ async def cancel_job(job_id: str, _: None = Depends(require_key)) -> dict:
     if job["status"] in ("done", "failed", "cancelled"):
         return job
     update_job(job_id, status="cancelled", error="cancelled by user")
+    # If this is the running job, stop it in ComfyUI too and release tracking
+    # so the worker does not keep polling a dead prompt.
+    if job_id == _state.get("current_job"):
+        _state["current_job"] = None
+        prompt_id = _state.get("current_prompt_id")
+        _state["current_prompt_id"] = None
+        if prompt_id:
+            await comfy_cancel(str(prompt_id))
     log.info("job %s cancelled", job_id)
     return get_job(job_id)
 

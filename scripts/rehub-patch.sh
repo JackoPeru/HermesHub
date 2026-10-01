@@ -54,7 +54,7 @@ if [ -z "$key" ]; then
 fi
 fail=0
 for path in /v1/capabilities /v1/hub/runtime /v1/hub/hardware /v1/hub/conversations; do
-  code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $key" "http://127.0.0.1:8642$path" || true)
+  code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $key" "http://127.0.0.1:8642$path" || true)
   echo "$path -> $code"
   [ "$code" = "200" ] || fail=1
 done

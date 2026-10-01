@@ -119,6 +119,7 @@ import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PhotoCamera
@@ -493,6 +494,7 @@ internal fun ChatScreen(
             .background(if (isEmptyChat) emptyChatBrush else solidBrush)
     ) {
         TopBar(
+            settings = settings,
             contextUsage = contextUsage,
             connected = gatewayAvailable,
             gatewayRuntime = gatewayRuntime,
@@ -1232,6 +1234,7 @@ internal fun executeSlashCommand(
 
 @Composable
 internal fun TopBar(
+    settings: AppSettings,
     contextUsage: ContextUsage,
     connected: Boolean,
     gatewayRuntime: GatewayRuntimeStatus?,
@@ -1239,6 +1242,40 @@ internal fun TopBar(
     onOpenSidebar: () -> Unit = {},
     onOpenArchive: () -> Unit = {}
 ) {
+    val scope = rememberCoroutineScope()
+    val managerBase = remember(settings.gatewayUrl) { gpuManagerBase(settings.gatewayUrl) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var llmLoaded by remember { mutableStateOf<Boolean?>(null) }
+    var llmState by remember { mutableStateOf("") }
+    var llmBusy by remember { mutableStateOf(false) }
+    var llmError by remember { mutableStateOf("") }
+
+    fun refreshLlm() {
+        scope.launch {
+            llmBusy = true
+            llmError = runCatching {
+                val status = JSONObject(httpGet("$managerBase/status", null))
+                llmLoaded = status.optBoolean("llm_loaded", false)
+                llmState = status.optString("current_state", "")
+            }.exceptionOrNull()?.message ?: ""
+            llmBusy = false
+        }
+    }
+
+    fun setLlmWanted(wanted: Boolean) {
+        scope.launch {
+            llmBusy = true
+            llmError = runCatching {
+                postJson("$managerBase/mode/${if (wanted) "llm" else "media"}", JSONObject(), null, allowCompatAuth = false)
+                delay(3_000)
+                val status = JSONObject(httpGet("$managerBase/status", null))
+                llmLoaded = status.optBoolean("llm_loaded", false)
+                llmState = status.optString("current_state", "")
+            }.exceptionOrNull()?.message ?: ""
+            llmBusy = false
+        }
+    }
+
     Surface(color = AppColors.Background) {
         Row(
             modifier = Modifier
@@ -1277,8 +1314,51 @@ internal fun TopBar(
             IconButton(onClick = onOpenArchive, modifier = Modifier.size(38.dp)) {
                 Icon(Icons.Rounded.FolderOpen, contentDescription = "Archivio chat", tint = AppColors.Muted, modifier = Modifier.size(20.dp))
             }
-            IconButton(onClick = onNewChat, modifier = Modifier.size(38.dp)) {
-                Icon(Icons.Rounded.Edit, contentDescription = "Nuova chat", tint = AppColors.Accent, modifier = Modifier.size(20.dp))
+            Box {
+                IconButton(
+                    onClick = { menuOpen = true; refreshLlm() },
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Icon(Icons.Rounded.MoreVert, contentDescription = "Impostazioni rapide", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+                DropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Nuova chat") },
+                        leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null, tint = AppColors.Accent) },
+                        onClick = { menuOpen = false; onNewChat() }
+                    )
+                    HorizontalDivider()
+                    val loaded = llmLoaded
+                    val subtitle = when {
+                        llmError.isNotBlank() -> "Non raggiungibile"
+                        loaded == null -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
+                        llmBusy -> "Applicazione in corso..."
+                        loaded -> "Caricato sulle GPU"
+                        llmState == "LLM_LOADING" -> "Caricamento in corso..."
+                        llmState == "MEDIA_STOPPING" || llmState == "LLM_UNLOADING" -> "Scaricamento in corso..."
+                        else -> "Scaricato"
+                    }
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text("LLM su GPU")
+                                Text(subtitle, color = AppColors.Muted, fontSize = 12.sp)
+                            }
+                        },
+                        trailingIcon = {
+                            Switch(
+                                checked = loaded == true,
+                                onCheckedChange = null,
+                                enabled = !llmBusy
+                            )
+                        },
+                        enabled = !llmBusy && loaded != null && llmError.isBlank(),
+                        onClick = { if (!llmBusy && loaded != null) setLlmWanted(!(loaded)) }
+                    )
+                }
             }
             ContextMeter(usage = contextUsage, modifier = Modifier.size(40.dp))
         }
@@ -2618,6 +2698,7 @@ internal fun appendFeedbackSnippet(current: String, snippet: String): String {
 
 internal fun authHeaders(apiKey: String?): Map<String, String> {
     val token = apiKey?.trim().orEmpty()
+    if (token.isEmpty()) return mapOf("User-Agent" to "HermesHub-Android")
     return mapOf("Authorization" to "Bearer $token", "User-Agent" to "HermesHub-Android")
 }
 
@@ -2663,7 +2744,8 @@ internal fun decodeAttachmentPreview(source: String): Bitmap? {
         val decoded = if (file != null) {
             BitmapFactory.decodeFile(file.absolutePath, decodeOptions)
         } else {
-            BitmapFactory.decodeByteArray(bytes!!, 0, bytes.size, decodeOptions)
+            val data = bytes ?: return null
+            BitmapFactory.decodeByteArray(data, 0, data.size, decodeOptions)
         }
         decoded?.scaleBitmapToMaxWidth(maxWidth)
     } catch (_: Exception) {

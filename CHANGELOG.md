@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.197 - 2026-10-01
+
+- Chat: la penna in alto a destra diventa menu a 3 puntini (impostazioni rapide); dentro: Nuova chat e flag LLM su GPU (stato reale da gpu-manager, accende/scarica il modello al tocco).
+- Profilo: bottone Riavvia server con conferma, riavvio completo (come sudo reboot now) via nuovo endpoint manager POST /system/reboot.
+- Manager: cancel reale con stop prompt ComfyUI, escaping JSON nei template, limite coda 429, reboot fire-and-forget.
+- Chiamata vocale in ViewModel: la rotazione non uccide più la chiamata (stato + tono + coroutine sopravvivono al recreate).
+
 ## 0.6.196 - 2026-10-01
 
 - Media senza card: immagine nuda con viewer e icona download, dedup per URL, kind corretto dall'evidenza, loopback riscritto sull'host gateway.

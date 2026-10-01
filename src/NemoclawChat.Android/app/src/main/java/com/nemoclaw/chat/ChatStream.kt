@@ -949,7 +949,9 @@ fun streamChatRequest(
             break
         }
         if (lastError != null && !sawActivity) {
-            Log.w("ChatStream", "Responses API fallback: $lastError")
+            if (com.nemoclaw.chat.BuildConfig.DEBUG) {
+                Log.w("ChatStream", "Responses API fallback: $lastError")
+            }
             if (nativeMode && isHermesAuthError(lastError)) {
                 emit(ChatStreamEvent.Error("Hermes ha rifiutato l'API key salvata anche dopo il retry senza autenticazione e senza previous_response_id. Verifica la chiave in Impostazioni e HERMES_API_KEY sul gateway."))
                 return@flow

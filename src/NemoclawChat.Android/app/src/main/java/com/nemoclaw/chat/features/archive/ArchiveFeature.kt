@@ -877,7 +877,8 @@ internal fun writeConversationPdf(file: File, conversation: LocalConversation) {
             if (lines.isEmpty()) lines += " "
             for (line in lines) {
                 if (page == null || y > pageHeight - margin) startPage()
-                page!!.canvas.drawText(line, margin, y, sourcePaint)
+                val canvas = page?.canvas ?: return
+                canvas.drawText(line, margin, y, sourcePaint)
                 y += sourcePaint.textSize * 1.35f
             }
         }

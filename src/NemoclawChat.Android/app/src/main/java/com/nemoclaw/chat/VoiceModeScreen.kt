@@ -48,7 +48,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -67,6 +66,10 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -77,7 +80,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -126,7 +128,7 @@ private val voiceHttpClient: OkHttpClient by lazy {
         .build()
 }
 
-private enum class VoiceCallPhase {
+internal enum class VoiceCallPhase {
     Idle,
     Connecting,
     Listening,
@@ -136,7 +138,7 @@ private enum class VoiceCallPhase {
     Error
 }
 
-private data class VoiceConversationContext(
+internal data class VoiceConversationContext(
     val conversationId: String,
     var previousResponseId: String? = null
 )
@@ -282,14 +284,9 @@ internal suspend fun previewVoiceProfile(
 internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartToken: Long = 0L) {
     val context = LocalContext.current
     val view = LocalView.current
-    val scope = rememberCoroutineScope()
-    val history = remember { mutableStateListOf<ChatMessage>() }
-    var callActive by remember { mutableStateOf(false) }
-    var phase by remember { mutableStateOf(VoiceCallPhase.Idle) }
-    var status by remember { mutableStateOf("Hermes voce pronto.") }
-    var callJob by remember { mutableStateOf<Job?>(null) }
+    val vm: VoiceCallViewModel = viewModel()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     var startRequested by remember { mutableStateOf(false) }
-    val waitingTone = remember(context) { WaitingTonePlayer(context.applicationContext) }
     val voiceProfile = remember(settings.activeProjectId) {
         loadVoiceProfile(context, settings.activeProjectId)
     }
@@ -303,7 +300,7 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
     }
 
     LaunchedEffect(autoStartToken) {
-        if (autoStartToken == 0L || callActive) return@LaunchedEffect
+        if (autoStartToken == 0L || vm.callActive) return@LaunchedEffect
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             startRequested = true
         } else {
@@ -312,42 +309,15 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
     }
 
     LaunchedEffect(startRequested) {
-        if (!startRequested || callActive) return@LaunchedEffect
+        if (!startRequested || vm.callActive) return@LaunchedEffect
         startRequested = false
-        callJob?.cancel()
-        callActive = true
-        phase = VoiceCallPhase.Connecting
-        status = "Connessione a Hermes..."
-        if (voiceProfile.bluetooth) routeVoiceBluetooth(context, true)
-        callJob = scope.launch {
-            try {
-                verifyVoiceGateway(settings, apiKey)
-                if (!callActive) return@launch
-                phase = VoiceCallPhase.Listening
-                status = "Ti ascolto."
-                history.clear()
-                startVoiceForegroundService(context)
-                runVoiceCallLoop(
-                    context = context,
-                    settings = settings,
-                    apiKey = apiKey,
-                    history = history,
-                    voiceConversation = VoiceConversationContext("voice_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}"),
-                    isCallActive = { callActive },
-                    setPhase = { phase = it },
-                    setStatus = { status = it },
-                    voice = { voiceProfile.voice },
-                    speed = { voiceProfile.speed.toDouble() }
-                )
-            } catch (_: CancellationException) {
-            } catch (ex: Exception) {
-                if (callActive) {
-                    phase = VoiceCallPhase.Error
-                    status = "Voce non disponibile: ${ex.message ?: "errore sconosciuto"}"
-                    callActive = false
-                }
-            }
-        }
+        vm.startCall(
+            settings = settings,
+            apiKey = apiKey,
+            voice = voiceProfile.voice,
+            speed = voiceProfile.speed.toDouble(),
+            bluetooth = voiceProfile.bluetooth
+        )
     }
 
     DisposableEffect(view) {
@@ -358,21 +328,24 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
         onDispose { controller?.show(WindowInsetsCompat.Type.systemBars()) }
     }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            callActive = false
-            callJob?.cancel()
-            VoiceTurnController.interrupt()
-            stopVoiceForegroundService(context)
-            if (voiceProfile.bluetooth) routeVoiceBluetooth(context, false)
-            waitingTone.release()
+    // Ends the call when the screen is really gone. Rotation also destroys the
+    // Activity, but with isChangingConfigurations=true — the ViewModel (and the
+    // call inside it) survives that case untouched.
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_DESTROY) {
+                val activity = context as? Activity
+                if (activity?.isChangingConfigurations != true) vm.shutdown()
+            }
         }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(phase) {
-        if (phase == VoiceCallPhase.Thinking) waitingTone.start() else waitingTone.stop()
-    }
-
+    val callActive = vm.callActive
+    val phase = vm.phase
+    val status = vm.status
+    val history = vm.history
     val assembled = callActive && phase != VoiceCallPhase.Connecting && phase != VoiceCallPhase.Error
     val speaking = phase == VoiceCallPhase.Speaking
 
@@ -395,18 +368,9 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
                 onClick = {
                     if (callActive) {
                         if (voiceProfile.pushToTalk && (phase == VoiceCallPhase.Thinking || phase == VoiceCallPhase.Speaking)) {
-                            VoiceTurnController.interrupt()
-                            phase = VoiceCallPhase.Listening
-                            status = "Hermes interrotto. Ti ascolto."
+                            vm.interruptCall()
                         } else {
-                            callActive = false
-                            VoiceTurnController.interrupt()
-                            callJob?.cancel()
-                            callJob = null
-                            stopVoiceForegroundService(context)
-                            if (voiceProfile.bluetooth) routeVoiceBluetooth(context, false)
-                            phase = VoiceCallPhase.Idle
-                            scope.launch { status = saveVoiceCall(context, settings, apiKey, history) }
+                            vm.endCall(settings, apiKey)
                         }
                     } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                         startRequested = true
@@ -446,7 +410,7 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
     }
 }
 
-private suspend fun saveVoiceCall(context: Context, settings: AppSettings, apiKey: String?, history: List<ChatMessage>): String {
+internal suspend fun saveVoiceCall(context: Context, settings: AppSettings, apiKey: String?, history: List<ChatMessage>): String {
     if (history.isEmpty()) return "Chiamata chiusa."
     val saved = saveConversationSnapshot(context, null, "Chat", "Chiamata vocale", history.toList(), "voice-call", projectId = settings.activeProjectId)
     val transcript = history.joinToString("\n") { "${it.author}: ${it.text}" }
@@ -563,7 +527,7 @@ private fun VoiceParticleField(
     }
 }
 
-private suspend fun runVoiceCallLoop(
+internal suspend fun runVoiceCallLoop(
     context: Context,
     settings: AppSettings,
     apiKey: String?,
@@ -1087,7 +1051,7 @@ internal suspend fun playVoiceFile(file: File, onPlaybackStarted: () -> Unit): U
     }
 }
 
-private suspend fun verifyVoiceGateway(settings: AppSettings, apiKey: String?) = withContext(Dispatchers.IO) {
+internal suspend fun verifyVoiceGateway(settings: AppSettings, apiKey: String?) = withContext(Dispatchers.IO) {
     var lastError = "Gateway Hermes non raggiungibile."
     for (root in voiceGatewayRoots(settings)) {
         for (token in hermesAuthCandidates(apiKey)) {
@@ -1225,7 +1189,7 @@ private fun pcmPeak(bytes: ByteArray): Double {
     return peak.toDouble()
 }
 
-private class WaitingTonePlayer(context: Context) {
+internal class WaitingTonePlayer(context: Context) {
     private val toneFile = File(context.cacheDir, "hermes-waiting-tone.wav")
     private var player: MediaPlayer? = null
 
