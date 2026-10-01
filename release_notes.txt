@@ -1,10 +1,10 @@
-Hermes Hub 0.6.200 (anti-ripetizione, pill, allegati, skill)
+Hermes Hub 0.6.201 (Qwen repo-esatta, allegati, pill, anti-ripetizione)
 
-- Android chat: collapse blocchi ripetuti a display (niente più risposte 2x/4x); pill modello rimossa; flag reasoning affianco al microfono con tendina e Auto reale (inviato esplicito se supportato).
-- Android chat: allegati pending persistenti tra riaperture; immagini inviate in chip compatta.
-- Server: skill hermes-local-media v2.0; disabilitate qwen-image-21-native-edit e comfyui generica; Qwen resta bf16/int8 (Q4 da chiarire).
-- Versioni: Windows/AdminBridge `0.6.200`; Android `versionName 0.6.200`, `versionCode 204`.
-- Asset: `HermesHub-0.6.200-android.apk` (binario Windows invariato).
-- SHA-256 Android: `b55016a5a4742f8cb2e12a3434f59f51aac0690d0ba1dc8984643ff9d8a4ed2d`.
-- Asset: `HermesHub-0.6.200-linux-gateway.tar.gz`.
-- SHA-256 gateway: `149deae9d29c4362e59cfd4371e8572601f078d874683e459c2babe0897e03ad`.
+- Server: Qwen-Image-2.1 come da repo toyhank (DiT Q4 GGUF + TE w4a8 + VAE bf16, node leejet/ComfyUI-GGUF, stessi workflow); edit e T2I provati dal vivo.
+- Android chat: allegati pending persistenti; immagini inviate in chip compatta; pill modello rimossa; flag reasoning affianco al micro con Auto reale; collapse risposte 2x/4x.
+- Skill hermes-local-media v2.0; disabilitate qwen-image-21-native-edit e comfyui generica.
+- Versioni: Windows/AdminBridge `0.6.201`; Android `versionName 0.6.201`, `versionCode 205`.
+- Asset: `HermesHub-0.6.201-android.apk` (binario Windows invariato).
+- SHA-256 Android: `4d264133754b12cce9b86f07cbe94e4d66fe6f4160222d627d32dd34969d4e3d`.
+- Asset: `HermesHub-0.6.201-linux-gateway.tar.gz`.
+- SHA-256 gateway: `2a9acfaf5c4521445fd2a1a7edc1c111252ddd837d141785f1f53b9fa13b4795`.

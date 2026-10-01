@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.201 - 2026-10-01
+
+- Qwen repo-esatto live: DiT Q4 + TE w4a8 + node leejet, stessi workflow della repo 8gb (testati).
+- Chat: allegati persistenti, immagini inviate compatte, pill/flag reasoning, anti-ripetizione.
+
 ## 0.6.200 - 2026-10-01
 
 - Chat: anti-ripetizione a display (blocchi 2x/4x collassati), pill modello rimossa, flag reasoning affianco al microfono con Auto reale.
