@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.196 - 2026-10-01
+
+- Media senza card: immagine nuda con viewer e icona download, dedup per URL, kind corretto dall'evidenza, loopback riscritto sull'host gateway.
+- Player video inline, audio compatto, riga slim documenti.
+- Traccia reasoning intera e cerchio su finestra reale (come 0.6.195, incluso qui).
+
 ## 0.6.195 - 2026-10-01
 
 - Ragionamento e risposte: gli snapshot non cumulativi si accumulano invece di mostrare solo l'ultimo token; merge su finestre sovrapposte.

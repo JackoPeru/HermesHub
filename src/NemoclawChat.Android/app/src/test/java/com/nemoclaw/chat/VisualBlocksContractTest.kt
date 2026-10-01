@@ -51,6 +51,28 @@ class VisualBlocksContractTest {
     }
 
     @Test
+    fun `loopback media urls rewrite to configured gateway host`() {
+        val settings = AppSettings(gatewayUrl = "http://100.94.223.14:8642")
+        assertEquals(
+            "http://100.94.223.14:8642/v1/media/x.png",
+            normalizeLoopbackMediaUrl(settings, "http://127.0.0.1:8642/v1/media/x.png")
+        )
+        assertEquals(
+            "http://100.94.223.14:8642/v1/media/x.png?t=1",
+            normalizeLoopbackMediaUrl(settings, "http://localhost:8642/v1/media/x.png?t=1")
+        )
+        assertEquals(
+            "https://cdn.test/x.png",
+            normalizeLoopbackMediaUrl(settings, "https://cdn.test/x.png")
+        )
+        assertEquals("/v1/media/x.png", normalizeLoopbackMediaUrl(settings, "/v1/media/x.png"))
+        assertEquals(
+            "http://100.94.223.14:8642/v1/media/x.png",
+            resolveMediaUrl(settings, "http://127.0.0.1:8642/v1/media/x.png")
+        )
+    }
+
+    @Test
     fun `duplicate agent and inline blocks collapse to one card`() {
         val agent = VisualBlock(id = "a1", type = "media_file", filename = "tramonto", mediaUrl = "/v1/media/tramonto.png", mediaKind = "document")
         val inline = VisualBlock(id = "a2", type = "media_file", filename = "tramonto.png", mediaUrl = "/v1/media/tramonto.png", mediaKind = "image")

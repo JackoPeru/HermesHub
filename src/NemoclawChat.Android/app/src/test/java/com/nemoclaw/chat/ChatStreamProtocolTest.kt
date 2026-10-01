@@ -408,6 +408,25 @@ class ChatStreamProtocolTest {
     }
 
     @Test
+    fun doneEventKeepsRealModelPromptTotal() {
+        val live = StreamingState(promptProgressTotalTokens = 16425, promptProgressEstimated = false)
+        val done = live.applyEvent(ChatStreamEvent.Done(ChatStreamStats(promptTokens = 1308012)))
+        assertEquals(16425, done.stats?.modelPromptTokens)
+        assertEquals(1308012, done.stats?.promptTokens)
+        val estimated = StreamingState(promptProgressTotalTokens = 999, promptProgressEstimated = true)
+        val doneEstimated = estimated.applyEvent(ChatStreamEvent.Done(ChatStreamStats()))
+        assertEquals(null, doneEstimated.stats?.modelPromptTokens)
+    }
+
+    @Test
+    fun contextMeterUsesRealModelTokensNotAgentAccounting() {
+        val settings = AppSettings()
+        val stats = ChatStreamStats(promptTokens = 1308012, tokensOut = 10914, modelPromptTokens = 16425)
+        val usage = estimateChatContextUsage(settings, emptyList(), "", StreamingState(stats = stats))
+        assertEquals(16425, usage.tokens)
+        assertEquals(13, usage.percent)
+    }
+    @Test
     fun reasoningMergesIntoSingleCanvasAfterTools() {
         val timeline = listOf(
             AssistantActivity(AssistantActivity.Kind.Reasoning, text = "penso A"),

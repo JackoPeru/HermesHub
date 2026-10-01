@@ -1,9 +1,9 @@
-Hermes Hub 0.6.195 (traccia reasoning intera, cerchio tarato)
+Hermes Hub 0.6.196 (media senza card, loopback fix, reasoning, cerchio)
 
-- Android: snapshot non cumulativi accumulati (traccia ragionamento completa, niente più solo-ultimo-token); merge su finestre sovrapposte.
-- Android: cerchio contesto su finestra reale 131072 (parte da 0, sale col contesto).
-- Versioni: Windows/AdminBridge `0.6.195`; Android `versionName 0.6.195`, `versionCode 199`.
-- Asset: `HermesHub-0.6.195-android.apk` (binario Windows invariato).
-- SHA-256 Android: `da6df5f7839ad7437f32ce3dfb1c547bf2c620688d095f38b52ceeeb865d9869`.
-- Asset: `HermesHub-0.6.195-linux-gateway.tar.gz` (invariato nei contenuti gateway).
-- SHA-256 gateway: `31baced7133a8c570f03d7115c61201ea3307f7bf62df71a9541d6d55f7c0a27`.
+- Android: immagine nuda con viewer e icona download; player video inline, audio compatto, documenti slim; dedup per URL, kind dall'evidenza, loopback riscritto sul gateway.
+- Android: traccia reasoning intera e cerchio su finestra reale 131072.
+- Versioni: Windows/AdminBridge `0.6.196`; Android `versionName 0.6.196`, `versionCode 200`.
+- Asset: `HermesHub-0.6.196-android.apk` (binario Windows invariato).
+- SHA-256 Android: `96e9555cdf306d6c5e5662620e82bce8bdfd2ba2c71b6104c7eeb59d1ded861e`.
+- Asset: `HermesHub-0.6.196-linux-gateway.tar.gz` (invariato nei contenuti gateway).
+- SHA-256 gateway: `baee728d6836d506eea354c27c7ead6cbb8a70f0de2f2033346f6e1582b2da25`.

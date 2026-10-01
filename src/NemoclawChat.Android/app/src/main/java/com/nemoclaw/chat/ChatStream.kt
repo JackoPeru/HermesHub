@@ -129,7 +129,8 @@ data class ChatStreamStats(
     val contextLength: Int? = null,
     val contextPercent: Int? = null,
     val acceptanceRate: Double? = null,
-    val acceptanceLabel: String? = null
+    val acceptanceLabel: String? = null,
+    val modelPromptTokens: Int? = null
 )
 
 internal fun ChatStreamStats.contextTokens(): Int {
@@ -389,7 +390,13 @@ data class StreamingState(
         )
         is ChatStreamEvent.Done -> copy(
             text = stripReasoningArtifacts(text),
-            stats = event.stats,
+            stats = event.stats.let { base ->
+                // Il totale prompt reale macinato dal modello andrebbe perso con
+                // l'azzeramento qui sotto: conservalo nelle stats per il meter.
+                val modelTotal = promptProgressTotalTokens?.takeIf { !promptProgressEstimated }
+                if (modelTotal != null && modelTotal > 0) base.copy(modelPromptTokens = modelTotal)
+                else base
+            },
             isDone = true,
             status = "Risposta completata.",
             promptProgressPercent = null,

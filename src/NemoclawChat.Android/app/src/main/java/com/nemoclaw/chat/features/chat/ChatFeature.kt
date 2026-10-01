@@ -455,6 +455,7 @@ internal fun ChatScreen(
         state.streamingState?.stats?.contextTokens,
         state.streamingState?.stats?.contextLength,
         state.streamingState?.stats?.contextPercent,
+        state.streamingState?.stats?.modelPromptTokens,
         streamingTextLen,
         settings.gatewayUrl,
         settings.model,
@@ -1361,7 +1362,11 @@ internal fun estimateChatContextUsage(
     } else {
         CONTEXT_SYSTEM_OVERHEAD_TOKENS + historyTokens + draftTokens
     }
-    val tokens = if (isHermesNative(settings)) serverContextTokens else maxOf(estimated, serverContextTokens).coerceAtLeast(0)
+    val tokens = authoritativeStats?.modelPromptTokens?.takeIf { it > 0 }
+        // Prompt reale macinato dal modello nell'ultimo turno: è il riempimento
+        // vero, non l'accounting lato agent (che può superare la finestra).
+        ?: if (isHermesNative(settings)) serverContextTokens
+        else maxOf(estimated, serverContextTokens).coerceAtLeast(0)
     // Percentuale sempre calcolata sui token rispetto alla finestra reale del
     // modello (dichiarata dal server o fallback verificato): parte da 0 a chat
     // vuota e sale col contesto. La percent del compattatore server non fa fede
@@ -2699,10 +2704,37 @@ internal fun RemoteGalleryImage(settings: AppSettings, image: VisualGalleryImage
     )
 }
 
+/**
+ * L'agente gira sul server e a volte emette URL assoluti su loopback
+ * (http://127.0.0.1:8642/v1/media/...), irraggiungibili dal telefono.
+ * Riscrive l'host con quello del gateway configurato, stessa porta e path.
+ */
+internal fun normalizeLoopbackMediaUrl(settings: AppSettings, value: String): String {
+    return try {
+        val uri = URI(value)
+        val host = uri.host.orEmpty().lowercase().trim('[', ']')
+        val isLoopback = host == "127.0.0.1" || host == "localhost" || host == "::1" || host == "0.0.0.0"
+        if (!isLoopback || !uri.path.orEmpty().startsWith("/v1/media/")) return value
+        val root = URI(hermesRoot(settings))
+        val rootHost = root.host.orEmpty()
+        if (rootHost.isBlank()) return value
+        val port = if (uri.port != -1) uri.port else root.port
+        val rebuilt = StringBuilder("${root.scheme}://$rootHost")
+        if (port != -1) rebuilt.append(":$port")
+        rebuilt.append(uri.rawPath)
+        if (!uri.rawQuery.isNullOrEmpty()) rebuilt.append("?${uri.rawQuery}")
+        if (!uri.rawFragment.isNullOrEmpty()) rebuilt.append("#${uri.rawFragment}")
+        rebuilt.toString()
+    } catch (_: Exception) {
+        value
+    }
+}
+
 internal fun resolveMediaUrl(settings: AppSettings, value: String, allowExternalImage: Boolean = false, allowExternalMedia: Boolean = false): String? {
-    return if (value.startsWith("http://", true) || value.startsWith("https://", true)) {
+    val candidate = normalizeLoopbackMediaUrl(settings, value)
+    return if (candidate.startsWith("http://", true) || candidate.startsWith("https://", true)) {
         try {
-            val uri = URI(value)
+            val uri = URI(candidate)
             val root = URI(hermesRoot(settings))
             val path = uri.path.orEmpty()
             if (
@@ -2710,21 +2742,21 @@ internal fun resolveMediaUrl(settings: AppSettings, value: String, allowExternal
                 path.startsWith("/v1/media/") &&
                 (uri.host.equals(root.host, ignoreCase = true) || isKnownHermesGatewayHost(uri.host))
             ) {
-                value
+                candidate
             } else if (
                 allowExternalImage &&
                 uri.scheme == "https" &&
                 !uri.host.isNullOrBlank() &&
-                !value.startsWith("file:", ignoreCase = true) &&
-                !value.startsWith("data:", ignoreCase = true)
+                !candidate.startsWith("file:", ignoreCase = true) &&
+                !candidate.startsWith("data:", ignoreCase = true)
             ) {
-                value
+                candidate
             } else if (
                 allowExternalMedia &&
                 uri.scheme == "https" &&
                 !uri.host.isNullOrBlank()
             ) {
-                value
+                candidate
             } else {
                 null
             }
