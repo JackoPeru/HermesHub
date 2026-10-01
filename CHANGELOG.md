@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.202 - 2026-10-02
+
+- Chat: preriscaldamento LLM all'apertura (niente più minuto morto dopo i job media).
+- Manager: ritorno a LLM dopo 10s di idle media (era 30s).
+
 ## 0.6.201 - 2026-10-01
 
 - Qwen repo-esatto live: DiT Q4 + TE w4a8 + node leejet, stessi workflow della repo 8gb (testati).

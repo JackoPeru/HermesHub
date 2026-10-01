@@ -27,7 +27,7 @@ media:
   poll_interval: 2.0
 
 switching:
-  media_idle_timeout: 30
+  media_idle_timeout: 10
   llm_drain_timeout: 10
   llm_shutdown_timeout: 60
   vram_free_mb: 2500

@@ -450,6 +450,18 @@ internal fun ChatScreen(
             }
         }
     }
+    // Preriscalda LLM: se il manager e' in AUTO e il modello e' scarico
+    // (dopo job media), chiedi il caricamento appena apri la chat cosi' e'
+    // pronto quando invii. Silenzioso, una sola volta per apertura.
+    LaunchedEffect(Unit) {
+        runCatching {
+            val base = gpuManagerBase(settings.gatewayUrl)
+            val status = JSONObject(httpGet("$base/status", null))
+            if (status.optString("desired_mode") == "AUTO" && !status.optBoolean("llm_loaded", true)) {
+                postJson("$base/mode/llm", JSONObject(), null, allowCompatAuth = false)
+            }
+        }
+    }
     // Allegati pending persistenti: rientrando in app (o nella conversazione)
     // la foto allegata al prompt e' ancora li'.
     var restoredPendingFor by remember { mutableStateOf<String?>(null) }

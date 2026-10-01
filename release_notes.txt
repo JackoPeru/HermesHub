@@ -1,10 +1,10 @@
-Hermes Hub 0.6.201 (Qwen repo-esatta, allegati, pill, anti-ripetizione)
+Hermes Hub 0.6.202 (fix minuto morto pre-risposta)
 
-- Server: Qwen-Image-2.1 come da repo toyhank (DiT Q4 GGUF + TE w4a8 + VAE bf16, node leejet/ComfyUI-GGUF, stessi workflow); edit e T2I provati dal vivo.
-- Android chat: allegati pending persistenti; immagini inviate in chip compatta; pill modello rimossa; flag reasoning affianco al micro con Auto reale; collapse risposte 2x/4x.
-- Skill hermes-local-media v2.0; disabilitate qwen-image-21-native-edit e comfyui generica.
-- Versioni: Windows/AdminBridge `0.6.201`; Android `versionName 0.6.201`, `versionCode 205`.
-- Asset: `HermesHub-0.6.201-android.apk` (binario Windows invariato).
-- SHA-256 Android: `4d264133754b12cce9b86f07cbe94e4d66fe6f4160222d627d32dd34969d4e3d`.
-- Asset: `HermesHub-0.6.201-linux-gateway.tar.gz`.
-- SHA-256 gateway: `2a9acfaf5c4521445fd2a1a7edc1c111252ddd837d141785f1f53b9fa13b4795`.
+- Causa: dopo i job media l'LLM è scarico; il primo prompt beccava 503 + retry agente da 62s + ricarico. Il modello in sé risponde in 0.2s.
+- Android chat: all'apertura, se il manager è in AUTO e l'LLM è scarico, richiede il caricamento in silenzio.
+- Manager: idle media 30s → 10s prima di ricaricare l'LLM.
+- Versioni: Windows/AdminBridge `0.6.202`; Android `versionName 0.6.202`, `versionCode 206`.
+- Asset: `HermesHub-0.6.202-android.apk` (binario Windows invariato).
+- SHA-256 Android: `7d31bb68703c6b03f6e4652636a3e5c2eeabe65e85c401d0a1f8728105fd01c9`.
+- Asset: `HermesHub-0.6.202-linux-gateway.tar.gz`.
+- SHA-256 gateway: `8432f514987b18f64a39d6042f288c3c30555df1857c374b158e18dcca29acd8`.
