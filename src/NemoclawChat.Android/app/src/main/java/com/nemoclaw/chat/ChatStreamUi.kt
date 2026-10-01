@@ -105,7 +105,8 @@ internal fun StreamingBubbleView(
             }
 
             if (state.text.isNotEmpty()) {
-                MarkdownText(state.text, color = Color.White, fontSize = 15.sp)
+                val streamText = remember(state.text) { collapseRepeatedBlocks(state.text) }
+                MarkdownText(streamText, color = Color.White, fontSize = 15.sp)
             }
 
             if (state.isDone && timeline.isNotEmpty()) {

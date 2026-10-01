@@ -1,9 +1,10 @@
-Hermes Hub 0.6.199 (fix doppia risposta, edit confermato)
+Hermes Hub 0.6.200 (anti-ripetizione, pill, allegati, skill)
 
-- Android chat: lo snapshot finale con micro-differenze sostituisce invece di duplicare (niente più risposta doppia).
-- Edit immagini: verificato pesi (DiT bf16 + TE qwen3vl int8 + VAE bf16, gli stessi della repo a precisione maggiore); i pe_* sono prompt-enhancer, rimossi; denoise 1.0 come repo; test cursore superato.
-- Versioni: Windows/AdminBridge `0.6.199`; Android `versionName 0.6.199`, `versionCode 203`.
-- Asset: `HermesHub-0.6.199-android.apk` (binario Windows invariato).
-- SHA-256 Android: `d2c0a29b28c0fea68b28d0701a86b443d121ab9d748d93d505ce91a3f5842980`.
-- Asset: `HermesHub-0.6.199-linux-gateway.tar.gz`.
-- SHA-256 gateway: `1021f544ea6bfed6739d892d16871d66053947f10344d92fddcafd968b1a7fa9`.
+- Android chat: collapse blocchi ripetuti a display (niente più risposte 2x/4x); pill modello rimossa; flag reasoning affianco al microfono con tendina e Auto reale (inviato esplicito se supportato).
+- Android chat: allegati pending persistenti tra riaperture; immagini inviate in chip compatta.
+- Server: skill hermes-local-media v2.0; disabilitate qwen-image-21-native-edit e comfyui generica; Qwen resta bf16/int8 (Q4 da chiarire).
+- Versioni: Windows/AdminBridge `0.6.200`; Android `versionName 0.6.200`, `versionCode 204`.
+- Asset: `HermesHub-0.6.200-android.apk` (binario Windows invariato).
+- SHA-256 Android: `b55016a5a4742f8cb2e12a3434f59f51aac0690d0ba1dc8984643ff9d8a4ed2d`.
+- Asset: `HermesHub-0.6.200-linux-gateway.tar.gz`.
+- SHA-256 gateway: `149deae9d29c4362e59cfd4371e8572601f078d874683e459c2babe0897e03ad`.

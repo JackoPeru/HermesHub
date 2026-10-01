@@ -79,6 +79,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -449,6 +450,23 @@ internal fun ChatScreen(
             }
         }
     }
+    // Allegati pending persistenti: rientrando in app (o nella conversazione)
+    // la foto allegata al prompt e' ancora li'.
+    var restoredPendingFor by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.activeConversationId) {
+        val cid = state.activeConversationId
+        if (restoredPendingFor != cid) {
+            if (state.pendingAttachments.isEmpty()) {
+                loadPendingAttachments(context, cid).forEach { state.pendingAttachments.add(it) }
+            }
+            restoredPendingFor = cid
+        }
+    }
+    LaunchedEffect(state.pendingAttachments.size, state.activeConversationId) {
+        if (restoredPendingFor == state.activeConversationId) {
+            savePendingAttachments(context, state.activeConversationId, state.pendingAttachments.toList())
+        }
+    }
     LaunchedEffect(isStreaming) {
         if (!isStreaming && state.messages.isNotEmpty()) {
             runCatching { haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
@@ -716,6 +734,19 @@ internal fun ChatScreen(
             context = context
         )
 
+        val reasoningLadder = remember(state.chatModelCatalog, state.chatCapabilities, state.chatModelOverride, state.chatProviderOverride) {
+            val caps = state.chatCapabilities
+            val catalog = state.chatModelCatalog
+            val selected = catalog.models.firstOrNull {
+                it.id == state.chatModelOverride && (state.chatProviderOverride.isBlank() || it.provider == state.chatProviderOverride)
+            }
+            when {
+                selected != null && selected.reasoningEfforts.isNotEmpty() && caps?.reasoningEfforts?.isNotEmpty() == true ->
+                    selected.reasoningEfforts.filter { eff -> caps.supportsReasoningEffort(eff) }
+                caps?.reasoningEfforts?.isNotEmpty() == true -> caps.reasoningEfforts
+                else -> FALLBACK_REASONING_EFFORTS
+            }
+        }
         Composer(
             value = state.draft,
             attachments = state.pendingAttachments,
@@ -734,6 +765,12 @@ internal fun ChatScreen(
                 scanUri?.let { scanLauncher.launch(it) }
             },
             onRemoveAttachment = { state.pendingAttachments.remove(it) },
+            reasoningEffort = state.chatReasoningEffort,
+            reasoningOptions = reasoningLadder,
+            onReasoningChange = {
+                state.chatReasoningEffort = it
+                persistChatOverrides(context, state)
+            },
             quickPrompt = quickPrompt,
             onQuickPromptConsumed = { quickPrompt = null },
             onSend = {
@@ -836,7 +873,11 @@ internal fun ChatScreen(
                         }
                         val effModel = state.chatModelOverride.ifBlank { botSettings.model }
                         val effProvider = state.chatProviderOverride.ifBlank { botSettings.provider }
-                        val effReasoning = state.chatReasoningEffort.ifBlank { botSettings.reasoningEffort }
+                        val effReasoning = state.chatReasoningEffort.ifBlank { botSettings.reasoningEffort }.ifBlank {
+                            // Auto reale: se il server pubblicizza "auto" lo inviamo
+                            // esplicito, altrimenti omettiamo (default server).
+                            if (capsSnapshot?.reasoningEfforts?.any { it.equals("auto", ignoreCase = true) } == true) "auto" else ""
+                        }
 
                         suspend fun collectFlow(flow: kotlinx.coroutines.flow.Flow<ChatStreamEvent>) {
                             flow.collect { event ->
@@ -1578,6 +1619,12 @@ internal fun Card(
 
 @Composable
 internal fun MessageBubble(message: ChatMessage, settings: AppSettings) {
+    // Anti-ripetizione a display: se il testo contiene lo stesso blocco 2x/4x
+    // (server o merge concorrenti), mostra una copia sola. Solo assistente.
+    val displayText = remember(message.text, message.fromUser, message.isAction) {
+        if (!message.fromUser && !message.isAction) collapseRepeatedBlocks(message.text)
+        else message.text
+    }
     SelectionContainer {
         if (!message.fromUser && !message.isAction) {
             Column(
@@ -1590,7 +1637,7 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings) {
                     Box(modifier = Modifier.size(7.dp).background(AppColors.Accent, CircleShape))
                     Text("HERMES", color = AppColors.Faint, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
                 }
-                MarkdownText(message.text, color = Color.White, fontSize = 15.sp)
+                MarkdownText(displayText, color = Color.White, fontSize = 15.sp)
                 ArchivedActivityDisclosure(message.activityTimeline, message.thinking, settings.showToolCalls)
                 if (message.visualBlocks.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1632,7 +1679,7 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings) {
                     if (message.fromUser || message.isAction) {
                         Text(text = message.text, color = Color.White)
                     } else {
-                        MarkdownText(message.text, color = Color.White)
+                        MarkdownText(displayText, color = Color.White)
                         ArchivedActivityDisclosure(message.activityTimeline, message.thinking, settings.showToolCalls)
                     }
                     if (message.visualBlocks.isNotEmpty()) {
@@ -2437,13 +2484,40 @@ internal fun MediaFileBlock(block: VisualBlock) {
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (isLocalAttachment && block.mediaKind == "image") {
-            decodeAttachmentPreview(block.localDataUrl)?.let { bitmap ->
-                Image(
-                    bitmap = bitmap.asImageBitmap(),
-                    contentDescription = block.alt.ifBlank { block.filename },
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
-                    contentScale = ContentScale.Fit
-                )
+            // Allegato appena inviato: resta compatto come nel composer,
+            // niente canvas grande con nome file.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                decodeAttachmentPreview(block.localDataUrl)?.let { bitmap ->
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = block.alt.ifBlank { block.filename },
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(12.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+                Column(modifier = Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = block.filename.ifBlank { block.title.ifBlank { block.alt } },
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = listOf(block.mimeType, formatMediaBytes(block.sizeBytes))
+                            .filter { it.isNotBlank() }.joinToString(" · "),
+                        color = AppColors.Muted,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         } else if (previewSource.isNotBlank()) {
             RemoteGalleryImage(
@@ -2457,6 +2531,10 @@ internal fun MediaFileBlock(block: VisualBlock) {
             )
         }
 
+        if (isLocalAttachment && block.mediaKind == "image") {
+            // Chip compatta già mostrata sopra: niente scheda info.
+            return@Column
+        }
         Surface(color = AppColors.Composer, shape = RoundedCornerShape(10.dp)) {
             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
@@ -2981,9 +3059,6 @@ internal fun ChatModelSessionBar(
     scope: kotlinx.coroutines.CoroutineScope
 ) {
     val caps = state.chatCapabilities
-    val catalog = state.chatModelCatalog
-    var showModelDialog by remember { mutableStateOf(false) }
-    var showReasoningDialog by remember { mutableStateOf(false) }
     var showSteerDialog by remember { mutableStateOf(false) }
     var steerText by remember { mutableStateOf("") }
     var steerStatus by remember { mutableStateOf("") }
@@ -2991,18 +3066,6 @@ internal fun ChatModelSessionBar(
     val runId = streaming?.activeRunId
     val steerable = !runId.isNullOrBlank() && streaming?.isDone == false &&
         (caps?.supportsSteer() ?: false) && streaming?.runStatus !in listOf("completed", "failed", "cancelled")
-    val effModel = state.chatModelOverride.ifBlank { settings.model }
-    val effProvider = state.chatProviderOverride.ifBlank { settings.provider }
-    val selectedOption = catalog.models.firstOrNull {
-        it.id == state.chatModelOverride && (state.chatProviderOverride.isBlank() || it.provider == state.chatProviderOverride)
-    }
-    val ladder = when {
-        selectedOption != null && selectedOption.reasoningEfforts.isNotEmpty() && caps?.reasoningEfforts?.isNotEmpty() == true ->
-            selectedOption.reasoningEfforts.filter { eff -> caps.supportsReasoningEffort(eff) }
-        caps?.reasoningEfforts?.isNotEmpty() == true -> caps.reasoningEfforts
-        else -> FALLBACK_REASONING_EFFORTS
-    }
-    val reasoningVisible = ladder.isNotEmpty()
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -3016,136 +3079,11 @@ internal fun ChatModelSessionBar(
                 IconButton(onClick = { steerStatus = ""; showSteerDialog = true }, modifier = Modifier.size(34.dp)) { Icon(Icons.Rounded.Edit, contentDescription = "Correggi run in corso", tint = AppColors.Muted, modifier = Modifier.size(20.dp)) }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Button(onClick = { showModelDialog = true }, modifier = Modifier.weight(1f)) {
-                Text(
-                    if (state.chatModelOverride.isBlank()) "Modello: $effModel (default)"
-                    else "Modello: ${state.chatModelOverride}${effProvider.takeIf { it.isNotBlank() && !it.equals("hermes-agent", true) }?.let { " · $it" }.orEmpty()}",
-                    fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
-                )
-            }
-            if (reasoningVisible) {
-                Button(onClick = { showReasoningDialog = true }) {
-                    Text(if (state.chatReasoningEffort.isBlank()) "Reasoning: auto" else "Reasoning: ${state.chatReasoningEffort}", fontSize = 12.sp)
-                }
-            }
-        }
         if (streaming?.pendingSteer?.isNotBlank() == true) {
             Text("Steer non consegnato: riproponilo come turno successivo.", color = AppColors.Muted, fontSize = 11.sp)
         }
     }
 
-    if (showModelDialog) {
-        AlertDialog(
-            onDismissRequest = { showModelDialog = false },
-            title = { Text(if (catalog.models.isEmpty() && catalog.providers.isEmpty()) "Modello" else "Modello Hermes (${catalog.source})") },
-            text = {
-                LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
-                    if (catalog.models.isEmpty() && catalog.providers.isEmpty()) {
-                        item {
-                            Text(
-                                "Catalogo non caricato. Verifica gateway e API key, oppure digita provider/modello nelle Impostazioni.",
-                                color = AppColors.Muted, fontSize = 12.sp
-                            )
-                        }
-                    }
-                    if (catalog.models.isEmpty() && catalog.providers.isNotEmpty()) {
-                        item {
-                            Text(
-                                "Il server non espone singoli modelli (solo provider). Il backend LLM resta quello configurato sul server.",
-                                color = AppColors.Muted, fontSize = 12.sp
-                            )
-                        }
-                    }
-                    item {
-                        TextButton(onClick = {
-                            state.chatModelOverride = ""
-                            state.chatProviderOverride = ""
-                            persistChatOverrides(context, state)
-                            showModelDialog = false
-                        }) { Text("Usa default server (${settings.model})") }
-                    }
-                    items(catalog.providers.take(20), key = { "provider::${it.slug}" }) { row ->
-                        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                            Text(row.displayName, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                if (!row.available) "non disponibile"
-                                else row.warning ?: "provider server",
-                                color = AppColors.Muted, fontSize = 11.sp
-                            )
-                        }
-                    }
-                    items(catalog.models.take(40), key = { it.id + "::" + it.provider }) { opt ->
-                        Column(modifier = Modifier.fillMaxWidth().clickable {
-                            state.chatModelOverride = opt.id
-                            state.chatProviderOverride = opt.provider
-                            // Se il nuovo modello non supporta l'effort corrente, resettalo.
-                            val okEffort = state.chatReasoningEffort.isBlank() ||
-                                (opt.reasoningEfforts.isEmpty() && ladder.contains(state.chatReasoningEffort)) ||
-                                opt.reasoningEfforts.any { it.equals(state.chatReasoningEffort, true) }
-                            if (!okEffort) state.chatReasoningEffort = ""
-                            persistChatOverrides(context, state)
-                            // Model lock persistente server-side (precedence #1 sui turni della sessione).
-                            // Fallimento MAI silenzioso: il turno usa comunque model/provider/model_options.
-                            val sid = state.hermesSessionId
-                            if (!sid.isNullOrBlank() && state.chatCapabilities?.sessionModelLock == true) {
-                                scope.launch {
-                                    val code = runCatching {
-                                        HermesSessionClient(botSettings, botApiKey, botProfile, botMultiplexEnabled, state.chatCapabilities)
-                                            .lockModel(sid, opt.id, opt.provider.takeIf { p -> p.isNotBlank() }).first
-                                    }.getOrElse { 0 }
-                                    hermesModelLockWarning(code, opt.displayName)?.let { warning ->
-                                        state.messages.add(ChatMessage("Hermes Hub", warning, fromUser = false, isAction = true))
-                                    }
-                                }
-                            }
-                            showModelDialog = false
-                        }.padding(vertical = 6.dp)) {
-                            Text(opt.displayName, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                buildString {
-                                    append(opt.provider.ifBlank { "default" })
-                                    opt.contextWindow?.let { append(" · ctx $it") }
-                                    if (opt.reasoningSupported) append(" · reasoning")
-                                    opt.warning?.let { append(" · $it") }
-                                },
-                                color = AppColors.Muted, fontSize = 11.sp
-                            )
-                            opt.pricing?.let { p ->
-                                Text("pricing: ${p.toString().take(120)}", color = AppColors.Faint, fontSize = 10.sp)
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { showModelDialog = false }) { Text("Chiudi") } }
-        )
-    }
-    if (showReasoningDialog) {
-        AlertDialog(
-            onDismissRequest = { showReasoningDialog = false },
-            title = { Text("Reasoning effort") },
-            text = {
-                LazyColumn {
-                    item {
-                        TextButton(onClick = {
-                            state.chatReasoningEffort = ""
-                            persistChatOverrides(context, state)
-                            showReasoningDialog = false
-                        }) { Text("Auto (default server)") }
-                    }
-                    items(ladder) { eff ->
-                        TextButton(onClick = {
-                            state.chatReasoningEffort = eff
-                            persistChatOverrides(context, state)
-                            showReasoningDialog = false
-                        }) { Text(eff) }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { showReasoningDialog = false }) { Text("Chiudi") } }
-        )
-    }
     if (showSteerDialog && runId != null) {
         AlertDialog(
             onDismissRequest = { showSteerDialog = false },
@@ -3324,6 +3262,9 @@ internal fun Composer(
     onTakePhoto: () -> Unit,
     onScanDocument: () -> Unit,
     onRemoveAttachment: (ChatInputAttachment) -> Unit,
+    reasoningEffort: String,
+    reasoningOptions: List<String>,
+    onReasoningChange: (String) -> Unit,
     quickPrompt: String?,
     onQuickPromptConsumed: () -> Unit,
     onSend: () -> Unit,
@@ -3507,6 +3448,47 @@ internal fun Composer(
                     if (value.isEmpty()) {
                         Text("Fai una domanda", color = AppColors.Faint, fontSize = 16.sp)
                     }
+                    }
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+
+                var showReasoningMenu by remember { mutableStateOf(false) }
+                Box {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = AppColors.Surface,
+                        border = BorderStroke(1.dp, AppColors.Border),
+                        modifier = Modifier
+                            .height(42.dp)
+                            .clickable { showReasoningMenu = true }
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(horizontal = 10.dp).fillMaxHeight()
+                        ) {
+                            Text(
+                                reasoningEffort.ifBlank { "Auto" },
+                                color = AppColors.Muted,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = showReasoningMenu,
+                        onDismissRequest = { showReasoningMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Auto") },
+                            onClick = { showReasoningMenu = false; onReasoningChange("") }
+                        )
+                        reasoningOptions.forEach { eff ->
+                            DropdownMenuItem(
+                                text = { Text(eff) },
+                                onClick = { showReasoningMenu = false; onReasoningChange(eff) }
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.width(8.dp))

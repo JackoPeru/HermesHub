@@ -1,12 +1,60 @@
 package com.nemoclaw.chat
 
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.core.content.edit
 import kotlinx.coroutines.Job
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+
+private const val PENDING_ATTACHMENTS_PREFS = "chatclaw_pending_attachments"
+
+internal fun savePendingAttachments(context: Context, conversationId: String?, attachments: List<ChatInputAttachment>) {
+    runCatching {
+        val arr = JSONArray()
+        attachments.forEach {
+            val path = it.localFilePath
+            if (!path.isNullOrBlank() && File(path).isFile) {
+                arr.put(
+                    JSONObject()
+                        .put("filename", it.filename)
+                        .put("mimeType", it.mimeType)
+                        .put("sizeBytes", it.sizeBytes)
+                        .put("localFilePath", path)
+                )
+            }
+        }
+        context.getSharedPreferences(PENDING_ATTACHMENTS_PREFS, Context.MODE_PRIVATE).edit {
+            putString("pending:${conversationId.orEmpty()}", arr.toString())
+        }
+    }
+}
+
+internal fun loadPendingAttachments(context: Context, conversationId: String?): List<ChatInputAttachment> {
+    return runCatching {
+        val raw = context.getSharedPreferences(PENDING_ATTACHMENTS_PREFS, Context.MODE_PRIVATE)
+            .getString("pending:${conversationId.orEmpty()}", null) ?: return emptyList()
+        val arr = JSONArray(raw)
+        List(arr.length()) { index ->
+            val obj = arr.getJSONObject(index)
+            ChatInputAttachment(
+                filename = obj.optString("filename"),
+                mimeType = obj.optString("mimeType"),
+                sizeBytes = obj.optLong("sizeBytes"),
+                localFilePath = obj.optString("localFilePath").takeIf { it.isNotBlank() }
+            )
+        }.filter { item ->
+            val path = item.localFilePath
+            !path.isNullOrBlank() && File(path).isFile
+        }
+    }.getOrDefault(emptyList())
+}
 
 internal data class ActiveStreamState(
     val streamingState: StreamingState?,

@@ -588,16 +588,9 @@ internal fun mergeTextSnapshot(current: String, snapshot: String): String {
     if (snapshot.contains(current)) return snapshot
     if (current.contains(snapshot)) return current
     // Stesso testo riemesso con micro-differenze (snapshot finale cumulativo
-    // dopo i delta: ritokenizzazione, spaziatura). Lungo prefisso e suffisso
-    // comuni => vince lo snapshot, altrimenti la risposta appare due volte.
-    val minLen = minOf(current.length, snapshot.length)
-    if (minLen >= 64 && snapshot.length >= current.length / 2 && snapshot.length <= current.length * 2 + 256) {
-        var prefix = 0
-        while (prefix < minLen && current[prefix] == snapshot[prefix]) prefix++
-        var suffix = 0
-        while (suffix < minLen - prefix && current[current.length - 1 - suffix] == snapshot[snapshot.length - 1 - suffix]) suffix++
-        if (prefix >= 48 && suffix >= 16 && prefix + suffix >= minLen * 3 / 5) return snapshot
-    }
+    // dopo i delta: ritokenizzazione, spaziatura). Blocchi quasi identici
+    // => vince lo snapshot, altrimenti la risposta appare due volte.
+    if (nearDuplicateBlocks(current, snapshot)) return snapshot
     // Snapshot non cumulativo (chunk sequenziali del server): accoda invece di
     // sostituire, altrimenti resta visibile solo l'ultimo token generato.
     // Se la coda di current coincide con la testa di snapshot (finestre
@@ -611,6 +604,44 @@ internal fun mergeTextSnapshot(current: String, snapshot: String): String {
         }
     }
     return current + snapshot.drop(overlap)
+}
+
+internal fun nearDuplicateBlocks(first: String, second: String): Boolean {
+    val minLen = minOf(first.length, second.length)
+    if (minLen < 64) return first == second
+    if (second.length < first.length / 2 || second.length > first.length * 2 + 256) return false
+    var prefix = 0
+    while (prefix < minLen && first[prefix] == second[prefix]) prefix++
+    if (prefix >= minLen) return true
+    var suffix = 0
+    while (suffix < minLen - prefix && first[first.length - 1 - suffix] == second[second.length - 1 - suffix]) suffix++
+    return prefix >= 48 && suffix >= 16 && prefix + suffix >= minLen * 3 / 5
+}
+
+/**
+ * Collassa blocchi consecutivi quasi identici (risposta emessa 2x/4x dal
+ * server o da merge concorrenti): mostra una sola copia. Solo display,
+ * non altera i dati salvati/sincronizzati.
+ */
+internal fun collapseRepeatedBlocks(text: String): String {
+    var result = text
+    for (reps in listOf(4, 3, 2)) {
+        val segLen = result.length / reps
+        if (segLen < 64 || result.length % reps != 0) continue
+        val first = result.take(segLen)
+        var ok = true
+        for (i in 1 until reps) {
+            if (!nearDuplicateBlocks(first, result.drop(i * segLen).take(segLen))) {
+                ok = false
+                break
+            }
+        }
+        if (ok) {
+            result = first
+            break
+        }
+    }
+    return result
 }
 
 private fun inferToolPendingStatus(tool: ToolCallState): Boolean {

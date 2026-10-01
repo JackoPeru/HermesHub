@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.200 - 2026-10-01
+
+- Chat: anti-ripetizione a display (blocchi 2x/4x collassati), pill modello rimossa, flag reasoning affianco al microfono con Auto reale.
+- Chat: allegati pending persistenti, immagini inviate compatte.
+- Skill hermes-local-media v2.0 riscritta; disabilitate qwen-image-21-native-edit (preset fantasma) e comfyui generica.
+
 ## 0.6.199 - 2026-10-01
 
 - Chat: fix doppia risposta (snapshot finale con micro-differenze non più accodato).
