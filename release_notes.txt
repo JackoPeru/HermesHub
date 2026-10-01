@@ -1,11 +1,9 @@
-Hermes Hub 0.6.198 (menu + minimal, fine-chat, edit fedele, worker fix)
+Hermes Hub 0.6.199 (fix doppia risposta, edit confermato)
 
-- Android chat: menu + in bottom-sheet minimal con 3 voci (Allega file, Scatta foto, Scansiona documento); allegati silenziosi con card; Scatta foto ora allega davvero via FileProvider.
-- Android chat: bottone freccia-giu scorre a fine risposta.
-- Android chat: flag LLM con aggiornamento live ogni 3s a menu aperto.
-- Manager: fix worker che ignorava coda/media a LLM_READY (flag e job ora partono sempre), heartbeat worker_alive_s, task reference anti-GC; edit nativo con denoise 0.8, negative repo, image_2 opzionale (già live sul server).
-- Versioni: Windows/AdminBridge `0.6.198`; Android `versionName 0.6.198`, `versionCode 202`.
-- Asset: `HermesHub-0.6.198-android.apk` (binario Windows invariato).
-- SHA-256 Android: `aeeb9d998e42a6cf3959ca00c28157d280853cef72175bea5dc11001e8c667c1`.
-- Asset: `HermesHub-0.6.198-linux-gateway.tar.gz`.
-- SHA-256 gateway: `f2ef20b0c89436a3f38c2cdd453c0f325e7c5ed5657db213ccf19c3c09fdfdf0`.
+- Android chat: lo snapshot finale con micro-differenze sostituisce invece di duplicare (niente più risposta doppia).
+- Edit immagini: verificato pesi (DiT bf16 + TE qwen3vl int8 + VAE bf16, gli stessi della repo a precisione maggiore); i pe_* sono prompt-enhancer, rimossi; denoise 1.0 come repo; test cursore superato.
+- Versioni: Windows/AdminBridge `0.6.199`; Android `versionName 0.6.199`, `versionCode 203`.
+- Asset: `HermesHub-0.6.199-android.apk` (binario Windows invariato).
+- SHA-256 Android: `d2c0a29b28c0fea68b28d0701a86b443d121ab9d748d93d505ce91a3f5842980`.
+- Asset: `HermesHub-0.6.199-linux-gateway.tar.gz`.
+- SHA-256 gateway: `1021f544ea6bfed6739d892d16871d66053947f10344d92fddcafd968b1a7fa9`.

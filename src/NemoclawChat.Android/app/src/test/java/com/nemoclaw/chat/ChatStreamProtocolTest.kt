@@ -39,6 +39,21 @@ class ChatStreamProtocolTest {
     }
 
     @Test
+    fun finalSnapshotWithMicroDifferencesReplacesInsteadOfDuplicating() {
+        // Delta + snapshot finale cumulativo con ritokenizzazione diversa:
+        // la risposta deve apparire una volta sola (bug: doppia risposta).
+        val fromDeltas = "Journey_edit, cioe Qwen-Image-2.1 edit nativo via GPU manager. " +
+            "Una input single, niente maschere ne ControlNet: prompt con lista " +
+            "REMOVE (i vestiti, completamente nuda) e lista KEEP (viso, capelli, " +
+            "occhiali, sfondo). Poi verifico colvision e correggo quello che serve."
+        val finalSnapshot = "Journey_edit, cioe Qwen-Image-2.1 edit nativo via GPU manager. " +
+            "Una input single, niente maschere ne ControlNet: prompt con lista " +
+            "REMOVE (i vestiti, completamente nuda) e lista KEEP (viso, capelli, " +
+            "occhiali, sfondo). Poi verifico col vision e correggo quello che serve."
+        assertEquals(finalSnapshot, mergeTextSnapshot(fromDeltas, finalSnapshot))
+    }
+
+    @Test
     fun terminalDetectionRequiresExplicitProtocolSignal() {
         assertTrue(isTerminalSseEvent(null, "[DONE]"))
         assertTrue(isTerminalSseEvent("response.completed", "{}"))

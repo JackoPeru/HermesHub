@@ -587,6 +587,17 @@ internal fun mergeTextSnapshot(current: String, snapshot: String): String {
     // Stesso contenuto con wrapping diverso (es. "\n\nFinale..."): vince lo snapshot.
     if (snapshot.contains(current)) return snapshot
     if (current.contains(snapshot)) return current
+    // Stesso testo riemesso con micro-differenze (snapshot finale cumulativo
+    // dopo i delta: ritokenizzazione, spaziatura). Lungo prefisso e suffisso
+    // comuni => vince lo snapshot, altrimenti la risposta appare due volte.
+    val minLen = minOf(current.length, snapshot.length)
+    if (minLen >= 64 && snapshot.length >= current.length / 2 && snapshot.length <= current.length * 2 + 256) {
+        var prefix = 0
+        while (prefix < minLen && current[prefix] == snapshot[prefix]) prefix++
+        var suffix = 0
+        while (suffix < minLen - prefix && current[current.length - 1 - suffix] == snapshot[snapshot.length - 1 - suffix]) suffix++
+        if (prefix >= 48 && suffix >= 16 && prefix + suffix >= minLen * 3 / 5) return snapshot
+    }
     // Snapshot non cumulativo (chunk sequenziali del server): accoda invece di
     // sostituire, altrimenti resta visibile solo l'ultimo token generato.
     // Se la coda di current coincide con la testa di snapshot (finestre

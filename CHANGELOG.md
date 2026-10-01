@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.199 - 2026-10-01
+
+- Chat: fix doppia risposta (snapshot finale con micro-differenze non più accodato).
+- Edit: stack confermato repo-identico (qwen3vl TE + denoise 1.0); i file pe_* sono prompt-enhancer, non encoder.
+
 ## 0.6.198 - 2026-10-01
 
 - Chat: menu + ridotto a 3 voci (file, foto, scansione) in bottom-sheet minimal, allegati silenziosi, scatto foto funzionante con FileProvider.
