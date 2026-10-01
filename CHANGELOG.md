@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.198 - 2026-10-01
+
+- Chat: menu + ridotto a 3 voci (file, foto, scansione) in bottom-sheet minimal, allegati silenziosi, scatto foto funzionante con FileProvider.
+- Chat: bottone fine-chat scorre a fine risposta (non a inizio ultima).
+- Edit immagini: denoise configurabile (default 0.8 per restare fedeli), negative repo di default, seconda immagine riferimento opzionale.
+- Manager: fix worker che ignorava la coda a LLM caricato, heartbeat worker_alive_s, reference forte al task.
+
 ## 0.6.197 - 2026-10-01
 
 - Chat: la penna in alto a destra diventa menu a 3 puntini (impostazioni rapide); dentro: Nuova chat e flag LLM su GPU (stato reale da gpu-manager, accende/scarica il modello al tocco).

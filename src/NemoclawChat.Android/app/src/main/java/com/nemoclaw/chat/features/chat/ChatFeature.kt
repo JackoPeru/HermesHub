@@ -62,6 +62,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -110,6 +111,7 @@ import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Edit
@@ -152,6 +154,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -421,7 +424,6 @@ internal fun ChatScreen(
                 val attachment = withContext(Dispatchers.IO) { createAttachmentFromUri(context, uri, settings.maxAttachmentMb) }
                 if (attachment != null) {
                     state.pendingAttachments.add(attachment)
-                    state.messages.add(ChatMessage("Allegato", "${attachment.filename} pronto per Hermes (${attachment.sizeBytes.toReadableFileSize()}).", fromUser = false, isAction = true))
                 } else {
                     state.messages.add(ChatMessage("Allegato", "File vuoto, non leggibile o troppo grande. Limite attuale: ${settings.maxAttachmentMb} MB.", fromUser = false, isAction = true))
                 }
@@ -431,7 +433,21 @@ internal fun ChatScreen(
     var scanUri by remember { mutableStateOf<Uri?>(null) }
     val scanLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val uri = scanUri
-        if (ok && uri != null) scope.launch { createAttachmentFromUri(context, uri, settings.maxAttachmentMb)?.let { attachment -> state.pendingAttachments.add(attachment.copy(filename = "scansione-${System.currentTimeMillis()}.jpg")); state.messages.add(ChatMessage("Scanner", "Documento acquisito e allegato.", false, isAction = true)) } }
+        if (ok && uri != null) scope.launch { createAttachmentFromUri(context, uri, settings.maxAttachmentMb)?.let { attachment -> state.pendingAttachments.add(attachment.copy(filename = "scansione-${System.currentTimeMillis()}.jpg")) } }
+    }
+    var photoUri by remember { mutableStateOf<Uri?>(null) }
+    val photoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val uri = photoUri
+        if (ok && uri != null) {
+            scope.launch {
+                val attachment = withContext(Dispatchers.IO) { createAttachmentFromUri(context, uri, settings.maxAttachmentMb) }
+                if (attachment != null) {
+                    state.pendingAttachments.add(attachment.copy(filename = "foto-${System.currentTimeMillis()}.jpg"))
+                } else {
+                    android.widget.Toast.makeText(context, "Scatto non riuscito.", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
     LaunchedEffect(isStreaming) {
         if (!isStreaming && state.messages.isNotEmpty()) {
@@ -583,7 +599,15 @@ internal fun ChatScreen(
                     onClick = {
                         scope.launch {
                             val total = listState.layoutInfo.totalItemsCount
-                            if (total > 0) listState.animateScrollToItem(total - 1)
+                            if (total > 0) {
+                                listState.animateScrollToItem(total - 1)
+                                val info = listState.layoutInfo
+                                val last = info.visibleItemsInfo.lastOrNull()
+                                if (last != null) {
+                                    val remaining = last.offset + last.size - info.viewportEndOffset
+                                    if (remaining > 0) listState.animateScrollBy(remaining.toFloat())
+                                }
+                            }
                         }
                     },
                     modifier = Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 14.dp),
@@ -693,21 +717,15 @@ internal fun ChatScreen(
         )
 
         Composer(
-            context = context,
             value = state.draft,
             attachments = state.pendingAttachments,
             onValueChange = { state.draft = it },
             onAttachImage = { filePicker.launch("*/*") },
-            onPasteImage = {
-                scope.launch {
-                    val attachment = withContext(Dispatchers.IO) { createAttachmentFromClipboard(context, settings.maxAttachmentMb) }
-                    if (attachment != null) {
-                        state.pendingAttachments.add(attachment)
-                        state.messages.add(ChatMessage("Incolla immagine", "${attachment.filename} pronta per Hermes (${attachment.sizeBytes.toReadableFileSize()}).", fromUser = false, isAction = true))
-                    } else {
-                        android.widget.Toast.makeText(context, "Nessuna immagine valida negli appunti", android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                }
+            onTakePhoto = {
+                val directory = File(context.cacheDir, "attachments").apply { mkdirs() }
+                val file = File(directory, "foto-${System.currentTimeMillis()}.jpg")
+                photoUri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                photoUri?.let { photoLauncher.launch(it) }
             },
             onScanDocument = {
                 val directory = File(context.cacheDir, "attachments").apply { mkdirs() }
@@ -715,21 +733,7 @@ internal fun ChatScreen(
                 scanUri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
                 scanUri?.let { scanLauncher.launch(it) }
             },
-            onCaptureScreenshot = {
-                scope.launch {
-                    val attachment = captureHermesAppScreenshot(context, settings.maxAttachmentMb)
-                    if (attachment != null) { state.pendingAttachments.add(attachment); state.messages.add(ChatMessage("Screenshot", "Screenshot reale dell'app acquisito e allegato automaticamente.", false, isAction = true)) }
-                    else state.messages.add(ChatMessage("Screenshot", "Cattura screenshot non riuscita.", false, isAction = true))
-                }
-            },
             onRemoveAttachment = { state.pendingAttachments.remove(it) },
-            onAction = { title, text, prompt ->
-                state.messages.add(ChatMessage(title, text, fromUser = false, isAction = true))
-                if (prompt.isNotBlank()) {
-                    state.draft = if (state.draft.isBlank()) prompt else "${state.draft.trimEnd()}\n\n$prompt"
-                }
-            },
-            onModeChange = { state.mode = it },
             quickPrompt = quickPrompt,
             onQuickPromptConsumed = { quickPrompt = null },
             onSend = {
@@ -1259,6 +1263,21 @@ internal fun TopBar(
                 llmState = status.optString("current_state", "")
             }.exceptionOrNull()?.message ?: ""
             llmBusy = false
+        }
+    }
+
+    // Mentre il menu è aperto, ricampiona lo stato in silenzio così il flag
+    // segue le transizioni (caricamento/scaricamento) in tempo reale.
+    // L'effect si cancella da solo alla chiusura del menu.
+    LaunchedEffect(menuOpen, managerBase) {
+        if (!menuOpen) return@LaunchedEffect
+        while (true) {
+            delay(3_000)
+            llmError = runCatching {
+                val status = JSONObject(httpGet("$managerBase/status", null))
+                llmLoaded = status.optBoolean("llm_loaded", false)
+                llmState = status.optString("current_state", "")
+            }.exceptionOrNull()?.message ?: ""
         }
     }
 
@@ -3263,20 +3282,48 @@ internal fun ChatApprovalCards(
     }
 }
 
+@Composable
+internal fun AttachSheetRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Surface(
+            color = AppColors.Elevated,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.size(46.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Icon(icon, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(22.dp))
+            }
+        }
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun Composer(
-    context: Context,
     value: String,
     attachments: List<ChatInputAttachment>,
     onValueChange: (String) -> Unit,
     onAttachImage: () -> Unit,
-    onPasteImage: () -> Unit,
+    onTakePhoto: () -> Unit,
     onScanDocument: () -> Unit,
-    onCaptureScreenshot: () -> Unit,
     onRemoveAttachment: (ChatInputAttachment) -> Unit,
-    onAction: (String, String, String) -> Unit,
-    onModeChange: (String) -> Unit,
     quickPrompt: String?,
     onQuickPromptConsumed: () -> Unit,
     onSend: () -> Unit,
@@ -3285,17 +3332,12 @@ internal fun Composer(
     isRecordingVoiceNote: Boolean,
     onToggleVoiceNote: () -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(quickPrompt) {
         val prompt = quickPrompt ?: return@LaunchedEffect
         onValueChange(prompt)
         onSend()
         onQuickPromptConsumed()
-    }
-
-    fun queueAction(title: String, detail: String, prompt: String) {
-        onAction(title, detail, prompt)
     }
 
     Row(
@@ -3308,146 +3350,53 @@ internal fun Composer(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.Bottom
     ) {
-        Box {
-            Surface(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clickable { expanded = true },
-                color = AppColors.Composer,
-                shape = CircleShape,
-                border = BorderStroke(1.dp, AppColors.Border)
-            ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Icon(Icons.Rounded.Add, contentDescription = "Apri menu azioni", tint = AppColors.Muted, modifier = Modifier.size(25.dp))
-                }
+        var showSheet by remember { mutableStateOf(false) }
+        Surface(
+            modifier = Modifier
+                .size(48.dp)
+                .clickable { showSheet = true },
+            color = AppColors.Composer,
+            shape = CircleShape,
+            border = BorderStroke(1.dp, AppColors.Border)
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Icon(Icons.Rounded.Add, contentDescription = "Apri menu allegati", tint = AppColors.Muted, modifier = Modifier.size(25.dp))
             }
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false },
-                containerColor = AppColors.Elevated
+        }
+        if (showSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showSheet = false },
+                containerColor = AppColors.Surface,
+                contentColor = Color.White
             ) {
-                DropdownMenuItem(
-                    text = { Text("Allega file", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.AttachFile, null, tint = Color.White) },
-                    onClick = {
-                        expanded = false
-                        onAttachImage()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Incolla immagine", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.Image, null, tint = Color.White) },
-                    onClick = {
-                        expanded = false
-                        onPasteImage()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Cattura screenshot", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.CropFree, null, tint = Color.White) },
-                    onClick = {
-                        expanded = false
-                        onCaptureScreenshot()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Scansiona documento", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.PhotoCamera, null, tint = Color.White) },
-                    onClick = { expanded = false; onScanDocument() }
-                )
-                DropdownMenuItem(
-                    text = { Text("Scatta foto", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.PhotoCamera, null, tint = Color.White) },
-                    onClick = {
-                        expanded = false
-                        val opened = openAndroidIntent(context, Intent(MediaStore.ACTION_IMAGE_CAPTURE))
-                        queueAction(
-                            "Foto",
-                            if (opened) "Fotocamera Android aperta. Scatta la foto e allegala al task quando pronta." else "Nessuna app fotocamera disponibile. Seleziona una foto esistente dal menu file.",
-                            "Acquisisci una foto e usala come allegato per la conversazione."
-                        )
-                    }
-                )
-                HorizontalDivider(color = AppColors.Border)
-                DropdownMenuItem(
-                    text = { Text("Passa a modalita Chat", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.ChatBubbleOutline, null, tint = Color.White) },
-                    onClick = {
-                        expanded = false
-                        onModeChange("Chat")
-                        onAction("Modalita", "Chat attiva: messaggi normali, nessun task agente automatico.", "")
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Passa a modalita Agente", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.SmartToy, null, tint = Color.White) },
-                    onClick = {
-                        expanded = false
-                        onModeChange("Agente")
-                        onAction("Modalita", "Agente attivo: usa strumenti Hermes se disponibili, altrimenti fallback locale.", "")
-                    }
-                )
-                HorizontalDivider(color = AppColors.Border)
-                DropdownMenuItem(
-                    text = { Text("Crea immagine", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.Image, null, tint = Color.White) },
-                    onClick = {
-                        expanded = false
-                        queueAction(
-                            "Immagine",
-                            "Generazione immagine richiedera' tool Hermes dedicato e conferma prima di chiamate esterne.",
-                            "Prepara una richiesta di generazione immagine, ma chiedi conferma prima di usare tool esterni."
-                        )
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Deep Research locale", color = Color.White) },
-                    leadingIcon = { Icon(Icons.AutoMirrored.Rounded.ManageSearch, null, tint = Color.White) },
-                    onClick = {
-                        expanded = false
-                        queueAction(
-                            "Deep Research",
-                            "Ricerca approfondita locale; rete solo dopo approvazione esplicita.",
-                            "Esegui una ricerca approfondita e cita fonti, usando rete solo dopo approvazione."
-                        )
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Ricerca web autorizzata", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.Language, null, tint = Color.White) },
-                    onClick = {
-                        expanded = false
-                        queueAction(
-                            "Web",
-                            "Ricerca web marcata come azione autorizzabile: nessuna rete fuori LAN/VPN senza conferma.",
-                            "Cerca sul web informazioni aggiornate, chiedendo conferma prima di uscire dalla LAN/VPN."
-                        )
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Spiegazione visiva", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.Image, null, tint = Color.White) },
-                    onClick = {
-                        expanded = false
-                        queueAction(
-                            "Visuale",
-                            "Spiegazione visiva richiesta: Hermes usera' blocchi statici sicuri se disponibili.",
-                            "Spiega anche con blocchi visuali se utile: tabella, diagramma, chart o callout. Mantieni output_text completo."
-                        )
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Progetti e workspace", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.FolderOpen, null, tint = Color.White) },
-                    onClick = {
-                        expanded = false
-                        queueAction(
-                            "Workspace",
-                            "Workspace/progetti saranno collegati agli artifact Hermes con audit trail.",
-                            "Lavora sul workspace o progetto selezionato e mostra piano prima di modificare file."
-                        )
-                    }
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("Aggiungi alla chat", color = AppColors.Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    AttachSheetRow(
+                        icon = Icons.Rounded.AttachFile,
+                        title = "Allega file",
+                        subtitle = "Foto, video o documenti dalla galleria",
+                        onClick = { showSheet = false; onAttachImage() }
+                    )
+                    AttachSheetRow(
+                        icon = Icons.Rounded.PhotoCamera,
+                        title = "Scatta foto",
+                        subtitle = "Fotocamera, allegata subito in chat",
+                        onClick = { showSheet = false; onTakePhoto() }
+                    )
+                    AttachSheetRow(
+                        icon = Icons.Rounded.Description,
+                        title = "Scansiona documento",
+                        subtitle = "Scatto singolo nominato scansione",
+                        onClick = { showSheet = false; onScanDocument() }
+                    )
+                    Spacer(modifier = Modifier.navigationBarsPadding().height(12.dp))
+                }
             }
         }
 
@@ -3482,16 +3431,16 @@ internal fun Composer(
                                     }
                                 }
                                 Surface(
-                                    color = AppColors.Surface,
-                                    shape = RoundedCornerShape(12.dp),
+                                    color = AppColors.Elevated,
+                                    shape = RoundedCornerShape(16.dp),
                                     border = BorderStroke(1.dp, AppColors.Border)
                                 ) {
                                     Row(
                                         modifier = Modifier
                                             .widthIn(max = 260.dp)
-                                            .padding(6.dp),
+                                            .padding(8.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
                                         val p = preview
                                         if (p != null) {
@@ -3500,26 +3449,34 @@ internal fun Composer(
                                                 contentDescription = attachment.filename,
                                                 contentScale = ContentScale.Crop,
                                                 modifier = Modifier
-                                                    .size(52.dp)
-                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .size(56.dp)
+                                                    .clip(RoundedCornerShape(12.dp))
                                             )
                                         } else {
                                             Box(
                                                 modifier = Modifier
-                                                    .size(52.dp)
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(AppColors.Elevated),
+                                                    .size(56.dp)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(AppColors.Surface),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Icon(Icons.Rounded.Image, contentDescription = null, tint = AppColors.Accent)
                                             }
                                         }
-                                        Column(modifier = Modifier.weight(1f, fill = false)) {
-                                            Text(attachment.filename, color = Color.White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Column(modifier = Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Text(attachment.filename, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             Text("${attachment.mimeType} · ${attachment.sizeBytes.toReadableFileSize()}", color = AppColors.Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         }
-                                        IconButton(onClick = { onRemoveAttachment(attachment) }, modifier = Modifier.size(22.dp)) {
-                                            Icon(Icons.Rounded.Delete, contentDescription = "Rimuovi allegato", tint = AppColors.Muted, modifier = Modifier.size(14.dp))
+                                        Surface(
+                                            color = AppColors.Surface,
+                                            shape = CircleShape,
+                                            modifier = Modifier
+                                                .size(26.dp)
+                                                .clickable { onRemoveAttachment(attachment) }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                                Icon(Icons.Rounded.Close, contentDescription = "Rimuovi allegato", tint = AppColors.Muted, modifier = Modifier.size(14.dp))
+                                            }
                                         }
                                     }
                                 }

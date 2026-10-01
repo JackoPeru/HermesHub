@@ -1,11 +1,11 @@
-Hermes Hub 0.6.197 (menu 3 puntini, flag LLM, reboot server, voice ViewModel)
+Hermes Hub 0.6.198 (menu + minimal, fine-chat, edit fedele, worker fix)
 
-- Android chat: menu a 3 puntini al posto della penna (accanto al cerchio contesto); dentro Nuova chat e flag LLM su GPU con stato reale (accende/scarica il modello via /mode/llm e /mode/media).
-- Android profilo: bottone Riavvia server con conferma (POST /system/reboot, come sudo reboot now).
-- Manager: endpoint /system/reboot, cancel con stop ComfyUI, escaping JSON template, limite coda 429 (manager già dispiegato sul server).
-- Android voce: chiamata in ViewModel, la rotazione non uccide più la chiamata.
-- Versioni: Windows/AdminBridge `0.6.197`; Android `versionName 0.6.197`, `versionCode 201`.
-- Asset: `HermesHub-0.6.197-android.apk` (binario Windows invariato).
-- SHA-256 Android: `bf07d4968a62766ef3978f196240a96b22d1a44e747248ce91e63fce5201e41a`.
-- Asset: `HermesHub-0.6.197-linux-gateway.tar.gz` (include fix timeout curl in rehub-patch.sh).
-- SHA-256 gateway: `a74f711991053f0d8dbe6e6572c957e5d992cbcb4f0ef66b9a10e61e9e19663b`.
+- Android chat: menu + in bottom-sheet minimal con 3 voci (Allega file, Scatta foto, Scansiona documento); allegati silenziosi con card; Scatta foto ora allega davvero via FileProvider.
+- Android chat: bottone freccia-giu scorre a fine risposta.
+- Android chat: flag LLM con aggiornamento live ogni 3s a menu aperto.
+- Manager: fix worker che ignorava coda/media a LLM_READY (flag e job ora partono sempre), heartbeat worker_alive_s, task reference anti-GC; edit nativo con denoise 0.8, negative repo, image_2 opzionale (già live sul server).
+- Versioni: Windows/AdminBridge `0.6.198`; Android `versionName 0.6.198`, `versionCode 202`.
+- Asset: `HermesHub-0.6.198-android.apk` (binario Windows invariato).
+- SHA-256 Android: `aeeb9d998e42a6cf3959ca00c28157d280853cef72175bea5dc11001e8c667c1`.
+- Asset: `HermesHub-0.6.198-linux-gateway.tar.gz`.
+- SHA-256 gateway: `f2ef20b0c89436a3f38c2cdd453c0f325e7c5ed5657db213ccf19c3c09fdfdf0`.

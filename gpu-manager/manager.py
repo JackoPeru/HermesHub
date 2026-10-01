@@ -151,9 +151,9 @@ MEDIA_OUTPUT_DIR = "/opt/hermes/media-output"
 
 PRESETS = {
     "journey_image": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1_bf16", "file": "qwen/t2i.json"},
-    "journey_edit": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1_bf16", "file": "qwen/edit.json"},
+    "journey_edit": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1_bf16", "file": "qwen/edit.json", "needs_input": True},
     "journey_rgba": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1_bf16", "file": "qwen/rgba.json"},
-    "journey_product": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1_bf16", "file": "qwen/edit.json"},
+    "journey_product": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1_bf16", "file": "qwen/edit.json", "needs_input": True},
     "journey_video_preview": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8+turbo4", "file": "h3/i2v-turbo.json"},
     "journey_video_quality": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8", "file": "h3/i2v.json", "disabled": "DISABLED_FULLSTEPS_OOM"},
     "journey_video_first_last": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8", "file": "h3/first_last.json", "disabled": "DISABLED_FULLSTEPS_OOM"},
@@ -174,6 +174,48 @@ def _json_text(value: object) -> str:
     return json.dumps(str(value))[1:-1]
 
 
+# Default negative prompt shipped by the reference qwen-image-2.1-8gb
+# workflows. Used for Qwen presets when the caller passes none.
+REPO_DEFAULT_NEGATIVE = (
+    "low quality, worst quality, blurry, jpeg artifacts, noise, distorted, "
+    "deformed, bad anatomy, extra fingers, fused fingers, extra limbs, "
+    "disfigured face, watermark, text, signature, oversaturated, "
+    "plastic skin, cropped"
+)
+
+
+def _prune_unresolved_loads(workflow: dict) -> dict:
+    """Drop LoadImage nodes whose file was never staged (optional
+    INPUT_IMAGE_N slots) plus any references to them, so one template
+    serves single- and multi-reference calls."""
+    dead = {
+        nid
+        for nid, node in workflow.items()
+        if isinstance(node, dict)
+        and node.get("class_type") == "LoadImage"
+        and isinstance((node.get("inputs") or {}).get("image"), str)
+        and "{{" in str(node["inputs"]["image"])
+    }
+    if not dead:
+        return workflow
+
+    def refers_dead(value: object) -> bool:
+        return isinstance(value, list) and len(value) == 2 and value[0] in dead
+
+    for nid in dead:
+        del workflow[nid]
+    for node in workflow.values():
+        inputs = node.get("inputs") if isinstance(node, dict) else None
+        if not isinstance(inputs, dict):
+            continue
+        for key in [k for k, v in inputs.items() if refers_dead(v)]:
+            del inputs[key]
+        for key, val in list(inputs.items()):
+            if isinstance(val, dict):
+                inputs[key] = {sk: sv for sk, sv in val.items() if not refers_dead(sv)}
+    return workflow
+
+
 def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, str]:
     """Render a versioned workflow template. Returns (workflow, error)."""
     spec = PRESETS.get(preset)
@@ -188,12 +230,17 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
         return None, f"workflow template missing: {spec['file']}"
     params = dict(params or {})
     default_cfg = "6.0" if (PRESETS.get(preset) or {}).get("kind") == "video" else "1.0"
+    default_negative = (
+        REPO_DEFAULT_NEGATIVE
+        if (PRESETS.get(preset) or {}).get("backend") == "qwen-image-2.1"
+        else " "
+    )
     mapping = {
         "JOB_ID": job_id,
         "PROMPT": _json_text(params.get("prompt", "")),
-        "NEGATIVE_PROMPT": _json_text(params.get("negative_prompt", " ")),
+        "NEGATIVE_PROMPT": _json_text(params.get("negative_prompt") or default_negative),
         "SEED": str(params.get("seed", 7)),
-        "STEPS": str(params.get("steps", 20)),
+        "STEPS": str(params.get("steps", 25)),
         "CFG": str(params.get("cfg", default_cfg)),
         "RESOLUTION": str(params.get("resolution", 1024)),
         "DENOISE": str(params.get("denoise", 0.8)),
@@ -232,14 +279,17 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
         mapping[f"INPUT_IMAGE_{idx}"] = dest_name
     if staged:
         mapping["INPUT_IMAGE"] = staged[0]
+    elif spec.get("needs_input"):
+        return None, f"preset {preset} needs one input photo in input_images"
     for key, value in mapping.items():
         workflow_text = workflow_text.replace("{{" + key + "}}", value)
-    if "{{" in workflow_text:
-        return None, "unresolved template placeholders remain"
     try:
         workflow = json.loads(workflow_text)
     except (json.JSONDecodeError, ValueError) as exc:
         return None, f"rendered workflow is not valid JSON: {exc}"
+    workflow = _prune_unresolved_loads(workflow)
+    if "{{" in json.dumps(workflow):
+        return None, "unresolved template placeholders remain"
     problem = validate_workflow(workflow)
     if problem:
         return None, problem
@@ -930,11 +980,22 @@ async def comfy_busy() -> bool:
 
 async def drive_auto_once() -> None:
     """One reconciliation step. Called in a loop; never raises."""
+    _state["last_drive_ts"] = time.monotonic()
     try:
         await _drive()
     except Exception as exc:  # noqa: BLE001 - worker must survive everything
         log.warning("worker step failed: %r", exc)
         await asyncio.sleep(5)
+
+
+async def llm_watchdog() -> None:
+    """Throttled health check while the LLM should stay resident."""
+    now = time.monotonic()
+    if now - float(_state.get("llm_watch_ts") or 0.0) >= 30:
+        _state["llm_watch_ts"] = now
+        if not await llm_loaded():
+            log.warning("watchdog: LLM_READY but backend not loaded; restoring")
+            await restore_llm_with_retries("watchdog")
 
 
 async def _drive() -> None:
@@ -975,16 +1036,6 @@ async def _drive() -> None:
         if state == "BOOT":
             await reconcile_boot()
             return
-        if state == "LLM_READY":
-            # Steady-state watchdog: the backend can die (OOM, shm, crash)
-            # while we still believe it is ready. Verify cheaply, throttled.
-            now = time.monotonic()
-            if now - float(_state.get("llm_watch_ts") or 0.0) >= 30:
-                _state["llm_watch_ts"] = now
-                if not await llm_loaded():
-                    log.warning("watchdog: LLM_READY but backend not loaded; restoring")
-                    await restore_llm_with_retries("watchdog")
-            return
         if state == "ERROR":
             # Recover from any mode, throttled: a stuck ERROR used to need a
             # human restart. Prefer the desired path, fall back to LLM so the
@@ -1004,6 +1055,8 @@ async def _drive() -> None:
         if desired == "LLM":
             if state != "LLM_READY":
                 await restore_llm_with_retries("mode-llm")
+            else:
+                await llm_watchdog()
             return
         if desired == "MEDIA":
             if state == "LLM_READY":
@@ -1014,16 +1067,22 @@ async def _drive() -> None:
             if state in ("MEDIA_READY", "MEDIA_BUSY"):
                 await drain_media_queue()
             return
-        # AUTO
+        # AUTO: queued work pulls toward media, idleness back toward LLM.
         queue = queued_jobs()
-        if queue and state == "LLM_READY":
-            if not await transition_to_media():
-                for job in queue:
-                    update_job(job["job_id"], status="failed", error="media entry failed")
-                await restore_llm_with_retries("auto-entry-failed")
-                return
-            state = _state["current_state"]
-        if state in ("MEDIA_READY", "MEDIA_BUSY"):
+        if queue:
+            if state == "LLM_READY":
+                if not await transition_to_media():
+                    for job in queue:
+                        update_job(job["job_id"], status="failed", error="media entry failed")
+                    await restore_llm_with_retries("auto-entry-failed")
+                    return
+                state = _state["current_state"]
+            if state in ("MEDIA_READY", "MEDIA_BUSY"):
+                await drain_media_queue()
+            return
+        if state == "LLM_READY":
+            await llm_watchdog()
+        elif state in ("MEDIA_READY", "MEDIA_BUSY"):
             await drain_media_queue()
         elif state == "GPU_FREE":
             await restore_llm_with_retries("stray-gpu-free")
@@ -1138,6 +1197,7 @@ async def status(_: None = Depends(require_key)) -> dict:
     return {
         "desired_mode": _state["desired_mode"],
         "current_state": _state["current_state"],
+        "worker_alive_s": round(time.monotonic() - float(_state.get("last_drive_ts") or 0.0), 1),
         "llm_online": await llm_online(),
         "llm_loaded": await llm_loaded(),
         "media_online": await media_online(),
@@ -1292,10 +1352,17 @@ async def cancel_job(job_id: str, _: None = Depends(require_key)) -> dict:
     return get_job(job_id)
 
 
+# Strong reference to the worker task. asyncio holds only weak refs to
+# bare create_task() handles: without this the GC silently collects the
+# worker mid-run (observed live: queue stalls, no logs, restart revives).
+_worker_task: "asyncio.Task[None] | None" = None
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
+    global _worker_task
     _db_conn()
-    asyncio.create_task(worker_loop())
+    _worker_task = asyncio.create_task(worker_loop())
     log.info("hermes-gpu-manager starting, desired=%s", _state["desired_mode"])
 
 
