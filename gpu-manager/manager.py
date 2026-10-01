@@ -1194,9 +1194,24 @@ async def status(_: None = Depends(require_key)) -> dict:
         Path("/opt/hermes/models/minimax-h3/minimax_h3_video_vae_fp16.safetensors"),
     ]
     h3_ready = all(p.is_file() for p in h3_files)
+    desired = _state["desired_mode"]
+    state = _state["current_state"]
+    if state == "ERROR":
+        hint = f"worker error: {(_state['last_error'] or 'unknown')[:160]}"
+    elif desired == "AUTO" and state == "LLM_READY":
+        hint = "idle with LLM resident: submit a job, the worker starts media automatically"
+    elif desired == "MEDIA" and state == "LLM_READY":
+        hint = "switching to media: submit a job or wait for the transition"
+    elif state in ("MEDIA_READY", "MEDIA_BUSY"):
+        hint = "media up: submit jobs directly"
+    elif state in ("LLM_UNLOADING", "GPU_FREE", "MEDIA_STARTING", "MEDIA_STOPPING", "LLM_LOADING", "BOOT"):
+        hint = f"transition in progress ({state}): wait, do not resubmit"
+    else:
+        hint = "submit a job; the worker drives the GPUs"
     return {
-        "desired_mode": _state["desired_mode"],
-        "current_state": _state["current_state"],
+        "desired_mode": desired,
+        "current_state": state,
+        "hint": hint,
         "worker_alive_s": round(time.monotonic() - float(_state.get("last_drive_ts") or 0.0), 1),
         "llm_online": await llm_online(),
         "llm_loaded": await llm_loaded(),
