@@ -114,6 +114,7 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Language
@@ -132,6 +133,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.TaskAlt
@@ -3347,29 +3349,17 @@ internal fun Composer(
         onQuickPromptConsumed()
     }
 
-    Row(
+    var showSheet by remember { mutableStateOf(false) }
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .imePadding()
             .navigationBarsPadding()
             .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 10.dp)
             .widthIn(max = 1040.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.Bottom
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        var showSheet by remember { mutableStateOf(false) }
-        Surface(
-            modifier = Modifier
-                .size(48.dp)
-                .clickable { showSheet = true },
-            color = AppColors.Composer,
-            shape = CircleShape,
-            border = BorderStroke(1.dp, AppColors.Border)
-        ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                Icon(Icons.Rounded.Add, contentDescription = "Apri menu allegati", tint = AppColors.Muted, modifier = Modifier.size(25.dp))
-            }
-        }
         if (showSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showSheet = false },
@@ -3410,21 +3400,21 @@ internal fun Composer(
         val fontScale = LocalDensity.current.fontScale.coerceIn(0.5f, 2.0f)
         Surface(
             modifier = Modifier
-                .weight(1f)
-                .heightIn(min = (54 * fontScale).dp, max = (156 * fontScale).dp),
+                .fillMaxWidth()
+                .heightIn(min = (104 * fontScale).dp, max = (214 * fontScale).dp),
             color = AppColors.Composer,
-            shape = RoundedCornerShape(25.dp),
+            shape = RoundedCornerShape(26.dp),
             border = BorderStroke(1.dp, AppColors.Border)
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 18.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.Bottom
+                    .padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Column(
                     modifier = Modifier
-                        .weight(1f)
+                        .fillMaxWidth()
                         .heightIn(min = (38 * fontScale).dp, max = (138 * fontScale).dp)
                         .padding(vertical = 5.dp)
                 ) {
@@ -3512,89 +3502,88 @@ internal fun Composer(
                         modifier = Modifier.fillMaxWidth()
                     )
                     if (value.isEmpty()) {
-                        Text("Fai una domanda", color = AppColors.Faint, fontSize = 16.sp)
+                        Text("Chiedi a Hermes", color = AppColors.Faint, fontSize = 16.sp)
                     }
                     }
                 }
-                Spacer(modifier = Modifier.width(8.dp))
-
-                var showReasoningMenu by remember { mutableStateOf(false) }
-                Box {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = AppColors.Surface,
-                        border = BorderStroke(1.dp, AppColors.Border),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .height(42.dp)
-                            .clickable { showReasoningMenu = true }
+                            .size(40.dp)
+                            .clickable { showSheet = true }
                     ) {
+                        Icon(Icons.Rounded.Add, contentDescription = "Apri menu allegati", tint = Color.White, modifier = Modifier.size(28.dp))
+                    }
+                    var showReasoningMenu by remember { mutableStateOf(false) }
+                    Box(contentAlignment = Alignment.Center) {
                         Box(
                             contentAlignment = Alignment.Center,
-                            modifier = Modifier.padding(horizontal = 10.dp).fillMaxHeight()
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clickable { showReasoningMenu = true }
                         ) {
-                            Text(
-                                reasoningEffort.ifBlank { "Auto" },
-                                color = AppColors.Muted,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1
+                            Icon(
+                                imageVector = Icons.Rounded.Speed,
+                                contentDescription = "Sforzo ragionamento: ${reasoningEffort.ifBlank { "Auto" }}",
+                                tint = if (reasoningEffort.isBlank()) AppColors.Muted else AppColors.Accent,
+                                modifier = Modifier.size(25.dp)
                             )
                         }
-                    }
-                    DropdownMenu(
-                        expanded = showReasoningMenu,
-                        onDismissRequest = { showReasoningMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Auto") },
-                            onClick = { showReasoningMenu = false; onReasoningChange("") }
-                        )
-                        reasoningOptions.forEach { eff ->
+                        DropdownMenu(
+                            expanded = showReasoningMenu,
+                            onDismissRequest = { showReasoningMenu = false }
+                        ) {
                             DropdownMenuItem(
-                                text = { Text(eff) },
-                                onClick = { showReasoningMenu = false; onReasoningChange(eff) }
+                                text = { Text("Auto") },
+                                onClick = { showReasoningMenu = false; onReasoningChange("") }
                             )
+                            reasoningOptions.forEach { eff ->
+                                DropdownMenuItem(
+                                    text = { Text(eff) },
+                                    onClick = { showReasoningMenu = false; onReasoningChange(eff) }
+                                )
+                            }
                         }
                     }
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Surface(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clickable(enabled = true) {
-                            onToggleVoiceNote()
-                        },
-                    color = Color.Transparent,
-                    shape = CircleShape,
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Spacer(modifier = Modifier.weight(1f))
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clickable(enabled = true) { onToggleVoiceNote() }
+                    ) {
                         Icon(
                             imageVector = if (isRecordingVoiceNote) Icons.Rounded.Stop else Icons.Rounded.Mic,
                             contentDescription = if (isRecordingVoiceNote) "Ferma registrazione" else "Registra nota vocale",
-                            tint = if (isRecordingVoiceNote) Color.Red else AppColors.Muted
+                            tint = if (isRecordingVoiceNote) Color.Red else Color.White,
+                            modifier = Modifier.size(25.dp)
                         )
                     }
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-
-                val canSend = (value.isNotBlank() || attachments.isNotEmpty()) && !isBusy
-                val canPress = isBusy || canSend
-                Surface(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clickable(enabled = canPress) {
-                            if (isBusy) onStop() else onSend()
-                        },
-                    color = if (canPress) AppColors.Accent else AppColors.Surface,
-                    shape = CircleShape,
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Icon(
-                            imageVector = if (isBusy) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
-                            contentDescription = if (isBusy) "Interrompi generazione" else "Invia",
-                            tint = if (canPress) Color(0xFF171009) else AppColors.Muted
-                        )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    val canSend = (value.isNotBlank() || attachments.isNotEmpty()) && !isBusy
+                    Surface(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clickable {
+                                if (isBusy) onStop()
+                                else if (canSend) onSend()
+                                else onToggleVoiceNote()
+                            },
+                        color = Color(0xFF0A84FF),
+                        shape = CircleShape,
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Icon(
+                                imageVector = if (isBusy) Icons.Rounded.Stop else if (canSend) Icons.Rounded.ArrowUpward else Icons.Rounded.GraphicEq,
+                                contentDescription = if (isBusy) "Interrompi generazione" else if (canSend) "Invia" else "Tocca per parlare",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                 }
             }
