@@ -32,21 +32,23 @@ internal fun plugAndPlayUrlCandidates(url: String): List<String> {
 internal suspend fun httpGet(
     url: String,
     apiKey: String? = null,
-    requestContext: HermesRequestContext = HermesHubProtocol.newCorrelationContext()
+    requestContext: HermesRequestContext = HermesHubProtocol.newCorrelationContext(),
+    allowCompatAuth: Boolean = true
 ): String = withContext(Dispatchers.IO) {
-    httpGetResponse(url, apiKey, requestContext).second
+    httpGetResponse(url, apiKey, requestContext, allowCompatAuth).second
 }
 
 internal suspend fun httpGetResponse(
     url: String,
     apiKey: String? = null,
-    requestContext: HermesRequestContext = HermesHubProtocol.newCorrelationContext()
+    requestContext: HermesRequestContext = HermesHubProtocol.newCorrelationContext(),
+    allowCompatAuth: Boolean = true
 ): Pair<Int, String> = withContext(Dispatchers.IO) {
     // Fail-closed profili: URL /p/<profile>/ richiede credenziale esplicita, mai fallback null.
     val isProfileUrl = url.contains("/p/", ignoreCase = true)
     var last: Pair<Int, String>? = null
     for (candidateUrl in plugAndPlayUrlCandidates(url)) {
-        for (token in hermesAuthCandidates(apiKey)) {
+        for (token in hermesAuthCandidates(apiKey, allowCompatAuth)) {
             // Su profilo nominato senza key: non inviare fallback anonimo.
             if (isProfileUrl && token.isNullOrBlank()) continue
             val response = try {

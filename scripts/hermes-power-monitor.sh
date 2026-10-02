@@ -80,17 +80,22 @@ network_reachable() {
 
 notify_shutdown() {
   command -v curl >/dev/null 2>&1 || return 0
+  local auth_conf
+  auth_conf="$(mktemp "${TMPDIR:-/tmp}/hermes-power-auth.XXXXXX")"
+  chmod 600 "$auth_conf"
+  printf 'header = "Authorization: Bearer %s"\n' "$HERMES_API_KEY" > "$auth_conf"
   curl --fail --silent --show-error \
     --connect-timeout 2 --max-time 5 \
     -X POST "$NOTIFICATION_URL" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $HERMES_API_KEY" \
+    -K "$auth_conf" \
     -d '{
           "title": "Avviso Spegnimento (UPS)",
           "message": "Spegnimento automatico del server per assenza prolungata della rete protetta.",
           "severity": "critical",
           "source": "hermes-power-monitor"
         }' >/dev/null || true
+  rm -f "$auth_conf"
 }
 
 request_shutdown() {

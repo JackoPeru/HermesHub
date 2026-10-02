@@ -36,8 +36,7 @@ internal fun savePendingAttachments(context: Context, conversationId: String?, a
     }
 }
 
-internal fun loadPendingAttachments(context: Context, conversationId: String?): List<ChatInputAttachment> {
-    return runCatching {
+internal fun loadPendingAttachments(context: Context, conversationId: String?): List<ChatInputAttachment> {    return runCatching {
         val raw = context.getSharedPreferences(PENDING_ATTACHMENTS_PREFS, Context.MODE_PRIVATE)
             .getString("pending:${conversationId.orEmpty()}", null) ?: return emptyList()
         val arr = JSONArray(raw)
@@ -122,4 +121,19 @@ internal class ChatStateHolder {
         sessionRoute = "legacy"
         draft = ""
     }
+}
+
+internal fun saveDraft(context: Context, conversationId: String?, draft: String) {
+    runCatching {
+        context.getSharedPreferences(PENDING_ATTACHMENTS_PREFS, Context.MODE_PRIVATE).edit {
+            putString("draft:${conversationId.orEmpty()}", draft)
+        }
+    }
+}
+
+internal fun loadDraft(context: Context, conversationId: String?): String {
+    return runCatching {
+        context.getSharedPreferences(PENDING_ATTACHMENTS_PREFS, Context.MODE_PRIVATE)
+            .getString("draft:${conversationId.orEmpty()}", null).orEmpty()
+    }.getOrDefault("")
 }

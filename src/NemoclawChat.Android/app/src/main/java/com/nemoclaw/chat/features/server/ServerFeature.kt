@@ -528,11 +528,14 @@ internal fun HardwareScreen(context: Context, settings: AppSettings) {
     val apiKey = remember(settings.gatewayUrl) { loadGatewaySecret(context) }
 
     LaunchedEffect(settings.gatewayUrl, apiKey) {
+        var failures = 0
         while (true) {
             val next = loadHardwareSnapshot(settings, apiKey)
             previous = snapshot.takeIf { it.status != "loading" }
             snapshot = next
-            kotlinx.coroutines.delay(1000L)
+            failures = if (next.status == "unavailable") failures + 1 else 0
+            // Backoff su gateway spento: da 1s fino a 30s, niente raffica.
+            kotlinx.coroutines.delay((1000L shl failures.coerceAtMost(4)).coerceAtMost(30_000L))
         }
     }
 

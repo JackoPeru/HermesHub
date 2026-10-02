@@ -7,6 +7,7 @@ LLM mode is the safe default: AUTO + idle == LLM_READY.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -162,14 +163,48 @@ IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 MAX_INPUT_MB = 50
 
 
-def _json_text(value: object) -> str:
-    """JSON-escape a string for textual {{PLACEHOLDER}} substitution.
+# Node classes the manager will ever submit to ComfyUI. Custom/raw
+# workflows are restricted to this set: no checkpoint loaders, no
+# arbitrary custom nodes, no shell-adjacent utilities.
+ALLOWED_NODE_CLASSES = frozenset({
+    "UNETLoader", "UnetLoaderGGUF", "UnetLoaderGGUFAdvanced",
+    "CLIPLoader", "DualCLIPLoaderGGUF", "TripleCLIPLoaderGGUF",
+    "VAELoader", "TextEncodeQwenImage21",
+    "QwenImage21Cache", "ComfySwitchNode",
+    "EmptyLatentImage", "KSampler", "VAEDecode", "SaveImage",
+    "LoadImage", "LoraLoader", "SaveAnimatedPNG",
+    "MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo",
+})
+
+# Placeholders filled by trusted server-side values only; caller params
+# must never override these.
+RESERVED_PLACEHOLDERS = frozenset({"JOB_ID", "LENGTH"})
+
+MAX_PROMPT_CHARS = 4000
+
+
+def _num(value: object, default: float, lo: float, hi: float) -> str:
+    """Coerce to a clamped number; anything non-numeric becomes default."""
+    try:
+        num = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        num = float(default)
+    if num != num:  # NaN
+        num = float(default)
+    num = min(hi, max(lo, num))
+    return str(int(num)) if num.is_integer() else str(num)
+
+
+def _text(value: object, default: str = "", limit: int = MAX_PROMPT_CHARS) -> str:
+    """JSON-escape a string for textual {{PLACEHOLDER}} substitution,
+    truncated to a sane length.
 
     Templates quote string slots (e.g. "prompt": "{{PROMPT}}"), so the value
     must be escaped without the surrounding quotes: json.dumps()[1:-1].
     Numeric-looking strings stay bare, keeping unquoted numeric slots valid.
     """
-    return json.dumps(str(value))[1:-1]
+    raw = str(value) if value else default
+    return json.dumps(raw[:limit])[1:-1]
 
 
 # Default negative prompt shipped by the reference qwen-image-2.1-8gb
@@ -235,15 +270,15 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
     )
     mapping = {
         "JOB_ID": job_id,
-        "PROMPT": _json_text(params.get("prompt", "")),
-        "NEGATIVE_PROMPT": _json_text(params.get("negative_prompt") or default_negative),
-        "SEED": str(params.get("seed", 7)),
-        "STEPS": str(params.get("steps", 25)),
-        "CFG": str(params.get("cfg", default_cfg)),
-        "RESOLUTION": str(params.get("resolution", 1024)),
-        "DENOISE": str(params.get("denoise", 0.8)),
-        "WIDTH": str(params.get("width", 1024 if (PRESETS.get(preset) or {}).get("kind") == "image" else 1344)),
-        "HEIGHT": str(params.get("height", 1024 if (PRESETS.get(preset) or {}).get("kind") == "image" else 768)),
+        "PROMPT": _text(params.get("prompt", "")),
+        "NEGATIVE_PROMPT": _text(params.get("negative_prompt") or default_negative),
+        "SEED": _num(params.get("seed", 7), 7, 0, 2 ** 31 - 1),
+        "STEPS": _num(params.get("steps", 25), 25, 1, 100),
+        "CFG": _num(params.get("cfg", default_cfg), float(default_cfg), 0, 30),
+        "RESOLUTION": _num(params.get("resolution", 1024), 1024, 0, 2048),
+        "DENOISE": _num(params.get("denoise", 0.8), 0.8, 0, 1),
+        "WIDTH": _num(params.get("width", 1024 if (PRESETS.get(preset) or {}).get("kind") == "image" else 1344), 1024, 64, 2048),
+        "HEIGHT": _num(params.get("height", 1024 if (PRESETS.get(preset) or {}).get("kind") == "image" else 768), 1024, 64, 2048),
     }
     try:
         duration = float(params.get("duration", 0) or 0)
@@ -255,7 +290,10 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
     else:
         mapping["LENGTH"] = str(params.get("length", 124))
     for key, value in params.items():
-        mapping[str(key).upper()] = _json_text(value) if isinstance(value, str) else str(value)
+        upper = str(key).upper()
+        if upper in RESERVED_PLACEHOLDERS or upper in mapping:
+            continue
+        mapping[upper] = _text(value) if isinstance(value, str) else _num(value, 0, -10**12, 10**12)
     workflow_text = template
     staged: list[str] = []
     input_images = params.get("input_images") or []
@@ -292,6 +330,45 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
     if problem:
         return None, problem
     return workflow, ""
+
+
+def cleanup_old_artifacts(max_age_days: int = 7) -> int:
+    """Delete staged inputs and job output dirs older than the retention.
+    Prevents slow disk exhaustion from accumulated media artifacts."""
+    removed = 0
+    now = time.time()
+    cutoff = now - max_age_days * 86400
+    roots = [
+        Path(str(CONFIG["media"].get("input_dir", "/opt/hermes/runtimes/comfyui/app/input"))),
+        Path(MEDIA_OUTPUT_DIR),
+    ]
+    for root in roots:
+        input_root = root == roots[0]
+        try:
+            entries = list(root.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.stat().st_mtime > cutoff:
+                    continue
+                if input_root and not (
+                    entry.is_file()
+                    and entry.suffix.lower() in IMAGE_EXTS
+                    and "_in" in entry.stem
+                ):
+                    # Only our staged job inputs; never touch anything else.
+                    continue
+                if entry.is_dir() and not entry.is_symlink():
+                    shutil.rmtree(entry, ignore_errors=True)
+                else:
+                    entry.unlink(missing_ok=True)
+                removed += 1
+            except OSError:
+                continue
+    if removed:
+        log.info("artifact cleanup removed %d stale entries", removed)
+    return removed
 
 
 def _db_conn() -> sqlite3.Connection:
@@ -657,11 +734,7 @@ def update_job(jid: str, **fields) -> None:
 def queued_jobs() -> list[dict]:
     db = _db_conn()
     rows = db.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY created").fetchall()
-    jobs = [job_row(r) for r in rows]
-    # Model affinity: group compatible backends so one media model serves
-    # the whole batch (single load/unload per backend switch).
-    jobs.sort(key=lambda j: (j.get("backend") or "", j.get("created_at") or 0))
-    return jobs
+    return [job_row(r) for r in rows]
 
 
 def validate_workflow(workflow: dict) -> str:
@@ -670,6 +743,8 @@ def validate_workflow(workflow: dict) -> str:
     for key, node in workflow.items():
         if not isinstance(node, dict) or "class_type" not in node or "inputs" not in node:
             return f"node {key!r} lacks class_type/inputs"
+        if node.get("class_type") not in ALLOWED_NODE_CLASSES:
+            return f"node {key!r} class {node.get('class_type')!r} is not allowed"
     return ""
 
 
@@ -782,6 +857,8 @@ async def run_media_job(job: dict) -> bool:
     """Execute one job on ComfyUI. Returns True on success."""
     jid = job["job_id"]
     kind = job["kind"]
+    if (get_job(jid) or {}).get("status") not in ("queued", "running"):
+        return False
     try:
         workflow = json.loads(get_job(jid) and _db_conn().execute("SELECT workflow FROM jobs WHERE id=?", (jid,)).fetchone()[0])
     except Exception:  # noqa: BLE001
@@ -820,9 +897,14 @@ async def run_media_job(job: dict) -> bool:
         if status.get("completed") or entry.get("outputs"):
             return await finish_media_job(jid, prompt_id, entry, vram_peak)
         if status.get("status_str") == "error" or "error" in entry:
+            if (get_job(jid) or {}).get("status") == "cancelled":
+                return False
             update_job(jid, status="failed", error=str(entry.get("error") or status)[:500],
                        vram_peak_mb=vram_peak)
             return False
+    if (get_job(jid) or {}).get("status") == "cancelled":
+        await comfy_cancel(prompt_id)
+        return False
     update_job(jid, status="failed", error="job timeout", vram_peak_mb=vram_peak)
     await comfy_cancel(prompt_id)
     return False
@@ -830,6 +912,8 @@ async def run_media_job(job: dict) -> bool:
 
 async def finish_media_job(jid: str, prompt_id: str, entry: dict, vram_peak: float = 0) -> bool:
     job = get_job(jid) or {}
+    if job.get("status") == "cancelled":
+        return False
     kind = job.get("kind", "image")
     update_job(jid, phase="saving")
     out_root = Path(str(CONFIG["media"]["output_dir"]))
@@ -838,9 +922,18 @@ async def finish_media_job(jid: str, prompt_id: str, entry: dict, vram_peak: flo
     saved: list[str] = []
     for node_id, node_out in (entry.get("outputs") or {}).items():
         for item in node_out.get("images", []) + node_out.get("gifs", []):
-            name = item.get("filename")
-            sub = item.get("subfolder", "")
-            src = out_root / sub / name if name else None
+            name = Path(str(item.get("filename") or "")).name
+            sub = str(item.get("subfolder", "") or "")
+            if not name or ".." in sub or sub.startswith(("/", "\\")):
+                continue
+            src = out_root / sub / name
+            try:
+                # Never follow symlinks or leave the ComfyUI output tree.
+                if not src.is_file() or src.is_symlink():
+                    continue
+                src.resolve().relative_to(out_root.resolve())
+            except (OSError, ValueError):
+                continue
             if src and src.is_file():
                 dest = dest_root / f"{node_id}_{name}"
                 shutil.copy2(src, dest)
@@ -978,7 +1071,11 @@ async def comfy_busy() -> bool:
 
 async def drive_auto_once() -> None:
     """One reconciliation step. Called in a loop; never raises."""
-    _state["last_drive_ts"] = time.monotonic()
+    now = time.monotonic()
+    _state["last_drive_ts"] = now
+    if now - float(_state.get("last_cleanup_ts") or 0.0) > 3600:
+        _state["last_cleanup_ts"] = now
+        await asyncio.to_thread(cleanup_old_artifacts)
     try:
         await _drive()
     except Exception as exc:  # noqa: BLE001 - worker must survive everything
@@ -1003,12 +1100,16 @@ async def _drive() -> None:
         if state in ("LLM_UNLOADING", "GPU_FREE", "MEDIA_STARTING", "MEDIA_STOPPING", "LLM_LOADING"):
             # GPU_FREE is transient mid-transition, except after boot where it
             # persists: with manual MEDIA (or AUTO with queued work) move to
-            # media instead of stalling here forever.
-            if state == "GPU_FREE" and (desired == "MEDIA" or (desired == "AUTO" and queued_jobs())):
-                if await transition_to_media():
-                    state = _state["current_state"]
-                    if state in ("MEDIA_READY", "MEDIA_BUSY"):
-                        await drain_media_queue()
+            # media instead of stalling here forever; otherwise head back
+            # to LLM so AUTO-idle never wedges in GPU_FREE.
+            if state == "GPU_FREE":
+                if desired == "MEDIA" or (desired == "AUTO" and queued_jobs()):
+                    if await transition_to_media():
+                        state = _state["current_state"]
+                        if state in ("MEDIA_READY", "MEDIA_BUSY"):
+                            await drain_media_queue()
+                elif desired == "LLM" or desired == "AUTO":
+                    await restore_llm_with_retries("stray-gpu-free")
                 return
             return  # transition already running elsewhere
         if state == "MEDIA_BUSY":
@@ -1134,6 +1235,10 @@ async def reconcile_boot() -> None:
     desired = _state["desired_mode"]
     if desired == "MEDIA" and media_up:
         set_state("MEDIA_READY", "boot")
+    elif desired == "MEDIA" and not media_up:
+        # Manual MEDIA with ComfyUI down: park in GPU_FREE so the worker
+        # boots the media path instead of pointlessly restoring the LLM.
+        set_state("GPU_FREE", "boot")
     elif llm_up and free is False:
         set_state("LLM_READY", "boot")
     elif desired == "LLM" or not queued_jobs():
@@ -1162,7 +1267,7 @@ def require_key(request: Request) -> None:
     if not expected:
         return
     auth = request.headers.get("authorization", "")
-    if auth != f"Bearer {expected}":
+    if not hmac.compare_digest(auth, f"Bearer {expected}"):
         raise HTTPException(401, "invalid manager api key")
 
 
@@ -1376,6 +1481,7 @@ _worker_task: "asyncio.Task[None] | None" = None
 async def on_startup() -> None:
     global _worker_task
     _db_conn()
+    cleanup_old_artifacts()
     _worker_task = asyncio.create_task(worker_loop())
     log.info("hermes-gpu-manager starting, desired=%s", _state["desired_mode"])
 

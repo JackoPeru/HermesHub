@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.203 - 2026-10-02
+
+- Sicurezza manager: clamp numerici, allowlist nodi, chiave API obbligatoria, cleanup artefatti, fix overwrite cancelled.
+- Script: Bearer mai in ps, rehub --check reale, XFF non fidato, lock stale.
+- App: stop stream all'uscita, job singolo in Chat, BT cleanup, draft persistente, niente retry anonimi (stop 401).
+
 ## 0.6.202 - 2026-10-02
 
 - Chat: preriscaldamento LLM all'apertura (niente più minuto morto dopo i job media).

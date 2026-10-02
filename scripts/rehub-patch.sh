@@ -18,13 +18,20 @@ if [ ! -f "$TARGET" ]; then
 fi
 
 echo "== patch check =="
-if (cd "$PATCHER_DIR" && python3 patch-hermes-gateway-native.py --target "$TARGET" --check); then
-  echo "already patched or nothing actionable; no restart."
+set +e
+(cd "$PATCHER_DIR" && python3 patch-hermes-gateway-native.py --target "$TARGET" --check)
+check_rc=$?
+set -e
+if [ "$check_rc" -eq 0 ]; then
+  echo "already patched; no restart."
   check_only=1
-else
+elif [ "$check_rc" -eq 1 ]; then
   echo "== applying patch =="
   (cd "$PATCHER_DIR" && python3 patch-hermes-gateway-native.py --target "$TARGET")
   check_only=0
+else
+  echo "ERROR: patch check failed (exit $check_rc)" >&2
+  exit 1
 fi
 
 markers=$(grep -c HERMES_HUB_ "$TARGET" || true)
@@ -53,8 +60,12 @@ if [ -z "$key" ]; then
   key="$(grep ^HERMES_API_KEY= "$HOME/.hermes/.env" 2>/dev/null | cut -d= -f2- | tr -d '[:space:]')"
 fi
 fail=0
+auth_conf="$(mktemp "${TMPDIR:-/tmp}/rehub-auth.XXXXXX")"
+chmod 600 "$auth_conf"
+printf 'header = "Authorization: Bearer %s"\n' "$key" > "$auth_conf"
+trap 'rm -f "$auth_conf"' EXIT
 for path in /v1/capabilities /v1/hub/runtime /v1/hub/hardware /v1/hub/conversations; do
-  code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $key" "http://127.0.0.1:8642$path" || true)
+  code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 10 -K "$auth_conf" "http://127.0.0.1:8642$path" || true)
   echo "$path -> $code"
   [ "$code" = "200" ] || fail=1
 done

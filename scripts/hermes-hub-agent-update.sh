@@ -178,10 +178,12 @@ managed_patch_matches_head() {
 }
 
 validate_candidate() {
-  local candidate_root="$TMP_DIR/worktree"
+  local candidate_root="$TMP_DIR/worktree" rc=0
   git -C "$AGENT_ROOT" worktree add --detach "$candidate_root" "$TARGET_SHA" >/dev/null || return 1
   "$VENV_BIN/python" -m py_compile "$candidate_root/gateway/platforms/api_server.py" || return 1
-  python3 "$PATCHER" --target "$candidate_root/gateway/platforms/api_server.py" --check >/dev/null || return 1
+  # --check: 0 = already patched, 1 = patchable (both fine here); >=2 = error.
+  python3 "$PATCHER" --target "$candidate_root/gateway/platforms/api_server.py" --check >/dev/null || rc=$?
+  if [ "$rc" -gt 1 ]; then return 1; fi
 }
 
 apply_hub_patch() {
@@ -194,8 +196,12 @@ apply_hub_patch() {
 }
 
 probe_gateway() {
-  local expected_version="$1"
-  curl --fail --silent --show-error --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $API_KEY" "$PROBE_URL" |
+  local expected_version="$1" auth_conf rc=0
+  # Key via -K config file, never on the command line (visible in ps).
+  auth_conf="$(mktemp "$HERMES_HOME/.hub-probe-auth.XXXXXX")"
+  chmod 600 "$auth_conf"
+  printf 'header = "Authorization: Bearer %s"\n' "$API_KEY" > "$auth_conf"
+  curl --fail --silent --show-error --connect-timeout 2 --max-time 5 -K "$auth_conf" "$PROBE_URL" |
     python3 -c '
 import json, sys
 payload = json.load(sys.stdin)
@@ -213,7 +219,9 @@ version = payload.get("version")
 expected = sys.argv[1]
 if version is not None and expected and str(version).strip() != expected:
     raise AssertionError("capabilities version does not match candidate")
-' "$expected_version"
+    ' "$expected_version" || rc=$?
+  rm -f "$auth_conf"
+  return "$rc"
 }
 
 load_api_key() {
@@ -261,8 +269,22 @@ if command -v flock >/dev/null 2>&1; then
   flock -n 9 || { echo "ERROR: another Hermes Agent update is already running" >&2; exit 75; }
 else
   LOCK_DIR="${LOCK_FILE}.d"
-  mkdir "$LOCK_DIR" 2>/dev/null || { echo "ERROR: another Hermes Agent update is already running" >&2; exit 75; }
-  trap 'rmdir "$LOCK_DIR" 2>/dev/null || true; cleanup' EXIT
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    # Stale lock? A dead run leaves mkdir-fail forever. Steal it when the
+    # owner PID is gone or the lock is older than 2h.
+    lock_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || echo "")"
+    lock_age=$(( $(date +%s) - $(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0) ))
+    if [ -z "$lock_pid" ] || ! kill -0 "$lock_pid" 2>/dev/null || [ "$lock_age" -gt 7200 ]; then
+      echo "WARN: removing stale update lock (pid=$lock_pid age=${lock_age}s)" >&2
+      rm -rf "$LOCK_DIR"
+      mkdir "$LOCK_DIR" 2>/dev/null || { echo "ERROR: another Hermes Agent update is already running" >&2; exit 75; }
+    else
+      echo "ERROR: another Hermes Agent update is already running" >&2
+      exit 75
+    fi
+  fi
+  echo "$$ $(date +%s)" > "$LOCK_DIR/pid"
+  trap 'rm -f "$LOCK_DIR/pid" 2>/dev/null || true; rmdir "$LOCK_DIR" 2>/dev/null || true; cleanup' EXIT
 fi
 
 ACTIVE_SHA="$(git -C "$AGENT_ROOT" rev-parse HEAD)"

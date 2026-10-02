@@ -48,6 +48,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -471,12 +473,16 @@ internal fun ChatScreen(
             if (state.pendingAttachments.isEmpty()) {
                 loadPendingAttachments(context, cid).forEach { state.pendingAttachments.add(it) }
             }
+            if (state.draft.isBlank()) {
+                state.draft = loadDraft(context, cid)
+            }
             restoredPendingFor = cid
         }
     }
-    LaunchedEffect(state.pendingAttachments.size, state.activeConversationId) {
+    LaunchedEffect(state.pendingAttachments.size, state.activeConversationId, state.draft) {
         if (restoredPendingFor == state.activeConversationId) {
             savePendingAttachments(context, state.activeConversationId, state.pendingAttachments.toList())
+            saveDraft(context, state.activeConversationId, state.draft)
         }
     }
     LaunchedEffect(isStreaming) {
@@ -724,6 +730,22 @@ internal fun ChatScreen(
         )
         DisposableEffect(Unit) {
             onDispose { releaseVoiceRecorder(deleteTempFile = true) }
+        }
+        // Uscendo davvero dalla chat (non per rotazione), cancella gli
+        // stream attivi: niente job orfani che scrivono snapshot fuori schermo.
+        // Chiave sul context: a rotazione l'effect si ri-registra sul nuovo lifecycle.
+        DisposableEffect(context) {
+            val activity = context as? Activity
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_DESTROY &&
+                    activity?.isChangingConfigurations != true
+                ) {
+                    state.activeStreams.values.forEach { it.job?.cancel() }
+                }
+            }
+            val lifecycle = (context as? ComponentActivity)?.lifecycle
+            lifecycle?.addObserver(observer)
+            onDispose { lifecycle?.removeObserver(observer) }
         }
 
         ChatModelSessionBar(
@@ -1063,7 +1085,7 @@ internal fun ChatScreen(
                             if (finalState.error != null && finalText.isEmpty()) {
                                 newMessagesToAppend.add(ChatMessage("Stato", finalState.error, fromUser = false, isAction = true))
                             }
-                            val workspaceKind = if (!interrupted) detectWorkspaceIntent(text) else null
+                            val workspaceKind = if (!interrupted && mode == "Agente") detectWorkspaceIntent(text) else null
                             if (workspaceKind != null) {
                                 val workspaceResult = sendWorkspaceRunRequest(settings, workspaceKind, text, loadGatewaySecret(context))
                                 withContext(Dispatchers.IO) {
@@ -1304,17 +1326,23 @@ internal fun TopBar(
     var menuOpen by remember { mutableStateOf(false) }
     var llmLoaded by remember { mutableStateOf<Boolean?>(null) }
     var llmState by remember { mutableStateOf("") }
+    var desiredMode by remember { mutableStateOf("") }
+    var queueLength by remember { mutableStateOf(0) }
     var llmBusy by remember { mutableStateOf(false) }
     var llmError by remember { mutableStateOf("") }
+
+    suspend fun readManagerStatus() {
+        val status = JSONObject(httpGet("$managerBase/status", null))
+        llmLoaded = status.optBoolean("llm_loaded", false)
+        llmState = status.optString("current_state", "")
+        desiredMode = status.optString("desired_mode", "")
+        queueLength = status.optInt("queue_length", 0)
+    }
 
     fun refreshLlm() {
         scope.launch {
             llmBusy = true
-            llmError = runCatching {
-                val status = JSONObject(httpGet("$managerBase/status", null))
-                llmLoaded = status.optBoolean("llm_loaded", false)
-                llmState = status.optString("current_state", "")
-            }.exceptionOrNull()?.message ?: ""
+            llmError = runCatching { readManagerStatus() }.exceptionOrNull()?.message ?: ""
             llmBusy = false
         }
     }
@@ -1326,11 +1354,7 @@ internal fun TopBar(
         if (!menuOpen) return@LaunchedEffect
         while (true) {
             delay(3_000)
-            llmError = runCatching {
-                val status = JSONObject(httpGet("$managerBase/status", null))
-                llmLoaded = status.optBoolean("llm_loaded", false)
-                llmState = status.optString("current_state", "")
-            }.exceptionOrNull()?.message ?: ""
+            llmError = runCatching { readManagerStatus() }.exceptionOrNull()?.message ?: ""
         }
     }
 
@@ -1340,9 +1364,20 @@ internal fun TopBar(
             llmError = runCatching {
                 postJson("$managerBase/mode/${if (wanted) "llm" else "media"}", JSONObject(), null, allowCompatAuth = false)
                 delay(3_000)
-                val status = JSONObject(httpGet("$managerBase/status", null))
-                llmLoaded = status.optBoolean("llm_loaded", false)
-                llmState = status.optString("current_state", "")
+                readManagerStatus()
+            }.exceptionOrNull()?.message ?: ""
+            llmBusy = false
+        }
+    }
+
+    fun setAutoWanted(wanted: Boolean) {
+        scope.launch {
+            llmBusy = true
+            llmError = runCatching {
+                val mode = if (wanted) "auto" else if (llmLoaded == true) "llm" else "media"
+                postJson("$managerBase/mode/$mode", JSONObject(), null, allowCompatAuth = false)
+                delay(3_000)
+                readManagerStatus()
             }.exceptionOrNull()?.message ?: ""
             llmBusy = false
         }
@@ -1429,6 +1464,31 @@ internal fun TopBar(
                         },
                         enabled = !llmBusy && loaded != null && llmError.isBlank(),
                         onClick = { if (!llmBusy && loaded != null) setLlmWanted(!(loaded)) }
+                    )
+                    val auto = desiredMode == "AUTO"
+                    val autoSubtitle = when {
+                        llmError.isNotBlank() -> "Non raggiungibile"
+                        desiredMode.isBlank() -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
+                        llmBusy -> "Applicazione in corso..."
+                        auto -> "Il manager cambia da solo" + (if (queueLength > 0) " · coda $queueLength" else "")
+                        else -> "Manuale ($desiredMode)" + (if (queueLength > 0) " · coda $queueLength" else "")
+                    }
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text("Gestione automatica GPU")
+                                Text(autoSubtitle, color = AppColors.Muted, fontSize = 12.sp)
+                            }
+                        },
+                        trailingIcon = {
+                            Switch(
+                                checked = auto,
+                                onCheckedChange = null,
+                                enabled = !llmBusy
+                            )
+                        },
+                        enabled = !llmBusy && desiredMode.isNotBlank() && llmError.isBlank(),
+                        onClick = { if (!llmBusy && desiredMode.isNotBlank()) setAutoWanted(!auto) }
                     )
                 }
             }

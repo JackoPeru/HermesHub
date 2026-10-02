@@ -132,9 +132,18 @@ if command -v flock >/dev/null 2>&1; then
 else
   LOCK_DIR="$LOCK_FILE.d"
   if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    echo "ERROR: another Hermes Hub gateway update is already running" >&2
-    exit 75
+    lock_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || echo "")"
+    lock_age=$(( $(date +%s) - $(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0) ))
+    if [ -z "$lock_pid" ] || ! kill -0 "$lock_pid" 2>/dev/null || [ "$lock_age" -gt 7200 ]; then
+      echo "WARN: removing stale update lock (pid=$lock_pid age=${lock_age}s)" >&2
+      rm -rf "$LOCK_DIR"
+      mkdir "$LOCK_DIR" 2>/dev/null || { echo "ERROR: another Hermes Hub gateway update is already running" >&2; exit 75; }
+    else
+      echo "ERROR: another Hermes Hub gateway update is already running" >&2
+      exit 75
+    fi
   fi
+  echo "$$ $(date +%s)" > "$LOCK_DIR/pid"
 fi
 
 TMP_DIR="$(mktemp -d "$INSTALL_DIR/.update-tmp.XXXXXX")"
@@ -223,6 +232,7 @@ cleanup() {
     rm -rf "$TMP_DIR"
   fi
   if [ -n "$LOCK_DIR" ]; then
+    rm -f "$LOCK_DIR/pid" 2>/dev/null || true
     rmdir "$LOCK_DIR" 2>/dev/null || true
   fi
   exit "$status"
@@ -239,7 +249,13 @@ CURL_COMMON=(
   -H "Accept: application/vnd.github+json"
 )
 if [ -n "$TOKEN" ]; then
-  CURL_COMMON+=( -H "Authorization: Bearer $TOKEN" )
+  # Never pass the token on the command line (visible in ps): curl -K
+  # reads it from a 600 file inside TMP_DIR (removed by cleanup trap).
+  GITHUB_AUTH_CONF="$TMP_DIR/github-auth.conf"
+  printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" > "$GITHUB_AUTH_CONF"
+  chmod 600 "$GITHUB_AUTH_CONF"
+  CURL_COMMON+=( -K "$GITHUB_AUTH_CONF" )
+  TOKEN=""
 fi
 
 curl_api() {

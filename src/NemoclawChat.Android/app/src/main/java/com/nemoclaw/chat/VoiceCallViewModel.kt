@@ -90,6 +90,10 @@ internal class VoiceCallViewModel(app: Application) : AndroidViewModel(app) {
                     updatePhase(VoiceCallPhase.Error)
                     status = "Voce non disponibile: ${ex.message ?: "errore sconosciuto"}"
                     callActive = false
+                    if (startedBluetooth) {
+                        startedBluetooth = false
+                        routeVoiceBluetooth(appContext, false)
+                    }
                 }
             } finally {
                 startInProgress = false

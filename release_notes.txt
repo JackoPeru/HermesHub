@@ -1,10 +1,10 @@
-Hermes Hub 0.6.202 (fix minuto morto pre-risposta)
+Hermes Hub 0.6.203 (audit: sicurezza + pulizia)
 
-- Causa: dopo i job media l'LLM è scarico; il primo prompt beccava 503 + retry agente da 62s + ricarico. Il modello in sé risponde in 0.2s.
-- Android chat: all'apertura, se il manager è in AUTO e l'LLM è scarico, richiede il caricamento in silenzio.
-- Manager: idle media 30s → 10s prima di ricaricare l'LLM.
-- Versioni: Windows/AdminBridge `0.6.202`; Android `versionName 0.6.202`, `versionCode 206`.
-- Asset: `HermesHub-0.6.202-android.apk` (binario Windows invariato).
-- SHA-256 Android: `7d31bb68703c6b03f6e4652636a3e5c2eeabe65e85c401d0a1f8728105fd01c9`.
-- Asset: `HermesHub-0.6.202-linux-gateway.tar.gz`.
-- SHA-256 gateway: `8432f514987b18f64a39d6042f288c3c30555df1857c374b158e18dcca29acd8`.
+- Manager: clamp numerici anti-injection, allowlist nodi workflow, API key obbligatoria (401 senza), cleanup artefatti 7gg, guard cancelled, fix stallo GPU_FREE, coda FIFO.
+- Script: Bearer via file -K (mai in ps), rehub --check con exit code reali, XFF ignorato per auth, lock stale auto-recuperati.
+- App: stream cancellati all'uscita, niente doppio job in Chat, Bluetooth ripristinato su errore, draft persistente, endpoint Hub senza retry anonimo (stop 401 inutili).
+- Versioni: Windows/AdminBridge `0.6.203`; Android `versionName 0.6.203`, `versionCode 207`.
+- Asset: `HermesHub-0.6.203-android.apk` (binario Windows invariato).
+- SHA-256 Android: `852cc36a52410a5c466c8e21f7528ae7414323d9f1e4611da2535042c4a77ec2`.
+- Asset: `HermesHub-0.6.203-linux-gateway.tar.gz`.
+- SHA-256 gateway: `38ebfd5f81ff4646f7fe5a669da67bf468f1ee231c1a9f7adeb92dc028d088c9`.

@@ -529,7 +529,7 @@ internal suspend fun loadServerSnapshot(context: Context, settings: AppSettings,
 
 internal suspend fun loadHardwareSnapshot(settings: AppSettings, apiKey: String?): HardwareSnapshot = withContext(Dispatchers.IO) {
     try {
-        val body = httpGet(resolveHermesUrl(settings, "/v1/hub/hardware"), apiKey)
+        val body = httpGet(resolveHermesUrl(settings, "/v1/hub/hardware"), apiKey, allowCompatAuth = false)
         parseHardwareSnapshot(JSONObject(body))
     } catch (ex: Exception) {
         HardwareSnapshot(
@@ -1096,7 +1096,7 @@ internal fun injectHtmlBase(html: String, baseUrl: String): String {
 internal suspend fun loadHubNotifications(settings: AppSettings, apiKey: String?, unreadOnly: Boolean): Pair<List<HubNotification>, String> = withContext(Dispatchers.IO) {
     return@withContext try {
         val path = if (unreadOnly) "/v1/hub/notifications?unread=1" else "/v1/hub/notifications"
-        val response = httpGetResponse(resolveHermesUrl(settings, path), apiKey)
+        val response = httpGetResponse(resolveHermesUrl(settings, path), apiKey, allowCompatAuth = false)
         if (response.first !in 200..299) {
             return@withContext emptyList<HubNotification>() to "Notifiche HTTP ${response.first}: ${extractHumanError(response.second)}"
         }
@@ -1139,7 +1139,7 @@ internal suspend fun loadHubNotifications(settings: AppSettings, apiKey: String?
 
 internal suspend fun markHubNotificationRead(settings: AppSettings, id: String, apiKey: String?): String = withContext(Dispatchers.IO) {
     return@withContext try {
-        val response = postJson(resolveHermesUrl(settings, "/v1/hub/notifications/${URLEncoder.encode(id, "UTF-8")}"), JSONObject().put("read", true), apiKey, "PATCH")
+        val response = postJson(resolveHermesUrl(settings, "/v1/hub/notifications/${URLEncoder.encode(id, "UTF-8")}"), JSONObject().put("read", true), apiKey, "PATCH", allowCompatAuth = false)
         if (response.first in 200..299) "Notifica segnata come letta." else "Notifica non aggiornata: HTTP ${response.first}: ${extractHumanError(response.second)}"
     } catch (ex: Exception) {
         "Notifica non aggiornata: ${ex.message ?: ex.javaClass.simpleName}"
@@ -1148,7 +1148,7 @@ internal suspend fun markHubNotificationRead(settings: AppSettings, id: String, 
 
 internal suspend fun patchHubNotification(settings: AppSettings, id: String, patch: JSONObject, apiKey: String?): String = withContext(Dispatchers.IO) {
     return@withContext try {
-        val response = postJson(resolveHermesUrl(settings, "/v1/hub/notifications/${URLEncoder.encode(id, "UTF-8")}"), patch, apiKey, "PATCH")
+        val response = postJson(resolveHermesUrl(settings, "/v1/hub/notifications/${URLEncoder.encode(id, "UTF-8")}"), patch, apiKey, "PATCH", allowCompatAuth = false)
         if (response.first in 200..299) "Notifica aggiornata." else "Notifica non aggiornata: HTTP ${response.first}: ${extractHumanError(response.second)}"
     } catch (ex: Exception) { "Notifica non aggiornata: ${ex.message ?: ex.javaClass.simpleName}" }
 }
@@ -1530,7 +1530,7 @@ internal suspend fun speakChatMessage(context: Context, settings: AppSettings, t
     dir.listFiles()?.filter { it.isFile && it.lastModified() < System.currentTimeMillis() - 24 * 60 * 60 * 1000L }
         ?.forEach { runCatching { it.delete() } }
     for (candidateUrl in ttsUrlCandidates(resolveTtsSpeechUrl(settings))) {
-        for (token in hermesAuthCandidates(apiKey)) {
+    for (token in hermesAuthCandidates(apiKey, allowCompatAuth = false)) {
             val response = try {
                 withTimeout(TTS_REQUEST_TIMEOUT_MS) {
                     executeTtsRequest(dir, candidateUrl, payload, token)
@@ -1895,7 +1895,7 @@ internal fun diagnosticAction(label: String): String = when (label) {
 
 internal suspend fun loadHubMemory(settings: AppSettings, apiKey: String?): Pair<HubMemoryState, String> = withContext(Dispatchers.IO) {
     try {
-        val body = httpGet(resolveHermesUrl(settings, "/v1/hub/memory"), apiKey)
+        val body = httpGet(resolveHermesUrl(settings, "/v1/hub/memory"), apiKey, allowCompatAuth = false)
         val root = JSONObject(body)
         if (root.has("error")) return@withContext HubMemoryState() to "Memoria gateway non esposta: ${extractHumanError(body)}"
         val categories = root.optJSONObject("categories") ?: JSONObject()
@@ -1922,7 +1922,7 @@ internal suspend fun saveHubMemory(settings: AppSettings, memory: HubMemoryState
                 .put("project_rules", memory.projectRules)
                 .put("general_notes", memory.generalNotes)
         )
-        val response = postJson(resolveHermesUrl(settings, "/v1/hub/memory"), payload, apiKey, "PATCH")
+        val response = postJson(resolveHermesUrl(settings, "/v1/hub/memory"), payload, apiKey, "PATCH", allowCompatAuth = false)
         if (response.first in 200..299) "Memoria salvata sul gateway." else "Memoria gateway non esposta: HTTP ${response.first} ${extractHumanError(response.second)}"
     } catch (ex: Exception) {
         "Memoria gateway non esposta: ${ex.message ?: ex.javaClass.simpleName}"
@@ -1937,7 +1937,7 @@ internal suspend fun postHubState(settings: AppSettings, kind: String, entityId:
             .put("project_id", if (settings.activeProjectId.isBlank()) JSONObject.NULL else settings.activeProjectId)
             .put("project_name", if (settings.activeProjectName.isBlank()) JSONObject.NULL else settings.activeProjectName)
             .put("payload", payload)
-        val response = postJson(resolveHermesUrl(settings, "/v1/hub/state"), body, apiKey)
+        val response = postJson(resolveHermesUrl(settings, "/v1/hub/state"), body, apiKey, allowCompatAuth = false)
         if (response.first in 200..299) "Sincronizzato con Hub State." else "Hub State non disponibile: HTTP ${response.first}"
     } catch (ex: Exception) {
         "Hub State non disponibile: ${ex.message ?: ex.javaClass.simpleName}"
@@ -1948,7 +1948,7 @@ internal suspend fun syncConversationsToHub(context: Context, settings: AppSetti
     try {
         val items = conversationsToJsonArray(loadConversations(context, includeDeleted = true))
         val payload = JSONObject().put("items", items)
-        val response = postJson(resolveHermesUrl(settings, "/v1/hub/conversations/import"), payload, apiKey)
+        val response = postJson(resolveHermesUrl(settings, "/v1/hub/conversations/import"), payload, apiKey, allowCompatAuth = false)
         if (response.first !in 200..299) {
             return@withContext "Archivio server non disponibile: HTTP ${response.first} ${extractHumanError(response.second)}"
         }
@@ -1966,7 +1966,7 @@ internal suspend fun restoreConversationsFromHub(
     syncAfterSave: Boolean = true
 ): String = withContext(Dispatchers.IO) {
     try {
-        val response = httpGetResponse(resolveHermesUrl(settings, "/v1/hub/conversations"), apiKey)
+        val response = httpGetResponse(resolveHermesUrl(settings, "/v1/hub/conversations"), apiKey, allowCompatAuth = false)
         if (response.first !in 200..299) {
             return@withContext "Archivio server non disponibile: HTTP ${response.first} ${extractHumanError(response.second)}"
         }

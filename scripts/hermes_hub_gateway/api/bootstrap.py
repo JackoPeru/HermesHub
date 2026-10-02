@@ -120,6 +120,10 @@ def run_patcher(argv: list[str] | None = None) -> int:
     plan = build_patch_plan(target)
     if args.check:
         _print_check(plan)
+        # Exit status drives rehub-patch.sh: 0 = already patched (skip),
+        # 1 = changes pending (apply), anything else = error.
+        if plan.changes or plan.actionable_helper_changes:
+            return 1
         return 0
 
     if not plan.target_changed and not plan.route_changed and not plan.actionable_helper_changes:
