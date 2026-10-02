@@ -3573,14 +3573,14 @@ internal fun Composer(
                                 else if (canSend) onSend()
                                 else onToggleVoiceNote()
                             },
-                        color = Color(0xFF0A84FF),
+                        color = if (canSend || isBusy) AppColors.Accent else AppColors.Surface,
                         shape = CircleShape,
                     ) {
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                             Icon(
                                 imageVector = if (isBusy) Icons.Rounded.Stop else if (canSend) Icons.Rounded.ArrowUpward else Icons.Rounded.GraphicEq,
                                 contentDescription = if (isBusy) "Interrompi generazione" else if (canSend) "Invia" else "Tocca per parlare",
-                                tint = Color.White,
+                                tint = if (canSend || isBusy) Color(0xFF171009) else AppColors.Muted,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
