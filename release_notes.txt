@@ -1,10 +1,10 @@
-Hermes Hub 0.6.203 (audit: sicurezza + pulizia)
+Hermes Hub 0.6.204 (audit low-priority cleanup)
 
-- Manager: clamp numerici anti-injection, allowlist nodi workflow, API key obbligatoria (401 senza), cleanup artefatti 7gg, guard cancelled, fix stallo GPU_FREE, coda FIFO.
-- Script: Bearer via file -K (mai in ps), rehub --check con exit code reali, XFF ignorato per auth, lock stale auto-recuperati.
-- App: stream cancellati all'uscita, niente doppio job in Chat, Bluetooth ripristinato su errore, draft persistente, endpoint Hub senza retry anonimo (stop 401 inutili).
-- Versioni: Windows/AdminBridge `0.6.203`; Android `versionName 0.6.203`, `versionCode 207`.
-- Asset: `HermesHub-0.6.203-android.apk` (binario Windows invariato).
-- SHA-256 Android: `852cc36a52410a5c466c8e21f7528ae7414323d9f1e4611da2535042c4a77ec2`.
-- Asset: `HermesHub-0.6.203-linux-gateway.tar.gz`.
-- SHA-256 gateway: `38ebfd5f81ff4646f7fe5a669da67bf468f1ee231c1a9f7adeb92dc028d088c9`.
+- Manager: debounce mode, jobs con paginazione+totale, validazione campi SQL, docs disabilitati, progress ogni 5 poll, prune ricorsivo, LENGTH clampato.
+- App: import duplicati/morti rimossi, niente placeholder raw salvati, expander con chiave, retry voce limitati, export limitati a 3, draft persistente.
+- Script: quarantine atomica 600, install atomico, rehub con porta configurabile, sqlite 600, SHA tar stampato.
+- Versioni: Windows/AdminBridge `0.6.204`; Android `versionName 0.6.204`, `versionCode 208`.
+- Asset: `HermesHub-0.6.204-android.apk` (binario Windows invariato).
+- SHA-256 Android: `04a42855adcab06615d852242e5dc4d321a34138652162c345b924b2088d9d5a`.
+- Asset: `HermesHub-0.6.204-linux-gateway.tar.gz`.
+- SHA-256 gateway: `ec33ff3381bafdec88b8961a0ad55d5ae91100196d3efdc2d2a4ca5681857341`.

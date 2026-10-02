@@ -541,6 +541,7 @@ internal suspend fun runVoiceCallLoop(
 ) {
     var lastTranscript = ""
     var lastTranscriptAt = 0L
+    var consecutiveErrors = 0
     while (coroutineContext.isActive && isCallActive()) {
         try {
             setPhase(VoiceCallPhase.Listening)
@@ -559,6 +560,7 @@ internal suspend fun runVoiceCallLoop(
             }
             lastTranscript = text
             lastTranscriptAt = now
+            consecutiveErrors = 0
             setStatus("Tu: ${text.trimForStatus()}")
             coroutineScope {
                 val turn = async { runVoiceTurn(context, settings, apiKey, history, voiceConversation, text, setPhase, setStatus, voice(), speed()) }
@@ -568,6 +570,12 @@ internal suspend fun runVoiceCallLoop(
         } catch (_: CancellationException) {
             break
         } catch (ex: Exception) {
+            consecutiveErrors++
+            if (consecutiveErrors >= 5) {
+                setPhase(VoiceCallPhase.Error)
+                setStatus("Microfono o rete non disponibili: ${ex.message ?: "errore sconosciuto"}")
+                break
+            }
             setPhase(VoiceCallPhase.Error)
             setStatus("Errore voce: ${ex.message ?: "errore sconosciuto"}")
             kotlinx.coroutines.delay(900)

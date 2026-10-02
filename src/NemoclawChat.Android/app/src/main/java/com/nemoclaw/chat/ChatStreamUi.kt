@@ -508,7 +508,8 @@ internal fun friendlyActivityStatus(status: String): String {
 
 @Composable
 internal fun ToolGroupExpander(tools: List<ToolCallState>) {
-    var expanded by remember { mutableStateOf(false) }
+    // Reset solo quando cambia il SET di tool (nuovo turno), non a ogni update di stato.
+    var expanded by remember(tools.map { it.id }) { mutableStateOf(false) }
     val pending = tools.count { inferToolOutcome(it) == ToolOutcome.Pending }
     val failed = tools.count { inferToolOutcome(it) == ToolOutcome.Error }
     val completed = tools.size - pending - failed

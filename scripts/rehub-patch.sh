@@ -7,6 +7,7 @@ PATCHER_DIR="${HERMES_HUB_PATCHER_DIR:-$HOME/.hermes/hh187-patcher}"
 AGENT_ROOT="${HERMES_HUB_AGENT_ROOT:-$HOME/.hermes/hermes-agent}"
 TARGET="$AGENT_ROOT/gateway/platforms/api_server.py"
 SERVICE="${HERMES_HUB_SERVICE:-hermes-hub.service}"
+HUB_PORT="${HERMES_API_PORT:-8642}"
 
 if [ ! -f "$PATCHER_DIR/patch-hermes-gateway-native.py" ]; then
   echo "ERROR: patcher not found in $PATCHER_DIR" >&2
@@ -65,7 +66,7 @@ chmod 600 "$auth_conf"
 printf 'header = "Authorization: Bearer %s"\n' "$key" > "$auth_conf"
 trap 'rm -f "$auth_conf"' EXIT
 for path in /v1/capabilities /v1/hub/runtime /v1/hub/hardware /v1/hub/conversations; do
-  code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 10 -K "$auth_conf" "http://127.0.0.1:8642$path" || true)
+  code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 10 -K "$auth_conf" "http://127.0.0.1:$HUB_PORT$path" || true)
   echo "$path -> $code"
   [ "$code" = "200" ] || fail=1
 done

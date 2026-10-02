@@ -242,8 +242,9 @@ verify_current_gateway() {
 }
 
 rollback() {
-  local reason="$1" failed=false rollback_reason=""
-  if ! printf '%s\n' "$TARGET_SHA" > "$QUARANTINE_PATH"; then failed=true; rollback_reason="quarantine write failed"; fi
+  local reason="$1" failed=false rollback_reason="" quarantine_tmp
+  quarantine_tmp="${QUARANTINE_PATH}.$$.tmp"
+  if ! printf '%s\n' "$TARGET_SHA" > "$quarantine_tmp" || ! chmod 600 "$quarantine_tmp" || ! mv -f "$quarantine_tmp" "$QUARANTINE_PATH"; then failed=true; rollback_reason="quarantine write failed"; fi
   if ! cleanup_hub_patch_backups "$TARGET_SHA"; then failed=true; rollback_reason="candidate patch backup cleanup failed"; fi
   if ! git -C "$AGENT_ROOT" reset --hard "$ACTIVE_SHA" >/dev/null; then failed=true; rollback_reason="git restore failed"; fi
   if ! "$VENV_BIN/python" -m pip install --disable-pip-version-check --no-deps -e "${AGENT_ROOT}[all]" >/dev/null; then failed=true; rollback_reason="editable package restore failed"; fi

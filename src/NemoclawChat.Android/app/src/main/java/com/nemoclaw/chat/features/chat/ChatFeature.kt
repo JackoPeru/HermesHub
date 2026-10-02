@@ -17,7 +17,6 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Paint
-import android.graphics.pdf.PdfDocument
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.net.Uri
@@ -32,9 +31,6 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.view.WindowManager
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -113,7 +109,6 @@ import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Dns
@@ -222,10 +217,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
-import androidx.core.content.edit
 import androidx.core.content.FileProvider
 import androidx.core.graphics.scale
-import androidx.core.net.toUri
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -919,11 +912,12 @@ internal fun ChatScreen(
                                     // Risoluzione già applicata allo stato via applyEvent; notifica leggera.
                                 }
                                 if (event is ChatStreamEvent.RawHermesEvent) {
-                                    rawEvents += safeRawHermesEvent()
-                                    if (rawEvents.size > 200) {
-                                        rawEvents.subList(0, rawEvents.size - 200).clear()
-                                    }
-                                    if (!SHOW_RAW_HERMES_EVENTS_IN_CHAT) {
+                                    if (SHOW_RAW_HERMES_EVENTS_IN_CHAT) {
+                                        rawEvents += safeRawHermesEvent()
+                                        if (rawEvents.size > 200) {
+                                            rawEvents.subList(0, rawEvents.size - 200).clear()
+                                        }
+                                    } else {
                                         // Applica comunque metadata/run tracking senza mostrare raw.
                                         localState = localState.applyEvent(event)
                                         if (state.activeConversationId == activeStreamCid) {

@@ -25,6 +25,13 @@ internal fun exportLocalBackup(context: Context): String {
         .put("workspace", sharedPreferencesJson(context, "chatclaw_workspace_requests"))
 
     val dir = File(context.cacheDir, "exports").apply { mkdirs() }
+    // Prune vecchi export: tieni gli ultimi 3, niente accumulo in cache.
+    runCatching {
+        dir.listFiles()
+            ?.sortedByDescending { it.lastModified() }
+            ?.drop(3)
+            ?.forEach { it.delete() }
+    }
     val file = File(dir, "HermesHub-backup-$timestamp.json")
     file.writeText(backup.toString(2), Charsets.UTF_8)
 

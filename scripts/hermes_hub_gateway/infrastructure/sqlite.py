@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
@@ -24,6 +25,13 @@ class SQLiteHubStateStore(HubStateStore):
         self._memory_lock = RLock()
         if self.path != ":memory:":
             Path(self.path).expanduser().parent.mkdir(parents=True, exist_ok=True)
+            try:
+                if not Path(self.path).exists():
+                    Path(self.path).touch(mode=0o600)
+                else:
+                    os.chmod(self.path, 0o600)
+            except OSError:
+                pass
         self._migrate()
 
     def _connect(self) -> sqlite3.Connection:

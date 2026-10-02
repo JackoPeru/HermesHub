@@ -121,32 +121,46 @@ if [ -f "$SCRIPT_DIR/hermes-power-monitor.service" ]; then
   install -m 0644 "$SCRIPT_DIR/hermes-power-monitor.service" "$RELEASE_DIR/hermes-power-monitor.service"
 fi
 
-ln -sfn "$RELEASE_DIR" "$INSTALL_DIR/current"
-ln -sfn "$INSTALL_DIR/current/hermes-hub-linux.sh" "$HOME/hermes-hub-linux.sh"
-ln -sfn "$INSTALL_DIR/current/patch-hermes-gateway-native.py" "$HOME/patch-hermes-gateway-native.py"
-ln -sfn "$INSTALL_DIR/current/hermes-hub-linux-update.sh" "$BIN_DIR/hermes-hub-linux-update"
-ln -sfn "$INSTALL_DIR/current/hermes-hub-agent-update.sh" "$BIN_DIR/hermes-hub-agent-update"
-ln -sfn "$INSTALL_DIR/current/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-tailscale.sh"
-ln -sfn "$INSTALL_DIR/current/hermes-wait-llama.sh" "$BIN_DIR/hermes-wait-llama.sh"
-ln -sfn "$INSTALL_DIR/current/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-tailscale"
-ln -sfn "$INSTALL_DIR/current/hermes-wait-llama.sh" "$BIN_DIR/hermes-wait-llama"
-if [ -f "$INSTALL_DIR/current/hermes-power-monitor.sh" ]; then
-  ln -sfn "$INSTALL_DIR/current/hermes-power-monitor.sh" "$BIN_DIR/hermes-power-monitor.sh"
-  ln -sfn "$INSTALL_DIR/current/hermes-power-monitor.sh" "$BIN_DIR/hermes-power-monitor"
-fi
-printf '%s\n' "$VERSION" > "$INSTALL_DIR/VERSION"
+atomic_symlink() {
+  local target="$1" link="$2" tmp_link="${2}.new.$$"
+  rm -f "$tmp_link"
+  ln -s "$target" "$tmp_link"
+  mv -Tf "$tmp_link" "$link"
+}
 
-cp "$SCRIPT_DIR/hermes-hub-linux.service" "$SERVICE_DIR/hermes-hub.service"
+atomic_install() {
+  local source="$1" destination="$2" mode="$3" tmp_destination="${2}.new.$$"
+  install -m "$mode" "$source" "$tmp_destination"
+  mv -f "$tmp_destination" "$destination"
+}
+
+atomic_symlink "$RELEASE_DIR" "$INSTALL_DIR/current"
+atomic_symlink "$INSTALL_DIR/current/hermes-hub-linux.sh" "$HOME/hermes-hub-linux.sh"
+atomic_symlink "$INSTALL_DIR/current/patch-hermes-gateway-native.py" "$HOME/patch-hermes-gateway-native.py"
+atomic_symlink "$INSTALL_DIR/current/hermes-hub-linux-update.sh" "$BIN_DIR/hermes-hub-linux-update"
+atomic_symlink "$INSTALL_DIR/current/hermes-hub-agent-update.sh" "$BIN_DIR/hermes-hub-agent-update"
+atomic_symlink "$INSTALL_DIR/current/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-tailscale.sh"
+atomic_symlink "$INSTALL_DIR/current/hermes-wait-llama.sh" "$BIN_DIR/hermes-wait-llama.sh"
+atomic_symlink "$INSTALL_DIR/current/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-tailscale"
+atomic_symlink "$INSTALL_DIR/current/hermes-wait-llama.sh" "$BIN_DIR/hermes-wait-llama"
+if [ -f "$INSTALL_DIR/current/hermes-power-monitor.sh" ]; then
+  atomic_symlink "$INSTALL_DIR/current/hermes-power-monitor.sh" "$BIN_DIR/hermes-power-monitor.sh"
+  atomic_symlink "$INSTALL_DIR/current/hermes-power-monitor.sh" "$BIN_DIR/hermes-power-monitor"
+fi
+printf '%s\n' "$VERSION" > "$INSTALL_DIR/VERSION.tmp.$$"
+mv -f "$INSTALL_DIR/VERSION.tmp.$$" "$INSTALL_DIR/VERSION"
+
+atomic_install "$SCRIPT_DIR/hermes-hub-linux.service" "$SERVICE_DIR/hermes-hub.service" 0644
 if [ -f "$SCRIPT_DIR/hermes-hub-linux-update.service" ]; then
-  cp "$SCRIPT_DIR/hermes-hub-linux-update.service" "$SERVICE_DIR/hermes-hub-linux-update.service"
+  atomic_install "$SCRIPT_DIR/hermes-hub-linux-update.service" "$SERVICE_DIR/hermes-hub-linux-update.service" 0644
 fi
 if [ -f "$SCRIPT_DIR/hermes-hub-linux-update.timer" ]; then
-  cp "$SCRIPT_DIR/hermes-hub-linux-update.timer" "$SERVICE_DIR/hermes-hub-linux-update.timer"
+  atomic_install "$SCRIPT_DIR/hermes-hub-linux-update.timer" "$SERVICE_DIR/hermes-hub-linux-update.timer" 0644
 fi
-cp "$SCRIPT_DIR/hermes-hub-agent-update.service" "$SERVICE_DIR/hermes-hub-agent-update.service"
-cp "$SCRIPT_DIR/hermes-hub-agent-update.timer" "$SERVICE_DIR/hermes-hub-agent-update.timer"
+atomic_install "$SCRIPT_DIR/hermes-hub-agent-update.service" "$SERVICE_DIR/hermes-hub-agent-update.service" 0644
+atomic_install "$SCRIPT_DIR/hermes-hub-agent-update.timer" "$SERVICE_DIR/hermes-hub-agent-update.timer" 0644
 if [ -f "$SCRIPT_DIR/hermes-power-monitor.service" ]; then
-  cp "$SCRIPT_DIR/hermes-power-monitor.service" "$SERVICE_DIR/hermes-power-monitor.service"
+  atomic_install "$SCRIPT_DIR/hermes-power-monitor.service" "$SERVICE_DIR/hermes-power-monitor.service" 0644
 fi
 
 echo "Installed Hermes Gateway helper: $INSTALL_DIR/current"

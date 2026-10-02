@@ -108,8 +108,8 @@ internal class ChatStateHolder {
         }
 
     fun resetForNewChat() {
-        activeStreamJob?.cancel()
-        activeConversationId?.let { activeStreams.remove(it) }
+        activeStreams.values.forEach { it.job?.cancel() }
+        activeStreams.clear()
         messages.clear()
         pendingAttachments.clear()
         activeConversationId = null

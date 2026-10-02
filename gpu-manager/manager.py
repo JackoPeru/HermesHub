@@ -235,17 +235,23 @@ def _prune_unresolved_loads(workflow: dict) -> dict:
     def refers_dead(value: object) -> bool:
         return isinstance(value, list) and len(value) == 2 and value[0] in dead
 
+    def scrub(value: object) -> object:
+        if refers_dead(value):
+            return None
+        if isinstance(value, dict):
+            return {k: scrub(v) for k, v in value.items() if scrub(v) is not None}
+        if isinstance(value, list):
+            return [scrub(v) for v in value]
+        return value
+
     for nid in dead:
         del workflow[nid]
     for node in workflow.values():
-        inputs = node.get("inputs") if isinstance(node, dict) else None
-        if not isinstance(inputs, dict):
+        if not isinstance(node, dict):
             continue
-        for key in [k for k, v in inputs.items() if refers_dead(v)]:
-            del inputs[key]
-        for key, val in list(inputs.items()):
-            if isinstance(val, dict):
-                inputs[key] = {sk: sv for sk, sv in val.items() if not refers_dead(sv)}
+        inputs = node.get("inputs")
+        if isinstance(inputs, dict):
+            node["inputs"] = scrub(inputs)
     return workflow
 
 
@@ -288,7 +294,7 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
         grid_len = ((int(duration * 24) - 5 + 16) // 17) * 17 + 5
         mapping["LENGTH"] = str(max(22, min(3600, grid_len)))
     else:
-        mapping["LENGTH"] = str(params.get("length", 124))
+        mapping["LENGTH"] = _num(params.get("length", 124), 124, 22, 3600)
     for key, value in params.items():
         upper = str(key).upper()
         if upper in RESERVED_PLACEHOLDERS or upper in mapping:
@@ -676,11 +682,11 @@ def job_row(row: sqlite3.Row | tuple) -> dict:
     try:
         results = json.loads(result_paths) if result_paths else []
     except (json.JSONDecodeError, TypeError):
-        results = []
+        results = ["!corrupt-result-paths"]
     try:
         parameters = json.loads(params) if params else {}
     except (json.JSONDecodeError, TypeError):
-        parameters = {}
+        parameters = {"!corrupt-params": True}
     return {
         "job_id": jid,
         "kind": kind,
@@ -723,8 +729,18 @@ def get_job(jid: str) -> dict | None:
     return job_row(row) if row else None
 
 
+# Columns update_job is allowed to write. Anything else is a bug, never SQL.
+JOB_WRITABLE_FIELDS = frozenset({
+    "status", "workflow", "progress", "result_paths", "error", "retries",
+    "updated", "preset", "backend", "model", "params", "vram_peak_mb", "phase",
+})
+
+
 def update_job(jid: str, **fields) -> None:
+    fields = {k: v for k, v in fields.items() if k in JOB_WRITABLE_FIELDS}
     fields["updated"] = time.time()
+    if not fields:
+        return
     sets = ", ".join(f"{k}=?" for k in fields)
     db = _db_conn()
     db.execute(f"UPDATE jobs SET {sets} WHERE id=?", (*fields.values(), jid))
@@ -860,7 +876,10 @@ async def run_media_job(job: dict) -> bool:
     if (get_job(jid) or {}).get("status") not in ("queued", "running"):
         return False
     try:
-        workflow = json.loads(get_job(jid) and _db_conn().execute("SELECT workflow FROM jobs WHERE id=?", (jid,)).fetchone()[0])
+        row = _db_conn().execute("SELECT workflow FROM jobs WHERE id=?", (jid,)).fetchone()
+        workflow = json.loads(row[0]) if row else None
+        if not isinstance(workflow, dict):
+            raise ValueError("unreadable workflow")
     except Exception:  # noqa: BLE001
         update_job(jid, status="failed", error="unreadable workflow")
         return False
@@ -876,11 +895,14 @@ async def run_media_job(job: dict) -> bool:
     poll = float(CONFIG["media"].get("poll_interval", 2.0))
     vram_peak = 0.0
     seen_activity = False
+    polls = 0
     while time.monotonic() < deadline:
         await asyncio.sleep(poll)
+        polls += 1
         for g in await asyncio.to_thread(gpu_snapshot):
             vram_peak = max(vram_peak, float(g.get("memory_used_mb", 0)))
-        update_job(jid, progress=0.5, vram_peak_mb=vram_peak)
+        if polls % 5 == 1:
+            update_job(jid, progress=0.5, vram_peak_mb=vram_peak)
         if (get_job(jid) or {}).get("status") == "cancelled":
             await comfy_cancel(prompt_id)
             return False
@@ -969,7 +991,7 @@ async def finish_media_job(jid: str, prompt_id: str, entry: dict, vram_peak: flo
 
 def _valid_output(path: Path) -> bool:
     try:
-        return path.is_file() and path.stat().st_size > 1024
+        return path.is_file() and path.stat().st_size > 256
     except OSError:
         return False
 
@@ -1046,9 +1068,9 @@ async def comfy_queue_state(prompt_id: str) -> str:
     except (json.JSONDecodeError, ValueError):
         return ""
     blob = json.dumps(data.get("queue_running", [])) + json.dumps(data.get("queue_pending", []))
-    if prompt_id in blob:
-        return "executing" if prompt_id in json.dumps(data.get("queue_running", [])) else "queued"
-    return "gone"
+    if not prompt_id or f'"{prompt_id}"' not in blob:
+        return "gone"
+    return "executing" if f'"{prompt_id}"' in json.dumps(data.get("queue_running", [])) else "queued"
 
 
 # ----------------------------------------------------------------- worker ---
@@ -1259,7 +1281,8 @@ async def worker_loop() -> None:
 
 # -------------------------------------------------------------------- api ---
 
-app = FastAPI(title="Hermes GPU Manager", version="1.0.0")
+app = FastAPI(title="Hermes GPU Manager", version="1.0.0",
+              docs_url=None, redoc_url=None, openapi_url=None)
 
 
 def require_key(request: Request) -> None:
@@ -1273,7 +1296,7 @@ def require_key(request: Request) -> None:
 
 @app.get("/")
 async def root() -> dict:
-    return {"service": APP_NAME, "docs": "/docs", "status": "/status"}
+    return {"service": APP_NAME, "status": "/status"}
 
 
 @app.get("/status")
@@ -1337,31 +1360,29 @@ async def status(_: None = Depends(require_key)) -> dict:
     }
 
 
-@app.post("/mode/llm")
-async def mode_llm(_: None = Depends(require_key)) -> dict:
-    _state["desired_mode"] = "LLM"
+def _set_desired(mode: str) -> dict:
+    if _state["desired_mode"] == mode:
+        return {"desired_mode": mode, "unchanged": True}
+    _state["desired_mode"] = mode
     _state["last_error"] = ""
     _persist_desired()
-    log.info("desired mode -> LLM (manual)")
-    return {"desired_mode": "LLM"}
+    log.info("desired mode -> %s (manual)", mode)
+    return {"desired_mode": mode}
+
+
+@app.post("/mode/llm")
+async def mode_llm(_: None = Depends(require_key)) -> dict:
+    return _set_desired("LLM")
 
 
 @app.post("/mode/media")
 async def mode_media(_: None = Depends(require_key)) -> dict:
-    _state["desired_mode"] = "MEDIA"
-    _state["last_error"] = ""
-    _persist_desired()
-    log.info("desired mode -> MEDIA (manual)")
-    return {"desired_mode": "MEDIA"}
+    return _set_desired("MEDIA")
 
 
 @app.post("/mode/auto")
 async def mode_auto(_: None = Depends(require_key)) -> dict:
-    _state["desired_mode"] = "AUTO"
-    _state["last_error"] = ""
-    _persist_desired()
-    log.info("desired mode -> AUTO (manual)")
-    return {"desired_mode": "AUTO"}
+    return _set_desired("AUTO")
 
 
 @app.post("/system/reboot")
@@ -1437,10 +1458,15 @@ async def submit_job(request: Request, _: None = Depends(require_key)) -> JSONRe
 
 
 @app.get("/jobs")
-async def list_jobs(_: None = Depends(require_key)) -> dict:
+async def list_jobs(request: Request, _: None = Depends(require_key)) -> dict:
+    try:
+        limit = min(500, max(1, int(request.query_params.get("limit", "100"))))
+    except (TypeError, ValueError):
+        limit = 100
     db = _db_conn()
-    rows = db.execute("SELECT * FROM jobs ORDER BY created DESC LIMIT 100").fetchall()
-    return {"jobs": [job_row(r) for r in rows]}
+    total = db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+    rows = db.execute("SELECT * FROM jobs ORDER BY created DESC LIMIT ?", (limit,)).fetchall()
+    return {"jobs": [job_row(r) for r in rows], "total": total, "limit": limit}
 
 
 @app.get("/jobs/{job_id}")

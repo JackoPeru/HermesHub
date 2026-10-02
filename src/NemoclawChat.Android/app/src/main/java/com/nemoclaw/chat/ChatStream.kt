@@ -624,6 +624,8 @@ internal fun nearDuplicateBlocks(first: String, second: String): Boolean {
  * non altera i dati salvati/sincronizzati.
  */
 internal fun collapseRepeatedBlocks(text: String): String {
+    // Fast path: segmenti sotto i 64 char non possono mai collassare.
+    if (text.length < 128) return text
     var result = text
     for (reps in listOf(4, 3, 2)) {
         val segLen = result.length / reps
