@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.205 - 2026-10-02
+
+- Composer stile ChatGPT con pulsante arancione; preload voce best-effort, compat PyAV19, cuDNN cu13.
+
 ## 0.6.204 - 2026-10-02
 
 - Pulizia bassa priorità: import morti, raw placeholder, expander key, retry voce, export prune, mode debounce, jobs paging, docs off, Bearer mai in ps, XFF, lock stale, sqlite 600.

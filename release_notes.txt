@@ -1,10 +1,10 @@
-Hermes Hub 0.6.204 (audit low-priority cleanup)
+Hermes Hub 0.6.205 (composer ChatGPT + TTS/STT GPU ripristinati)
 
-- Manager: debounce mode, jobs con paginazione+totale, validazione campi SQL, docs disabilitati, progress ogni 5 poll, prune ricorsivo, LENGTH clampato.
-- App: import duplicati/morti rimossi, niente placeholder raw salvati, expander con chiave, retry voce limitati, export limitati a 3, draft persistente.
-- Script: quarantine atomica 600, install atomico, rehub con porta configurabile, sqlite 600, SHA tar stampato.
-- Versioni: Windows/AdminBridge `0.6.204`; Android `versionName 0.6.204`, `versionCode 208`.
-- Asset: `HermesHub-0.6.204-android.apk` (binario Windows invariato).
-- SHA-256 Android: `04a42855adcab06615d852242e5dc4d321a34138652162c345b924b2088d9d5a`.
-- Asset: `HermesHub-0.6.204-linux-gateway.tar.gz`.
-- SHA-256 gateway: `ec33ff3381bafdec88b8961a0ad55d5ae91100196d3efdc2d2a4ca5681857341`.
+- App: composer in stile ChatGPT (box unico, riga strumenti, pulsante voce/invio arancione, tachimetro reasoning), placeholder "Chiedi a Hermes".
+- Gateway patch: preload TTS/STT best-effort con site-packages ripristinati, compat faster-whisper/PyAV19, cuDNN cu13 via LD_PRELOAD.
+- Server: onnxruntime cu13 + cuDNN 9.27, av19+shim, huggingface_hub 2.1.1, whisper large-v3-turbo cache default.
+- Versioni: Windows/AdminBridge `0.6.205`; Android `versionName 0.6.205`, `versionCode 209`.
+- Asset: `HermesHub-0.6.205-android.apk` (binario Windows invariato).
+- SHA-256 Android: `abba30754ef63a7a183ce0d921f82268f82246e1b84ceb56c3b5c2b14012174f`.
+- Asset: `HermesHub-0.6.205-linux-gateway.tar.gz`.
+- SHA-256 gateway: `ed637314e820e35cd027a912a71f6cde60f900be54355b3409776ed81487d12f`.
