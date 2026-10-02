@@ -1990,6 +1990,11 @@ def _hermes_hub_publish_conversation_event(reason: str, result: Optional[Dict[st
         changes.append("framed streaming Kokoro TTS")
 
     preload_kokoro = r'''def _hermes_hub_preload_kokoro():
+    import site as _site
+    import sys as _sys
+    for _sp in _site.getsitepackages():
+        if _sp not in _sys.path:
+            _sys.path.append(_sp)
     enabled = str(os.environ.get("HERMES_KOKORO_PRELOAD", "1")).lower() not in {"0", "false", "no"}
     required = str(os.environ.get("HERMES_KOKORO_PRELOAD_REQUIRED", "1")).lower() not in {"0", "false", "no"}
     if not enabled:
@@ -2024,6 +2029,11 @@ _hermes_hub_preload_kokoro()
         changes.append("required blocking Kokoro GPU warmup")
 
     preload_whisper = r'''def _hermes_hub_preload_whisper():
+    import site as _site
+    import sys as _sys
+    for _sp in _site.getsitepackages():
+        if _sp not in _sys.path:
+            _sys.path.append(_sp)
     enabled = str(os.environ.get("HERMES_WHISPER_PRELOAD", "1")).lower() not in {"0", "false", "no"}
     required = str(os.environ.get("HERMES_WHISPER_PRELOAD_REQUIRED", "1")).lower() not in {"0", "false", "no"}
     if not enabled:
