@@ -150,8 +150,8 @@ WORKFLOWS_DIR = "/opt/hermes/media-workflows"
 MEDIA_OUTPUT_DIR = "/opt/hermes/media-output"
 
 PRESETS = {
-    "journey_image": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1-Q4_K", "file": "qwen/qwen-image-2.1-8gb-t2i.json"},
-    "journey_edit": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1-Q4_K", "file": "qwen/qwen-image-2.1-8gb-edit.json", "needs_input": True},
+    "create_image": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1-Q4_K", "file": "qwen/qwen-image-2.1-8gb-t2i.json"},
+    "edit_image": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1-Q4_K", "file": "qwen/qwen-image-2.1-8gb-edit.json", "needs_input": True},
     "journey_video_preview": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8+turbo4", "file": "h3/i2v-turbo.json"},
     "journey_video_quality": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8", "file": "h3/i2v.json", "disabled": "DISABLED_FULLSTEPS_OOM"},
     "journey_video_first_last": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8", "file": "h3/first_last.json", "disabled": "DISABLED_FULLSTEPS_OOM"},

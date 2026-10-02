@@ -32,8 +32,8 @@ Config/processor/tokenizer del repo `Qwen/Qwen-Image-2.1` NON serviti separatame
 
 ## Workflow versionati (`/opt/hermes/media-workflows/`)
 
-- `qwen/t2i.json` → preset `journey_image` (prompt, negative, seed, steps, resolution)
-- `qwen/edit.json` → preset `journey_edit` (+ `input_images[]` fino a 4, multi-ref nativo)
+- `qwen/t2i.json` → preset `create_image` (prompt, negative, seed, steps, resolution)
+- `qwen/edit.json` → preset `edit_image` (+ `input_images[]` fino a 4, multi-ref nativo)
 - `qwen/rgba.json` → preset `journey_rgba` (output RGBA reale, alpha 0–255 verificato)
 - `qwen/edit.json` riusato da `journey_product` (foto reali: geometria/materiale/venatura)
 - `h3/README.json` → placeholder: t2v/i2v/first_last/reference DA FARE post-licenza
@@ -43,7 +43,7 @@ VAELoader + TextEncodeQwenImage21 + KSampler(euler, cfg 1.0) + VAEDecode + SaveI
 
 ## Preset registry (manager `PRESETS`)
 
-`journey_image|journey_edit|journey_rgba|journey_product` attivi;
+`create_image|edit_image|journey_rgba|journey_product` attivi;
 `journey_video_preview|journey_video_quality|journey_video_first_last|journey_video_reference`
 rifiutati con HTTP 409 finché H3 è gated (mai sostituzioni silenziose).
 
@@ -61,7 +61,7 @@ vram_peak, status, error, paths). Derivati FFmpeg automatici: WebP q80 + thumb 3
 
 ```bash
 hermes-gpu submit workflow.json image     # oppure preset via API
-curl -X POST :8643/jobs/image -d '{"preset":"journey_image","prompt":"...","parameters":{"seed":1}}'
+curl -X POST :8643/jobs/image -d '{"preset":"create_image","prompt":"...","parameters":{"seed":1}}'
 hermes-gpu job <id>        # stato + result_paths quando done
 curl :8643/status          # coda, preset attivo, VRAM, errori
 ```
