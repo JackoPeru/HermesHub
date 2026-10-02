@@ -150,10 +150,8 @@ WORKFLOWS_DIR = "/opt/hermes/media-workflows"
 MEDIA_OUTPUT_DIR = "/opt/hermes/media-output"
 
 PRESETS = {
-    "journey_image": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1_bf16", "file": "qwen/t2i.json"},
-    "journey_edit": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1_bf16", "file": "qwen/edit.json", "needs_input": True},
-    "journey_rgba": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1_bf16", "file": "qwen/rgba.json"},
-    "journey_product": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1_bf16", "file": "qwen/edit.json", "needs_input": True},
+    "journey_image": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1-Q4_K", "file": "qwen/qwen-image-2.1-8gb-t2i.json"},
+    "journey_edit": {"kind": "image", "backend": "qwen-image-2.1", "model": "qwen_image_2.1-Q4_K", "file": "qwen/qwen-image-2.1-8gb-edit.json", "needs_input": True},
     "journey_video_preview": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8+turbo4", "file": "h3/i2v-turbo.json"},
     "journey_video_quality": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8", "file": "h3/i2v.json", "disabled": "DISABLED_FULLSTEPS_OOM"},
     "journey_video_first_last": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8", "file": "h3/first_last.json", "disabled": "DISABLED_FULLSTEPS_OOM"},
@@ -244,8 +242,8 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
         "CFG": str(params.get("cfg", default_cfg)),
         "RESOLUTION": str(params.get("resolution", 1024)),
         "DENOISE": str(params.get("denoise", 0.8)),
-        "WIDTH": str(params.get("width", 1344)),
-        "HEIGHT": str(params.get("height", 768)),
+        "WIDTH": str(params.get("width", 1024 if (PRESETS.get(preset) or {}).get("kind") == "image" else 1344)),
+        "HEIGHT": str(params.get("height", 1024 if (PRESETS.get(preset) or {}).get("kind") == "image" else 768)),
     }
     try:
         duration = float(params.get("duration", 0) or 0)
@@ -1178,10 +1176,11 @@ async def status(_: None = Depends(require_key)) -> dict:
     gpus = await asyncio.to_thread(gpu_snapshot)
     current = get_job(_state["current_job"]) if _state["current_job"] else None
     qwen_files = [
-        Path(WORKFLOWS_DIR) / "qwen" / "t2i.json",
-        Path("/opt/hermes/models/qwen-image-2.1/qwen_image_2.1_bf16.safetensors"),
-        Path("/opt/hermes/models/qwen-image-2.1/qwen3vl_8b_int8_convrot.safetensors"),
-        Path("/opt/hermes/models/qwen-image-2.1/qwen_image_2.1_vae_bf16.safetensors"),
+        Path(WORKFLOWS_DIR) / "qwen" / "qwen-image-2.1-8gb-t2i.json",
+        Path(WORKFLOWS_DIR) / "qwen" / "qwen-image-2.1-8gb-edit.json",
+        Path("/opt/hermes/runtimes/comfyui/app/models/diffusion_models/qwen_image_2.1-Q4_K.gguf"),
+        Path("/opt/hermes/runtimes/comfyui/app/models/text_encoders/qwen3vl_8b_w4a8.safetensors"),
+        Path("/opt/hermes/runtimes/comfyui/app/models/vae/qwen_image_2.1_vae_bf16.safetensors"),
     ]
     h3_files = [
         Path(WORKFLOWS_DIR) / "h3" / "i2v-turbo.json",
