@@ -59,6 +59,7 @@ _WELLBEING_HANDLERS_END = "    # HERMES_HUB_WELLBEING_HANDLERS_END"
 _SQLITE_SYNC_MARKER = "# HERMES_HUB_SQLITE_SYNC_V1"
 _CORRELATION_RUNTIME_MARKER = "# HERMES_HUB_CORRELATION_RUNTIME_V1"
 _AGENT_RUNTIME_MARKER = "# HERMES_HUB_AGENT_RUNTIME_ADAPTER_V1"
+_FASTER_WHISPER_PYAV_MARKER = "# HERMES_HUB_PYAV_COMPAT_V1"
 _HARDWARE_DISK_BLOCK_V1 = f'''    {_HARDWARE_DISK_FILTER_MARKER}
     disks: List[Dict[str, Any]] = []
     ignored_filesystems = {{
@@ -9847,6 +9848,67 @@ def _patch_text(text: str) -> tuple[str, list[str]]:
     return patched, changes
 
 
+def _find_faster_whisper_audio() -> Path | None:
+    """Resolve faster_whisper/audio.py in the gateway runtime environments."""
+    candidates: list[Path] = []
+    explicit = os.environ.get("HERMES_FASTER_WHISPER_AUDIO_PATH")
+    if explicit:
+        candidates.append(Path(explicit).expanduser())
+    home = Path.home()
+    tools_root = home / ".hermes" / "tools"
+    if tools_root.is_dir():
+        try:
+            for runtime in sorted(tools_root.glob("python-*")):
+                candidates.extend(sorted(runtime.glob("lib/python*/site-packages/faster_whisper/audio.py")))
+        except Exception:
+            pass
+    agent_venv = home / ".hermes" / "hermes-agent" / "venv" / "lib"
+    if agent_venv.is_dir():
+        try:
+            candidates.extend(sorted(agent_venv.glob("python*/site-packages/faster_whisper/audio.py")))
+        except Exception:
+            pass
+    for entry in sys.path:
+        if entry:
+            candidates.append(Path(entry) / "faster_whisper" / "audio.py")
+    seen: set[str] = set()
+    for path in candidates:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            if path.is_file():
+                return path
+        except Exception:
+            continue
+    return None
+
+
+def _patch_faster_whisper_audio(text: str) -> tuple[str, list[str]]:
+    """Tolerate PyAV builds without the metadata_errors open() option.
+
+    faster-whisper 1.2.1 passes metadata_errors="ignore" to av.open, which
+    PyAV >= 14 rejects with TypeError. The fallback keeps older PyAV behavior
+    unchanged and lets newer PyAV open the container with defaults. If
+    upstream changes the call, this patch becomes a no-op instead of failing.
+    """
+    if _FASTER_WHISPER_PYAV_MARKER in text:
+        return text, []
+    old = '    with av.open(input_file, mode="r", metadata_errors="ignore") as container:\n'
+    if old not in text:
+        return text, []
+    new = (
+        f"    {_FASTER_WHISPER_PYAV_MARKER}\n"
+        '    try:\n'
+        '        _container = av.open(input_file, mode="r", metadata_errors="ignore")\n'
+        "    except TypeError:\n"
+        '        _container = av.open(input_file, mode="r")\n'
+        "    with _container as container:\n"
+    )
+    return text.replace(old, new, 1), ["faster-whisper PyAV metadata_errors compat"]
+
+
 def _patch_agent_chat_completion_helpers(text: str) -> tuple[str, list[str]]:
     changes: list[str] = []
 
@@ -10046,12 +10108,26 @@ def main() -> int:
     else:
         helper_changes = ["agent chat_completion_helpers.py not found; raw llama progress passthrough skipped"]
 
+    fw_target = _find_faster_whisper_audio()
+    fw_original = None
+    fw_patched = None
+    fw_changes: list[str] = []
+    if fw_target is not None:
+        fw_original = fw_target.read_text(encoding="utf-8")
+        fw_patched, fw_changes = _patch_faster_whisper_audio(fw_original)
+    else:
+        fw_changes = ["faster_whisper/audio.py not found; PyAV compat patch skipped"]
+
     if args.check:
         actionable_helper_changes = [
             change for change in helper_changes
             if not change.endswith("not found; raw llama progress passthrough skipped")
         ]
-        state = "already patched" if not changes and not actionable_helper_changes else "patchable"
+        actionable_fw_changes = [
+            change for change in fw_changes
+            if not change.endswith("not found; PyAV compat patch skipped")
+        ]
+        state = "already patched" if not changes and not actionable_helper_changes and not actionable_fw_changes else "patchable"
         print(f"Hermes native gateway patch {state}: {target}")
         if changes:
             for change in changes:
@@ -10062,17 +10138,29 @@ def main() -> int:
                 print(f"- {change}")
         else:
             print("- agent chat_completion_helpers.py not found; raw llama progress passthrough skipped")
+        if fw_target is not None:
+            print(f"faster-whisper audio: {fw_target}")
+            for change in fw_changes:
+                print(f"- {change}")
+        else:
+            print("- faster_whisper/audio.py not found; PyAV compat patch skipped")
         return 0
 
     actionable_helper_changes = [
         change for change in helper_changes
         if not change.endswith("not found; raw llama progress passthrough skipped")
     ]
+    actionable_fw_changes = [
+        change for change in fw_changes
+        if not change.endswith("not found; PyAV compat patch skipped")
+    ]
 
-    if not changes and not actionable_helper_changes:
+    if not changes and not actionable_helper_changes and not actionable_fw_changes:
         print(f"Hermes native gateway already patched: {target}")
         if helper_target is not None:
             print(f"Hermes Agent stream helper already patched: {helper_target}")
+        if fw_target is not None:
+            print(f"faster-whisper audio already patched: {fw_target}")
         return 0
 
     updates: list[tuple[Path, str]] = []
@@ -10080,6 +10168,8 @@ def main() -> int:
         updates.append((target, patched))
     if helper_target is not None and actionable_helper_changes and helper_patched is not None:
         updates.append((helper_target, helper_patched))
+    if fw_target is not None and actionable_fw_changes and fw_patched is not None:
+        updates.append((fw_target, fw_patched))
 
     backups = _write_compiled_transaction(updates)
 
@@ -10099,6 +10189,15 @@ def main() -> int:
         print(f"Hermes Agent stream helper already patched: {helper_target}")
     else:
         print("- agent chat_completion_helpers.py not found; raw llama progress passthrough skipped")
+    if fw_target is not None and actionable_fw_changes:
+        print(f"faster-whisper audio patched: {fw_target}")
+        print(f"Backup: {backups[fw_target]}")
+        for change in fw_changes:
+            print(f"- {change}")
+    elif fw_target is not None:
+        print(f"faster-whisper audio already patched: {fw_target}")
+    else:
+        print("- faster_whisper/audio.py not found; PyAV compat patch skipped")
     return 0
 
 
