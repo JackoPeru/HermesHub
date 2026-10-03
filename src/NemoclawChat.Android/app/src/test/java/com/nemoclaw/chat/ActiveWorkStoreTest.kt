@@ -182,4 +182,26 @@ class ActiveWorkStoreTest {
         assertTrue(managerModeErrorMessage(500, "boom").contains("500"))
         assertTrue(managerModeErrorMessage(500, "boom").contains("boom"))
     }
+
+    @Test
+    fun userLocalImagesSkipInfoCard() {
+        val localImage = VisualBlock(
+            id = "local-media-0",
+            type = "media_file",
+            title = "Screenshot_2026.jpg",
+            filename = "Screenshot_2026.jpg",
+            mediaKind = "image",
+            mimeType = "image/jpeg",
+            localDataUrl = "/cache/attachments/foto-1.jpg"
+        )
+        assertTrue(isUserLocalImage(localImage))
+        // Fallback sul mime quando mediaKind manca.
+        assertTrue(isUserLocalImage(localImage.copy(mediaKind = "", mimeType = "image/png")))
+        // Remota di Hermes: card normale.
+        assertFalse(isUserLocalImage(localImage.copy(localDataUrl = "", mediaUrl = "http://h/media/1.jpg")))
+        // Documento locale: card normale.
+        assertFalse(isUserLocalImage(localImage.copy(mediaKind = "document", mimeType = "application/pdf")))
+        // Blocco non media: mai.
+        assertFalse(isUserLocalImage(VisualBlock(id = "t", type = "markdown", text = "ciao", localDataUrl = "/x.jpg")))
+    }
 }

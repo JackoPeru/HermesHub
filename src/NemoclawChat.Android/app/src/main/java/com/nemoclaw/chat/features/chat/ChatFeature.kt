@@ -2082,6 +2082,11 @@ internal fun formatChatStatsLine(stats: ChatStreamStats?, filter: MetricDisplayF
 
 @Composable
 internal fun VisualBlockView(block: VisualBlock) {
+    // Immagini inviate dall'utente: solo miniatura, niente card con nome file.
+    if (isUserLocalImage(block)) {
+        MediaFileBlock(block)
+        return
+    }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = AppColors.Surface,
@@ -2468,36 +2473,53 @@ internal fun ChatInlineImage(
             .clickable { viewer = true }
     )
     if (viewer) {
-        Dialog(onDismissRequest = { viewer = false }) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color.Black)
+        ChatImageViewerDialog(
+            bitmap = loaded,
+            alt = block.alt.ifBlank { block.filename },
+            isDownloading = isDownloading,
+            onClose = { viewer = false },
+            onDownload = { onDownload(mediaUrl, block.filename.ifBlank { block.title.ifBlank { "hermes-file" } }) }
+        )
+    }
+}
+
+/** Viewer fullscreen condiviso: stesse gesture e stessi pulsanti per le immagini
+ *  di Hermes e per quelle inviate dall'utente. Senza onDownload nasconde Scarica. */
+@Composable
+internal fun ChatImageViewerDialog(
+    bitmap: Bitmap,
+    alt: String,
+    isDownloading: Boolean,
+    onClose: () -> Unit,
+    onDownload: (() -> Unit)?
+) {
+    Dialog(onDismissRequest = onClose) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color.Black)
+        ) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = alt,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Image(
-                    bitmap = loaded.asImageBitmap(),
-                    contentDescription = block.alt.ifBlank { block.filename },
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
                 ) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = Color.White)
+                }
+                if (onDownload != null) {
                     IconButton(
-                        onClick = { viewer = false },
-                        modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
-                    ) {
-                        Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = Color.White)
-                    }
-                    IconButton(
-                        onClick = {
-                            if (!isDownloading) {
-                                onDownload(mediaUrl, block.filename.ifBlank { block.title.ifBlank { "hermes-file" } })
-                            }
-                        },
+                        onClick = { if (!isDownloading) onDownload() },
                         enabled = !isDownloading,
                         modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
                     ) {
@@ -2507,6 +2529,75 @@ internal fun ChatInlineImage(
             }
         }
     }
+}
+
+/** Vera se il blocco e' un'immagine inviata dall'utente (file locale, non remota). */
+internal fun isUserLocalImage(block: VisualBlock): Boolean =
+    block.type.equals("media_file", ignoreCase = true) &&
+        block.localDataUrl.isNotBlank() &&
+        (block.mediaKind.equals("image", ignoreCase = true) ||
+            block.mimeType.startsWith("image/", ignoreCase = true))
+
+/** Immagine inviata dall'utente: solo miniatura, tap apre il viewer come Hermes. */
+@Composable
+internal fun LocalInlineImage(block: VisualBlock) {
+    val alt = block.alt.ifBlank { block.filename.ifBlank { "Immagine" } }
+    var viewer by remember(block.localDataUrl) { mutableStateOf(false) }
+    val thumb by produceState<Bitmap?>(initialValue = null, block.localDataUrl) {
+        value = withContext(Dispatchers.IO) { decodeAttachmentPreview(block.localDataUrl) }
+    }
+    val loaded = thumb
+    if (loaded == null) {
+        Text("Immagine in caricamento...", color = AppColors.Muted, fontSize = 13.sp)
+        return
+    }
+    Image(
+        bitmap = loaded.asImageBitmap(),
+        contentDescription = alt,
+        contentScale = ContentScale.FillWidth,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { viewer = true }
+    )
+    if (viewer) {
+        LocalAttachmentViewerDialog(
+            source = block.localDataUrl,
+            alt = alt,
+            onClose = { viewer = false }
+        )
+    }
+}
+
+/** Viewer per un allegato locale (file o data-url): decodifica full-res solo all'apertura. */
+@Composable
+internal fun LocalAttachmentViewerDialog(source: String, alt: String, onClose: () -> Unit) {
+    val full by produceState<Bitmap?>(initialValue = null, source) {
+        value = withContext(Dispatchers.IO) { decodeAttachmentPreview(source, maxWidth = 1600) }
+    }
+    val bitmap = full
+    if (bitmap == null) {
+        Dialog(onDismissRequest = onClose) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.Black)
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Caricamento immagine...", color = AppColors.Muted, fontSize = 13.sp)
+            }
+        }
+        return
+    }
+    ChatImageViewerDialog(
+        bitmap = bitmap,
+        alt = alt,
+        isDownloading = false,
+        onClose = onClose,
+        onDownload = null
+    )
 }
 
 @Composable
@@ -2742,42 +2833,10 @@ internal fun MediaFileBlock(block: VisualBlock) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (isLocalAttachment && block.mediaKind == "image") {
-            // Allegato appena inviato: resta compatto come nel composer,
-            // niente canvas grande con nome file.
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                decodeAttachmentPreview(block.localDataUrl)?.let { bitmap ->
-                    Image(
-                        bitmap = bitmap.asImageBitmap(),
-                        contentDescription = block.alt.ifBlank { block.filename },
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(RoundedCornerShape(12.dp)),
-                        contentScale = ContentScale.Crop
-                    )
-                }
-                Column(modifier = Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = block.filename.ifBlank { block.title.ifBlank { block.alt } },
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = listOf(block.mimeType, formatMediaBytes(block.sizeBytes))
-                            .filter { it.isNotBlank() }.joinToString(" · "),
-                        color = AppColors.Muted,
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
+        if (isUserLocalImage(block)) {
+            // Solo miniatura: il tap apre lo stesso viewer delle immagini di Hermes.
+            LocalInlineImage(block)
+            return@Column
         } else if (previewSource.isNotBlank()) {
             RemoteGalleryImage(
                 settings,
@@ -2790,10 +2849,6 @@ internal fun MediaFileBlock(block: VisualBlock) {
             )
         }
 
-        if (isLocalAttachment && block.mediaKind == "image") {
-            // Chip compatta già mostrata sopra: niente scheda info.
-            return@Column
-        }
         Surface(color = AppColors.Composer, shape = RoundedCornerShape(10.dp)) {
             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
@@ -3083,7 +3138,7 @@ internal fun Bitmap.scaleBitmapToMaxWidth(maxWidth: Int): Bitmap {
     return scale(maxWidth, targetHeight)
 }
 
-internal fun decodeAttachmentPreview(source: String): Bitmap? {
+internal fun decodeAttachmentPreview(source: String, maxWidth: Int = 240): Bitmap? {
     return try {
         val payload = source.substringAfter(',', missingDelimiterValue = "")
         val file = source.takeIf { payload.isBlank() }?.let(::File)?.takeIf { it.isFile }
@@ -3094,8 +3149,8 @@ internal fun decodeAttachmentPreview(source: String): Bitmap? {
             bytes != null -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
             else -> return null
         }
-        val maxWidth = 240
-        val scale = if (options.outWidth > maxWidth) (options.outWidth / maxWidth).coerceAtLeast(1) else 1
+        val cap = maxWidth.coerceAtLeast(48)
+        val scale = if (options.outWidth > cap) (options.outWidth / cap).coerceAtLeast(1) else 1
         val decodeOptions = BitmapFactory.Options().apply { inSampleSize = scale }
         val decoded = if (file != null) {
             BitmapFactory.decodeFile(file.absolutePath, decodeOptions)
@@ -3103,7 +3158,7 @@ internal fun decodeAttachmentPreview(source: String): Bitmap? {
             val data = bytes ?: return null
             BitmapFactory.decodeByteArray(data, 0, data.size, decodeOptions)
         }
-        decoded?.scaleBitmapToMaxWidth(maxWidth)
+        decoded?.scaleBitmapToMaxWidth(cap)
     } catch (_: Exception) {
         null
     } catch (_: OutOfMemoryError) {
@@ -3609,6 +3664,92 @@ internal fun AttachSheetRow(
     }
 }
 
+/** Strip miniature SOPRA il canvas del prompt: solo anteprima + X, niente nomi file. */
+@Composable
+internal fun ComposerAttachmentStrip(
+    attachments: List<ChatInputAttachment>,
+    onRemoveAttachment: (ChatInputAttachment) -> Unit
+) {
+    var viewing by remember { mutableStateOf<ChatInputAttachment?>(null) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        attachments.forEach { attachment ->
+            ComposerAttachmentThumb(
+                attachment = attachment,
+                onRemove = { onRemoveAttachment(attachment) },
+                onView = { viewing = attachment }
+            )
+        }
+    }
+    viewing?.let { current ->
+        LocalAttachmentViewerDialog(
+            source = current.localFilePath ?: current.dataUrl,
+            alt = "Allegato",
+            onClose = { viewing = null }
+        )
+    }
+}
+
+@Composable
+internal fun ComposerAttachmentThumb(
+    attachment: ChatInputAttachment,
+    onRemove: () -> Unit,
+    onView: () -> Unit
+) {
+    val isImage = attachment.mimeType.startsWith("image/", ignoreCase = true)
+    val previewSource = attachment.localFilePath ?: attachment.dataUrl
+    val preview by produceState<Bitmap?>(initialValue = null, previewSource) {
+        value = withContext(Dispatchers.IO) { decodeAttachmentPreview(previewSource) }
+    }
+    Box(modifier = Modifier.size(76.dp)) {
+        val p = preview
+        if (isImage && p != null) {
+            Image(
+                bitmap = p.asImageBitmap(),
+                contentDescription = "Anteprima allegato",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(76.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable { onView() }
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(76.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(AppColors.Elevated)
+                    .clickable { onView() },
+                contentAlignment = Alignment.Center
+            ) {
+                val icon = when {
+                    attachment.mimeType.startsWith("video/", ignoreCase = true) -> Icons.Rounded.PlayArrow
+                    attachment.mimeType.startsWith("audio/", ignoreCase = true) -> Icons.Rounded.Mic
+                    else -> Icons.Rounded.Description
+                }
+                Icon(icon, contentDescription = "Anteprima allegato", tint = AppColors.Accent, modifier = Modifier.size(30.dp))
+            }
+        }
+        Surface(
+            color = Color.Black.copy(alpha = 0.65f),
+            shape = CircleShape,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(24.dp)
+                .clickable { onRemove() }
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Icon(Icons.Rounded.Close, contentDescription = "Rimuovi allegato", tint = Color.White, modifier = Modifier.size(13.dp))
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun Composer(
@@ -3687,6 +3828,13 @@ internal fun Composer(
         }
 
         val fontScale = LocalDensity.current.fontScale.coerceIn(0.5f, 2.0f)
+        // Miniature FUORI dal canvas del prompt: strip sopra la casella di input.
+        if (attachments.isNotEmpty()) {
+            ComposerAttachmentStrip(
+                attachments = attachments,
+                onRemoveAttachment = onRemoveAttachment
+            )
+        }
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -3707,69 +3855,6 @@ internal fun Composer(
                         .heightIn(min = (38 * fontScale).dp, max = (138 * fontScale).dp)
                         .padding(vertical = 5.dp)
                 ) {
-                    if (attachments.isNotEmpty()) {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            attachments.forEach { attachment ->
-                                val previewSource = attachment.localFilePath ?: attachment.dataUrl
-                                val preview by produceState<Bitmap?>(initialValue = null, previewSource) {
-                                    this.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                        decodeAttachmentPreview(previewSource)
-                                    }
-                                }
-                                Surface(
-                                    color = AppColors.Elevated,
-                                    shape = RoundedCornerShape(16.dp),
-                                    border = BorderStroke(1.dp, AppColors.Border)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .widthIn(max = 260.dp)
-                                            .padding(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        val p = preview
-                                        if (p != null) {
-                                            Image(
-                                                bitmap = p.asImageBitmap(),
-                                                contentDescription = attachment.filename,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier
-                                                    .size(56.dp)
-                                                    .clip(RoundedCornerShape(12.dp))
-                                            )
-                                        } else {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(56.dp)
-                                                    .clip(RoundedCornerShape(12.dp))
-                                                    .background(AppColors.Surface),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(Icons.Rounded.Image, contentDescription = null, tint = AppColors.Accent)
-                                            }
-                                        }
-                                        Column(modifier = Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            Text(attachment.filename, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                            Text("${attachment.mimeType} · ${attachment.sizeBytes.toReadableFileSize()}", color = AppColors.Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        }
-                                        Surface(
-                                            color = AppColors.Surface,
-                                            shape = CircleShape,
-                                            modifier = Modifier
-                                                .size(26.dp)
-                                                .clickable { onRemoveAttachment(attachment) }
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                                Icon(Icons.Rounded.Close, contentDescription = "Rimuovi allegato", tint = AppColors.Muted, modifier = Modifier.size(14.dp))
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
                     Box(contentAlignment = Alignment.CenterStart, modifier = Modifier.fillMaxWidth()) {
                     BasicTextField(
                         value = value,
