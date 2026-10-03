@@ -261,6 +261,200 @@ def _runs_module_preserves_active_tasks(text: str) -> bool:
     )
 
 
+_RUN_RESUME_BEGIN = "# HERMES_HUB_RUN_RESUME_V1_BEGIN"
+_RUN_RESUME_END = "# HERMES_HUB_RUN_RESUME_V1_END"
+
+_RUN_RESUME_EVENT_ANCHOR = (
+    "    def _callback(event_type: str, tool_name: str = None, preview: str = None, args=None, **kwargs):\n"
+)
+_RUN_RESUME_TRACK_ANCHOR = (
+    "    else:\n"
+    "        task = self._active_run_tasks[run_id] = asyncio.create_task(_execute_run(self, launch, _api_server=_api_server))\n"
+)
+_RUN_RESUME_FINISH_ANCHOR = (
+    '        self._set_run_status(run_id, status, **fields, last_event=f"run.{status}", **extra)\n'
+)
+
+
+def _run_resume_engine_source() -> str:
+    """Load the canonical resume engine (single source of truth for tests)."""
+    path = Path(__file__).resolve().parents[2] / "run_resume.py"
+    source = path.read_text(encoding="utf-8")
+    compile(source, str(path), "exec")
+    return source
+
+
+def _run_resume_loader_block() -> str:
+    """Build the self-contained block injected into api_server_runs.py.
+
+    The engine source is embedded as data and executed in an isolated
+    namespace, so no gateway sys.path entry is required and upstream names
+    can never collide with ours.
+    """
+    engine = _run_resume_engine_source()
+    lines = [
+        _RUN_RESUME_BEGIN,
+        '"""Hermes Hub persistent run resume (checkpoint + boot reconcile)."""',
+        "_HERMES_RUN_RESUME_SOURCE = " + repr(engine),
+        "_HERMES_RUN_RESUME_NS: dict = {}",
+        "try:",
+        "    exec(compile(_HERMES_RUN_RESUME_SOURCE, \"hermes_run_resume\", \"exec\"), _HERMES_RUN_RESUME_NS)",
+        "except Exception:",
+        "    logger.warning(\"[run-resume] engine load failed\", exc_info=True)",
+        "    _HERMES_RUN_RESUME_NS = {}",
+        "try:",
+        "    _HERMES_RUN_RESUME_STORE = _HERMES_RUN_RESUME_NS[\"ResumeStore\"]()",
+        "except Exception:",
+        "    logger.warning(\"[run-resume] store unavailable\", exc_info=True)",
+        "    _HERMES_RUN_RESUME_STORE = None",
+        "",
+        "",
+        "def _hermes_hub_rr_track(run_id, session_id, user_message, conversation_history, launch):",
+        "    try:",
+        '        store = globals().get("_HERMES_RUN_RESUME_STORE")',
+        "        if store is None:",
+        "            return",
+        "        route = \"\"",
+        "        model = \"\"",
+        "        try:",
+        '            agent_kwargs = getattr(launch, "agent_kwargs", {}) or {}',
+        '            route = agent_kwargs.get("route", "")',
+        '            model = agent_kwargs.get("requested_model", "") or agent_kwargs.get("model_options", "")',
+        "        except Exception:",
+        "            pass",
+        "        try:",
+        "            history_count = len(conversation_history or [])",
+        "        except Exception:",
+        "            history_count = -1",
+        "        store.track_run(run_id, session_id, user_message, history_count,",
+        '                        {"route": route, "model": model})',
+        "    except Exception:",
+        '        logger.debug("[run-resume] track failed", exc_info=True)',
+        "",
+        "",
+        "def _hermes_hub_rr_event(run_id, event_type, tool_name, preview, args, kwargs):",
+        "    try:",
+        '        store = globals().get("_HERMES_RUN_RESUME_STORE")',
+        '        ns = globals().get("_HERMES_RUN_RESUME_NS") or {}',
+        "        if store is None or not ns:",
+        "            return",
+        '        if event_type == "tool.started":',
+        "            store.record_started(run_id, tool_name, args)",
+        '        elif event_type == "tool.completed":',
+        "            kw = kwargs or {}",
+        "            session_id = \"\"",
+        "            try:",
+        "                row = store.get(run_id) or {}",
+        '                session_id = row.get("session_id") or ""',
+        "            except Exception:",
+        "                pass",
+        "            history_count = -1",
+        "            try:",
+        '                count_fn = ns.get("transcript_message_count")',
+        "                if count_fn is not None and session_id:",
+        "                    live = count_fn(session_id)",
+        "                    history_count = -1 if live is None else int(live)",
+        "            except Exception:",
+        "                pass",
+        "            store.record_completed(run_id, tool_name, args, result=kw.get(\"result\"),",
+        "                                 duration=kw.get(\"duration\"), is_error=bool(kw.get(\"is_error\")),",
+        "                                 history_count=history_count)",
+        '        elif event_type in ("subagent.start", "subagent.complete"):',
+        "            store.record_subagent(run_id, event_type, preview or \"\")",
+        "    except Exception:",
+        '        logger.debug("[run-resume] event hook failed", exc_info=True)',
+        "",
+        "",
+        "def _hermes_hub_rr_finish(run_id, status):",
+        "    try:",
+        '        store = globals().get("_HERMES_RUN_RESUME_STORE")',
+        "        if store is None:",
+        "            return",
+        "        store.finish(run_id, status)",
+        "    except Exception:",
+        '        logger.debug("[run-resume] finish hook failed", exc_info=True)',
+        "",
+        "",
+        "def _hermes_hub_rr_boot():",
+        "    try:",
+        '        ns = globals().get("_HERMES_RUN_RESUME_NS") or {}',
+        "        if not ns:",
+        "            return",
+        '        if str(os.environ.get("HERMES_HUB_RESUME_RECONCILE", "1")).lower() in {"0", "false", "no"}:',
+        "            return",
+        "        base = \"http://127.0.0.1:%s\" % os.environ.get(\"HERMES_API_PORT\", \"8642\")",
+        "        key = os.environ.get(\"HERMES_API_KEY\", \"\") or os.environ.get(\"HERMES_HUB_API_KEY\", \"\")",
+        "        delay = float(os.environ.get(\"HERMES_HUB_RESUME_DELAY_S\", \"120\"))",
+        "        period = float(os.environ.get(\"HERMES_HUB_RESUME_PERIOD_S\", \"600\"))",
+        "        thread = threading.Thread(",
+        '            target=ns["reconcile_loop_forever"],',
+        '            kwargs={"api_base": base, "api_key": key, "delay_s": delay, "period_s": period},',
+        '            name="hermes-run-resume", daemon=True)',
+        "        thread.start()",
+        "    except Exception:",
+        '        logger.debug("[run-resume] boot hook failed", exc_info=True)',
+        "",
+        "",
+        "_hermes_hub_rr_boot()",
+        _RUN_RESUME_END,
+    ]
+    return "\n".join(lines)
+
+
+def _patch_runs_resume(runs_original: str) -> tuple[str, list[str]]:
+    """Inject the persistent run-resume engine into the upstream runs module.
+
+    Fail-closed: any missing anchor raises instead of half-patching. When the
+    block is already present but embeds an older engine source, only the
+    block is refreshed (hooks are left untouched).
+    """
+    engine = _run_resume_engine_source()
+    if _RUN_RESUME_BEGIN in runs_original:
+        block_pattern = re.compile(
+            re.escape(_RUN_RESUME_BEGIN) + r".*?" + re.escape(_RUN_RESUME_END),
+            re.DOTALL,
+        )
+        match = block_pattern.search(runs_original)
+        if match is None:
+            raise PatchError("run resume markers are unbalanced; refusing to patch")
+        if repr(engine) in match.group(0):
+            return runs_original, []
+        refreshed = runs_original[:match.start()] + _run_resume_loader_block() + runs_original[match.end():]
+        return refreshed, ["run resume engine refreshed"]
+    patched = runs_original.rstrip("\n") + "\n\n" + _run_resume_loader_block() + "\n"
+    patched, _ = _replace_once(
+        patched,
+        _RUN_RESUME_EVENT_ANCHOR,
+        _RUN_RESUME_EVENT_ANCHOR
+        + "        try:\n"
+        + "            _hermes_hub_rr_event(run_id, event_type, tool_name, preview, args, kwargs)\n"
+        + "        except Exception:\n"
+        + "            logger.debug(\"[run-resume] event hook failed\", exc_info=True)\n",
+        "runs resume event hook",
+    )
+    patched, _ = _replace_once(
+        patched,
+        _RUN_RESUME_TRACK_ANCHOR,
+        _RUN_RESUME_TRACK_ANCHOR
+        + "    try:\n"
+        + "        _hermes_hub_rr_track(run_id, session_id, user_message, conversation_history, launch)\n"
+        + "    except Exception:\n"
+        + "        logger.debug(\"[run-resume] track hook failed\", exc_info=True)\n",
+        "runs resume track hook",
+    )
+    patched, _ = _replace_once(
+        patched,
+        _RUN_RESUME_FINISH_ANCHOR,
+        "        try:\n"
+        + "            _hermes_hub_rr_finish(run_id, status)\n"
+        + "        except Exception:\n"
+        + "            logger.debug(\"[run-resume] finish hook failed\", exc_info=True)\n"
+        + _RUN_RESUME_FINISH_ANCHOR,
+        "runs resume finish hook",
+    )
+    return patched, ["run resume checkpoint hooks (track/event/finish) + reconcile engine"]
+
+
 def _replace_once(text: str, old: str, new: str, label: str) -> tuple[str, bool]:
     if old not in text:
         raise RuntimeError(f"Patch anchor not found: {label}")
