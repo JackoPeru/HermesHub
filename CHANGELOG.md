@@ -2,6 +2,15 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.207 - 2026-10-04
+
+- Manager: ogni (re)boot atterra su AUTO con coda Comfy annullata
+  (job interrotti cancellati, non riaccodati); chat-first con fail-fast,
+  restore LLM e cooldown dopo failure media ripetuti.
+- App: allegati utente ridisegnati (strip miniature sopra il composer,
+  immagine sola in chat con viewer come Hermes); flag manager/LLM con
+  errori HTTP espliciti e refresh proattivo.
+
 ## 0.6.206 - 2026-10-03
 
 - Background work: run detachabili, re-attach, foreground service; auto-approve

@@ -1,18 +1,16 @@
-Hermes Hub 0.6.206 (background work + auto-approve + bot screen)
+Hermes Hub 0.6.207 (manager boot AUTO + allegati ridisegnati)
 
-- App: le run continuano sul gateway anche a client morto (continue_on_disconnect),
-  binding persistente, re-attach all'apertura, foreground service con notifiche.
-- App: auto-approve run opt-in (Chiedi/Sessione/Sempre, globale + per-bot),
-  pill AUTO visibile, tap notifica verso la richiesta pendente.
-- App: tab Schermo con viewer live noVNC + Take over/Hand back; sezione Bot
-  rivista (roster con avatar/stato/anteprima, dettaglio con tab Chat/Screen/Info).
-- Gateway patch: continue-on-disconnect su session/responses/chat (opt-in).
-- Manager: bridge display /display/* (status, ticket, WS RFB, takeover/release,
-  frame.png) con lease ufficiale; screen Xvnc+Xfce avviato sul server.
-- Script: updater busy-gate (lease/coda/Comfy, pending, double-check finale).
-- Gateway patch: resume persistente run (checkpoint, reconcile boot, recovery_required).
-- Versioni: Windows/AdminBridge `0.6.206`; Android `versionName 0.6.206`, `versionCode 210`.
-- Asset: `HermesHub-0.6.206-android.apk` (binario Windows invariato).
-- SHA-256 Android: `e99a2948e534124c412b72c2dd591244c4814dc522c0816716b0da6a9268de4e`.
-- Asset: `HermesHub-0.6.206-linux-gateway.tar.gz`.
-- SHA-256 gateway: `cd5476f4e713e85324971c3258b982ce7f08653d8673b3a54168d469903a0c4f`.
+- Manager: ogni (re)boot atterra su AUTO con coda Comfy annullata
+  (job interrotti cancellati, non riaccodati, Comfy interrupt+clear).
+- Manager: chat-first con fail-fast su prompt persi, restore LLM e cooldown
+  dopo failure media ripetuti.
+- App: allegati utente ridisegnati, strip miniature sopra il composer
+  (niente nomi file nel prompt), immagine sola in chat con viewer
+  fullscreen come le immagini di Hermes.
+- App: flag manager/LLM con errori HTTP espliciti (mai 401/500 travestiti
+  da tutto spento) e refresh proattivo ogni 15 s.
+- Versioni: Windows/AdminBridge `0.6.207`; Android `versionName 0.6.207`, `versionCode 211`.
+- Asset: `HermesHub-0.6.207-android.apk` (binario Windows invariato).
+- SHA-256 Android: `4f946d7d462f00a875183696a4892dd57f1816b583c67f56001867e76030f841`.
+- Asset: `HermesHub-0.6.207-linux-gateway.tar.gz`.
+- SHA-256 gateway: `c985f9b6075f30be758071b95830c84e3102bca7fcf1784dc2da24a0371c7105`.
