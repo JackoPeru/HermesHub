@@ -26,6 +26,16 @@ media:
   job_timeout_video: 3600
   poll_interval: 2.0
 
+# Comfy diretto: stessa app/porta del backend agente, ma in ascolto sulla
+# tailnet (ufw: solo tailscale0) e senza Restart, cosi' la chiusura
+# fa auto-ritornare il manager su AUTO. Mai insieme al service media.
+direct:
+  backend: comfyui-direct
+  service: hermes-comfyui-direct.service
+  base_url: http://127.0.0.1:8188
+  public_url: http://100.94.223.14:8188
+  startup_timeout: 600
+
 switching:
   media_idle_timeout: 10
   llm_drain_timeout: 10

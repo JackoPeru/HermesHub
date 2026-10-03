@@ -1,0 +1,23 @@
+[Unit]
+Description=Hermes ComfyUI diretto su Tailscale (gestito da hermes-gpu-manager, modo DIRECT)
+Wants=network-online.target
+After=network-online.target
+Conflicts=hermes-comfyui.service
+
+[Service]
+Type=simple
+User=matteo
+Group=matteo
+WorkingDirectory=/opt/hermes/runtimes/comfyui/app
+Environment=PATH=/opt/hermes/runtimes/comfyui/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStartPre=/home/matteo/.local/bin/hermes-wait-nvidia.sh
+# 0.0.0.0 con ufw ristretto a tailscale0: raggiungibile solo dalla tailnet,
+# robusto al cambio IP Tailscale. Mai Restart: la morte del backend deve
+# restare finale cosi' il manager auto-ritorna su AUTO.
+ExecStart=/opt/hermes/runtimes/comfyui/venv/bin/python main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch --lowvram
+Restart=no
+TimeoutStartSec=600
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

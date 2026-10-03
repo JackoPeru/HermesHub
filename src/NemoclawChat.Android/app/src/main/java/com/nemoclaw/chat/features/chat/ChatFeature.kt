@@ -1491,6 +1491,8 @@ internal fun TopBar(
     var llmState by remember { mutableStateOf("") }
     var desiredMode by remember { mutableStateOf("") }
     var queueLength by remember { mutableStateOf(0) }
+    var directUrl by remember { mutableStateOf("") }
+    var directActive by remember { mutableStateOf(false) }
     var llmBusy by remember { mutableStateOf(false) }
     var llmError by remember { mutableStateOf("") }
 
@@ -1505,6 +1507,8 @@ internal fun TopBar(
         llmState = status.optString("current_state", "")
         desiredMode = status.optString("desired_mode", "")
         queueLength = status.optInt("queue_length", 0)
+        directUrl = status.optString("direct_url", "")
+        directActive = status.optBoolean("direct_active", desiredMode == "DIRECT")
     }
 
     fun refreshLlm() {
@@ -1544,6 +1548,22 @@ internal fun TopBar(
             llmBusy = true
             llmError = runCatching {
                 val (code, body) = postJson("$managerBase/mode/${if (wanted) "llm" else "media"}", JSONObject(), managerApiKey, allowCompatAuth = false)
+                if (code !in 200..299) {
+                    throw IllegalStateException(managerModeErrorMessage(code, body))
+                }
+                delay(3_000)
+                readManagerStatus()
+            }.exceptionOrNull()?.message ?: ""
+            llmBusy = false
+        }
+    }
+
+    fun setDirectWanted(wanted: Boolean) {
+        scope.launch {
+            llmBusy = true
+            llmError = runCatching {
+                val mode = if (wanted) "direct" else "auto"
+                val (code, body) = postJson("$managerBase/mode/$mode", JSONObject(), managerApiKey, allowCompatAuth = false)
                 if (code !in 200..299) {
                     throw IllegalStateException(managerModeErrorMessage(code, body))
                 }
@@ -1676,6 +1696,32 @@ internal fun TopBar(
                         },
                         enabled = !llmBusy && desiredMode.isNotBlank() && llmError.isBlank(),
                         onClick = { if (!llmBusy && desiredMode.isNotBlank()) setAutoWanted(!auto) }
+                    )
+                    val direct = desiredMode == "DIRECT"
+                    val directSubtitle = when {
+                        llmError.isNotBlank() -> "Non raggiungibile"
+                        desiredMode.isBlank() -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
+                        llmBusy -> "Applicazione in corso..."
+                        direct && directUrl.isNotBlank() -> "Attivo su $directUrl"
+                        direct -> "Attivo: apri Comfy nel browser"
+                        else -> "LLM scaricato, Comfy per te sulla tailnet"
+                    }
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text("Comfy diretto")
+                                Text(directSubtitle, color = AppColors.Muted, fontSize = 12.sp)
+                            }
+                        },
+                        trailingIcon = {
+                            Switch(
+                                checked = direct,
+                                onCheckedChange = null,
+                                enabled = !llmBusy
+                            )
+                        },
+                        enabled = !llmBusy && desiredMode.isNotBlank() && llmError.isBlank(),
+                        onClick = { if (!llmBusy && desiredMode.isNotBlank()) setDirectWanted(!direct) }
                     )
                 }
             }

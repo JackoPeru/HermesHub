@@ -123,10 +123,11 @@ STATES = (
     "MEDIA_BUSY",
     "MEDIA_STOPPING",
     "LLM_LOADING",
+    "DIRECT",
     "ERROR",
 )
 
-MODES = ("LLM", "MEDIA", "AUTO")
+MODES = ("LLM", "MEDIA", "AUTO", "DIRECT")
 
 _state = {
     "current_state": "BOOT",
@@ -776,6 +777,8 @@ async def transition_to_media() -> bool:
     """LLM_READY -> MEDIA_READY. Returns True when ComfyUI serves."""
     cfg = CONFIG["switching"]
     set_state("LLM_UNLOADING")
+    # Entering agent media from anywhere: the direct backend must go first.
+    await systemctl("stop", direct_service_name())
     drain = float(cfg.get("llm_drain_timeout", 10))
     log.info("waiting %.0fs for in-flight LLM work to finish", drain)
     await asyncio.sleep(min(drain, 30))
@@ -814,6 +817,7 @@ async def transition_to_llm() -> bool:
     """MEDIA_* -> LLM_READY with health check. Returns True on success."""
     set_state("MEDIA_STOPPING")
     await systemctl("stop", str(CONFIG["media"]["service"]))
+    await systemctl("stop", direct_service_name())
     await asyncio.sleep(3)
     await asyncio.to_thread(cleanup_stale_shm)
     if not await vram_free(float(CONFIG["switching"].get("vram_free_mb", 2500))):
@@ -847,6 +851,69 @@ async def restore_llm_with_retries(context: str) -> bool:
         await asyncio.sleep(wait)
     set_state("ERROR", f"Qwen restore failed after {max_retries} retries ({context})")
     return False
+
+
+# ------------------------------------------------- direct comfyui ---
+
+def direct_service_name() -> str:
+    return str(CONFIG.get("direct", {}).get("service", "hermes-comfyui-direct.service"))
+
+
+def direct_public_url() -> str:
+    return str(CONFIG.get("direct", {}).get("public_url", ""))
+
+
+async def transition_to_direct() -> bool:
+    """Enter direct-Comfy mode: LLM unloaded, ComfyUI exposed for the user,
+    worker parked. Returns True when the direct backend serves."""
+    direct = CONFIG.get("direct", {})
+    service = direct_service_name()
+    set_state("LLM_UNLOADING")
+    # Never run both backends: the agent headless Comfy goes first.
+    await systemctl("stop", str(CONFIG["media"]["service"]))
+    current = _state.get("current_job")
+    if current:
+        update_job(str(current), status="failed",
+                   error="superseded by direct Comfy mode")
+        _state["current_job"] = None
+        _state["current_prompt_id"] = None
+        log.info("job %s failed: superseded by direct Comfy mode", current)
+    if not await unload_llm():
+        log.warning("direct: Tabby unload refused, continuing if VRAM is free")
+    await asyncio.sleep(float(CONFIG["switching"].get("post_unload_settle", 5)))
+    threshold = float(CONFIG["switching"].get("vram_free_mb", 2500))
+    for _ in range(12):
+        if await vram_free(threshold):
+            break
+        await asyncio.sleep(5)
+    if not await vram_free(threshold):
+        await cleanup_stray_cuda()
+        await asyncio.sleep(5)
+    if not await vram_free(threshold):
+        set_state("ERROR", "GPU not freed for direct Comfy")
+        return False
+    set_state("GPU_FREE")
+    set_state("MEDIA_STARTING")
+    if not await systemctl("start", service):
+        set_state("ERROR", "direct ComfyUI start failed")
+        return False
+    if not await wait_media_online(int(direct.get("startup_timeout", 600))):
+        set_state("ERROR", "direct ComfyUI health timeout")
+        await systemctl("stop", service)
+        return False
+    log.info("direct ComfyUI ready at %s", direct_public_url())
+    set_state("DIRECT")
+    return True
+
+
+async def watch_direct() -> None:
+    """Parked while the user drives Comfy directly: the manager touches
+    nothing. When the direct backend disappears (closed/crashed) the mode
+    auto-returns to AUTO so the LLM is reloaded."""
+    if await service_active(direct_service_name()) and await media_online():
+        return
+    log.info("direct ComfyUI gone; returning to AUTO")
+    _set_desired("AUTO")
 
 
 # --------------------------------------------------------------- comfyui ---
@@ -1157,6 +1224,8 @@ async def _drive() -> None:
                         state = _state["current_state"]
                         if state in ("MEDIA_READY", "MEDIA_BUSY"):
                             await drain_media_queue()
+                elif desired == "DIRECT":
+                    await transition_to_direct()
                 elif desired == "LLM" or desired == "AUTO":
                     await restore_llm_with_retries("stray-gpu-free")
                 return
@@ -1194,11 +1263,22 @@ async def _drive() -> None:
             _state["error_retry_ts"] = now
             if desired == "LLM" or (desired == "AUTO" and not queued_jobs()):
                 await restore_llm_with_retries("error-recovery")
+            elif desired == "DIRECT":
+                log.warning("error-recovery: retrying direct Comfy for desired=DIRECT")
+                if not await transition_to_direct():
+                    log.warning("error-recovery: direct failed, falling back to LLM")
+                    await restore_llm_with_retries("error-direct-failed")
             else:
                 log.warning("error-recovery: attempting media path for desired=%s", desired)
                 if not await transition_to_media():
                     log.warning("error-recovery: media failed, falling back to LLM")
                     await restore_llm_with_retries("error-media-failed")
+            return
+        if desired == "DIRECT":
+            if state != "DIRECT":
+                await transition_to_direct()
+            else:
+                await watch_direct()
             return
         if desired == "LLM":
             if state != "LLM_READY":
@@ -1241,6 +1321,9 @@ async def _drive() -> None:
             await drain_media_queue()
         elif state == "GPU_FREE":
             await restore_llm_with_retries("stray-gpu-free")
+        else:
+            # e.g. DIRECT after auto-return: stop any media backend, reload LLM.
+            await restore_llm_with_retries("auto-return")
 
 
 async def drain_media_queue() -> None:
@@ -1399,6 +1482,10 @@ async def status(_: None = Depends(require_key)) -> dict:
         hint = "idle with LLM resident: submit a job, the worker starts media automatically"
     elif desired == "MEDIA" and state == "LLM_READY":
         hint = "switching to media: submit a job or wait for the transition"
+    elif desired == "DIRECT" and state == "DIRECT":
+        hint = f"direct ComfyUI for you at {direct_public_url()} (manager parked, chat idle)"
+    elif desired == "DIRECT":
+        hint = f"switching to direct ComfyUI ({state}): wait, do not resubmit"
     elif state in ("MEDIA_READY", "MEDIA_BUSY"):
         hint = "media up: submit jobs directly"
     elif state in ("LLM_UNLOADING", "GPU_FREE", "MEDIA_STARTING", "MEDIA_STOPPING", "LLM_LOADING", "BOOT"):
@@ -1420,6 +1507,8 @@ async def status(_: None = Depends(require_key)) -> dict:
         "media_online": await media_online(),
         "queue_length": len(queued_jobs()),
         "current_job": _state["current_job"],
+        "direct_url": direct_public_url(),
+        "direct_active": desired == "DIRECT" and state == "DIRECT",
         "media_progress": (current or {}).get("progress", 0.0),
         "active_preset": _state["active_preset"],
         "active_media_model": _state["active_media_model"],
@@ -1460,6 +1549,11 @@ async def mode_media(_: None = Depends(require_key)) -> dict:
 @app.post("/mode/auto")
 async def mode_auto(_: None = Depends(require_key)) -> dict:
     return _set_desired("AUTO")
+
+
+@app.post("/mode/direct")
+async def mode_direct(_: None = Depends(require_key)) -> dict:
+    return _set_desired("DIRECT")
 
 
 @app.post("/system/reboot")
