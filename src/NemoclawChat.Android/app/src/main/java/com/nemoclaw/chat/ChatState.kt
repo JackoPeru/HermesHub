@@ -60,6 +60,13 @@ internal data class ActiveStreamState(
     val job: Job?
 )
 
+internal data class BackgroundWorkUi(
+    val runId: String,
+    val goal: String,
+    val statusText: String,
+    val approvalPending: Boolean = false
+)
+
 internal class ChatStateHolder {
     val messages: SnapshotStateList<ChatMessage> = mutableStateListOf()
     val pendingAttachments: SnapshotStateList<ChatInputAttachment> = mutableStateListOf()
@@ -76,6 +83,7 @@ internal class ChatStateHolder {
     var sessionRoute: String by mutableStateOf("legacy")
     var isRecordingVoiceNote: Boolean by mutableStateOf(false)
     var tempVoiceNoteFile: java.io.File? = null
+    var backgroundWork: BackgroundWorkUi? by mutableStateOf(null)
 
     val activeStreams: androidx.compose.runtime.snapshots.SnapshotStateMap<String, ActiveStreamState> = androidx.compose.runtime.mutableStateMapOf()
     var streamUiTickNs: Long by mutableLongStateOf(System.nanoTime())

@@ -28,6 +28,8 @@ class GatewayPatchPlan:
     runs_resume_patched: str | None = None
     runs_resume_changed: bool = False
     runs_resume_changes: tuple[str, ...] = ()
+    detach_changes: tuple[str, ...] = ()
+    detach_routes_changes: tuple[str, ...] = ()
     helper_target: Path | None = None
     helper_patched: str | None = None
     helper_changes: tuple[str, ...] = ()
@@ -65,6 +67,21 @@ def build_patch_plan(target: Path, helper_target: Path | None = None) -> Gateway
             route_original,
             runs_original,
         )
+    # Continue-on-disconnect applies on top; a layout without the upstream
+    # anchors skips detach only (other patches still apply: unknown body
+    # fields are ignored by older gateways, degrading to kill-on-disconnect).
+    try:
+        patched, detach_changes = legacy_patcher._patch_detach_api_server(patched)
+    except legacy_patcher.PatchError as exc:
+        detach_changes = (f"continue-on-disconnect skipped for api_server: {exc}",)
+    detach_routes_changes: tuple[str, ...] = ()
+    detach_routes_base = route_patched if route_patched is not None else route_original
+    if route_target is not None and detach_routes_base is not None:
+        try:
+            route_patched, detach_routes_changes = legacy_patcher._patch_detach_openai_routes(
+                detach_routes_base)
+        except legacy_patcher.PatchError as exc:
+            detach_routes_changes = (f"continue-on-disconnect skipped for openai routes: {exc}",)
     resolved_helper = helper_target if helper_target is not None else legacy_patcher._find_agent_chat_completion_helpers(target)
     if resolved_helper is None:
         return GatewayPatchPlan(
@@ -83,6 +100,8 @@ def build_patch_plan(target: Path, helper_target: Path | None = None) -> Gateway
             runs_resume_patched=runs_resume_patched,
             runs_resume_changed=runs_resume_changed,
             runs_resume_changes=runs_resume_changes,
+            detach_changes=detach_changes,
+            detach_routes_changes=detach_routes_changes,
             helper_changes=("agent chat_completion_helpers.py not found; raw llama progress passthrough skipped",),
         )
 
@@ -104,9 +123,20 @@ def build_patch_plan(target: Path, helper_target: Path | None = None) -> Gateway
         runs_resume_patched=runs_resume_patched,
         runs_resume_changed=runs_resume_changed,
         runs_resume_changes=runs_resume_changes,
+        detach_changes=detach_changes,
+        detach_routes_changes=detach_routes_changes,
         helper_target=resolved_helper,
         helper_patched=helper_patched,
         helper_changes=tuple(helper_changes),
+    )
+
+
+def _actionable_detach_changes(plan: GatewayPatchPlan) -> tuple[str, ...]:
+    """Detach changes that actually modify files (skip notices are inert)."""
+    return tuple(
+        change
+        for change in (*plan.detach_changes, *plan.detach_routes_changes)
+        if "skipped for " not in change
     )
 
 
@@ -130,6 +160,8 @@ def _print_check(plan: GatewayPatchPlan) -> None:
             print(f"- {change}")
     else:
         print("- run lifecycle module not found; persistent resume patch skipped")
+    for change in (*plan.detach_changes, *plan.detach_routes_changes):
+        print(f"- {change}")
 
 
 def run_patcher(argv: list[str] | None = None) -> int:
@@ -144,15 +176,16 @@ def run_patcher(argv: list[str] | None = None) -> int:
         change for change in plan.runs_resume_changes
         if not change.endswith("persistent resume patch skipped")
     )
+    actionable_detach_changes = _actionable_detach_changes(plan)
     if args.check:
         _print_check(plan)
         # Exit status drives rehub-patch.sh: 0 = already patched (skip),
         # 1 = changes pending (apply), anything else = error.
-        if plan.changes or plan.actionable_helper_changes or actionable_resume_changes:
+        if plan.changes or plan.actionable_helper_changes or actionable_resume_changes or actionable_detach_changes:
             return 1
         return 0
 
-    if not plan.target_changed and not plan.route_changed and not plan.actionable_helper_changes and not actionable_resume_changes:
+    if not plan.target_changed and not plan.route_changed and not plan.actionable_helper_changes and not actionable_resume_changes and not actionable_detach_changes:
         print(f"Hermes native gateway already patched: {plan.target}")
         if plan.route_target is not None:
             print(f"Hermes OpenAI route module already patched: {plan.route_target}")
@@ -204,4 +237,6 @@ def run_patcher(argv: list[str] | None = None) -> int:
         print(f"Hermes run lifecycle module already patched: {plan.runs_target}")
     else:
         print("- run lifecycle module not found; persistent resume patch skipped")
+    for change in actionable_detach_changes:
+        print(f"- {change}")
     return 0

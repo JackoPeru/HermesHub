@@ -133,9 +133,13 @@ fun streamHermesSessionChat(
     provider: String? = null,
     modelOptions: JSONObject? = null,
     sessionKey: String? = null,
-    allowCompatAuth: Boolean = true
+    allowCompatAuth: Boolean = true,
+    continueOnDisconnect: Boolean = true
 ): Flow<ChatStreamEvent> = flow {
     val payload = JSONObject().put("input", input)
+    // Il turno deve sopravvivere alla morte del client (app killata): il gateway
+    // continua il lavoro e il risultato resta leggibile via GET /v1/runs/{id}.
+    if (continueOnDisconnect) payload.put("continue_on_disconnect", true)
     val effModel = model?.takeIf { it.isNotBlank() } ?: settings.model.takeIf { it.isNotBlank() }
     if (effModel != null) payload.put("model", effModel)
     val effProvider = provider?.takeIf { it.isNotBlank() }

@@ -464,6 +464,10 @@ internal fun ChatScreen(
     // Allegati pending persistenti: rientrando in app (o nella conversazione)
     // la foto allegata al prompt e' ancora li'.
     var restoredPendingFor by remember { mutableStateOf<String?>(null) }
+    val notificationsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+        onResult = { }
+    )
     LaunchedEffect(state.activeConversationId) {
         val cid = state.activeConversationId
         if (restoredPendingFor != cid) {
@@ -480,6 +484,86 @@ internal fun ChatScreen(
         if (restoredPendingFor == state.activeConversationId) {
             savePendingAttachments(context, state.activeConversationId, state.pendingAttachments.toList())
             saveDraft(context, state.activeConversationId, state.draft)
+        }
+    }
+    // Re-attach lavoro background: se per questa conversazione esiste un binding
+    // e nessuno stream locale lo sta gia' seguendo, interroga il server e agisci.
+    // Il server e' fonte di verita': solo il terminale reale pulisce il binding.
+    LaunchedEffect(state.activeConversationId) {
+        val cid = state.activeConversationId ?: return@LaunchedEffect
+        val binding = withContext(Dispatchers.IO) { loadActiveWorkBinding(context, cid) }
+            ?: return@LaunchedEffect
+        if (state.streamingState?.activeRunId == binding.runId && state.sending) return@LaunchedEffect
+        val client = HermesRunClient(botSettings, botApiKey, botProfile, botMultiplexEnabled)
+        val (code, info) = runCatching { client.status(binding.runId) }.getOrElse { 0 to null }
+        if (code == 404) {
+            withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
+            return@LaunchedEffect
+        }
+        if (code !in 200..299 || info == null) return@LaunchedEffect
+        val approval = parseRunApprovalPayload(info.raw, binding.runId)
+        when (backgroundWorkStateFromRun(info, approval != null)) {
+            BackgroundWorkState.ACTIVE -> {
+                state.backgroundWork = BackgroundWorkUi(
+                    runId = binding.runId,
+                    goal = binding.goal,
+                    statusText = "Hermes continua il lavoro sul gateway…"
+                )
+                maybeStartBackgroundWork(context, settings, binding, botProfile, botMultiplexEnabled) {
+                    notificationsPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+            BackgroundWorkState.WAITING_FOR_APPROVAL -> {
+                val req = approval
+                if (req != null) {
+                    state.streamingState = (state.streamingState ?: StreamingState()).copy(
+                        activeRunId = binding.runId,
+                        runStatus = "waiting_for_approval",
+                        pendingApprovals = listOf(
+                            HermesServerApproval(
+                                approvalId = req.approvalId,
+                                requestId = req.requestId,
+                                runId = binding.runId,
+                                tool = req.tool,
+                                command = req.command,
+                                description = req.description,
+                                choices = req.choices
+                            )
+                        ),
+                        status = "In attesa di approvazione."
+                    )
+                }
+                state.backgroundWork = BackgroundWorkUi(
+                    runId = binding.runId,
+                    goal = binding.goal,
+                    statusText = "Approvazione richiesta.",
+                    approvalPending = true
+                )
+                maybeStartBackgroundWork(context, settings, binding, botProfile, botMultiplexEnabled) {
+                    notificationsPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+            BackgroundWorkState.DONE_COMPLETED -> {
+                val output = info.output.orEmpty()
+                if (output.isNotBlank() && state.messages.none { !it.fromUser && it.text.contains(output.take(60)) }) {
+                    state.messages.add(ChatMessage("Hermes", output, fromUser = false))
+                }
+                withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
+                HermesWorkService.stop(context, binding.runId)
+                if (state.backgroundWork?.runId == binding.runId) state.backgroundWork = null
+            }
+            BackgroundWorkState.DONE_FAILED, BackgroundWorkState.DONE_CANCELLED -> {
+                withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
+                HermesWorkService.stop(context, binding.runId)
+                if (state.backgroundWork?.runId == binding.runId) state.backgroundWork = null
+            }
+            BackgroundWorkState.GONE, BackgroundWorkState.UNKNOWN -> {
+                state.backgroundWork = BackgroundWorkUi(
+                    runId = binding.runId,
+                    goal = binding.goal,
+                    statusText = "Stato lavoro incerto, ricontrollo…"
+                )
+            }
         }
     }
     LaunchedEffect(isStreaming) {
@@ -579,6 +663,25 @@ internal fun ChatScreen(
                     IconButton(onClick = { onSwitchTab(Tab.Bots) }) { Icon(Icons.Rounded.SmartToy, contentDescription = "Apri Bot Hermes", tint = Color.White) }
                 }
             }
+        }
+        val backgroundWork = state.backgroundWork
+        val locallyStreamingRun = state.streamingState?.activeRunId
+        if (backgroundWork != null && locallyStreamingRun != backgroundWork.runId) {
+            BackgroundWorkBanner(
+                work = backgroundWork,
+                onStop = {
+                    scope.launch {
+                        runCatching {
+                            HermesRunClient(botSettings, botApiKey, botProfile, botMultiplexEnabled).stop(backgroundWork.runId)
+                            withContext(Dispatchers.IO) {
+                                state.activeConversationId?.let { clearActiveWorkBinding(context, it) }
+                            }
+                            HermesWorkService.stop(context, backgroundWork.runId)
+                            if (state.backgroundWork?.runId == backgroundWork.runId) state.backgroundWork = null
+                        }
+                    }
+                }
+            )
         }
         Box(modifier = Modifier.weight(1f)) {
             LazyColumn(
@@ -807,7 +910,7 @@ internal fun ChatScreen(
             onQuickPromptConsumed = { quickPrompt = null },
             onSend = {
                 var text = state.draft.trim()
-                if (archivedBotWithoutContext) {
+        if (archivedBotWithoutContext) {
                     state.messages.add(
                         ChatMessage(
                             "Hermes Hub",
@@ -849,6 +952,7 @@ internal fun ChatScreen(
                         val prevId = state.previousResponseId
                         var interrupted = false
                         var lastCheckpointAt = 0L
+                        var boundRunIdForTurn: String? = null
                         val rawEvents = mutableListOf<HermesRawEvent>()
                         val initialConversation = withContext(NonCancellable + Dispatchers.IO) {
                             saveConversationSnapshot(
@@ -913,6 +1017,23 @@ internal fun ChatScreen(
 
                         suspend fun collectFlow(flow: kotlinx.coroutines.flow.Flow<ChatStreamEvent>) {
                             flow.collect { event ->
+                                if (event is ChatStreamEvent.RunId && event.id.isNotBlank() && boundRunIdForTurn != event.id) {
+                                    // La run vive sul server: indirizzo persistito subito, prima ancora
+                                    // di sapere come finira'. Se il client muore, il service/notifica e
+                                    // il re-attach la ritrovano da qui. Solo il terminale reale cancella.
+                                    boundRunIdForTurn = event.id
+                                    val binding = ActiveWorkBinding(
+                                        conversationId = activeStreamCid,
+                                        runId = event.id,
+                                        sessionId = sessionIdForTurn ?: state.hermesSessionId,
+                                        goal = displayText.take(140),
+                                        startedAtMs = System.currentTimeMillis()
+                                    )
+                                    withContext(Dispatchers.IO) { saveActiveWorkBinding(context, binding) }
+                                    maybeStartBackgroundWork(context, settings, binding, botProfile, botMultiplexEnabled) {
+                                        notificationsPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                    }
+                                }
                                 if (event is ChatStreamEvent.ApprovalResolved) {
                                     // Risoluzione già applicata allo stato via applyEvent; notifica leggera.
                                 }
@@ -1063,6 +1184,29 @@ internal fun ChatScreen(
                                 else -> finalState.text.ifEmpty { finalState.error ?: "" }
                             }
 
+                            val serverTerminalRun = finalState.runStatus.lowercase() in setOf("completed", "failed", "cancelled")
+                            if (boundRunIdForTurn != null) {
+                                if (serverTerminalRun) {
+                                    // Terminale reale dal server: niente da continuare, pulizia.
+                                    withContext(NonCancellable + Dispatchers.IO) { clearActiveWorkBinding(context, activeStreamCid) }
+                                    HermesWorkService.stop(context, boundRunIdForTurn!!)
+                                    if (state.backgroundWork?.runId == boundRunIdForTurn) state.backgroundWork = null
+                                } else {
+                                    // Stream finito senza terminale server (kill client, rete, stop
+                                    // locale non confermato): la run CONTINUA sul gateway grazie a
+                                    // continue_on_disconnect. Il binding resta, il service polla.
+                                    val keepBinding = ActiveWorkBinding(
+                                        conversationId = activeStreamCid,
+                                        runId = boundRunIdForTurn!!,
+                                        sessionId = sessionIdForTurn ?: state.hermesSessionId,
+                                        goal = displayText.take(140),
+                                        startedAtMs = System.currentTimeMillis()
+                                    )
+                                    withContext(NonCancellable + Dispatchers.IO) { saveActiveWorkBinding(context, keepBinding) }
+                                    maybeStartBackgroundWork(context, settings, keepBinding, botProfile, botMultiplexEnabled, requestNotificationsPermission = null)
+                                }
+                            }
+
                             val newMessagesToAppend = mutableListOf<ChatMessage>()
 
                             if (finalState.activityTimeline.isNotEmpty() || finalText.isNotEmpty() || finalState.visualBlocks.isNotEmpty()) {
@@ -1190,6 +1334,15 @@ internal fun ChatScreen(
                                 else -> "Stop HTTP $code: ${body.take(160)}"
                             }
                             state.messages.add(ChatMessage("Hermes Hub", msg, fromUser = false, isAction = true))
+                        } else {
+                            // Stop confermato dal server: niente da continuare, pulizia subito.
+                            // (Se il POST fallisce, il binding resta e sara' il poll a decidere.)
+                            runCatching {
+                                val cid = state.activeConversationId
+                                if (cid != null) clearActiveWorkBinding(context, cid)
+                                HermesWorkService.stop(context, activeRunId)
+                                if (state.backgroundWork?.runId == activeRunId) state.backgroundWork = null
+                            }
                         }
                     }
                 }
@@ -3214,6 +3367,47 @@ private fun persistChatOverrides(context: Context, state: ChatStateHolder) {
             syncAfterSave = false
         )
     }
+}
+
+@Composable
+internal fun BackgroundWorkBanner(
+    work: BackgroundWorkUi,
+    onStop: () -> Unit
+) {
+    Surface(
+        color = AppColors.Elevated,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, AppColors.Border),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(
+                Icons.Rounded.Refresh,
+                contentDescription = null,
+                tint = AppColors.Accent,
+                modifier = Modifier.size(20.dp)
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = if (work.goal.isBlank()) "Hermes al lavoro in background" else "Hermes al lavoro: ${work.goal.take(80)}",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(work.statusText, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            IconButton(onClick = onStop, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Rounded.Stop, contentDescription = "Ferma lavoro", tint = Color.White)
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(4.dp))
 }
 
 @Composable

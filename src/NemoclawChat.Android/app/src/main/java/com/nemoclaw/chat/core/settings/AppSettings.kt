@@ -48,7 +48,8 @@ data class AppSettings(
     val sidebarControllo: Boolean = AppDefaults.sidebarControllo,
     val sidebarContenuti: Boolean = AppDefaults.sidebarContenuti,
     val sidebarAccount: Boolean = AppDefaults.sidebarAccount,
-    val sidebarRecenti: Boolean = AppDefaults.sidebarRecenti
+    val sidebarRecenti: Boolean = AppDefaults.sidebarRecenti,
+    val backgroundWork: Boolean = AppDefaults.backgroundWork
 )
 
 internal fun AppSettings.metricFilter(): MetricDisplayFilter = MetricDisplayFilter(
@@ -108,7 +109,8 @@ internal fun loadSettings(context: Context): AppSettings {
         sidebarControllo = prefs.getBoolean("sidebarControllo", AppDefaults.sidebarControllo),
         sidebarContenuti = prefs.getBoolean("sidebarContenuti", AppDefaults.sidebarContenuti),
         sidebarAccount = prefs.getBoolean("sidebarAccount", AppDefaults.sidebarAccount),
-        sidebarRecenti = prefs.getBoolean("sidebarRecenti", AppDefaults.sidebarRecenti)
+        sidebarRecenti = prefs.getBoolean("sidebarRecenti", AppDefaults.sidebarRecenti),
+        backgroundWork = prefs.getBoolean("backgroundWork", AppDefaults.backgroundWork)
     )
     return normalizePlugAndPlaySettings(context, settings)
 }
@@ -206,6 +208,7 @@ internal fun saveSettings(context: Context, settings: AppSettings) {
         putBoolean("sidebarContenuti", settings.sidebarContenuti)
         putBoolean("sidebarAccount", settings.sidebarAccount)
         putBoolean("sidebarRecenti", settings.sidebarRecenti)
+        putBoolean("backgroundWork", settings.backgroundWork)
     }
 }
 
@@ -253,6 +256,7 @@ internal object AppDefaults {
     const val sidebarContenuti = true
     const val sidebarAccount = true
     const val sidebarRecenti = true
+    const val backgroundWork = true
     const val releasesPage = "https://github.com/JackoPeru/HermesHub/releases"
     const val latestReleaseApi = "https://api.github.com/repos/JackoPeru/HermesHub/releases/latest"
 }

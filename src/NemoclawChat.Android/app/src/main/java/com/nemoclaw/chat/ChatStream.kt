@@ -939,6 +939,8 @@ fun streamChatRequest(
                 .put("input", buildMultimodalInput(promptForModel, payloadAttachments))
                 .put("store", true)
                 .put("stream", true)
+                // Il turno deve sopravvivere alla morte del client: vedi session chat.
+                .put("continue_on_disconnect", true)
                 .put("return_progress", true)
                 .put("timings_per_token", true)
                 .put("conversation", serverConversationId ?: JSONObject.NULL)
@@ -1018,6 +1020,7 @@ fun streamChatRequest(
         val payload = JSONObject()
             .put("model", settings.model)
             .put("stream", true)
+            .put("continue_on_disconnect", true)
             .put("return_progress", true)
             .put("timings_per_token", true)
             .put("session_id", serverConversationId ?: JSONObject.NULL)

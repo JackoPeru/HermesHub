@@ -274,14 +274,73 @@ _RUN_RESUME_TRACK_ANCHOR = (
 _RUN_RESUME_FINISH_ANCHOR = (
     '        self._set_run_status(run_id, status, **fields, last_event=f"run.{status}", **extra)\n'
 )
+_RUN_RESUME_STOP_ANCHOR = (
+    "    self._stopping_run_ids.add(run_id)\n"
+)
+_RUN_RESUME_SHUTDOWN_ANCHOR = (
+    "def _mark_shutdown_interrupted_runs(self, run_ids) -> None:\n"
+    '    """Publish the shutdown outcome before cooperative interruption can race teardown."""\n'
+)
+_RUN_RESUME_EVENT_HOOK = (
+    "        try:\n"
+    "            _hermes_hub_rr_event(run_id, event_type, tool_name, preview, args, kwargs)\n"
+    "        except Exception:\n"
+    "            logger.debug(\"[run-resume] event hook failed\", exc_info=True)\n"
+)
+_RUN_RESUME_TRACK_HOOK = (
+    "    try:\n"
+    "        _hermes_hub_rr_track(run_id, session_id, user_message, conversation_history, launch)\n"
+    "    except Exception:\n"
+    "        logger.debug(\"[run-resume] track hook failed\", exc_info=True)\n"
+)
+_RUN_RESUME_FINISH_HOOK = (
+    "        try:\n"
+    "            _hermes_hub_rr_finish(run_id, status)\n"
+    "        except Exception:\n"
+    "            logger.debug(\"[run-resume] finish hook failed\", exc_info=True)\n"
+)
+_RUN_RESUME_STOP_HOOK = (
+    "    try:\n"
+    "        _hermes_hub_rr_user_stop(run_id)\n"
+    "    except Exception:\n"
+    "        logger.debug(\"[run-resume] user-stop hook failed\", exc_info=True)\n"
+)
+_RUN_RESUME_SHUTDOWN_HOOK = (
+    "    try:\n"
+    "        _hermes_hub_rr_shutdown_mark(run_ids)\n"
+    "    except Exception:\n"
+    "        logger.debug(\"[run-resume] shutdown-mark hook failed\", exc_info=True)\n"
+)
+
+_RUN_RESUME_HOOKS = (
+    (_RUN_RESUME_EVENT_ANCHOR, _RUN_RESUME_EVENT_HOOK, "runs resume event hook", False),
+    (_RUN_RESUME_TRACK_ANCHOR, _RUN_RESUME_TRACK_HOOK, "runs resume track hook", False),
+    (_RUN_RESUME_FINISH_ANCHOR, _RUN_RESUME_FINISH_HOOK, "runs resume finish hook", True),
+    (_RUN_RESUME_STOP_ANCHOR, _RUN_RESUME_STOP_HOOK, "runs resume user-stop hook", False),
+    (_RUN_RESUME_SHUTDOWN_ANCHOR, _RUN_RESUME_SHUTDOWN_HOOK, "runs resume shutdown-mark hook", False),
+)
 
 
-def _run_resume_engine_source() -> str:
-    """Load the canonical resume engine (single source of truth for tests)."""
-    path = Path(__file__).resolve().parents[2] / "run_resume.py"
-    source = path.read_text(encoding="utf-8")
-    compile(source, str(path), "exec")
-    return source
+def _apply_runs_resume_hooks(patched: str) -> tuple[str, list[str]]:
+    """Ensure every resume hook is present (idempotent; future-proof for new hooks).
+
+    Probes keep their exact indentation: the engine block defines wrappers
+    with the same call text, so only the indented call sites count.
+    """
+    changes: list[str] = []
+    for anchor, hook, label, prepend in _RUN_RESUME_HOOKS:
+        probe = hook.splitlines()[1]
+        assert probe.startswith((" ", "\t")) and probe.strip(), label
+        if probe in patched:
+            continue
+        if anchor not in patched:
+            raise PatchError(f"Patch anchor not found: {label}")
+        if prepend:
+            patched = patched.replace(anchor, hook + anchor, 1)
+        else:
+            patched = patched.replace(anchor, anchor + hook, 1)
+        changes.append(label)
+    return patched, changes
 
 
 def _run_resume_loader_block() -> str:
@@ -375,6 +434,32 @@ def _run_resume_loader_block() -> str:
         '        logger.debug("[run-resume] finish hook failed", exc_info=True)',
         "",
         "",
+        "def _hermes_hub_rr_user_stop(run_id):",
+        "    try:",
+        '        store = globals().get("_HERMES_RUN_RESUME_STORE")',
+        "        if store is None:",
+        "            return",
+        "        store.note_user_stop(run_id)",
+        "    except Exception:",
+        '        logger.debug("[run-resume] user-stop hook failed", exc_info=True)',
+        "",
+        "",
+        "def _hermes_hub_rr_shutdown_mark(run_ids):",
+        "    try:",
+        '        ns = globals().get("_HERMES_RUN_RESUME_NS") or {}',
+        "        if not ns:",
+        "            return",
+        "        try:",
+        "            count = len(list(run_ids or []))",
+        "        except Exception:",
+        "            count = -1",
+        '        fn = ns.get("note_controlled_shutdown")',
+        "        if fn is not None:",
+        "            fn(count)",
+        "    except Exception:",
+        '        logger.debug("[run-resume] shutdown-mark hook failed", exc_info=True)',
+        "",
+        "",
         "def _hermes_hub_rr_boot():",
         "    try:",
         '        ns = globals().get("_HERMES_RUN_RESUME_NS") or {}',
@@ -384,7 +469,7 @@ def _run_resume_loader_block() -> str:
         "            return",
         "        base = \"http://127.0.0.1:%s\" % os.environ.get(\"HERMES_API_PORT\", \"8642\")",
         "        key = os.environ.get(\"HERMES_API_KEY\", \"\") or os.environ.get(\"HERMES_HUB_API_KEY\", \"\")",
-        "        delay = float(os.environ.get(\"HERMES_HUB_RESUME_DELAY_S\", \"120\"))",
+        "        delay = float(os.environ.get(\"HERMES_HUB_RESUME_DELAY_S\", \"10\"))",
         "        period = float(os.environ.get(\"HERMES_HUB_RESUME_PERIOD_S\", \"600\"))",
         "        thread = threading.Thread(",
         '            target=ns["reconcile_loop_forever"],',
@@ -401,14 +486,133 @@ def _run_resume_loader_block() -> str:
     return "\n".join(lines)
 
 
+_DETACH_BEGIN = "# HERMES_HUB_DETACH_V1_BEGIN"
+_DETACH_END = "# HERMES_HUB_DETACH_V1_END"
+
+_DETACH_SESSION_RUN_ANCHOR = (
+    '        message_id = f"msg_{uuid.uuid4().hex}"\n'
+    '        run_id = f"run_{uuid.uuid4().hex}"\n'
+)
+_DETACH_SESSION_FLAG = (
+    "        try:\n"
+    '            _hermes_hub_detach_body = ctx.get("body") if isinstance(ctx, dict) else {}\n'
+    "            _hermes_hub_detach_on_disconnect = bool(\n"
+    "                isinstance(_hermes_hub_detach_body, dict)\n"
+    '                and (_hermes_hub_detach_body.get("continue_on_disconnect")\n'
+    '                     or _hermes_hub_detach_body.get("background")))\n'
+    "        except Exception:\n"
+    "            _hermes_hub_detach_on_disconnect = False\n"
+)
+_DETACH_SESSION_DRAIN_OLD = (
+    "        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError):\n"
+    "            await self._drain_session_stream_task_on_disconnect(\n"
+    '                run_id, task, interrupt_message="SSE client disconnected", shield_wait=False)\n'
+    '            logger.info("Session SSE client disconnected; interrupted live run %s", run_id)\n'
+)
+_DETACH_SESSION_DRAIN_NEW = (
+    "        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError):\n"
+    "            if _hermes_hub_detach_on_disconnect:\n"
+    '                logger.info("Session SSE client disconnected; detached run %s continues", run_id)\n'
+    "            else:\n"
+    "                await self._drain_session_stream_task_on_disconnect(\n"
+    '                    run_id, task, interrupt_message="SSE client disconnected", shield_wait=False)\n'
+    '                logger.info("Session SSE client disconnected; interrupted live run %s", run_id)\n'
+)
+_DETACH_ROUTES_HELPER = (
+    "async def _hermes_hub_detach_requested(source) -> bool:\n"
+    '    """Opt-in continue-on-disconnect: the client declares the turn must survive transport loss."""\n'
+    "    try:\n"
+    "        body = source\n"
+    "        if not isinstance(body, dict):\n"
+    "            reader = getattr(body, \"json\", None)\n"
+    "            if not callable(reader):\n"
+    "                return False\n"
+    "            body = await reader()\n"
+    "        if not isinstance(body, dict):\n"
+    "            return False\n"
+    '        return bool(body.get("continue_on_disconnect") or body.get("background"))\n'
+    "    except Exception:\n"
+    "        return False\n"
+)
+_DETACH_CHAT_ABANDON_OLD = (
+    "        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError):\n"
+    '            await _abandon_agent_task(agent_ref, agent_task, "SSE client disconnected")\n'
+    '            logger.info("SSE client disconnected; interrupted agent task %s", completion_id)\n'
+)
+_DETACH_CHAT_ABANDON_NEW = (
+    "        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError):\n"
+    "            if await _hermes_hub_detach_requested(request):\n"
+    '                logger.info("SSE client disconnected; detached agent task %s continues", completion_id)\n'
+    "            else:\n"
+    '                await _abandon_agent_task(agent_ref, agent_task, "SSE client disconnected")\n'
+    '                logger.info("SSE client disconnected; interrupted agent task %s", completion_id)\n'
+)
+_DETACH_RESPONSES_ABANDON_OLD = (
+    "        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError):\n"
+    "            st.persist_incomplete_if_needed()\n"
+    '            await _abandon_agent_task(agent_ref, agent_task, "SSE client disconnected")\n'
+    '            logger.info("SSE client disconnected; interrupted agent task %s", response_id)\n'
+)
+_DETACH_RESPONSES_ABANDON_NEW = (
+    "        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError):\n"
+    "            st.persist_incomplete_if_needed()\n"
+    "            if await _hermes_hub_detach_requested(request):\n"
+    '                logger.info("SSE client disconnected; detached agent task %s continues", response_id)\n'
+    "            else:\n"
+    '                await _abandon_agent_task(agent_ref, agent_task, "SSE client disconnected")\n'
+    '                logger.info("SSE client disconnected; interrupted agent task %s", response_id)\n'
+)
+
+
+def _patch_detach_api_server(text: str) -> tuple[str, list[str]]:
+    """Opt-in continue-on-disconnect for session chat streams.
+
+    With ``continue_on_disconnect`` (or ``background``) in the request body,
+    an SSE transport loss no longer interrupts the turn: the agent keeps
+    working and the final status/output stays readable via GET /v1/runs/{id}.
+    Fail-closed: any missing anchor raises instead of half-patching.
+    """
+    if _DETACH_BEGIN in text:
+        return text, []
+    if "_hermes_hub_detach_on_disconnect" in text:
+        return text, []
+    if text.count(_DETACH_SESSION_RUN_ANCHOR) != 1:
+        raise PatchError("detach session run anchor not found or ambiguous")
+    if text.count(_DETACH_SESSION_DRAIN_OLD) != 1:
+        raise PatchError("detach session drain anchor not found or ambiguous")
+    patched = text.replace(_DETACH_SESSION_RUN_ANCHOR,
+                            _DETACH_SESSION_RUN_ANCHOR + _DETACH_SESSION_FLAG, 1)
+    patched = patched.replace(_DETACH_SESSION_DRAIN_OLD, _DETACH_SESSION_DRAIN_NEW, 1)
+    return patched, ["session chat continue-on-disconnect"]
+
+
+def _patch_detach_openai_routes(text: str) -> tuple[str, list[str]]:
+    """Opt-in continue-on-disconnect for chat completions and responses streams.
+
+    Same contract as the session path: flagged turns survive transport loss,
+    unflagged behavior is unchanged. Fail-closed on missing anchors.
+    """
+    if "_hermes_hub_detach_requested" in text:
+        return text, []
+    if text.count(_DETACH_CHAT_ABANDON_OLD) != 1:
+        raise PatchError("detach chat abandon anchor not found or ambiguous")
+    if text.count(_DETACH_RESPONSES_ABANDON_OLD) != 1:
+        raise PatchError("detach responses abandon anchor not found or ambiguous")
+    patched = text.replace(_DETACH_CHAT_ABANDON_OLD, _DETACH_CHAT_ABANDON_NEW, 1)
+    patched = patched.replace(_DETACH_RESPONSES_ABANDON_OLD, _DETACH_RESPONSES_ABANDON_NEW, 1)
+    block = "\n\n" + _DETACH_BEGIN + "\n" + _DETACH_ROUTES_HELPER + _DETACH_END + "\n"
+    patched = patched.rstrip("\n") + block
+    return patched, ["openai routes continue-on-disconnect"]
+
+
 def _patch_runs_resume(runs_original: str) -> tuple[str, list[str]]:
     """Inject the persistent run-resume engine into the upstream runs module.
 
     Fail-closed: any missing anchor raises instead of half-patching. When the
-    block is already present but embeds an older engine source, only the
-    block is refreshed (hooks are left untouched).
+    block is already present but stale, only the block is refreshed; hooks
+    are always ensured idempotently afterwards.
     """
-    engine = _run_resume_engine_source()
+    rebuilt = _run_resume_loader_block()
     if _RUN_RESUME_BEGIN in runs_original:
         block_pattern = re.compile(
             re.escape(_RUN_RESUME_BEGIN) + r".*?" + re.escape(_RUN_RESUME_END),
@@ -417,42 +621,23 @@ def _patch_runs_resume(runs_original: str) -> tuple[str, list[str]]:
         match = block_pattern.search(runs_original)
         if match is None:
             raise PatchError("run resume markers are unbalanced; refusing to patch")
-        if repr(engine) in match.group(0):
-            return runs_original, []
-        refreshed = runs_original[:match.start()] + _run_resume_loader_block() + runs_original[match.end():]
-        return refreshed, ["run resume engine refreshed"]
-    patched = runs_original.rstrip("\n") + "\n\n" + _run_resume_loader_block() + "\n"
-    patched, _ = _replace_once(
-        patched,
-        _RUN_RESUME_EVENT_ANCHOR,
-        _RUN_RESUME_EVENT_ANCHOR
-        + "        try:\n"
-        + "            _hermes_hub_rr_event(run_id, event_type, tool_name, preview, args, kwargs)\n"
-        + "        except Exception:\n"
-        + "            logger.debug(\"[run-resume] event hook failed\", exc_info=True)\n",
-        "runs resume event hook",
-    )
-    patched, _ = _replace_once(
-        patched,
-        _RUN_RESUME_TRACK_ANCHOR,
-        _RUN_RESUME_TRACK_ANCHOR
-        + "    try:\n"
-        + "        _hermes_hub_rr_track(run_id, session_id, user_message, conversation_history, launch)\n"
-        + "    except Exception:\n"
-        + "        logger.debug(\"[run-resume] track hook failed\", exc_info=True)\n",
-        "runs resume track hook",
-    )
-    patched, _ = _replace_once(
-        patched,
-        _RUN_RESUME_FINISH_ANCHOR,
-        "        try:\n"
-        + "            _hermes_hub_rr_finish(run_id, status)\n"
-        + "        except Exception:\n"
-        + "            logger.debug(\"[run-resume] finish hook failed\", exc_info=True)\n"
-        + _RUN_RESUME_FINISH_ANCHOR,
-        "runs resume finish hook",
-    )
-    return patched, ["run resume checkpoint hooks (track/event/finish) + reconcile engine"]
+        if match.group(0) == rebuilt:
+            patched, hook_changes = _apply_runs_resume_hooks(runs_original)
+            return patched, hook_changes
+        refreshed = runs_original[:match.start()] + rebuilt + runs_original[match.end():]
+        refreshed, hook_changes = _apply_runs_resume_hooks(refreshed)
+        return refreshed, ["run resume engine refreshed"] + hook_changes
+    patched = runs_original.rstrip("\n") + "\n\n" + rebuilt + "\n"
+    patched, hook_changes = _apply_runs_resume_hooks(patched)
+    return patched, hook_changes
+
+
+def _run_resume_engine_source() -> str:
+    """Load the canonical resume engine (single source of truth for tests)."""
+    path = Path(__file__).resolve().parents[2] / "run_resume.py"
+    source = path.read_text(encoding="utf-8")
+    compile(source, str(path), "exec")
+    return source
 
 
 def _replace_once(text: str, old: str, new: str, label: str) -> tuple[str, bool]:

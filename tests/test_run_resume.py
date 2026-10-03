@@ -49,15 +49,25 @@ RUNS_FIXTURE = textwrap.dedent('''\
             task = self._active_run_tasks[run_id] = 1
         else:
             task = self._active_run_tasks[run_id] = asyncio.create_task(_execute_run(self, launch, _api_server=_api_server))
+
+    def _mark_shutdown_interrupted_runs(self, run_ids) -> None:
+        """Publish the shutdown outcome before cooperative interruption can race teardown."""
+        for run_id in run_ids:
+            pass
+
+    async def _handle_stop_run(self, request, *, _api_server):
+        self._stopping_run_ids.add(run_id)
+        return None
     ''')
 
 
 class FakeDeps(rr.ReconcileDeps):
-    def __init__(self, statuses=None, counts=None, post_code=202):
+    def __init__(self, statuses=None, counts=None, post_code=202, llm="unknown"):
         super().__init__(api_base="http://127.0.0.1:9", api_key="test")
         self.statuses = dict(statuses or {})
         self.counts = dict(counts or {})
         self.post_code = post_code
+        self._llm = {"yes": True, "no": False}.get(llm)
         self.posts = []
         self.child_seq = 0
 
@@ -66,6 +76,9 @@ class FakeDeps(rr.ReconcileDeps):
 
     def transcript_count(self, session_id):
         return self.counts.get(session_id)
+
+    def llm_ready(self):
+        return self._llm
 
     def post_resume(self, body, idempotency_key):
         self.posts.append({"body": body, "key": idempotency_key})
@@ -113,11 +126,21 @@ class LifecycleTests(unittest.TestCase):
     def test_terminal_states_are_sticky(self):
         store, _ = make_store()
         store.track_run("run_1", "sess_1", "goal", 0, {})
-        for terminal in ("completed", "failed", "cancelled"):
+        for terminal in ("completed", "failed"):
             store.finish("run_1", terminal)
             # finish() always mirrors upstream truthfully, but reconcile must skip them;
             # here assert the stored mirror is exact.
             self.assertEqual(store.get("run_1")["hub_state"], terminal)
+        # Plain cancelled (no user stop) is shutdown-caused: resumable, not terminal.
+        store.finish("run_1", "cancelled")
+        self.assertEqual(store.get("run_1")["hub_state"], "interrupted")
+        self.assertEqual(store.get("run_1")["cancel_origin"], "shutdown")
+        # A real user stop stays cancelled forever.
+        store.note_user_stop("run_1")
+        store.finish("run_1", "cancelled")
+        row = store.get("run_1")
+        self.assertEqual(row["hub_state"], "cancelled")
+        self.assertEqual(row["cancel_origin"], "user")
 
     def test_untracked_run_gets_stub_row(self):
         store, _ = make_store()
@@ -185,10 +208,23 @@ class ReconcileTests(unittest.TestCase):
         for terminal in ("failed", "cancelled"):
             store, _ = make_store()
             self._tracked(store)
+            if terminal == "cancelled":
+                # Upstream-cancelled WITH a recorded user stop stays cancelled.
+                store.note_user_stop("run_1")
+                store.finish("run_1", "cancelled")
             simulate_reboot(store)
             deps = FakeDeps(statuses={"run_1": terminal}, counts={"sess_1": 4})
             self.assertEqual(rr.reconcile_row(store, store.get("run_1"), deps), terminal)
             self.assertEqual(deps.posts, [])
+
+    def test_shutdown_cancel_without_user_stop_is_resumable(self):
+        # Upstream-cancelled WITHOUT a user stop is shutdown-caused: resumable.
+        store, _ = make_store()
+        self._tracked(store)
+        simulate_reboot(store)
+        deps = FakeDeps(statuses={"run_1": "cancelled"}, counts={"sess_1": 4})
+        self.assertEqual(rr.reconcile_row(store, store.get("run_1"), deps), "resuming")
+        self.assertEqual(len(deps.posts), 1)
 
     def test_waiting_for_approval_needs_recovery(self):
         store, _ = make_store()
@@ -312,9 +348,22 @@ class ReconcileTests(unittest.TestCase):
         store, _ = make_store()
         self._tracked(store)
         simulate_reboot(store)
-        simulate_reboot(store)
         deps = FakeDeps(statuses={}, counts={"sess_1": 4}, post_code=500)
         self.assertEqual(rr.reconcile_row(store, store.get("run_1"), deps), "interrupted")
+
+    def test_unloaded_llm_defers_post_until_ready(self):
+        store, _ = make_store()
+        self._tracked(store)
+        simulate_reboot(store)
+        deps = FakeDeps(statuses={}, counts={"sess_1": 4}, llm="no")
+        outcomes = rr.reconcile_all(store, deps)
+        self.assertEqual(outcomes, {"run_1": "interrupted"})
+        self.assertEqual(deps.posts, [])
+        # Same cycle with the backend back: resumes normally, no recovery.
+        deps._llm = True
+        outcomes = rr.reconcile_all(store, deps)
+        self.assertEqual(outcomes, {"run_1": "resuming"})
+        self.assertEqual(len(deps.posts), 1)
 
     def test_terminal_rows_skipped(self):
         store, _ = make_store()
@@ -345,6 +394,144 @@ class ReconcileTests(unittest.TestCase):
         self.assertEqual(row["hub_state"], "recovery_required")
         self.assertEqual(len(json.loads(row["completed_json"])), 1)
 
+    def test_user_stop_cancel_never_resumes(self):
+        store, _ = make_store()
+        self._tracked(store)
+        store.note_user_stop("run_1")
+        store.finish("run_1", "cancelled")
+        row = store.get("run_1")
+        self.assertEqual(row["hub_state"], "cancelled")
+        self.assertEqual(row["cancel_origin"], "user")
+        simulate_reboot(store)
+        deps = FakeDeps(statuses={"run_1": "cancelled"}, counts={"sess_1": 4})
+        self.assertEqual(rr.reconcile_all(store, deps), {})
+        self.assertEqual(deps.posts, [])
+
+    def test_shutdown_cancel_without_user_stop_is_resumable(self):
+        store, _ = make_store()
+        self._tracked(store)
+        store.record_started("run_1", "web_search", {"query": "x"})
+        store.record_completed("run_1", "web_search", {"query": "x"}, result="y", history_count=4)
+        # Shutdown drain cancels the task; no /stop was ever requested.
+        store.finish("run_1", "cancelled")
+        row = store.get("run_1")
+        self.assertEqual(row["hub_state"], "interrupted")
+        self.assertEqual(row["cancel_origin"], "shutdown")
+        simulate_reboot(store)
+        deps = FakeDeps(statuses={"run_1": "interrupted"}, counts={"sess_1": 4})
+        self.assertEqual(rr.reconcile_row(store, store.get("run_1"), deps), "resuming")
+        self.assertEqual(len(deps.posts), 1)
+
+    def test_shutdown_marker_roundtrip(self):
+        tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+        tmp.close()
+        os.environ["HERMES_HUB_SHUTDOWN_MARKER"] = tmp.name
+        try:
+            os.unlink(tmp.name)
+            self.assertIsNone(rr.take_shutdown_marker())
+            path = rr.note_controlled_shutdown(3)
+            self.assertEqual(path, tmp.name)
+            marker = rr.take_shutdown_marker()
+            self.assertEqual(marker["active_runs"], 3)
+            self.assertEqual(marker["reason"], "gateway-shutdown")
+            self.assertFalse(os.path.exists(tmp.name))
+            self.assertIsNone(rr.take_shutdown_marker())
+        finally:
+            os.environ.pop("HERMES_HUB_SHUTDOWN_MARKER", None)
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
+    def test_double_restart_keeps_single_chain(self):
+        store, _ = make_store()
+        self._tracked(store, run_id="run_p", session="sess_p")
+        # Boot 1: parent resumes as child C1, then everything crashes again.
+        simulate_reboot(store)
+        deps = FakeDeps(statuses={"run_p": "interrupted"}, counts={"sess_p": 4})
+        self.assertEqual(rr.reconcile_row(store, store.get("run_p"), deps), "resuming")
+        child1 = store.get("run_p")["resumed_child"]
+        # Child C1 tracked in boot 1, interrupted by the second crash.
+        store.track_run(child1, "sess_p", "continued", 6, {})
+        store.record_started(child1, "web_search", {"query": "x"})
+        store.finish(child1, "interrupted")
+        # Boot 2: parent must re-resume (new child), old child superseded, no dupes.
+        simulate_reboot(store)
+        deps.statuses[child1] = "interrupted"
+        deps.statuses["run_p"] = "interrupted"
+        outcomes = rr.reconcile_all(store, deps)
+        self.assertEqual(outcomes["run_p"], "resuming")
+        child2 = store.get("run_p")["resumed_child"]
+        self.assertNotEqual(child2, child1)
+        self.assertEqual(store.get(child1)["hub_state"], "superseded")
+        # Exactly two POSTs total across both boots: C1 then C2, never a grandchild.
+        self.assertEqual(len(deps.posts), 2)
+        self.assertNotEqual(deps.posts[0]["key"], deps.posts[1]["key"])
+        self.assertTrue(child2.startswith("run_child"))
+
+    def test_wait_ready_waits_for_hub(self):
+        calls = {"hub": 0}
+        sleeps = []
+
+        def poll_hub():
+            calls["hub"] += 1
+            return calls["hub"] >= 3
+
+        ok, llm, elapsed = rr.wait_ready(poll_hub, lambda: True, 30.0, 1.0, sleep=sleeps.append)
+        self.assertTrue(ok)
+        self.assertTrue(llm)
+        self.assertEqual(calls["hub"], 3)
+        self.assertEqual(len(sleeps), 2)
+        self.assertTrue(all(s == 1.0 for s in sleeps))
+
+    def test_wait_ready_times_out(self):
+        ok, llm, elapsed = rr.wait_ready(lambda: False, lambda: None, 3.0, 1.0,
+                                         sleep=lambda s: time.sleep(0.01))
+        self.assertFalse(ok)
+        self.assertIsNone(llm)
+        self.assertGreaterEqual(elapsed, 3.0)
+
+    def test_shutdown_mid_checkpoint_keeps_previous_state(self):
+        # Deterministic crash-during-write: child holds an uncommitted txn, dies.
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        script = (
+            "import sys, time;"
+            "sys.path.insert(0, %r);"
+            "import run_resume as rr;"
+            "s = rr.ResumeStore(%r);"
+            "s.track_run('run_victim', 'sess_v', 'goal', 7, {});"
+            "s.record_completed('run_victim', 'web_search', {'query': 'x'}, result='seven', history_count=7);"
+            "c = s._conn;"
+            "c.execute('BEGIN IMMEDIATE');"
+            "c.execute(\"UPDATE run_resume SET hub_state='completed' WHERE run_id='run_victim'\");"
+            "time.sleep(30)"
+            % (str(REPO / "scripts" / "hermes_hub_gateway"), tmp.name)
+        )
+        proc = subprocess.Popen([sys.executable, "-c", script],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            time.sleep(1.0)
+        finally:
+            proc.kill()
+            proc.wait()
+        conn = sqlite3.connect(tmp.name)
+        try:
+            self.assertEqual(conn.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            row = conn.execute("SELECT hub_state, history_count, completed_json FROM run_resume"
+                               " WHERE run_id='run_victim'").fetchone()
+            # Uncommitted 'completed' rolled back; previous checkpoint intact.
+            self.assertEqual(row[0], "checkpointed")
+            self.assertEqual(row[1], 7)
+            self.assertEqual(len(json.loads(row[2])), 1)
+        finally:
+            conn.close()
+            for suffix in ("", "-wal", "-shm"):
+                try:
+                    os.unlink(tmp.name + suffix)
+                except OSError:
+                    pass
+
     def test_continuation_content(self):
         row = {"run_id": "run_9", "user_goal": "make site",
                "completed_json": "[]", "updated_at": 123.0}
@@ -358,9 +545,12 @@ class ReconcileTests(unittest.TestCase):
         self.assertIn("do NOT re-execute", text)
 
     def test_idempotency_key_stable(self):
-        self.assertEqual(rr.resume_idempotency_key("run_1", 1700000000.7), "resume-run_1-1700000000")
+        self.assertEqual(rr.resume_idempotency_key("run_1", 1700000000.7), "resume-run_1-1700000000-0")
         self.assertEqual(rr.resume_idempotency_key("run_1", 1700000000.7),
                          rr.resume_idempotency_key("run_1", 1700000000.2))
+        # Attempts disambiguate genuinely new resumes sharing a timestamp.
+        self.assertNotEqual(rr.resume_idempotency_key("run_1", 1700000000.7, 0),
+                            rr.resume_idempotency_key("run_1", 1700000000.7, 1))
 
 
 class CrashAtomicityTests(unittest.TestCase):
@@ -414,21 +604,36 @@ class PatchEmbeddingTests(unittest.TestCase):
 
     def test_runs_patch_injects_hooks_and_compiles(self):
         patched, changes = self.patcher._patch_runs_resume(RUNS_FIXTURE)
-        self.assertEqual(
-            changes, ["run resume checkpoint hooks (track/event/finish) + reconcile engine"])
-        self.assertIn("# HERMES_HUB_RUN_RESUME_V1_BEGIN", patched)
+        self.assertEqual(len(changes), 5)
+        self.assertIn("runs resume user-stop hook", changes)
+        self.assertIn("runs resume shutdown-mark hook", changes)
         self.assertIn("_hermes_hub_rr_event(run_id, event_type, tool_name, preview, args, kwargs)", patched)
         self.assertIn("_hermes_hub_rr_track(run_id, session_id, user_message, conversation_history, launch)", patched)
         self.assertIn("_hermes_hub_rr_finish(run_id, status)", patched)
+        self.assertIn("_hermes_hub_rr_user_stop(run_id)", patched)
+        self.assertIn("_hermes_hub_rr_shutdown_mark(run_ids)", patched)
         self.assertIn("reconcile_loop_forever", patched)
         self.assertIn("run_resume", patched)
         compile(patched, "api_server_runs.py", "exec")
 
-    def test_runs_patch_is_idempotent(self):
+    def test_runs_patch_backfills_missing_hooks(self):
         patched, _ = self.patcher._patch_runs_resume(RUNS_FIXTURE)
-        repached, changes = self.patcher._patch_runs_resume(patched)
+        # Simulate an older deployment that only has the first three hooks.
+        regressed = patched.replace(
+            "    try:\n        _hermes_hub_rr_user_stop(run_id)\n    except Exception:\n"
+            "        logger.debug(\"[run-resume] user-stop hook failed\", exc_info=True)\n", "")
+        regressed = regressed.replace(
+            "    try:\n        _hermes_hub_rr_shutdown_mark(run_ids)\n    except Exception:\n"
+            "        logger.debug(\"[run-resume] shutdown-mark hook failed\", exc_info=True)\n", "")
+        backfilled, changes = self.patcher._patch_runs_resume(regressed)
+        self.assertEqual(sorted(changes),
+                         ["runs resume shutdown-mark hook", "runs resume user-stop hook"])
+        self.assertIn("_hermes_hub_rr_user_stop(run_id)", backfilled)
+        self.assertIn("_hermes_hub_rr_shutdown_mark(run_ids)", backfilled)
+        compile(backfilled, "api_server_runs.py", "exec")
+        repached, changes = self.patcher._patch_runs_resume(backfilled)
         self.assertEqual(changes, [])
-        self.assertEqual(repached, patched)
+        self.assertEqual(repached, backfilled)
 
     def test_runs_patch_fails_closed_on_missing_anchor(self):
         with self.assertRaises(RuntimeError):

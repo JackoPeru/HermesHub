@@ -309,6 +309,7 @@ internal fun SettingsScreen(
     var apiKey by remember(gatewaySecret) { mutableStateOf(gatewaySecret.orEmpty()) }
     var fontScale by remember(settings.fontScale) { mutableFloatStateOf(settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)) }
     var showToolCalls by remember(settings.showToolCalls) { mutableStateOf(settings.showToolCalls) }
+    var backgroundWork by remember(settings.backgroundWork) { mutableStateOf(settings.backgroundWork) }
     var showMessageMetrics by remember(settings.showMessageMetrics) { mutableStateOf(settings.showMessageMetrics) }
     var metricTtft by remember(settings.metricTtft) { mutableStateOf(settings.metricTtft) }
     var metricTokensPerSecond by remember(settings.metricTokensPerSecond) { mutableStateOf(settings.metricTokensPerSecond) }
@@ -373,6 +374,7 @@ internal fun SettingsScreen(
             activeProjectName = settings.activeProjectName,
             fontScale = scale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE),
             showToolCalls = showToolCalls,
+            backgroundWork = backgroundWork,
             showMessageMetrics = showMessageMetrics,
             metricTtft = metricTtft,
             metricTokensPerSecond = metricTokensPerSecond,
@@ -644,6 +646,13 @@ internal fun SettingsScreen(
                     Switch(checked = showToolCalls, onCheckedChange = { showToolCalls = it })
                 }
                 Text("ON = mostra pannello tool compatto. Output lunghi restano collassati.", color = AppColors.Muted, fontSize = 12.sp)
+            }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Lavoro in background", color = Color.White, modifier = Modifier.weight(1f))
+                    Switch(checked = backgroundWork, onCheckedChange = { backgroundWork = it })
+                }
+                Text("ON = se esci dall'app Hermes continua il lavoro sul gateway e ti avvisa alla fine.", color = AppColors.Muted, fontSize = 12.sp)
             }
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {

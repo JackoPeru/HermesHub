@@ -52,8 +52,9 @@ ST_RECOVERY = "recovery_required"
 ST_COMPLETED = "completed"
 ST_FAILED = "failed"
 ST_CANCELLED = "cancelled"
+ST_SUPERSEDED = "superseded"
 
-TERMINAL_STATES = frozenset({ST_COMPLETED, ST_FAILED, ST_CANCELLED})
+TERMINAL_STATES = frozenset({ST_COMPLETED, ST_FAILED, ST_CANCELLED, ST_SUPERSEDED})
 LIVE_STATES = frozenset({ST_RUNNING, ST_CHECKPOINTED, ST_INTERRUPTED, ST_RESUMING})
 
 # Upstream terminal statuses mirrored 1:1 (plus interrupted -> interrupted).
@@ -68,6 +69,13 @@ NOTED_TOOLS_DEFAULT = frozenset()
 
 SUBAGENT_START = "subagent.start"
 SUBAGENT_COMPLETE = "subagent.complete"
+
+_COLUMNS = (
+    "run_id", "session_id", "hub_state", "user_goal", "history_count",
+    "completed_json", "inflight_json", "sub_inflight_json", "route_json",
+    "resumed_from", "resumed_child", "recovery_reason", "created_at",
+    "updated_at", "boot_id", "cancel_origin", "resume_attempts",
+)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS run_resume (
@@ -97,7 +105,64 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         columns = set()
     if "boot_id" not in columns:
         conn.execute("ALTER TABLE run_resume ADD COLUMN boot_id TEXT NOT NULL DEFAULT ''")
+    if "cancel_origin" not in columns:
+        conn.execute("ALTER TABLE run_resume ADD COLUMN cancel_origin TEXT NOT NULL DEFAULT ''")
+    if "resume_attempts" not in columns:
+        conn.execute("ALTER TABLE run_resume ADD COLUMN resume_attempts INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS run_user_stop ("
+        "run_id TEXT PRIMARY KEY, stopped_at REAL NOT NULL)")
     conn.commit()
+
+
+def shutdown_marker_path() -> str:
+    override = os.environ.get("HERMES_HUB_SHUTDOWN_MARKER", "").strip()
+    if override:
+        return override
+    try:
+        from hermes_cli.config import get_hermes_home  # type: ignore
+
+        return str(Path(get_hermes_home()) / "hub_controlled_shutdown.json")
+    except Exception:
+        return str(Path.home() / ".hermes" / "hub_controlled_shutdown.json")
+
+
+def note_controlled_shutdown(run_count: int) -> Optional[str]:
+    """Atomically record a controlled gateway shutdown (crash never writes this)."""
+    payload = {"ts": time.time(), "active_runs": int(run_count), "reason": "gateway-shutdown"}
+    try:
+        path = shutdown_marker_path()
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        tmp = f"{path}.new.{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+        os.replace(tmp, path)
+        return path
+    except Exception as exc:
+        LOG.warning("shutdown marker write failed: %r", exc)
+        return None
+
+
+def take_shutdown_marker() -> Optional[Dict[str, Any]]:
+    """Read and consume the controlled-shutdown marker, if present."""
+    path = shutdown_marker_path()
+    try:
+        with open(path, encoding="utf-8") as handle:
+            marker = json.load(handle)
+        if not isinstance(marker, dict):
+            return None
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return marker
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        LOG.warning("shutdown marker unreadable: %r", exc)
+        return None
 
 
 def _env_set(name: str) -> frozenset:
@@ -206,16 +271,29 @@ class ResumeStore:
                 raise
 
     def get(self, run_id: str) -> Optional[Dict[str, Any]]:
-        rows = self._read("SELECT * FROM run_resume WHERE run_id = ?", (run_id,))
+        rows = self._read(
+            f"SELECT {', '.join(_COLUMNS)} FROM run_resume WHERE run_id = ?", (run_id,))
         return _row_to_dict(rows[0]) if rows else None
 
     def live_rows(self) -> List[Dict[str, Any]]:
         placeholders = ",".join("?" for _ in LIVE_STATES)
         rows = self._read(
-            f"SELECT * FROM run_resume WHERE hub_state IN ({placeholders}) ORDER BY updated_at",
+            f"SELECT {', '.join(_COLUMNS)} FROM run_resume WHERE hub_state IN ({placeholders})"
+            " ORDER BY updated_at",
             tuple(LIVE_STATES),
         )
         return [_row_to_dict(row) for row in rows]
+
+    def note_user_stop(self, run_id: str) -> None:
+        try:
+            self._write("INSERT OR IGNORE INTO run_user_stop (run_id, stopped_at) VALUES (?, ?)",
+                        (run_id, time.time()))
+        except Exception as exc:
+            LOG.warning("user-stop record failed for %s: %r", run_id, exc)
+
+    def has_user_stop(self, run_id: str) -> bool:
+        rows = self._read("SELECT 1 FROM run_user_stop WHERE run_id = ?", (run_id,))
+        return bool(rows)
 
     def _load_lists(self, run_id: str) -> Tuple[list, list, list]:
         row = self.get(run_id)
@@ -325,7 +403,7 @@ class ResumeStore:
         return self.get(run_id)  # type: ignore[return-value]
 
     def set_state(self, run_id: str, state: str, recovery_reason: str = "",
-                  resumed_child: Optional[str] = None) -> None:
+                  resumed_child: Optional[str] = None, cancel_origin: Optional[str] = None) -> None:
         now = time.time()
         with self._lock:
             try:
@@ -339,6 +417,34 @@ class ResumeStore:
                     self._conn.execute(
                         "UPDATE run_resume SET hub_state = ?, recovery_reason = ?, updated_at = ? WHERE run_id = ?",
                         (state, recovery_reason, now, run_id))
+                if cancel_origin is not None:
+                    self._conn.execute(
+                        "UPDATE run_resume SET cancel_origin = ? WHERE run_id = ?",
+                        (cancel_origin, run_id))
+                self._conn.commit()
+            except Exception:
+                try:
+                    self._conn.rollback()
+                except Exception:
+                    pass
+                raise
+
+    def mark_resuming(self, run_id: str, child_id: str) -> None:
+        """Record a successful resume POST: new child link + monotonic attempt.
+
+        The attempt counter moves only here, atomically with the child link:
+        a crash between the POST and this write retries with the SAME
+        idempotency key (upstream dedups to the same child), while every
+        genuinely new resume gets a fresh key.
+        """
+        now = time.time()
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                self._conn.execute(
+                    "UPDATE run_resume SET hub_state = ?, resumed_child = ?, "
+                    "resume_attempts = resume_attempts + 1, updated_at = ? WHERE run_id = ?",
+                    (ST_RESUMING, child_id, now, run_id))
                 self._conn.commit()
             except Exception:
                 try:
@@ -348,9 +454,23 @@ class ResumeStore:
                 raise
 
     def finish(self, run_id: str, upstream_status: str) -> None:
+        """Mirror a terminal upstream status with explicit cancel causality.
+
+        A user stop (recorded via the /stop hook) stays cancelled forever.
+        Any other cancellation can only come from the shutdown drain, so it
+        is recorded as interrupted (resumable) with a shutdown origin.
+        """
+        status = str(upstream_status or "")
+        if status == "cancelled":
+            self.ensure_row(run_id)
+            if self.has_user_stop(run_id):
+                self.set_state(run_id, ST_CANCELLED, cancel_origin="user")
+            else:
+                self.set_state(run_id, ST_INTERRUPTED, cancel_origin="shutdown")
+            return
         mapping = {"completed": ST_COMPLETED, "failed": ST_FAILED,
-                   "cancelled": ST_CANCELLED, "interrupted": ST_INTERRUPTED}
-        state = mapping.get(str(upstream_status or ""), ST_INTERRUPTED)
+                   "interrupted": ST_INTERRUPTED}
+        state = mapping.get(status, ST_INTERRUPTED)
         self.ensure_row(run_id)
         self.set_state(run_id, state)
 
@@ -363,14 +483,8 @@ class ResumeStore:
 
 
 def _row_to_dict(row: tuple) -> Dict[str, Any]:
-    return {
-        "run_id": row[0], "session_id": row[1], "hub_state": row[2], "user_goal": row[3],
-        "history_count": row[4], "completed_json": row[5], "inflight_json": row[6],
-        "sub_inflight_json": row[7], "route_json": row[8], "resumed_from": row[9],
-        "resumed_child": row[10], "recovery_reason": row[11],
-        "created_at": row[12], "updated_at": row[13],
-        "boot_id": row[14] if len(row) > 14 else "",
-    }
+    values = list(row) + [""] * (len(_COLUMNS) - len(row))
+    return dict(zip(_COLUMNS, values))
 
 
 def _checkpoint_state(current_state: str) -> str:
@@ -433,8 +547,8 @@ def transcript_message_count(session_id: str, state_db_path: Optional[str] = Non
         return None
 
 
-def resume_idempotency_key(run_id: str, checkpoint_ts: float) -> str:
-    return f"resume-{run_id}-{int(checkpoint_ts)}"
+def resume_idempotency_key(run_id: str, checkpoint_ts: float, attempt: int = 0) -> str:
+    return f"resume-{run_id}-{int(checkpoint_ts)}-{int(attempt)}"
 
 
 def build_continuation(row: Dict[str, Any], completed: list, notes: List[str]) -> str:
@@ -461,10 +575,11 @@ class ReconcileDeps:
     """Injectable boundary for reconcile(): real HTTP/SQLite in production, fakes in tests."""
 
     def __init__(self, api_base: str = "http://127.0.0.1:8642", api_key: str = "",
-                 timeout: float = 10.0) -> None:
+                 timeout: float = 10.0, manager_base: str = "http://127.0.0.1:8643") -> None:
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
+        self.manager_base = manager_base.rstrip("/")
 
     def upstream_status(self, run_id: str) -> Optional[str]:
         """Durable upstream status for a run, or None when unknown/unreachable."""
@@ -482,6 +597,29 @@ class ReconcileDeps:
 
     def transcript_count(self, session_id: str) -> Optional[int]:
         return transcript_message_count(session_id)
+
+    def hub_ready(self) -> bool:
+        """Whether the gateway answers authenticated requests (admission possible)."""
+        try:
+            request = urllib.request.Request(
+                f"{self.api_base}/v1/capabilities",
+                headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {})
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return 200 <= response.getcode() < 300
+        except Exception:
+            return False
+
+    def llm_ready(self) -> Optional[bool]:
+        """Whether the LLM backend is loaded (None when the manager is unreachable)."""
+        try:
+            request = urllib.request.Request(
+                f"{self.manager_base}/status",
+                headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {})
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            return bool(payload.get("llm_loaded"))
+        except Exception:
+            return None
 
     def post_resume(self, body: Dict[str, Any], idempotency_key: str) -> Tuple[Optional[int], Optional[str]]:
         """Submit the continuation run. Returns (http_code, child_run_id)."""
@@ -503,17 +641,19 @@ class ReconcileDeps:
             return None, None
 
 
-def reconcile_row(store: ResumeStore, row: Dict[str, Any], deps: ReconcileDeps) -> str:
+def reconcile_row(store: ResumeStore, row: Dict[str, Any], deps: ReconcileDeps,
+                  llm_ok: Optional[bool] = None) -> str:
     """Reconcile one live row. Returns the resulting hub_state. Never raises."""
     run_id = row["run_id"]
     try:
-        return _reconcile_row(store, row, deps)
+        return _reconcile_row(store, row, deps, llm_ok=llm_ok)
     except Exception as exc:  # noqa: BLE001 - reconciler must survive everything
         LOG.warning("reconcile %s failed: %r", run_id, exc)
         return str(row.get("hub_state") or ST_INTERRUPTED)
 
 
-def _reconcile_row(store: ResumeStore, row: Dict[str, Any], deps: ReconcileDeps) -> str:
+def _reconcile_row(store: ResumeStore, row: Dict[str, Any], deps: ReconcileDeps,
+                   llm_ok: Optional[bool] = None) -> str:
     run_id = row["run_id"]
     if row.get("hub_state") in TERMINAL_STATES:
         return str(row["hub_state"])
@@ -597,6 +737,15 @@ def _reconcile_row(store: ResumeStore, row: Dict[str, Any], deps: ReconcileDeps)
     if live_count > recorded >= 0:
         notes.append(f"session advanced since checkpoint ({recorded} -> {live_count}); continuing from live tip")
 
+    if llm_ok is False:
+        # The LLM backend is provably unloaded (e.g. a media job owns the
+        # GPUs). Posting now would fail the child on 503 and wrongly end the
+        # chain in recovery: stay interrupted and retry on a later cycle.
+        LOG.warning("resume of %s deferred: LLM backend unloaded", run_id)
+        if row.get("hub_state") != ST_INTERRUPTED:
+            store.set_state(run_id, ST_INTERRUPTED)
+        return ST_INTERRUPTED
+
     body: Dict[str, Any] = {"input": build_continuation(row, completed, notes), "session_id": session_id}
     try:
         route = json.loads(row.get("route_json") or "{}")
@@ -604,9 +753,22 @@ def _reconcile_row(store: ResumeStore, row: Dict[str, Any], deps: ReconcileDeps)
         route = {}
     if isinstance(route, dict) and route.get("model"):
         body["model"] = route["model"]
-    code, child_id = deps.post_resume(body, resume_idempotency_key(run_id, float(row.get("updated_at") or 0)))
+    code, child_id = deps.post_resume(
+        body, resume_idempotency_key(run_id, float(row.get("updated_at") or 0),
+                                     int(row.get("resume_attempts") or 0)))
     if code in (200, 201, 202) and child_id:
-        store.set_state(run_id, ST_RESUMING, resumed_child=child_id)
+        previous_child = child or ""
+        store.mark_resuming(run_id, child_id)
+        if previous_child and previous_child != child_id:
+            # The older continuation is superseded by this one: it must never
+            # self-resume into a duplicate chain.
+            try:
+                old = store.get(previous_child)
+                if old is not None and old.get("hub_state") not in TERMINAL_STATES:
+                    store.set_state(previous_child, ST_SUPERSEDED,
+                                    f"superseded by {child_id} for {run_id}")
+            except Exception as exc:
+                LOG.warning("supersede %s failed: %r", previous_child, exc)
         return ST_RESUMING
     LOG.warning("resume POST for %s failed (code=%r); will retry next cycle", run_id, code)
     if row.get("hub_state") != ST_INTERRUPTED:
@@ -617,22 +779,87 @@ def _reconcile_row(store: ResumeStore, row: Dict[str, Any], deps: ReconcileDeps)
 def reconcile_all(store: ResumeStore, deps: ReconcileDeps) -> Dict[str, str]:
     """Reconcile every live row. Returns {run_id: resulting_state}. Never raises."""
     outcomes: Dict[str, str] = {}
+    marker = take_shutdown_marker()
+    if marker is not None:
+        LOG.warning("controlled shutdown marker consumed: %s", marker)
     try:
         rows = store.live_rows()
     except Exception as exc:
         LOG.warning("reconcile list failed: %r", exc)
         return outcomes
-    for row in rows:
-        outcomes[row["run_id"]] = reconcile_row(store, row, deps)
+    # Claimed children: rows owned by an active continuation must not
+    # self-resume into a duplicate chain (double-restart safety).
+    claimed: set = set()
+    for candidate in rows:
+        child = candidate.get("resumed_child") or ""
+        if not child:
+            continue
+        state = candidate.get("hub_state")
+        if state not in (ST_RESUMING, ST_INTERRUPTED):
+            continue
+        try:
+            child_status = deps.upstream_status(child)
+        except Exception:
+            continue
+        if child_status is None:
+            continue  # unknown: parent skips, child manages itself once
+        if child_status in ("completed", "failed", "cancelled"):
+            continue  # parent resolves from these; child is terminal
+        claimed.add(child)  # alive or interrupted: single actor only
+    ordered = sorted(rows, key=lambda row: (row["run_id"] in claimed, float(row.get("updated_at") or 0)))
+    llm_ok: Optional[bool] = None
+    try:
+        llm_ok = deps.llm_ready()
+    except Exception:
+        llm_ok = None
+    for row in ordered:
+        if row["run_id"] in claimed:
+            outcomes[row["run_id"]] = str(row.get("hub_state") or ST_INTERRUPTED)
+            continue
+        outcomes[row["run_id"]] = reconcile_row(store, row, deps, llm_ok=llm_ok)
     return outcomes
 
 
+def wait_ready(poll_hub: Callable[[], bool], poll_llm: Callable[[], Optional[bool]],
+               timeout_s: float, interval_s: float,
+               sleep: Callable[[float], None] = time.sleep) -> Tuple[bool, Optional[bool], float]:
+    """Wait until the gateway admits requests (readiness-based, no fixed delay).
+
+    Returns (hub_ok, llm_ok, elapsed_s). llm_ok may be None (manager unreachable).
+    Never raises.
+    """
+    start = time.monotonic()
+    llm: Optional[bool] = None
+    try:
+        while True:
+            try:
+                if poll_hub():
+                    try:
+                        llm = poll_llm()
+                    except Exception:
+                        llm = None
+                    return True, llm, time.monotonic() - start
+            except Exception:
+                pass
+            if time.monotonic() - start >= max(1.0, float(timeout_s)):
+                return False, llm, time.monotonic() - start
+            try:
+                sleep(max(0.5, float(interval_s)))
+            except Exception:
+                return False, llm, time.monotonic() - start
+    except Exception:
+        return False, llm, time.monotonic() - start
+
+
 def reconcile_loop_forever(api_base: str = "http://127.0.0.1:8642", api_key: str = "",
-                            delay_s: float = 120.0, period_s: float = 600.0,
+                            delay_s: float = 10.0, period_s: float = 600.0,
                             db_path: Optional[str] = None) -> None:
     """Boot + periodic reconciler entrypoint (runs in a daemon thread)."""
     try:
-        time.sleep(max(0.0, float(delay_s)))
+        settle = max(0.0, float(os.environ.get("HERMES_HUB_RESUME_SETTLE_S", delay_s)))
+        timeout = max(1.0, float(os.environ.get("HERMES_HUB_RESUME_READY_TIMEOUT_S", "600")))
+        interval = max(0.5, float(os.environ.get("HERMES_HUB_RESUME_READY_POLL_S", "5")))
+        time.sleep(settle)
     except Exception:
         return
     store: Optional[ResumeStore] = None
@@ -642,13 +869,22 @@ def reconcile_loop_forever(api_base: str = "http://127.0.0.1:8642", api_key: str
         LOG.warning("run-resume store unavailable: %r", exc)
         return
     deps = ReconcileDeps(api_base=api_base, api_key=api_key)
+    first = True
     while True:
         try:
-            outcomes = reconcile_all(store, deps)
-            resumed = sorted(run for run, state in outcomes.items() if state == ST_RESUMING)
-            recovered = sorted(run for run, state in outcomes.items() if state == ST_RECOVERY)
-            if resumed or recovered:
-                LOG.warning("run-resume cycle: resumed=%s recovery_required=%s", resumed, recovered)
+            hub_ok, llm_ok, elapsed = wait_ready(deps.hub_ready, deps.llm_ready, timeout, interval)
+            if first:
+                LOG.warning("run-resume readiness: hub=%s llm=%s after %.0fs",
+                            hub_ok, llm_ok, elapsed)
+                first = False
+            if hub_ok:
+                outcomes = reconcile_all(store, deps)
+                resumed = sorted(run for run, state in outcomes.items() if state == ST_RESUMING)
+                recovered = sorted(run for run, state in outcomes.items() if state == ST_RECOVERY)
+                if resumed or recovered:
+                    LOG.warning("run-resume cycle: resumed=%s recovery_required=%s", resumed, recovered)
+            else:
+                LOG.warning("run-resume cycle skipped: gateway not ready after %.0fs", elapsed)
         except Exception as exc:  # noqa: BLE001
             LOG.warning("run-resume cycle failed: %r", exc)
         try:
