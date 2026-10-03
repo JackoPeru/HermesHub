@@ -1,16 +1,17 @@
-Hermes Hub 0.6.207 (manager boot AUTO + allegati ridisegnati)
+Hermes Hub 0.6.208 (Comfy diretto + allegati persistenti)
 
-- Manager: ogni (re)boot atterra su AUTO con coda Comfy annullata
-  (job interrotti cancellati, non riaccodati, Comfy interrupt+clear).
-- Manager: chat-first con fail-fast su prompt persi, restore LLM e cooldown
-  dopo failure media ripetuti.
-- App: allegati utente ridisegnati, strip miniature sopra il composer
-  (niente nomi file nel prompt), immagine sola in chat con viewer
-  fullscreen come le immagini di Hermes.
-- App: flag manager/LLM con errori HTTP espliciti (mai 401/500 travestiti
-  da tutto spento) e refresh proattivo ogni 15 s.
-- Versioni: Windows/AdminBridge `0.6.207`; Android `versionName 0.6.207`, `versionCode 211`.
-- Asset: `HermesHub-0.6.207-android.apk` (binario Windows invariato).
-- SHA-256 Android: `4f946d7d462f00a875183696a4892dd57f1816b583c67f56001867e76030f841`.
-- Asset: `HermesHub-0.6.207-linux-gateway.tar.gz`.
-- SHA-256 gateway: `c985f9b6075f30be758071b95830c84e3102bca7fcf1784dc2da24a0371c7105`.
+- Manager: modo DIRECT, ComfyUI diretto sulla tailnet
+  (`http://100.94.223.14:8188`) con LLM scaricato e worker parcheggiato;
+  la chiusura o il crash del backend fa auto-ritornare su AUTO
+  con LLM ricaricato; mai i due Comfy insieme (Conflicts + stop incrociati).
+- Server: nuovo `hermes-comfyui-direct.service` (Restart=no) + regola ufw
+  8188 solo su tailscale0.
+- App: voce "Comfy diretto" nel menu con URL e stato live.
+- App: allegati inviati ora persistiti nel messaggio "Tu" (le immagini
+  sopravvivono al riavvio); riga sobria di fallback se la cache
+  viene pulita.
+- Versioni: Windows/AdminBridge `0.6.208`; Android `versionName 0.6.208`, `versionCode 212`.
+- Asset: `HermesHub-0.6.208-android.apk` (binario Windows invariato).
+- SHA-256 Android: `a9b5a052d1946f85a711fa4fd0859f595eeca05b9d3913e35de4e41c6c32fdfd`.
+- Asset: `HermesHub-0.6.208-linux-gateway.tar.gz`.
+- SHA-256 gateway: `7088f9a5ae4b60483810743f2fee06653094c12a4999d2337a0bb503deb843cd`.

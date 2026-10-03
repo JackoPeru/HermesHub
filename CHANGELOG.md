@@ -2,6 +2,15 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.208 - 2026-10-04
+
+- Manager: modo DIRECT, ComfyUI diretto sulla tailnet con LLM scaricato
+  e worker parcheggiato; chiusura/crash del backend fa auto-ritornare
+  su AUTO con LLM ricaricato; mai i due Comfy insieme.
+- App: voce "Comfy diretto" nel menu con URL e stato; allegati inviati
+  ora persistiti nel messaggio (sopravvivono al riavvio) con fallback
+  sobrio se la cache viene pulita.
+
 ## 0.6.207 - 2026-10-04
 
 - Manager: ogni (re)boot atterra su AUTO con coda Comfy annullata
