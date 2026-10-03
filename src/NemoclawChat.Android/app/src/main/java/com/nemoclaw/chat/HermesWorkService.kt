@@ -12,6 +12,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.net.toUri
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -100,7 +101,7 @@ internal class HermesWorkService : Service() {
                     failures = 0
                     when {
                         code == 404 -> {
-                            notifyFinished(runId, "Run non trovato", "Il gateway non la conosce più.")
+                            notifyFinished(runId, tracked[runId]?.conversationId, "Run non trovato", "Il gateway non la conosce più.")
                             untrack(runId, clearBinding = true)
                             break
                         }
@@ -115,17 +116,18 @@ internal class HermesWorkService : Service() {
                                     updateProgress(runId, "In attesa di approvazione…")
                                     if (approval != null) {
                                         autoApproveIfEnabled(runId, approval)
-                                        notifyApproval(runId, approval)
+                                        notifyApproval(runId, tracked[runId]?.conversationId, approval)
                                     }
-                                }
-                                BackgroundWorkState.DONE_COMPLETED -> {
-                                    notifyFinished(runId, "Lavoro completato",
+                                }                                BackgroundWorkState.DONE_COMPLETED -> {
+                                    val conversationId = tracked[runId]?.conversationId
+                                    notifyFinished(runId, conversationId, "Lavoro completato",
                                         info.output?.take(220)?.ifBlank { "Risultato pronto in chat." } ?: "Risultato pronto in chat.")
                                     untrack(runId, clearBinding = false)
                                     break
                                 }
                                 BackgroundWorkState.DONE_FAILED -> {
-                                    notifyFinished(runId, "Lavoro fallito",
+                                    val conversationId = tracked[runId]?.conversationId
+                                    notifyFinished(runId, conversationId, "Lavoro fallito",
                                         info.error?.take(220)?.ifBlank { "Vedi dettagli in chat." } ?: "Vedi dettagli in chat.")
                                     untrack(runId, clearBinding = false)
                                     break
@@ -191,13 +193,19 @@ internal class HermesWorkService : Service() {
 
     private fun tag(runId: String) = "work_$runId"
 
-    private fun openAppIntent(): PendingIntent = PendingIntent.getActivity(
-        this, 0,
-        Intent(this, MainActivity::class.java).apply {
+    private fun openAppIntent(conversationId: String? = null): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        },
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
+            if (!conversationId.isNullOrBlank()) {
+                data = "hermes-hub://chat?conversation=$conversationId".toUri()
+            }
+        }
+        return PendingIntent.getActivity(
+            this, conversationId.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
 
     private fun stopAction(runId: String): NotificationCompat.Action {
         val pending = PendingIntent.getService(
@@ -228,7 +236,7 @@ internal class HermesWorkService : Service() {
             .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle(goal)
             .setContentText(text)
-            .setContentIntent(openAppIntent())
+            .setContentIntent(openAppIntent(meta.conversationId))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -237,13 +245,13 @@ internal class HermesWorkService : Service() {
         getSystemService(NotificationManager::class.java).notify(tag(runId), NOTIFICATION_ID, notification)
     }
 
-    private fun notifyFinished(runId: String, title: String, text: String) {
+    private fun notifyFinished(runId: String, conversationId: String?, title: String, text: String) {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setContentIntent(openAppIntent())
+            .setContentIntent(openAppIntent(conversationId))
             .setAutoCancel(true)
             .build()
         getSystemService(NotificationManager::class.java).notify(tag(runId), NOTIFICATION_ID + 1, notification)
@@ -256,10 +264,14 @@ internal class HermesWorkService : Service() {
      */
     private fun autoApproveIfEnabled(runId: String, approval: HermesRunApprovalRequest) {
         val settings = runCatching { loadSettings(this) }.getOrNull() ?: return
-        val mode = settings.autoApprove
+        val meta = tracked[runId] ?: return
+        val mode = resolveAutoApproveMode(
+            meta.profile,
+            runCatching { loadBotAutoApproveMap(this) }.getOrDefault(emptyMap()),
+            settings.autoApprove
+        )
         if (mode == "off" || mode.isBlank()) return
         val choice = pickAutoApprovalChoice(approval.choices, mode) ?: return
-        val meta = tracked[runId] ?: return
         val key = runCatching { loadGatewaySecret(this) }.getOrNull()
         val client = HermesRunClient(settings, key, meta.profile, meta.multiplex)
         scope.launch {
@@ -272,7 +284,8 @@ internal class HermesWorkService : Service() {
         }
     }
 
-    private fun notifyApproval(runId: String, approval: HermesRunApprovalRequest) {        val key = "${approval.approvalId}::${approval.requestId}"
+    private fun notifyApproval(runId: String, conversationId: String?, approval: HermesRunApprovalRequest) {
+        val key = "${approval.approvalId}::${approval.requestId}"
         if (notifiedApprovals[runId] == key) return
         notifiedApprovals[runId] = key
         val detail = listOf(approval.tool, approval.command, approval.description)
@@ -283,7 +296,7 @@ internal class HermesWorkService : Service() {
             .setContentTitle("Hermes chiede approvazione")
             .setContentText(detail)
             .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
-            .setContentIntent(openAppIntent())
+            .setContentIntent(openAppIntent(conversationId))
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()

@@ -139,3 +139,47 @@ internal fun backgroundWorkSummary(binding: ActiveWorkBinding): String {
     val goal = binding.goal.trim().take(90)
     return if (goal.isBlank()) "Hermes al lavoro in background…" else "Hermes al lavoro: $goal"
 }
+
+private const val BOT_AUTO_APPROVE_PREFS = "chatclaw_bot_auto_approve"
+private val botAutoApproveLock = Any()
+
+/** Auto-approve per bot (chiave: nome profilo). Null = nessuna override, vale il globale. */
+internal fun loadBotAutoApproveMap(context: Context): Map<String, String> {
+    synchronized(botAutoApproveLock) {
+        val prefs = context.applicationContext
+            .getSharedPreferences(BOT_AUTO_APPROVE_PREFS, Context.MODE_PRIVATE)
+        val out = mutableMapOf<String, String>()
+        val raw = prefs.getString("modes", "{}").orEmpty()
+        val root = runCatching { JSONObject(raw) }.getOrNull() ?: return out
+        val keys = root.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val mode = root.optString(key).trim().lowercase()
+            if (mode in setOf("off", "session", "always")) out[key] = mode
+        }
+        return out
+    }
+}
+
+internal fun saveBotAutoApprove(context: Context, botProfile: String, mode: String) {
+    val key = botProfile.trim()
+    if (key.isEmpty()) return
+    val clean = mode.trim().lowercase().takeIf { it in setOf("off", "session", "always") } ?: return
+    synchronized(botAutoApproveLock) {
+        val prefs = context.applicationContext
+            .getSharedPreferences(BOT_AUTO_APPROVE_PREFS, Context.MODE_PRIVATE)
+        val all = loadBotAutoApproveMap(context).toMutableMap()
+        if (clean == "off") all.remove(key) else all[key] = clean
+        val encoded = JSONObject()
+        for ((k, v) in all) encoded.put(k, v)
+        prefs.edit().putString("modes", encoded.toString()).apply()
+    }
+}
+
+/** Risoluzione effettiva: per-bot > globale. Pura, testabile a meno del context. */
+internal fun resolveAutoApproveMode(botProfile: String?, botModes: Map<String, String>, globalMode: String): String {
+    val cleanGlobal = globalMode.trim().lowercase().takeIf { it in setOf("off", "session", "always") } ?: "off"
+    val key = botProfile?.trim().orEmpty()
+    if (key.isEmpty()) return cleanGlobal
+    return botModes[key] ?: botModes.entries.firstOrNull { it.key.equals(key, ignoreCase = true) }?.value ?: cleanGlobal
+}

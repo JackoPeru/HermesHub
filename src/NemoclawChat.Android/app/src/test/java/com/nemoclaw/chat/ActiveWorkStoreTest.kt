@@ -129,4 +129,16 @@ class ActiveWorkStoreTest {
         assertNull(pickAutoApprovalChoice(emptyList(), "session"))
         assertNull(pickAutoApprovalChoice(listOf("mystery"), "always"))
     }
+
+    @Test
+    fun resolveAutoApprovePrefersBotOverGlobal() {
+        val bots = mapOf("coder" to "always")
+        assertEquals("always", resolveAutoApproveMode("coder", bots, "off"))
+        assertEquals("off", resolveAutoApproveMode("other", bots, "off"))
+        assertEquals("session", resolveAutoApproveMode("other", bots, "session"))
+        assertEquals("session", resolveAutoApproveMode(null, bots, "session"))
+        assertEquals("off", resolveAutoApproveMode("", bots, "off"))
+        assertEquals("always", resolveAutoApproveMode("", bots, "always"))
+        assertEquals("always", resolveAutoApproveMode("coder", bots, "banana"))
+    }
 }

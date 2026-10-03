@@ -60,6 +60,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.AppColors
 import com.nemoclaw.chat.AppSettings
+import com.nemoclaw.chat.loadBotAutoApproveMap
+import com.nemoclaw.chat.saveBotAutoApprove
 import com.nemoclaw.chat.httpGetResponse
 import com.nemoclaw.chat.normalizeHermesProfileName
 import com.nemoclaw.chat.postJson
@@ -726,6 +728,24 @@ internal fun BotsScreen(
                     OutlinedTextField(displayNameInput, { displayNameInput = it }, label = { Text("Nome visualizzato") }, singleLine = true)
                     OutlinedTextField(descriptionInput, { descriptionInput = it }, label = { Text("Descrizione") }, minLines = 2)
                     OutlinedTextField(soulInput, { soulInput = it }, label = { Text("SOUL.md (opzionale)") }, minLines = 4)
+                    Text("Auto-approvazione run di questo bot (solo client, mai deny automatico)", color = AppColors.Muted, fontSize = 12.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for ((label, value) in listOf("Chiedi" to "off", "Sessione" to "session", "Sempre" to "always")) {
+                            val selected = loadBotAutoApproveMap(context)[editing?.profile.orEmpty()]?.let { it == value }
+                                ?: (value == "off")
+                            TextButton(
+                                onClick = {
+                                    val profile = (if (editing == null) profileInput else editing?.profile).orEmpty()
+                                    if (profile.isNotBlank()) {
+                                        saveBotAutoApprove(context, profile, value)
+                                        refreshNonce++
+                                    }
+                                }
+                            ) {
+                                Text(if (selected) "✓ $label" else label)
+                            }
+                        }
+                    }
                     Text("Connessione", color = AppColors.Muted, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         connections.items.filter { it.enabled }.forEach { connection ->

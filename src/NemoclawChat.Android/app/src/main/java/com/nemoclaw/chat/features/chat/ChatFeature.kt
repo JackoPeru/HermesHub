@@ -857,7 +857,12 @@ internal fun ChatScreen(
             botApiKey = botApiKey,
             botProfile = botProfile,
             botMultiplexEnabled = botMultiplexEnabled,
-            scope = scope
+            scope = scope,
+            autoApproveMode = resolveAutoApproveMode(
+                botProfile,
+                runCatching { loadBotAutoApproveMap(context) }.getOrDefault(emptyMap()),
+                settings.autoApprove
+            )
         )
         ChatApprovalCards(
             state = state,
@@ -866,7 +871,12 @@ internal fun ChatScreen(
             botProfile = botProfile,
             botMultiplexEnabled = botMultiplexEnabled,
             scope = scope,
-            context = context
+            context = context,
+            autoApproveMode = resolveAutoApproveMode(
+                botProfile,
+                runCatching { loadBotAutoApproveMap(context) }.getOrDefault(emptyMap()),
+                botSettings.autoApprove
+            )
         )
 
         val reasoningLadder = remember(state.chatModelCatalog, state.chatCapabilities, state.chatModelOverride, state.chatProviderOverride) {
@@ -3281,7 +3291,8 @@ internal fun ChatModelSessionBar(
     botApiKey: String?,
     botProfile: String?,
     botMultiplexEnabled: Boolean,
-    scope: kotlinx.coroutines.CoroutineScope
+    scope: kotlinx.coroutines.CoroutineScope,
+    autoApproveMode: String = "off"
 ) {
     val caps = state.chatCapabilities
     var showSteerDialog by remember { mutableStateOf(false) }
@@ -3300,6 +3311,21 @@ internal fun ChatModelSessionBar(
                 else -> "Legacy"
             }
             Text(routeLabel, color = AppColors.Muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
+            if (autoApproveMode == "session" || autoApproveMode == "always") {
+                Surface(
+                    color = AppColors.Elevated,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, AppColors.Accent)
+                ) {
+                    Text(
+                        if (autoApproveMode == "always") "AUTO SEMPRE" else "AUTO SESSIONE",
+                        color = AppColors.Accent,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
             if (steerable) {
                 IconButton(onClick = { steerStatus = ""; showSteerDialog = true }, modifier = Modifier.size(34.dp)) { Icon(Icons.Rounded.Edit, contentDescription = "Correggi run in corso", tint = AppColors.Muted, modifier = Modifier.size(20.dp)) }
             }
@@ -3418,7 +3444,8 @@ internal fun ChatApprovalCards(
     botProfile: String?,
     botMultiplexEnabled: Boolean,
     scope: kotlinx.coroutines.CoroutineScope,
-    context: Context
+    context: Context,
+    autoApproveMode: String = "off"
 ) {
     val approvals = state.streamingState?.pendingApprovals.orEmpty()
     if (approvals.isEmpty()) return
@@ -3427,7 +3454,7 @@ internal fun ChatApprovalCards(
     var autoHandled by remember { mutableStateOf(setOf<String>()) }
     // Auto-approvazione (opt-in da impostazioni): risolve da solo con la scelta
     // configurata, mai deny. Ogni auto-approvazione resta visibile in chat.
-    val autoMode = botSettings.autoApprove
+    val autoMode = autoApproveMode
     LaunchedEffect(approvals, autoMode) {
         if (autoMode == "off" || autoMode.isBlank()) return@LaunchedEffect
         for (approval in approvals) {
