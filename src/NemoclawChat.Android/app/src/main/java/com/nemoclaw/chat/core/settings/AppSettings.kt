@@ -49,7 +49,9 @@ data class AppSettings(
     val sidebarContenuti: Boolean = AppDefaults.sidebarContenuti,
     val sidebarAccount: Boolean = AppDefaults.sidebarAccount,
     val sidebarRecenti: Boolean = AppDefaults.sidebarRecenti,
-    val backgroundWork: Boolean = AppDefaults.backgroundWork
+    val backgroundWork: Boolean = AppDefaults.backgroundWork,
+    /** Auto-approvazione run: "off" (chiedi sempre), "session", "always". Mai "deny" automatico. */
+    val autoApprove: String = AppDefaults.autoApprove
 )
 
 internal fun AppSettings.metricFilter(): MetricDisplayFilter = MetricDisplayFilter(
@@ -110,7 +112,8 @@ internal fun loadSettings(context: Context): AppSettings {
         sidebarContenuti = prefs.getBoolean("sidebarContenuti", AppDefaults.sidebarContenuti),
         sidebarAccount = prefs.getBoolean("sidebarAccount", AppDefaults.sidebarAccount),
         sidebarRecenti = prefs.getBoolean("sidebarRecenti", AppDefaults.sidebarRecenti),
-        backgroundWork = prefs.getBoolean("backgroundWork", AppDefaults.backgroundWork)
+        backgroundWork = prefs.getBoolean("backgroundWork", AppDefaults.backgroundWork),
+        autoApprove = prefs.getString("autoApprove", AppDefaults.autoApprove)?.takeIf { it in setOf("off", "session", "always") } ?: AppDefaults.autoApprove
     )
     return normalizePlugAndPlaySettings(context, settings)
 }
@@ -209,6 +212,7 @@ internal fun saveSettings(context: Context, settings: AppSettings) {
         putBoolean("sidebarAccount", settings.sidebarAccount)
         putBoolean("sidebarRecenti", settings.sidebarRecenti)
         putBoolean("backgroundWork", settings.backgroundWork)
+        putString("autoApprove", settings.autoApprove.takeIf { it in setOf("off", "session", "always") } ?: AppDefaults.autoApprove)
     }
 }
 
@@ -257,6 +261,7 @@ internal object AppDefaults {
     const val sidebarAccount = true
     const val sidebarRecenti = true
     const val backgroundWork = true
+    const val autoApprove = "off"
     const val releasesPage = "https://github.com/JackoPeru/HermesHub/releases"
     const val latestReleaseApi = "https://api.github.com/repos/JackoPeru/HermesHub/releases/latest"
 }

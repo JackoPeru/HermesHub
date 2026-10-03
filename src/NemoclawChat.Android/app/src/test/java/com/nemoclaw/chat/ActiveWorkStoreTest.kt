@@ -106,4 +106,27 @@ class ActiveWorkStoreTest {
         assertTrue(withGoal.contains("fai X"))
         assertFalse(backgroundWorkSummary(ActiveWorkBinding("c", "r", goal = "x".repeat(200))).length > 140)
     }
+
+    @Test
+    fun autoApproveOffNeverApproves() {
+        assertNull(pickAutoApprovalChoice(listOf("once", "session", "always", "deny"), "off"))
+        assertNull(pickAutoApprovalChoice(listOf("once", "session", "always", "deny"), ""))
+        assertNull(pickAutoApprovalChoice(listOf("once", "session", "always", "deny"), "banana"))
+    }
+
+    @Test
+    fun autoApprovePrefersConfiguredLevel() {
+        val full = listOf("once", "session", "always", "deny")
+        assertEquals("session", pickAutoApprovalChoice(full, "session"))
+        assertEquals("always", pickAutoApprovalChoice(full, "always"))
+    }
+
+    @Test
+    fun autoApproveFallsBackWithoutDeny() {
+        assertEquals("once", pickAutoApprovalChoice(listOf("once", "deny"), "always"))
+        assertEquals("once", pickAutoApprovalChoice(listOf("once", "deny"), "session"))
+        assertNull(pickAutoApprovalChoice(listOf("deny"), "always"))
+        assertNull(pickAutoApprovalChoice(emptyList(), "session"))
+        assertNull(pickAutoApprovalChoice(listOf("mystery"), "always"))
+    }
 }

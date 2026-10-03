@@ -3424,6 +3424,46 @@ internal fun ChatApprovalCards(
     if (approvals.isEmpty()) return
     var resolving by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
+    var autoHandled by remember { mutableStateOf(setOf<String>()) }
+    // Auto-approvazione (opt-in da impostazioni): risolve da solo con la scelta
+    // configurata, mai deny. Ogni auto-approvazione resta visibile in chat.
+    val autoMode = botSettings.autoApprove
+    LaunchedEffect(approvals, autoMode) {
+        if (autoMode == "off" || autoMode.isBlank()) return@LaunchedEffect
+        for (approval in approvals) {
+            val key = "${approval.approvalId}::${approval.requestId}"
+            if (key in autoHandled) continue
+            val choice = pickAutoApprovalChoice(approval.choices, autoMode) ?: continue
+            autoHandled = autoHandled + key
+            resolving = "$key::auto"
+            val runId = approval.runId.ifBlank { state.streamingState?.activeRunId.orEmpty() }
+            if (runId.isBlank()) {
+                resolving = ""
+                continue
+            }
+            val (code, _) = resolveHermesRunApproval(
+                botSettings, runId, choice, botApiKey,
+                approval.requestId.takeIf { it.isNotBlank() }, botProfile, botMultiplexEnabled
+            )
+            if (code in 200..299) {
+                val cur = state.streamingState
+                if (cur != null) {
+                    state.streamingState = cur.applyEvent(
+                        ChatStreamEvent.ApprovalResolved(runId, approval.approvalId, "auto:$choice")
+                    )
+                }
+                state.messages.add(
+                    ChatMessage(
+                        "Hermes Hub",
+                        "Auto-approvato ($choice): ${(approval.tool.ifBlank { approval.command }).take(120)}",
+                        fromUser = false,
+                        isAction = true
+                    )
+                )
+            }
+            resolving = ""
+        }
+    }
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         approvals.take(3).forEach { approval ->
             Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF3A2A00))) {

@@ -310,6 +310,7 @@ internal fun SettingsScreen(
     var fontScale by remember(settings.fontScale) { mutableFloatStateOf(settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)) }
     var showToolCalls by remember(settings.showToolCalls) { mutableStateOf(settings.showToolCalls) }
     var backgroundWork by remember(settings.backgroundWork) { mutableStateOf(settings.backgroundWork) }
+    var autoApprove by remember(settings.autoApprove) { mutableStateOf(settings.autoApprove) }
     var showMessageMetrics by remember(settings.showMessageMetrics) { mutableStateOf(settings.showMessageMetrics) }
     var metricTtft by remember(settings.metricTtft) { mutableStateOf(settings.metricTtft) }
     var metricTokensPerSecond by remember(settings.metricTokensPerSecond) { mutableStateOf(settings.metricTokensPerSecond) }
@@ -375,6 +376,7 @@ internal fun SettingsScreen(
             fontScale = scale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE),
             showToolCalls = showToolCalls,
             backgroundWork = backgroundWork,
+            autoApprove = autoApprove,
             showMessageMetrics = showMessageMetrics,
             metricTtft = metricTtft,
             metricTokensPerSecond = metricTokensPerSecond,
@@ -653,6 +655,20 @@ internal fun SettingsScreen(
                     Switch(checked = backgroundWork, onCheckedChange = { backgroundWork = it })
                 }
                 Text("ON = se esci dall'app Hermes continua il lavoro sul gateway e ti avvisa alla fine.", color = AppColors.Muted, fontSize = 12.sp)
+            }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Auto-approvazione run", color = Color.White)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AutoApproveChip("Chiedi", "off", autoApprove) { autoApprove = it }
+                        AutoApproveChip("Sessione", "session", autoApprove) { autoApprove = it }
+                        AutoApproveChip("Sempre", "always", autoApprove) { autoApprove = it }
+                    }
+                    Text(
+                        "Chiedi = notifica e card ogni volta. Sessione/Sempre = approva da solo (mai deny automatico); ogni auto-approvazione resta visibile in chat e notifica.",
+                        color = AppColors.Muted, fontSize = 12.sp
+                    )
+                }
             }
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1023,6 +1039,25 @@ internal fun MetricSwitch(label: String, checked: Boolean, onCheckedChange: (Boo
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = Color.White, modifier = Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+internal fun AutoApproveChip(label: String, value: String, current: String, onSelect: (String) -> Unit) {
+    val selected = current == value
+    Surface(
+        color = if (selected) AppColors.Accent else AppColors.Elevated,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, if (selected) AppColors.Accent else AppColors.Border),
+        modifier = Modifier.clickable { onSelect(value) }
+    ) {
+        Text(
+            label,
+            color = if (selected) Color(0xFF171009) else Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+        )
     }
 }
 

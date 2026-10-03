@@ -113,7 +113,10 @@ internal class HermesWorkService : Service() {
                                 BackgroundWorkState.ACTIVE -> updateProgress(runId, "Elaborazione nel gateway…")
                                 BackgroundWorkState.WAITING_FOR_APPROVAL -> {
                                     updateProgress(runId, "In attesa di approvazione…")
-                                    if (approval != null) notifyApproval(runId, approval)
+                                    if (approval != null) {
+                                        autoApproveIfEnabled(runId, approval)
+                                        notifyApproval(runId, approval)
+                                    }
                                 }
                                 BackgroundWorkState.DONE_COMPLETED -> {
                                     notifyFinished(runId, "Lavoro completato",
@@ -246,8 +249,30 @@ internal class HermesWorkService : Service() {
         getSystemService(NotificationManager::class.java).notify(tag(runId), NOTIFICATION_ID + 1, notification)
     }
 
-    private fun notifyApproval(runId: String, approval: HermesRunApprovalRequest) {
-        val key = "${approval.approvalId}::${approval.requestId}"
+    /**
+     * Auto-approvazione in background (solo opt-in da impostazioni, mai deny).
+     * Idempotente per approvalId: se il server ha gia' risolto, il POST fallisce
+     * con 409 e non succede niente.
+     */
+    private fun autoApproveIfEnabled(runId: String, approval: HermesRunApprovalRequest) {
+        val settings = runCatching { loadSettings(this) }.getOrNull() ?: return
+        val mode = settings.autoApprove
+        if (mode == "off" || mode.isBlank()) return
+        val choice = pickAutoApprovalChoice(approval.choices, mode) ?: return
+        val meta = tracked[runId] ?: return
+        val key = runCatching { loadGatewaySecret(this) }.getOrNull()
+        val client = HermesRunClient(settings, key, meta.profile, meta.multiplex)
+        scope.launch {
+            val (code, _) = runCatching {
+                client.approval(runId, choice, approval.requestId.takeIf { it.isNotBlank() })
+            }.getOrElse { 0 to "" }
+            if (code in 200..299) {
+                updateProgress(runId, "Auto-approvato ($choice): ${approval.tool.take(60)}")
+            }
+        }
+    }
+
+    private fun notifyApproval(runId: String, approval: HermesRunApprovalRequest) {        val key = "${approval.approvalId}::${approval.requestId}"
         if (notifiedApprovals[runId] == key) return
         notifiedApprovals[runId] = key
         val detail = listOf(approval.tool, approval.command, approval.description)
@@ -298,7 +323,7 @@ internal class HermesWorkService : Service() {
         const val EXTRA_MULTIPLEX = "multiplex"
         private const val CHANNEL_ID = "hermes_work"
         private const val NOTIFICATION_ID = 8644
-        private const val POLL_MS = 15_000L
+        private const val POLL_MS = 10_000L
 
         fun start(context: Context, binding: ActiveWorkBinding, profile: String?, multiplex: Boolean) {
             // Su Android 12+ l'avvio da background puo' essere negato: mai far fallire il chiamante.
