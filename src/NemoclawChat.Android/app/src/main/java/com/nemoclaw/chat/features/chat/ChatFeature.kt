@@ -941,9 +941,13 @@ internal fun ChatScreen(
                         text.ifBlank { "Media condiviso." }
                     }
                     val localHistory = state.messages.toMutableList()
-                    localHistory.add(ChatMessage("Tu", displayText, true))
+                    // Stessa istanza con blocchi: il messaggio salvato conserva
+                    // le immagini anche dopo il riavvio (il payload gateway usa
+                    // solo il testo, i blocchi non alterano la richiesta).
+                    val userMessage = ChatMessage("Tu", displayText, true, visualBlocks = createLocalAttachmentBlocks(attachments))
+                    localHistory.add(userMessage)
 
-                    state.messages.add(ChatMessage("Tu", displayText, true, visualBlocks = createLocalAttachmentBlocks(attachments)))
+                    state.messages.add(userMessage)
                     state.draft = ""
                     val streamCid = state.activeConversationId
                         ?: "conv_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(8)}"
@@ -2584,11 +2588,52 @@ internal fun isUserLocalImage(block: VisualBlock): Boolean =
         (block.mediaKind.equals("image", ignoreCase = true) ||
             block.mimeType.startsWith("image/", ignoreCase = true))
 
+/** Vera se la sorgente anteprima locale e' ancora leggibile (file in cache o data-url inline). */
+internal fun localPreviewSourceExists(source: String): Boolean {
+    if (source.isBlank()) return false
+    return try {
+        if (File(source).isFile) return true
+        source.contains(',')
+    } catch (_: Exception) {
+        false
+    }
+}
+
 /** Immagine inviata dall'utente: solo miniatura, tap apre il viewer come Hermes. */
 @Composable
 internal fun LocalInlineImage(block: VisualBlock) {
     val alt = block.alt.ifBlank { block.filename.ifBlank { "Immagine" } }
     var viewer by remember(block.localDataUrl) { mutableStateOf(false) }
+    val sourceAlive = remember(block.localDataUrl) { localPreviewSourceExists(block.localDataUrl) }
+    if (!sourceAlive) {
+        // Cache pulita o file spostato: riga sobria con nome, niente loading infinito.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(AppColors.Surface),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Image, contentDescription = null, tint = AppColors.Muted)
+            }
+            Column(modifier = Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = block.filename.ifBlank { alt },
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text("Anteprima non disponibile.", color = AppColors.Muted, fontSize = 11.sp, maxLines = 1)
+            }
+        }
+        return
+    }
     val thumb by produceState<Bitmap?>(initialValue = null, block.localDataUrl) {
         value = withContext(Dispatchers.IO) { decodeAttachmentPreview(block.localDataUrl) }
     }

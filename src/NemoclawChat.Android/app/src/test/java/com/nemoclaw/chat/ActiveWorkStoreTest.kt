@@ -6,6 +6,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import java.io.File
 import org.junit.Test
 
 /**
@@ -181,6 +182,21 @@ class ActiveWorkStoreTest {
         assertTrue(managerModeErrorMessage(0, "").contains("non raggiungibile"))
         assertTrue(managerModeErrorMessage(500, "boom").contains("500"))
         assertTrue(managerModeErrorMessage(500, "boom").contains("boom"))
+    }
+
+    @Test
+    fun localPreviewSourceExists() {
+        assertFalse(localPreviewSourceExists(""))
+        assertFalse(localPreviewSourceExists("/cache/attachments/non-esiste.jpg"))
+        // Data-url: il payload viaggia col messaggio.
+        assertTrue(localPreviewSourceExists("data:image/jpeg;base64,/9j/AAAA"))
+        val tmp = File.createTempFile("preview-", ".jpg")
+        try {
+            assertTrue(localPreviewSourceExists(tmp.absolutePath))
+        } finally {
+            tmp.delete()
+        }
+        assertFalse(localPreviewSourceExists(tmp.absolutePath))
     }
 
     @Test
