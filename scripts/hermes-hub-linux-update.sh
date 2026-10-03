@@ -20,6 +20,9 @@ PROBE_SLEEP_SECONDS="${HERMES_HUB_UPDATE_PROBE_SLEEP_SECONDS:-2}"
 PROBE_URL="${HERMES_HUB_UPDATE_PROBE_URL:-http://127.0.0.1:${HERMES_API_PORT:-8642}/v1/capabilities}"
 API_SERVER_KEY_FILE="${API_SERVER_KEY_FILE:-$HOME/.hermes/api_server.key}"
 HERMES_ENV_FILE="${HERMES_ENV_FILE:-$HOME/.hermes/.env}"
+MANAGER_URL="${HERMES_HUB_MANAGER_URL:-http://127.0.0.1:8643}"
+COMFY_URL="${HERMES_HUB_COMFY_URL:-http://127.0.0.1:8188}"
+BUSY_LEASE_FILE="${HERMES_HUB_BUSY_LEASE:-$HOME/.hermes/hub_busy.lock}"
 
 FORCE=false
 CHECK_ONLY=false
@@ -34,6 +37,7 @@ FINAL_RELEASE_DIR=""
 OLD_VERSION_PRESENT=false
 OLD_VERSION=""
 FAILED_RELEASE_FILE="$INSTALL_DIR/failed-release"
+PENDING_FILE="$INSTALL_DIR/.pending-update"
 
 usage() {
   cat <<'EOF'
@@ -47,6 +51,9 @@ Env:
   HERMES_HUB_UPDATE_MAX_RELEASE_PAGES=5
   HERMES_HUB_UPDATE_MAX_ASSET_MB=256
   HERMES_HUB_UPDATE_PROBE_URL=http://127.0.0.1:8642/v1/capabilities
+  HERMES_HUB_MANAGER_URL=http://127.0.0.1:8643
+  HERMES_HUB_COMFY_URL=http://127.0.0.1:8188
+  HERMES_HUB_BUSY_LEASE=$HOME/.hermes/hub_busy.lock
   GH_TOKEN or GITHUB_TOKEN for private/rate-limited GitHub API calls
 EOF
 }
@@ -180,6 +187,183 @@ record_failed_release() {
   local tmp_failed="$INSTALL_DIR/.failed-release.new.$$"
   printf '%s|%s\n' "$LATEST_VERSION" "$ASSET_DIGEST" > "$tmp_failed"
   mv -f "$tmp_failed" "$FAILED_RELEASE_FILE"
+}
+
+resolve_probe_key() {
+  local key="${HERMES_HUB_API_KEY:-${HERMES_API_KEY:-}}"
+  if [ -z "$key" ] && [ -s "$HERMES_ENV_FILE" ]; then
+    local key_name
+    for key_name in HERMES_HUB_API_KEY HERMES_GATEWAY_API_KEY API_SERVER_KEY HERMES_API_KEY HERMESAPIKEY; do
+      key="$(read_env_value "$HERMES_ENV_FILE" "$key_name")"
+      if [ -n "$key" ]; then
+        break
+      fi
+    done
+  fi
+  if [ -z "$key" ] && [ -s "$API_SERVER_KEY_FILE" ]; then
+    key="$(tr -d '[:space:]' < "$API_SERVER_KEY_FILE")"
+  fi
+  printf '%s' "$key"
+}
+
+# --- update busy gate -------------------------------------------------
+# The updater must never restart the hub while work is in flight: a
+# restart wipes in-memory agent runs. Three independent signals, first
+# hit wins. Every checker prints a human reason (or nothing) and always
+# returns 0 so `set -e` never trips on an idle answer.
+#
+# Cooperative lease protocol for long agent tasks (JSON file):
+#   {"owner": "<agent>", "task": "<label>", "expires_at": <unix>}
+# The agent creates it before starting, refreshes expires_at as a
+# heartbeat, and deletes it when done. Expired or unreadable leases are
+# removed and ignored so a crashed agent can never block updates forever.
+
+lease_busy_reason() {
+  if [ -z "${BUSY_LEASE_FILE:-}" ]; then
+    return 0
+  fi
+  if [ ! -f "$BUSY_LEASE_FILE" ]; then
+    return 0
+  fi
+  local verdict_file="$TMP_DIR/busy-lease.out"
+  rm -f "$verdict_file"
+  python3 - "$BUSY_LEASE_FILE" >"$verdict_file" 2>/dev/null <<'PY' || true
+import json
+import sys
+import time
+try:
+    lease = json.load(open(sys.argv[1], encoding="utf-8"))
+    exp = float(lease.get("expires_at") or 0)
+    if exp > time.time() + 30:
+        owner = str(lease.get("owner") or "?")
+        task = str(lease.get("task") or "?")
+        print("LEASE busy lease by %s: %s" % (owner, task))
+    else:
+        print("STALE")
+except Exception:
+    print("GARBAGE")
+PY
+  local verdict
+  verdict="$(cat "$verdict_file" 2>/dev/null || true)"
+  rm -f "$verdict_file"
+  if [ "$verdict" = "STALE" ]; then
+    echo "Removing expired busy lease: $BUSY_LEASE_FILE" >&2
+    rm -f "$BUSY_LEASE_FILE" || true
+    return 0
+  fi
+  if [ "$verdict" = "GARBAGE" ]; then
+    echo "Removing unreadable busy lease: $BUSY_LEASE_FILE" >&2
+    rm -f "$BUSY_LEASE_FILE" || true
+    return 0
+  fi
+  if [ "${verdict#LEASE }" != "$verdict" ]; then
+    printf '%s' "${verdict#LEASE }"
+  fi
+  return 0
+}
+
+manager_busy_reason() {
+  local key="$1"
+  if [ -z "$key" ]; then
+    printf 'no API key available for manager busy check'
+    return 0
+  fi
+  local body
+  body="$(curl --fail --silent --connect-timeout 3 --max-time 8 -H "Authorization: Bearer $key" "$MANAGER_URL/status" 2>/dev/null || true)"
+  if [ -z "$body" ]; then
+    printf 'manager unreachable'
+    return 0
+  fi
+  python3 - "$body" <<'PY' 2>/dev/null || printf 'manager status unreadable'
+import json
+import sys
+try:
+    st = json.loads(sys.argv[1])
+except Exception:
+    print("manager status unreadable")
+else:
+    try:
+        queued = int(st.get("queue_length") or 0)
+    except (TypeError, ValueError):
+        queued = 0
+    if queued > 0:
+        print("manager queue holds %d job(s)" % queued)
+    elif st.get("current_job"):
+        print("manager runs job %s" % st.get("current_job"))
+    else:
+        state = str(st.get("current_state") or "")
+        if state == "" :
+            print("manager status unreadable")
+        elif state == "LLM_READY" or state == "ERROR":
+            print("")
+        else:
+            print("manager state %s" % state)
+PY
+  return 0
+}
+
+comfy_busy_reason() {
+  local body
+  body="$(curl --fail --silent --connect-timeout 3 --max-time 8 "$COMFY_URL/queue" 2>/dev/null || true)"
+  if [ -z "$body" ]; then
+    return 0
+  fi
+  python3 - "$body" <<'PY' 2>/dev/null || true
+import json
+import sys
+try:
+    q = json.loads(sys.argv[1])
+    running = q.get("queue_running") or {}
+    pending = q.get("queue_pending") or []
+    total = len(running) + len(pending)
+    if total > 0:
+        print("ComfyUI holds %d prompt(s)" % total)
+except Exception:
+    pass
+PY
+  return 0
+}
+
+hub_busy_reason() {
+  local key="$1"
+  local reason
+  reason="$(lease_busy_reason)"
+  if [ -n "$reason" ]; then
+    printf '%s' "$reason"
+    return 0
+  fi
+  reason="$(manager_busy_reason "$key")"
+  if [ -n "$reason" ]; then
+    printf '%s' "$reason"
+    return 0
+  fi
+  reason="$(comfy_busy_reason)"
+  if [ -n "$reason" ]; then
+    printf '%s' "$reason"
+    return 0
+  fi
+  return 0
+}
+
+mark_update_pending() {
+  local current=""
+  if [ -f "$PENDING_FILE" ]; then
+    current="$(cut -d'|' -f1 < "$PENDING_FILE" 2>/dev/null || true)"
+  fi
+  if [ "$current" != "$1" ]; then
+    printf '%s|%s|%s\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$2" > "$PENDING_FILE.new.$$"
+    mv -f "$PENDING_FILE.new.$$" "$PENDING_FILE"
+  fi
+}
+
+clear_update_pending() {
+  rm -f "$PENDING_FILE"
+}
+
+defer_update() {
+  echo "Update $1 deferred: $2. Marked pending; the timer will retry." >&2
+  mark_update_pending "$1" "$2"
+  exit 0
 }
 
 restore_units() {
@@ -431,7 +615,20 @@ fi
 
 if [ "$FORCE" != "true" ] && [ -n "$LOCAL_VERSION" ] && [ "$LOCAL_VERSION" = "$LATEST_VERSION" ]; then
   echo "Already installed: $LATEST_VERSION"
+  clear_update_pending
   exit 0
+fi
+
+# First busy gate: never download/stage/restart while runs or queued
+# media work exist. A restart would wipe in-memory agent runs.
+if [ "$FORCE" = "true" ]; then
+  echo "WARN: --force bypasses the busy gate; in-flight runs may be lost" >&2
+else
+  PROBE_API_KEY="$(resolve_probe_key)"
+  BUSY_REASON="$(hub_busy_reason "$PROBE_API_KEY")"
+  if [ -n "$BUSY_REASON" ]; then
+    defer_update "$LATEST_VERSION" "$BUSY_REASON"
+  fi
 fi
 
 ARCHIVE="$TMP_DIR/$ASSET_BASENAME"
@@ -532,6 +729,22 @@ python3 -m py_compile "$STAGED_RELEASE/patch-hermes-gateway-native.py"
 FINAL_RELEASE_DIR="$INSTALL_DIR/releases/${LATEST_VERSION}-$(date +%Y%m%d%H%M%S)-$$"
 mv "$STAGED_RELEASE" "$FINAL_RELEASE_DIR"
 
+# Final busy gate (double-checked locking): work may have started while
+# downloading. Abort before touching live symlinks; the staged dir is
+# discarded and VERSION stays untouched so the next tick retries cleanly.
+if [ "$FORCE" != "true" ]; then
+  BUSY_REASON="$(hub_busy_reason "$PROBE_API_KEY")"
+  if [ -n "$BUSY_REASON" ]; then
+    echo "Update $LATEST_VERSION aborted at final check: $BUSY_REASON. Staged release discarded; will retry." >&2
+    case "$FINAL_RELEASE_DIR" in
+      "$INSTALL_DIR"/releases/*) rm -rf "$FINAL_RELEASE_DIR" ;;
+    esac
+    FINAL_RELEASE_DIR=""
+    mark_update_pending "$LATEST_VERSION" "$BUSY_REASON"
+    exit 0
+  fi
+fi
+
 if [ -L "$INSTALL_DIR/current" ]; then
   PREVIOUS_TARGET="$(readlink -f "$INSTALL_DIR/current" || true)"
 fi
@@ -572,18 +785,7 @@ if [ "$RESTART" = "true" ]; then
   systemctl --user daemon-reload
   systemctl --user restart "$SERVICE_NAME"
 
-  PROBE_API_KEY="${HERMES_HUB_API_KEY:-${HERMES_API_KEY:-}}"
-  if [ -z "$PROBE_API_KEY" ] && [ -s "$HERMES_ENV_FILE" ]; then
-    for key_name in HERMES_HUB_API_KEY HERMES_GATEWAY_API_KEY API_SERVER_KEY HERMES_API_KEY HERMESAPIKEY; do
-      PROBE_API_KEY="$(read_env_value "$HERMES_ENV_FILE" "$key_name")"
-      if [ -n "$PROBE_API_KEY" ]; then
-        break
-      fi
-    done
-  fi
-  if [ -z "$PROBE_API_KEY" ] && [ -s "$API_SERVER_KEY_FILE" ]; then
-    PROBE_API_KEY="$(tr -d '[:space:]' < "$API_SERVER_KEY_FILE")"
-  fi
+  PROBE_API_KEY="$(resolve_probe_key)"
   if [ -z "$PROBE_API_KEY" ]; then
     echo "ERROR: gateway API key missing; configure HERMES_API_KEY or $API_SERVER_KEY_FILE" >&2
     exit 1
@@ -619,6 +821,7 @@ if [ -n "$PREVIOUS_TARGET" ] && [ -d "$PREVIOUS_TARGET" ]; then
 fi
 COMMITTED=true
 rm -f "$FAILED_RELEASE_FILE"
+clear_update_pending
 
 echo "Installed: $LATEST_VERSION"
 echo "Launcher: $HOME/hermes-hub-linux.sh"

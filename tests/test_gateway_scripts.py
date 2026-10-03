@@ -130,6 +130,9 @@ class GatewayScriptTests(unittest.TestCase):
         probe_ok: bool,
         gateway_page: int = 1,
         asset_size_override: int | None = None,
+        manager_state: str = "idle",
+        comfy_state: str = "idle",
+        manager_flip: bool = False,
     ) -> dict[str, object]:
         version = "9.8.7"
         home = root / "home"
@@ -226,6 +229,30 @@ class GatewayScriptTests(unittest.TestCase):
                     fi
                   elif [ "$url" = "$HERMES_HUB_UPDATE_PROBE_URL" ] && [ "$FAKE_PROBE_OK" = "1" ]; then
                     printf '{}\n'
+                  elif [[ "$url" == */status && "$url" != "$HERMES_HUB_UPDATE_PROBE_URL" ]]; then
+                    if [ "$FAKE_MANAGER_FLIP" = "1" ]; then
+                      calls="$(cat "$FAKE_MANAGER_CALLS" 2>/dev/null || echo 0)"
+                      printf '%s' "$((calls + 1))" > "$FAKE_MANAGER_CALLS"
+                      if [ "$calls" = "0" ]; then
+                        printf '{"desired_mode":"AUTO","current_state":"LLM_READY","queue_length":0,"current_job":null}\n'
+                      else
+                        printf '{"desired_mode":"AUTO","current_state":"MEDIA_BUSY","queue_length":1,"current_job":"flip123"}\n'
+                      fi
+                    elif [ "$FAKE_MANAGER_STATE" = "queue" ]; then
+                      printf '{"desired_mode":"AUTO","current_state":"MEDIA_BUSY","queue_length":2,"current_job":"abc123"}\n'
+                    elif [ "$FAKE_MANAGER_STATE" = "media_idle" ]; then
+                      printf '{"desired_mode":"AUTO","current_state":"MEDIA_READY","queue_length":0,"current_job":null}\n'
+                    elif [ "$FAKE_MANAGER_STATE" = "down" ]; then
+                      return 22
+                    else
+                      printf '{"desired_mode":"AUTO","current_state":"LLM_READY","queue_length":0,"current_job":null}\n'
+                    fi
+                  elif [[ "$url" == */queue ]]; then
+                    if [ "$FAKE_COMFY_STATE" = "busy" ]; then
+                      printf '{"queue_running":{"1":{}},"queue_pending":[]}\n'
+                    else
+                      printf '{"queue_running":{},"queue_pending":[]}\n'
+                    fi
                   else
                     return 22
                   fi
@@ -280,6 +307,10 @@ class GatewayScriptTests(unittest.TestCase):
                 "FAKE_SYSTEMCTL_LOG": bash_path(bash, systemctl_log),
                 "FAKE_REAL_PYTHON": bash_path(bash, Path(sys.executable)),
                 "FAKE_PROBE_OK": "1" if probe_ok else "0",
+                "FAKE_MANAGER_STATE": manager_state,
+                "FAKE_COMFY_STATE": comfy_state,
+                "FAKE_MANAGER_FLIP": "1" if manager_flip else "0",
+                "FAKE_MANAGER_CALLS": bash_path(bash, root / "manager_calls"),
                 "MSYS": "winsymlinks:sys",
             }
         )
@@ -990,6 +1021,120 @@ class GatewayScriptTests(unittest.TestCase):
             self.assertIn(f"Installed: {version}", result.stdout)
             self.assertIn("Restarted and verified: hermes-hub.service", result.stdout)
 
+    def _write_busy_lease(self, home: Path, *, expired: bool = False) -> Path:
+        lease_dir = Path(home) / ".hermes"
+        lease_dir.mkdir(parents=True, exist_ok=True)
+        lease = lease_dir / "hub_busy.lock"
+        lease.write_text(
+            json.dumps(
+                {
+                    "owner": "test-agent",
+                    "task": "long journey task",
+                    "expires_at": time.time() - 60 if expired else time.time() + 3600,
+                }
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
+        return lease
+
+    def _assert_update_deferred(self, bash, fixture, result, *, reason_fragment: str) -> None:
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("deferred", result.stderr.lower())
+        self.assertIn(reason_fragment, result.stderr)
+        systemctl_log = Path(fixture["systemctl_log"]).read_text(encoding="utf-8")
+        self.assertNotIn("restart hermes-hub.service", systemctl_log)
+        pending = Path(fixture["install_dir"]) / ".pending-update"
+        self.assertTrue(pending.is_file())
+        self.assertTrue(pending.read_text(encoding="utf-8").startswith(f'{fixture["version"]}|'))
+        self.assertFalse((Path(fixture["install_dir"]) / "VERSION").exists())
+        releases = Path(fixture["install_dir"]) / "releases"
+        if releases.is_dir():
+            self.assertFalse(any(path.is_dir() for path in releases.iterdir()))
+
+    def test_updater_defers_restart_while_busy_lease_active(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            self._write_busy_lease(Path(fixture["home"]))
+            result = self._run_updater(bash, fixture)
+            self._assert_update_deferred(bash, fixture, result, reason_fragment="test-agent")
+
+    def test_updater_defers_restart_while_manager_queue_busy(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True, manager_state="queue")
+            result = self._run_updater(bash, fixture)
+            self._assert_update_deferred(bash, fixture, result, reason_fragment="manager queue")
+
+    def test_updater_defers_restart_while_media_warm_without_queue(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True, manager_state="media_idle")
+            result = self._run_updater(bash, fixture)
+            self._assert_update_deferred(bash, fixture, result, reason_fragment="MEDIA_READY")
+
+    def test_updater_defers_restart_while_comfy_holds_prompts(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True, comfy_state="busy")
+            result = self._run_updater(bash, fixture)
+            self._assert_update_deferred(bash, fixture, result, reason_fragment="ComfyUI")
+
+    def test_updater_ignores_stale_lease_and_installs(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            lease = self._write_busy_lease(Path(fixture["home"]), expired=True)
+            result = self._run_updater(bash, fixture)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn(f"Installed: {fixture['version']}", result.stdout)
+            self.assertIn("--user restart hermes-hub.service", Path(fixture["systemctl_log"]).read_text(encoding="utf-8"))
+            self.assertFalse(lease.exists())
+
+    def test_updater_final_gate_aborts_when_busy_midway(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True, manager_flip=True)
+            result = self._run_updater(bash, fixture)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("aborted at final check", result.stderr)
+            self.assertIn("manager queue holds 1 job(s)", result.stderr)
+            systemctl_log = Path(fixture["systemctl_log"]).read_text(encoding="utf-8")
+            self.assertNotIn("restart hermes-hub.service", systemctl_log)
+            pending = Path(fixture["install_dir"]) / ".pending-update"
+            self.assertTrue(pending.is_file())
+            self.assertTrue(pending.read_text(encoding="utf-8").startswith(f'{fixture["version"]}|'))
+            self.assertFalse((Path(fixture["install_dir"]) / "VERSION").exists())
+            releases = Path(fixture["install_dir"]) / "releases"
+            if releases.is_dir():
+                self.assertFalse(any(path.is_dir() for path in releases.iterdir()))
+
+    def test_updater_clears_pending_after_successful_install(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            pending = Path(fixture["install_dir"]) / ".pending-update"
+            pending.write_text(f'{fixture["version"]}|2026-10-03T00:00:00Z|stale\n', encoding="utf-8", newline="\n")
+            result = self._run_updater(bash, fixture)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn(f"Installed: {fixture['version']}", result.stdout)
+            self.assertFalse(pending.exists())
+
     def test_updater_probe_failure_rolls_back_current_version_and_units(self):
         bash = find_bash()
         if not bash:
@@ -1193,11 +1338,9 @@ class GatewayScriptTests(unittest.TestCase):
     def test_updater_probe_restores_hub_key_from_persisted_env(self):
         script = (SCRIPTS / "hermes-hub-linux-update.sh").read_text(encoding="utf-8")
         self.assertIn('HERMES_ENV_FILE="${HERMES_ENV_FILE:-$HOME/.hermes/.env}"', script)
-        probe_start = script.index('  PROBE_API_KEY="${HERMES_HUB_API_KEY:-${HERMES_API_KEY:-}}"')
-        probe_end = script.index('\n  if [ -z "$PROBE_API_KEY" ]; then', probe_start)
-        probe_source = script[probe_start:probe_end]
-        self.assertIn('read_env_value "$HERMES_ENV_FILE" "$key_name"', probe_source)
-        self.assertLess(probe_source.index("HERMES_HUB_API_KEY HERMES_GATEWAY_API_KEY"), probe_source.index("API_SERVER_KEY HERMES_API_KEY"))
+        resolver = heredoc_between(script, "resolve_probe_key() {\n", "\n}\n")
+        self.assertIn('read_env_value "$HERMES_ENV_FILE" "$key_name"', resolver)
+        self.assertLess(resolver.index("HERMES_HUB_API_KEY HERMES_GATEWAY_API_KEY"), resolver.index("API_SERVER_KEY HERMES_API_KEY"))
 
     def test_media_roots_keep_broad_terminal_root_last(self):
         launcher = (SCRIPTS / "hermes-hub-linux.sh").read_text(encoding="utf-8")
