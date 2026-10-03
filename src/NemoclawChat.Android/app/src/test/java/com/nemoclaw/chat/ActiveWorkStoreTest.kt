@@ -141,4 +141,28 @@ class ActiveWorkStoreTest {
         assertEquals("always", resolveAutoApproveMode("", bots, "always"))
         assertEquals("always", resolveAutoApproveMode("coder", bots, "banana"))
     }
+
+    @Test
+    fun screenWsUrlBuildsFromManagerBase() {
+        assertEquals(
+            "ws://h:8643/display/ws?display_ticket=T",
+            buildScreenWsUrl("http://h:8643", "T")
+        )
+        assertEquals(
+            "wss://h:8643/display/ws?display_ticket=T",
+            buildScreenWsUrl("https://h:8643/", "T")
+        )
+        assertNull(buildScreenWsUrl("", "T"))
+        assertNull(buildScreenWsUrl("http://h:8643", ""))
+        assertNull(buildScreenWsUrl("notaurl", "T"))
+    }
+
+    @Test
+    fun screenViewerUrlEncodesWs() {
+        val url = buildScreenViewerUrl("ws://h:8643/display/ws?display_ticket=T", true)
+        assertTrue(url.startsWith("https://appassets.androidplatform.net/assets/novnc/viewer.html?url="))
+        assertTrue(url.contains("ws%3A%2F%2Fh%3A8643"))
+        assertTrue(url.endsWith("&viewonly=1"))
+        assertTrue(buildScreenViewerUrl("ws://h/display/ws?display_ticket=T", false).endsWith("&viewonly=0"))
+    }
 }

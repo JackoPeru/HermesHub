@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<!-- HermesHub screen viewer. Served locally via WebViewAssetLoader (same origin
+     for ES modules). Connects to the manager WS bridge; input gated server-side
+     by the control lease. MPL-2.0 noVNC lives in ./core (see LICENSE files). -->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Hermes Screen</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  #screen { position: fixed; inset: 0; }
+  #screen canvas { display: block; }
+  #banner {
+    position: fixed; left: 0; right: 0; bottom: 0; padding: 6px 10px;
+    font: 12px system-ui, sans-serif; color: #9aa4b2; background: rgba(0,0,0,.55);
+    display: none; text-align: center;
+  }
+</style>
+</head>
+<body>
+<div id="screen"></div>
+<div id="banner"></div>
+<script type="module">
+import RFB from './core/rfb.js';
+
+const params = new URLSearchParams(location.search);
+const wsUrl = params.get('url') || '';
+const startViewOnly = params.get('viewonly') !== '0';
+
+const banner = document.getElementById('banner');
+function showBanner(text) {
+  if (!text) { banner.style.display = 'none'; return; }
+  banner.textContent = text;
+  banner.style.display = 'block';
+}
+function report(state, extra) {
+  try {
+    const payload = JSON.stringify(Object.assign({ state: state }, extra || {}));
+    if (window.HermesScreen && window.HermesScreen.onState) window.HermesScreen.onState(payload);
+  } catch (e) { /* native bridge missing: stay silent */ }
+}
+
+let rfb = null;
+function connect() {
+  if (!wsUrl) { showBanner('URL mancante'); report('error', { message: 'missing url' }); return; }
+  try { if (rfb) rfb.disconnect(); } catch (e) {}
+  showBanner('Connessione…');
+  try {
+    rfb = new RFB(document.getElementById('screen'), wsUrl, { shared: true });
+  } catch (e) {
+    showBanner('Errore: ' + e);
+    report('error', { message: String(e && e.message || e) });
+    return;
+  }
+  rfb.scaleViewport = true;
+  rfb.clipViewport = false;
+  rfb.resizeSession = false;
+  rfb.viewOnly = startViewOnly;
+  rfb.addEventListener('connect', () => { showBanner(''); report('connected', { viewOnly: !!rfb.viewOnly }); });
+  rfb.addEventListener('disconnect', (e) => {
+    const clean = e && e.detail && e.detail.clean;
+    showBanner(clean ? 'Disconnesso' : 'Connessione persa');
+    report('disconnected', { clean: !!clean });
+  });
+  rfb.addEventListener('credentialsrequired', () => { showBanner('Credenziali richieste'); report('error', { message: 'credentials' }); });
+  rfb.addEventListener('securityfailure', (e) => {
+    const reason = (e && e.detail && (e.detail.reason || e.detail.status)) || 'security';
+    showBanner('Sicurezza: ' + reason);
+    report('error', { message: String(reason) });
+  });
+  rfb.addEventListener('desktopname', (e) => {
+    report('desktop', { name: (e && e.detail && e.detail.name) || '' });
+  });
+}
+
+window.HermesScreenCtl = {
+  connect: connect,
+  disconnect: () => { try { if (rfb) rfb.disconnect(); } catch (e) {} },
+  setViewOnly: (v) => { try { if (rfb) rfb.viewOnly = !!v; } catch (e) {} return !!(rfb && rfb.viewOnly); },
+  state: () => (rfb ? 'live' : 'idle'),
+};
+connect();
+</script>
+</body>
+</html>

@@ -1284,6 +1284,13 @@ async def worker_loop() -> None:
 app = FastAPI(title="Hermes GPU Manager", version="1.0.0",
               docs_url=None, redoc_url=None, openapi_url=None)
 
+try:
+    from display_bridge import router as _display_router
+    app.include_router(_display_router)
+    log.info("display bridge routes mounted (/display/*)")
+except Exception as exc:
+    log.warning("display bridge unavailable: %r", exc)
+
 
 def require_key(request: Request) -> None:
     expected = str(CONFIG.get("api_key") or "")

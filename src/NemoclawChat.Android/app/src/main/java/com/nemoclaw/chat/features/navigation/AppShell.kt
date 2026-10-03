@@ -402,6 +402,9 @@ internal fun HermesSidebar(
                     SidebarTabRow(Tab.Bots, selectedTab == Tab.Bots, onOpenTab)
                 }
                 item {
+                    SidebarTabRow(Tab.Screen, selectedTab == Tab.Screen, onOpenTab)
+                }
+                item {
                     SidebarTabRow(Tab.Artifacts, selectedTab == Tab.Artifacts, onOpenTab)
                 }
                 item {
@@ -547,6 +550,7 @@ internal fun SidebarTabRow(tab: Tab, selected: Boolean, onOpenTab: (Tab) -> Unit
         Tab.Jarvis -> "Vista e assistenza temporanea"
         Tab.Projects -> "Workspace e contesto operativo"
         Tab.Bots -> "Profili reali e Bot Chat canoniche"
+        Tab.Screen -> "Desktop live del bot"
         Tab.Artifacts -> "Output persistenti e versioni"
         Tab.Search -> "Ricerca su tutto Hermes Hub"
         Tab.Archive -> "Chat e progetti salvati"

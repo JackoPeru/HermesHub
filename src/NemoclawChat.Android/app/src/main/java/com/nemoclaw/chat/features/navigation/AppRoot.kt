@@ -219,6 +219,7 @@ import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
 import com.nemoclaw.chat.features.bots.BotChatContext
 import com.nemoclaw.chat.features.bots.BotsScreen
+import com.nemoclaw.chat.features.screen.ScreenScreen
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -516,8 +517,11 @@ internal fun ChatApp() {
                         pendingConversationId = bot.localConversationId
                         pendingPrompt = ""
                         setSelectedTab(Tab.Chat)
-                    }
+                    },
+                    onOpenScreen = { setSelectedTab(Tab.Screen) },
+                    onOpenCron = { setSelectedTab(Tab.Cron) }
                 )
+                Tab.Screen -> ScreenScreen(context = context, settings = settings)
                 Tab.Artifacts -> ArtifactLibraryScreen(
                 context = context,
                 settings = settings,

@@ -1,10 +1,18 @@
 package com.nemoclaw.chat.features.bots
 
 import android.content.Context
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -13,7 +21,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
+import com.nemoclaw.chat.features.screen.ScreenScreen
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -32,6 +47,7 @@ import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -60,6 +76,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.AppColors
 import com.nemoclaw.chat.AppSettings
+import com.nemoclaw.chat.AutoApproveChip
+import com.nemoclaw.chat.ScreenStatusInfo
+import com.nemoclaw.chat.decodeScreenFrame
+import com.nemoclaw.chat.fetchScreenFrameBytes
+import com.nemoclaw.chat.getScreenStatus
+import com.nemoclaw.chat.loadBotAutoApproveMap
+import com.nemoclaw.chat.loadGatewaySecret
+import com.nemoclaw.chat.saveBotAutoApprove
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import com.nemoclaw.chat.loadBotAutoApproveMap
 import com.nemoclaw.chat.saveBotAutoApprove
 import com.nemoclaw.chat.httpGetResponse
@@ -405,7 +431,9 @@ internal suspend fun deleteHermesBot(
 internal fun BotsScreen(
     context: Context,
     settings: AppSettings,
-    onOpenBot: (BotChatContext) -> Unit
+    onOpenBot: (BotChatContext) -> Unit,
+    onOpenScreen: () -> Unit = {},
+    onOpenCron: () -> Unit = {}
 ) {
     var roster by remember(settings.gatewayUrl) { mutableStateOf<HermesBotRoster?>(null) }
     var connections by remember(settings.gatewayUrl) {
@@ -437,7 +465,55 @@ internal fun BotsScreen(
     var groupResult by remember { mutableStateOf<HermesBotGroupTurnResult?>(null) }
     var groupRunning by remember { mutableStateOf(false) }
     var groupJob by remember { mutableStateOf<Job?>(null) }
+    var detailBot by remember { mutableStateOf<HermesBotItem?>(null) }
     val scope = rememberCoroutineScope()
+
+    // Stato schermo condiviso per roster e dettaglio (poll leggero, anteprima solo se acceso).
+    var screenStatus by remember(settings.gatewayUrl) { mutableStateOf<ScreenStatusInfo?>(null) }
+    var screenPreview by remember { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(settings.gatewayUrl) {
+        while (isActive) {
+            val key = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+            screenStatus = runCatching { withContext(Dispatchers.IO) { getScreenStatus(settings, key) } }.getOrNull()
+            delay(8_000L)
+        }
+    }
+    LaunchedEffect(screenStatus?.running) {
+        if (screenStatus?.running != true) {
+            screenPreview = null
+            return@LaunchedEffect
+        }
+        while (isActive) {
+            val key = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+            val bytes = withContext(Dispatchers.IO) { fetchScreenFrameBytes(settings, key, 480) }
+            screenPreview = decodeScreenFrame(bytes)
+            delay(6_000L)
+        }
+    }
+
+    val detail = detailBot
+    if (detail != null) {
+        BotDetailScreen(
+            bot = detail,
+            context = context,
+            settings = settings,
+            screenStatus = screenStatus,
+            screenPreview = screenPreview,
+            onBack = { detailBot = null },
+            onOpenChat = { bot ->
+                opening = bot.identityKey
+                scope.launch {
+                    openHermesBotChat(context, settings, bot)
+                        .onSuccess { onOpenBot(it) }
+                        .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
+                    opening = null
+                }
+            },
+            onOpenScreen = onOpenScreen,
+            onOpenCron = onOpenCron
+        )
+        return
+    }
 
     fun openEditor(bot: HermesBotItem?) {
         editorBot = bot
@@ -607,43 +683,30 @@ internal fun BotsScreen(
             }
         }
         items(roster?.items.orEmpty(), key = { it.identityKey }) { bot ->
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
-                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text(bot.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-                        Text("@${bot.handle} · ${bot.connectionLabel}", color = AppColors.Muted, fontSize = 12.sp)
-                        if (!bot.profile.equals(bot.handle, ignoreCase = true)) {
-                            Text(bot.profile, color = AppColors.Faint, fontSize = 11.sp)
-                        }
-                        if (bot.description.isNotBlank()) Text(bot.description, color = Color.White, fontSize = 13.sp)
-                        if (bot.isDefault) Text("Profilo predefinito", color = AppColors.Faint, fontSize = 11.sp)
+            BotRosterCard(
+                bot = bot,
+                screenRunning = screenStatus?.running == true,
+                screenPreview = screenPreview,
+                chatSupported = roster?.chatSupported == true,
+                busy = opening != null,
+                onOpenDetail = { detailBot = bot },
+                onOpenChat = {
+                    opening = bot.identityKey
+                    scope.launch {
+                        openHermesBotChat(context, settings, bot)
+                            .onSuccess { onOpenBot(it) }
+                            .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
+                        opening = null
                     }
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        IconButton(
-                            enabled = opening == null && roster?.chatSupported == true,
-                            onClick = {
-                                opening = bot.identityKey
-                                scope.launch {
-                                    openHermesBotChat(context, settings, bot)
-                                        .onSuccess { onOpenBot(it) }
-                                        .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
-                                    opening = null
-                                }
-                            }
-                        ) { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Apri Bot Chat", tint = Color.White) }
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            IconButton(onClick = { openEditor(bot) }, enabled = mutating == false) { Icon(Icons.Rounded.Edit, contentDescription = "Modifica bot", tint = Color.White) }
-                            IconButton(
-                                onClick = {
-                                    deleteBot = bot
-                                    deleteConfirmation = ""
-                                },
-                                enabled = !bot.isDefault && !bot.profile.equals("default", true) && mutating == false
-                            ) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina bot", tint = MaterialTheme.colorScheme.error) }
-                        }
-                    }
-                }
-            }
+                },
+                onOpenScreen = onOpenScreen,
+                onEdit = { openEditor(bot) },
+                onDelete = {
+                    deleteBot = bot
+                    deleteConfirmation = ""
+                },
+                canDelete = !bot.isDefault && !bot.profile.equals("default", true) && mutating == false
+            )
         }
     }
 
@@ -897,4 +960,186 @@ private fun groupOutcomeLabel(outcome: String): String = when (outcome.lowercase
     "error" -> "Errore"
     "escalation" -> "Escalation"
     else -> outcome
+}
+
+/** Colore avatar deterministico dal profilo. Puro, testabile. */
+internal fun botAvatarColor(profile: String): androidx.compose.ui.graphics.Color {
+    val hue = kotlin.math.abs(profile.hashCode() % 360).toFloat()
+    return androidx.compose.ui.graphics.Color.hsl(hue, 0.45f, 0.42f)
+}
+
+@Composable
+internal fun BotAvatar(name: String, profile: String, size: androidx.compose.ui.unit.Dp = 52.dp) {
+    Box(
+        modifier = Modifier.size(size).clip(CircleShape).background(botAvatarColor(profile)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            (name.trim().firstOrNull()?.uppercase() ?: "?"),
+            color = Color.White,
+            fontSize = (size.value / 2.4f).sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+internal fun BotRosterCard(
+    bot: HermesBotItem,
+    screenRunning: Boolean,
+    screenPreview: Bitmap?,
+    chatSupported: Boolean,
+    busy: Boolean,
+    onOpenDetail: () -> Unit,
+    onOpenChat: () -> Unit,
+    onOpenScreen: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    canDelete: Boolean
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenDetail),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box {
+                    BotAvatar(bot.displayName, bot.profile)
+                    Box(
+                        modifier = Modifier.size(14.dp).clip(CircleShape)
+                            .background(if (screenRunning) Color(0xFF4CAF50) else AppColors.Faint)
+                            .align(Alignment.BottomEnd)
+                    )
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(bot.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                        Text("@${bot.handle} · ${bot.connectionLabel}", color = AppColors.Muted, fontSize = 12.sp)
+                    Text(
+                        if (screenRunning) "Schermo live" else if (bot.isDefault) "Profilo predefinito" else bot.profile,
+                        color = if (screenRunning) Color(0xFF4CAF50) else AppColors.Faint,
+                        fontSize = 11.sp
+                    )
+                }
+                IconButton(onClick = onOpenChat, enabled = !busy && chatSupported) {
+                    Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Apri Bot Chat", tint = Color.White)
+                }
+            }
+            if (screenRunning && screenPreview != null) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(120.dp)
+                        .clip(RoundedCornerShape(12.dp)).background(Color.Black)
+                        .clickable(onClick = onOpenScreen)
+                ) {
+                    Image(
+                        bitmap = screenPreview.asImageBitmap(),
+                        contentDescription = "Anteprima schermo",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+            if (!bot.description.isBlank()) Text(bot.description, color = Color.White, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(onClick = onOpenScreen, enabled = screenRunning) { Text("Apri live") }
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = onEdit) { Icon(Icons.Rounded.Edit, contentDescription = "Modifica bot", tint = Color.White) }
+                if (canDelete) {
+                    IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina bot", tint = MaterialTheme.colorScheme.error) }
+                }
+            }
+        }
+    }
+}
+
+private enum class BotDetailTab(val label: String) { Chat("Chat"), Screen("Screen"), Info("Info") }
+
+@Composable
+internal fun BotDetailScreen(
+    bot: HermesBotItem,
+    context: Context,
+    settings: AppSettings,
+    screenStatus: ScreenStatusInfo?,
+    screenPreview: Bitmap?,
+    onBack: () -> Unit,
+    onOpenChat: (HermesBotItem) -> Unit,
+    onOpenScreen: () -> Unit,
+    onOpenCron: () -> Unit
+) {
+    var tab by remember(bot.identityKey) { mutableStateOf(BotDetailTab.Chat) }
+    var autoMode by remember(bot.identityKey) {
+        mutableStateOf(loadBotAutoApproveMap(context)[bot.profile] ?: "off")
+    }
+    val scope = rememberCoroutineScope()
+    var opening by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("") }
+    Column(modifier = Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Indietro", tint = Color.White)
+            }
+            BotAvatar(bot.displayName, bot.profile, 44.dp)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(bot.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
+                Text(
+                    "@${bot.handle} · " + if (screenStatus?.running == true) "schermo live" else "schermo spento",
+                    color = AppColors.Muted, fontSize = 12.sp
+                )
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            BotDetailTab.values().forEach { entry ->
+                val selected = tab == entry
+                TextButton(onClick = { tab = entry }) {
+                    Text(
+                        entry.label,
+                        color = if (selected) AppColors.Accent else Color.White,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
+            }
+        }
+        when (tab) {
+            BotDetailTab.Chat -> {
+                if (bot.description.isNotBlank()) Text(bot.description, color = Color.White, fontSize = 14.sp)
+                Button(
+                    onClick = {
+                        opening = true
+                        scope.launch {
+                            openHermesBotChat(context, settings, bot)
+                                .onSuccess { onOpenChat(bot) }
+                                .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
+                            opening = false
+                        }
+                    },
+                    enabled = !opening,
+                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
+                ) { Text(if (opening) "Apertura…" else "Apri Bot Chat", color = Color(0xFF171009)) }
+                if (status.isNotBlank()) Text(status, color = AppColors.Muted, fontSize = 12.sp)
+                Text("Auto-approvazione run di ${bot.displayName}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((label, value) in listOf("Chiedi" to "off", "Sessione" to "session", "Sempre" to "always")) {
+                        val selected = autoMode == value
+                        TextButton(onClick = {
+                            saveBotAutoApprove(context, bot.profile, value)
+                            autoMode = value
+                        }) { Text(if (selected) "✓ $label" else label) }
+                    }
+                }
+                Text("Mai deny automatico; ogni auto-approvazione resta visibile.", color = AppColors.Faint, fontSize = 11.sp)
+            }
+            BotDetailTab.Screen -> {
+                Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                    ScreenScreen(context = context, settings = settings)
+                }
+            }
+            BotDetailTab.Info -> {
+                Text("Profilo: ${bot.profile}", color = Color.White, fontSize = 13.sp)
+                Text("Connessione: ${bot.connectionLabel}", color = AppColors.Muted, fontSize = 12.sp)
+                if (bot.description.isNotBlank()) Text(bot.description, color = Color.White, fontSize = 13.sp)
+                OutlinedButton(onClick = onOpenCron) { Text("Routine e Cron") }
+                OutlinedButton(onClick = onOpenScreen) { Text("Apri schermo live") }
+            }
+        }
+    }
 }
