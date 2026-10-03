@@ -32,6 +32,9 @@ switching:
   llm_shutdown_timeout: 60
   vram_free_mb: 2500
   post_unload_settle: 5
+  media_failure_threshold: 2
+  media_cooldown_seconds: 1200
+  media_gone_timeout: 120
 
 recovery:
   max_retries: 3

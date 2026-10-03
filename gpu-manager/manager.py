@@ -56,6 +56,9 @@ DEFAULT_CONFIG = {
         "llm_shutdown_timeout": 60,
         "vram_free_mb": 2500,
         "post_unload_settle": 5,
+        "media_failure_threshold": 2,
+        "media_cooldown_seconds": 1200,
+        "media_gone_timeout": 120,
     },
     "recovery": {
         "max_retries": 3,
@@ -133,6 +136,9 @@ _state = {
     "last_error": "",
     "last_transition": "",
     "media_idle_since": 0.0,
+    "media_consec_failures": 0,
+    "media_cooldown_until": 0.0,
+    "cooldown_log_ts": 0.0,
     "retries": 0,
     "active_media_model": "",
     "active_preset": "",
@@ -893,8 +899,10 @@ async def run_media_job(job: dict) -> bool:
     update_job(jid, status="running", progress=0.05, phase="submitted")
     deadline = time.monotonic() + timeout
     poll = float(CONFIG["media"].get("poll_interval", 2.0))
+    gone_timeout = float(CONFIG["switching"].get("media_gone_timeout", 120))
     vram_peak = 0.0
     seen_activity = False
+    last_seen = time.monotonic()
     polls = 0
     while time.monotonic() < deadline:
         await asyncio.sleep(poll)
@@ -910,8 +918,21 @@ async def run_media_job(job: dict) -> bool:
         if not entry:
             phase = await comfy_queue_state(prompt_id)
             if phase in ("executing", "queued"):
+                last_seen = time.monotonic()
                 update_job(jid, phase=phase)
+                continue
+            # No history entry and prompt not live in ComfyUI (gone, evicted,
+            # or unreachable backend): fail fast instead of sitting until the
+            # hour timeout while the GPUs idle.
+            if time.monotonic() - last_seen >= gone_timeout:
+                log.warning("job %s lost by ComfyUI (phase=%s); failing", jid, phase or "unknown")
+                update_job(jid, status="failed",
+                           error="lost by ComfyUI: no history and prompt not queued",
+                           vram_peak_mb=vram_peak)
+                await comfy_cancel(prompt_id)
+                return False
             continue
+        last_seen = time.monotonic()
         if not seen_activity:
             seen_activity = True
             update_job(jid, phase="executing")
@@ -1192,6 +1213,13 @@ async def _drive() -> None:
         queue = queued_jobs()
         if queue:
             if state == "LLM_READY":
+                if time.monotonic() < float(_state.get("media_cooldown_until", 0.0)):
+                    # Media path cooling after repeated failures: keep chat up,
+                    # jobs wait instead of flapping GPUs on every drive tick.
+                    if time.monotonic() - float(_state.get("cooldown_log_ts", 0.0)) > 60.0:
+                        _state["cooldown_log_ts"] = time.monotonic()
+                        log.info("media cooldown active; %d job(s) waiting, LLM stays up", len(queue))
+                    return
                 if not await transition_to_media():
                     for job in queue:
                         update_job(job["job_id"], status="failed", error="media entry failed")
@@ -1230,6 +1258,23 @@ async def drain_media_queue() -> None:
         if not ok and _state["current_state"] == "ERROR":
             await restore_llm_with_retries("media-job-failed")
             return
+        if not ok:
+            # Chat-first: repeated media failures mean the backend is broken
+            # (OOM, crash loop). Failing jobs one by one while the LLM stays
+            # down kills chat/voice for nothing: restore the LLM now and cool
+            # the media path down instead of flapping on every job.
+            _state["media_consec_failures"] = int(_state.get("media_consec_failures", 0)) + 1
+            threshold = int(CONFIG["switching"].get("media_failure_threshold", 2))
+            if _state["media_consec_failures"] >= max(1, threshold) and _state["desired_mode"] == "AUTO":
+                cooldown = float(CONFIG["switching"].get("media_cooldown_seconds", 1200))
+                _state["media_cooldown_until"] = time.monotonic() + max(60.0, cooldown)
+                log.warning("media failed %sx in a row; restoring LLM and cooling media path for %.0fs",
+                            _state["media_consec_failures"], max(60.0, cooldown))
+                await restore_llm_with_retries("media-job-failed")
+                return
+        else:
+            _state["media_consec_failures"] = 0
+            _state["media_cooldown_until"] = 0.0
         set_state("MEDIA_READY")
         _state["media_idle_since"] = time.monotonic()
         return
@@ -1342,10 +1387,15 @@ async def status(_: None = Depends(require_key)) -> dict:
         hint = f"transition in progress ({state}): wait, do not resubmit"
     else:
         hint = "submit a job; the worker drives the GPUs"
+    cooldown_left = max(0.0, float(_state.get("media_cooldown_until", 0.0)) - time.monotonic())
+    if cooldown_left > 0 and desired == "AUTO":
+        hint = f"media cooling down ({cooldown_left:.0f}s left, chat stays up): jobs wait"
     return {
         "desired_mode": desired,
         "current_state": state,
         "hint": hint,
+        "media_consec_failures": int(_state.get("media_consec_failures", 0)),
+        "media_cooldown_s": round(cooldown_left, 1),
         "worker_alive_s": round(time.monotonic() - float(_state.get("last_drive_ts") or 0.0), 1),
         "llm_online": await llm_online(),
         "llm_loaded": await llm_loaded(),
@@ -1372,6 +1422,8 @@ def _set_desired(mode: str) -> dict:
         return {"desired_mode": mode, "unchanged": True}
     _state["desired_mode"] = mode
     _state["last_error"] = ""
+    _state["media_consec_failures"] = 0
+    _state["media_cooldown_until"] = 0.0
     _persist_desired()
     log.info("desired mode -> %s (manual)", mode)
     return {"desired_mode": mode}
