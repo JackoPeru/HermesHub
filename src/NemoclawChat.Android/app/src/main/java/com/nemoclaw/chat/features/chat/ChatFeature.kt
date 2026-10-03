@@ -450,12 +450,14 @@ internal fun ChatScreen(
     // Preriscalda LLM: se il manager e' in AUTO e il modello e' scarico
     // (dopo job media), chiedi il caricamento appena apri la chat cosi' e'
     // pronto quando invii. Silenzioso, una sola volta per apertura.
+    // Il manager richiede Bearer (chiave master gateway), mai anonimo.
+    val managerKey = remember { loadGatewaySecret(context) }
     LaunchedEffect(Unit) {
         runCatching {
             val base = gpuManagerBase(settings.gatewayUrl)
-            val status = JSONObject(httpGet("$base/status", null))
+            val status = JSONObject(httpGet("$base/status", managerKey))
             if (status.optString("desired_mode") == "AUTO" && !status.optBoolean("llm_loaded", true)) {
-                postJson("$base/mode/llm", JSONObject(), null, allowCompatAuth = false)
+                postJson("$base/mode/llm", JSONObject(), managerKey, allowCompatAuth = false)
             }
         }
     }
@@ -545,6 +547,7 @@ internal fun ChatScreen(
             contextUsage = contextUsage,
             connected = gatewayAvailable,
             gatewayRuntime = gatewayRuntime,
+            managerApiKey = managerKey,
             onNewChat = onNewChat,
             onOpenSidebar = onOpenSidebar,
             onOpenArchive = { onSwitchTab(Tab.Archive) }
@@ -1313,6 +1316,7 @@ internal fun TopBar(
     contextUsage: ContextUsage,
     connected: Boolean,
     gatewayRuntime: GatewayRuntimeStatus?,
+    managerApiKey: String? = null,
     onNewChat: () -> Unit = {},
     onOpenSidebar: () -> Unit = {},
     onOpenArchive: () -> Unit = {}
@@ -1328,7 +1332,7 @@ internal fun TopBar(
     var llmError by remember { mutableStateOf("") }
 
     suspend fun readManagerStatus() {
-        val status = JSONObject(httpGet("$managerBase/status", null))
+        val status = JSONObject(httpGet("$managerBase/status", managerApiKey))
         llmLoaded = status.optBoolean("llm_loaded", false)
         llmState = status.optString("current_state", "")
         desiredMode = status.optString("desired_mode", "")
@@ -1358,7 +1362,7 @@ internal fun TopBar(
         scope.launch {
             llmBusy = true
             llmError = runCatching {
-                postJson("$managerBase/mode/${if (wanted) "llm" else "media"}", JSONObject(), null, allowCompatAuth = false)
+                postJson("$managerBase/mode/${if (wanted) "llm" else "media"}", JSONObject(), managerApiKey, allowCompatAuth = false)
                 delay(3_000)
                 readManagerStatus()
             }.exceptionOrNull()?.message ?: ""
@@ -1371,7 +1375,7 @@ internal fun TopBar(
             llmBusy = true
             llmError = runCatching {
                 val mode = if (wanted) "auto" else if (llmLoaded == true) "llm" else "media"
-                postJson("$managerBase/mode/$mode", JSONObject(), null, allowCompatAuth = false)
+                postJson("$managerBase/mode/$mode", JSONObject(), managerApiKey, allowCompatAuth = false)
                 delay(3_000)
                 readManagerStatus()
             }.exceptionOrNull()?.message ?: ""

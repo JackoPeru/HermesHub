@@ -2253,7 +2253,7 @@ internal fun ProfileScreen(
         scope.launch {
             rebootBusy = true
             rebootStatus = try {
-                val (code, _) = postJson("$managerBase/system/reboot", JSONObject(), null, allowCompatAuth = false)
+                val (code, _) = postJson("$managerBase/system/reboot", JSONObject(), loadGatewaySecret(context), allowCompatAuth = false)
                 if (code == 200) {
                     "Comando di riavvio inviato. Il server tornerà online tra circa un minuto."
                 } else {
@@ -2761,8 +2761,9 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
         scope.launch {
             busy = true
             error = runCatching {
-                body = JSONObject(httpGet("$base/status", null))
-                jobsBody = JSONObject(httpGet("$base/jobs", null)).optJSONArray("jobs")
+                val key = loadGatewaySecret(context)
+                body = JSONObject(httpGet("$base/status", key))
+                jobsBody = JSONObject(httpGet("$base/jobs", key)).optJSONArray("jobs")
             }.exceptionOrNull()?.message ?: ""
             busy = false
         }
@@ -2795,7 +2796,7 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                     Button(
                         onClick = {
                             scope.launch {
-                                runCatching { postJson("$base/mode/${mode.lowercase()}", JSONObject(), null, allowCompatAuth = false) }
+                                runCatching { postJson("$base/mode/${mode.lowercase()}", JSONObject(), loadGatewaySecret(context), allowCompatAuth = false) }
                                 refresh()
                             }
                         },
