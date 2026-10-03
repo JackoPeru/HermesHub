@@ -1495,7 +1495,12 @@ internal fun TopBar(
     var llmError by remember { mutableStateOf("") }
 
     suspend fun readManagerStatus() {
-        val status = JSONObject(httpGet("$managerBase/status", managerApiKey))
+        // Errori HTTP espliciti: un 401/500 non deve mai sembrare "tutto spento".
+        val (code, body) = httpGetResponse("$managerBase/status", managerApiKey)
+        if (code !in 200..299) {
+            throw IllegalStateException(managerStatusErrorMessage(code, body))
+        }
+        val status = JSONObject(body)
         llmLoaded = status.optBoolean("llm_loaded", false)
         llmState = status.optString("current_state", "")
         desiredMode = status.optString("desired_mode", "")
@@ -1507,6 +1512,19 @@ internal fun TopBar(
             llmBusy = true
             llmError = runCatching { readManagerStatus() }.exceptionOrNull()?.message ?: ""
             llmBusy = false
+        }
+    }
+
+    // Stato veritiero anche senza aprire il menu: ricampiona all'apertura e poi
+    // ogni 15 s mentre la chat e' composta. Cosi' i flag non restano mai
+    // congelati su "off" dopo un riavvio app.
+    LaunchedEffect(managerBase) {
+        llmError = runCatching { readManagerStatus() }.exceptionOrNull()?.message ?: ""
+        while (true) {
+            delay(15_000)
+            // Durante una transizione richiesta ricampiona comunque: l'esito
+            // (LLM che carica in minuti) arriva da solo senza toccare il menu.
+            llmError = runCatching { readManagerStatus() }.exceptionOrNull()?.message ?: ""
         }
     }
 
@@ -1525,7 +1543,10 @@ internal fun TopBar(
         scope.launch {
             llmBusy = true
             llmError = runCatching {
-                postJson("$managerBase/mode/${if (wanted) "llm" else "media"}", JSONObject(), managerApiKey, allowCompatAuth = false)
+                val (code, body) = postJson("$managerBase/mode/${if (wanted) "llm" else "media"}", JSONObject(), managerApiKey, allowCompatAuth = false)
+                if (code !in 200..299) {
+                    throw IllegalStateException(managerModeErrorMessage(code, body))
+                }
                 delay(3_000)
                 readManagerStatus()
             }.exceptionOrNull()?.message ?: ""
@@ -1538,7 +1559,10 @@ internal fun TopBar(
             llmBusy = true
             llmError = runCatching {
                 val mode = if (wanted) "auto" else if (llmLoaded == true) "llm" else "media"
-                postJson("$managerBase/mode/$mode", JSONObject(), managerApiKey, allowCompatAuth = false)
+                val (code, body) = postJson("$managerBase/mode/$mode", JSONObject(), managerApiKey, allowCompatAuth = false)
+                if (code !in 200..299) {
+                    throw IllegalStateException(managerModeErrorMessage(code, body))
+                }
                 delay(3_000)
                 readManagerStatus()
             }.exceptionOrNull()?.message ?: ""
@@ -4125,4 +4149,17 @@ internal fun saveArtifactMetadata(context: Context, id: String, title: String, t
         )
         saveConversations(context, items)
     }
+}
+
+/** Messaggi d'errore manager: mai un HTTP fallito travestito da "tutto spento". */
+internal fun managerStatusErrorMessage(code: Int, body: String): String = when (code) {
+    401, 403 -> "Chiave rifiutata dal manager (HTTP $code)"
+    0 -> "Manager non raggiungibile (${body.take(120)})"
+    else -> "Manager HTTP $code: ${body.take(160)}"
+}
+
+internal fun managerModeErrorMessage(code: Int, body: String): String = when (code) {
+    401, 403 -> "Chiave rifiutata dal manager (HTTP $code)"
+    0 -> "Manager non raggiungibile"
+    else -> "Cambio modalita rifiutato (HTTP $code): ${body.take(160)}"
 }

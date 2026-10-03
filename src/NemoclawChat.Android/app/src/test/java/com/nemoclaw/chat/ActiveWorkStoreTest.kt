@@ -131,8 +131,7 @@ class ActiveWorkStoreTest {
     }
 
     @Test
-    fun resolveAutoApprovePrefersBotOverGlobal() {
-        val bots = mapOf("coder" to "always")
+    fun resolveAutoApprovePrefersBotOverGlobal() {        val bots = mapOf("coder" to "always")
         assertEquals("always", resolveAutoApproveMode("coder", bots, "off"))
         assertEquals("off", resolveAutoApproveMode("other", bots, "off"))
         assertEquals("session", resolveAutoApproveMode("other", bots, "session"))
@@ -164,5 +163,23 @@ class ActiveWorkStoreTest {
         assertTrue(url.contains("ws%3A%2F%2Fh%3A8643"))
         assertTrue(url.endsWith("&viewonly=1"))
         assertTrue(buildScreenViewerUrl("ws://h/display/ws?display_ticket=T", false).endsWith("&viewonly=0"))
+    }
+
+    @Test
+    fun managerStatusErrorsAreExplicit() {
+        assertTrue(managerStatusErrorMessage(401, "x").contains("401"))
+        assertTrue(managerStatusErrorMessage(403, "x").contains("403"))
+        assertTrue(managerStatusErrorMessage(0, "timeout").contains("timeout"))
+        val long = "e".repeat(300)
+        assertTrue(managerStatusErrorMessage(500, long).contains("500"))
+        assertTrue(managerStatusErrorMessage(500, long).length < long.length)
+    }
+
+    @Test
+    fun managerModeErrorsAreExplicit() {
+        assertTrue(managerModeErrorMessage(401, "x").contains("401"))
+        assertTrue(managerModeErrorMessage(0, "").contains("non raggiungibile"))
+        assertTrue(managerModeErrorMessage(500, "boom").contains("500"))
+        assertTrue(managerModeErrorMessage(500, "boom").contains("boom"))
     }
 }

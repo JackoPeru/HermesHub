@@ -2762,8 +2762,16 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
             busy = true
             error = runCatching {
                 val key = loadGatewaySecret(context)
-                body = JSONObject(httpGet("$base/status", key))
-                jobsBody = JSONObject(httpGet("$base/jobs", key)).optJSONArray("jobs")
+                val (statusCode, statusBody) = httpGetResponse("$base/status", key)
+                if (statusCode !in 200..299) {
+                    throw IllegalStateException(managerStatusErrorMessage(statusCode, statusBody))
+                }
+                body = JSONObject(statusBody)
+                val (jobsCode, jobsBodyRaw) = httpGetResponse("$base/jobs", key)
+                if (jobsCode !in 200..299) {
+                    throw IllegalStateException("Job manager HTTP $jobsCode")
+                }
+                jobsBody = JSONObject(jobsBodyRaw).optJSONArray("jobs")
             }.exceptionOrNull()?.message ?: ""
             busy = false
         }

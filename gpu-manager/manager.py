@@ -1079,6 +1079,12 @@ async def comfy_cancel(prompt_id: str) -> None:
     await _http_async("POST", media_base() + "/queue", {"delete": [prompt_id]}, timeout=15)
 
 
+async def comfy_clear_all() -> None:
+    """Best-effort: ferma il prompt in esecuzione e svuota tutta la coda ComfyUI."""
+    await _http_async("POST", media_base() + "/interrupt", {}, timeout=15)
+    await _http_async("POST", media_base() + "/queue", {"clear": True}, timeout=15)
+
+
 async def comfy_queue_state(prompt_id: str) -> str:
     """running|queued|gone based on the live ComfyUI queue."""
     code, body = await _http_async("GET", media_base() + "/queue", timeout=15)
@@ -1291,10 +1297,22 @@ async def drain_media_queue() -> None:
 
 async def reconcile_boot() -> None:
     log.info("boot reconcile: probing real hardware state")
+    # Policy: ogni (re)boot atterra su AUTO con la coda media svuotata.
+    # I job interrotti dal reboot vengono cancellati, non riaccodati.
+    _state["desired_mode"] = "AUTO"
+    _persist_desired()
+    log.info("boot: desired forced to AUTO, cancelling stale jobs + ComfyUI queue")
     db = _db_conn()
-    for (jid,) in db.execute("SELECT id FROM jobs WHERE status='running'").fetchall():
-        update_job(jid, status="queued", error="interrupted by reboot, requeued")
-        log.info("job %s requeued after reboot", jid)
+    for (jid,) in db.execute(
+        "SELECT id FROM jobs WHERE status IN ('running','queued')"
+    ).fetchall():
+        update_job(jid, status="cancelled",
+                   error="cancelled by reboot, manager reset to AUTO")
+        log.info("job %s cancelled after reboot", jid)
+    try:
+        await comfy_clear_all()
+    except Exception as exc:
+        log.warning("boot: ComfyUI queue clear failed (backend down?): %s", exc)
     llm_up = await llm_loaded()
     media_up = await media_online()
     threshold = float(CONFIG["switching"].get("vram_free_mb", 2500))
