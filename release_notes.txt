@@ -1,10 +1,18 @@
-Hermes Hub 0.6.205 (composer ChatGPT + TTS/STT GPU ripristinati)
+Hermes Hub 0.6.206 (background work + auto-approve + bot screen)
 
-- App: composer in stile ChatGPT (box unico, riga strumenti, pulsante voce/invio arancione, tachimetro reasoning), placeholder "Chiedi a Hermes".
-- Gateway patch: preload TTS/STT best-effort con site-packages ripristinati, compat faster-whisper/PyAV19, cuDNN cu13 via LD_PRELOAD.
-- Server: onnxruntime cu13 + cuDNN 9.27, av19+shim, huggingface_hub 2.1.1, whisper large-v3-turbo cache default.
-- Versioni: Windows/AdminBridge `0.6.205`; Android `versionName 0.6.205`, `versionCode 209`.
-- Asset: `HermesHub-0.6.205-android.apk` (binario Windows invariato).
-- SHA-256 Android: `abba30754ef63a7a183ce0d921f82268f82246e1b84ceb56c3b5c2b14012174f`.
-- Asset: `HermesHub-0.6.205-linux-gateway.tar.gz`.
-- SHA-256 gateway: `ed637314e820e35cd027a912a71f6cde60f900be54355b3409776ed81487d12f`.
+- App: le run continuano sul gateway anche a client morto (continue_on_disconnect),
+  binding persistente, re-attach all'apertura, foreground service con notifiche.
+- App: auto-approve run opt-in (Chiedi/Sessione/Sempre, globale + per-bot),
+  pill AUTO visibile, tap notifica verso la richiesta pendente.
+- App: tab Schermo con viewer live noVNC + Take over/Hand back; sezione Bot
+  rivista (roster con avatar/stato/anteprima, dettaglio con tab Chat/Screen/Info).
+- Gateway patch: continue-on-disconnect su session/responses/chat (opt-in).
+- Manager: bridge display /display/* (status, ticket, WS RFB, takeover/release,
+  frame.png) con lease ufficiale; screen Xvnc+Xfce avviato sul server.
+- Script: updater busy-gate (lease/coda/Comfy, pending, double-check finale).
+- Gateway patch: resume persistente run (checkpoint, reconcile boot, recovery_required).
+- Versioni: Windows/AdminBridge `0.6.206`; Android `versionName 0.6.206`, `versionCode 210`.
+- Asset: `HermesHub-0.6.206-android.apk` (binario Windows invariato).
+- SHA-256 Android: `e99a2948e534124c412b72c2dd591244c4814dc522c0816716b0da6a9268de4e`.
+- Asset: `HermesHub-0.6.206-linux-gateway.tar.gz`.
+- SHA-256 gateway: `cd5476f4e713e85324971c3258b982ce7f08653d8673b3a54168d469903a0c4f`.

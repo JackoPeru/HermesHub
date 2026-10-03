@@ -83,6 +83,7 @@ private class ScreenJsBridge(val onState: (String) -> Unit) {
  * Viewer live del desktop del bot (noVNC in WebView).
  * Il ticket e' single-use da 30 s: mint e load avvengono in sequenza stretta.
  */
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
 internal fun ScreenViewer(
     settings: AppSettings,

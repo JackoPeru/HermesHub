@@ -1,6 +1,7 @@
 package com.nemoclaw.chat
 
 import android.content.Context
+import androidx.core.content.edit
 import org.json.JSONObject
 
 /**
@@ -54,7 +55,7 @@ internal fun saveActiveWorkBinding(context: Context, binding: ActiveWorkBinding)
             .getSharedPreferences(ACTIVE_WORK_PREFS, Context.MODE_PRIVATE)
         val all = readActiveWorkMap(prefs.getString(ACTIVE_WORK_KEY, "{}").orEmpty()).toMutableMap()
         all[binding.conversationId] = binding
-        prefs.edit().putString(ACTIVE_WORK_KEY, JSONObject(all.mapValues { encodeActiveWorkBinding(it.value) }).toString()).apply()
+        prefs.edit { putString(ACTIVE_WORK_KEY, JSONObject(all.mapValues { encodeActiveWorkBinding(it.value) }).toString()) }
     }
 }
 
@@ -75,7 +76,7 @@ internal fun clearActiveWorkBinding(context: Context, conversationId: String) {
             .getSharedPreferences(ACTIVE_WORK_PREFS, Context.MODE_PRIVATE)
         val all = readActiveWorkMap(prefs.getString(ACTIVE_WORK_KEY, "{}").orEmpty()).toMutableMap()
         if (all.remove(conversationId) != null) {
-            prefs.edit().putString(ACTIVE_WORK_KEY, JSONObject(all.mapValues { encodeActiveWorkBinding(it.value) }).toString()).apply()
+            prefs.edit { putString(ACTIVE_WORK_KEY, JSONObject(all.mapValues { encodeActiveWorkBinding(it.value) }).toString()) }
         }
     }
 }
@@ -172,7 +173,7 @@ internal fun saveBotAutoApprove(context: Context, botProfile: String, mode: Stri
         if (clean == "off") all.remove(key) else all[key] = clean
         val encoded = JSONObject()
         for ((k, v) in all) encoded.put(k, v)
-        prefs.edit().putString("modes", encoded.toString()).apply()
+        prefs.edit { putString("modes", encoded.toString()) }
     }
 }
 

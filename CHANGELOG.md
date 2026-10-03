@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.206 - 2026-10-03
+
+- Background work: run detachabili, re-attach, foreground service; auto-approve
+  off/session/always globale e per-bot; tab Schermo noVNC con take-over;
+  sezione Bot rivista; bridge display su manager; gate updater anti-interruzione;
+  resume persistente run.
+
 ## 0.6.205 - 2026-10-02
 
 - Composer stile ChatGPT con pulsante arancione; preload voce best-effort, compat PyAV19, cuDNN cu13.
