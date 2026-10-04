@@ -347,6 +347,13 @@ internal fun SettingsScreen(
     var backupPassword by remember { mutableStateOf("") }
     var showEraseHealthConfirm by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
+    // Restore backup: solo memoria, mai persistiti. Doppia conferma + report.
+    var restoreAttempts by remember { mutableStateOf(0) }
+    var showRestoreConfirm by remember { mutableStateOf(false) }
+    var restorePendingJson by remember { mutableStateOf<String?>(null) }
+    var restorePendingCount by remember { mutableStateOf(0) }
+    var showRestoreReport by remember { mutableStateOf(false) }
+    var restoreReportText by remember { mutableStateOf("") }
     var advancedVisible by rememberSaveable { mutableStateOf(false) }
     val wakePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         voiceWakeWord = granted
@@ -452,6 +459,54 @@ internal fun SettingsScreen(
         }
     }
 
+    val backupRestorePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri == null) {
+            status = "Ripristino backup annullato."
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val raw = context.contentResolver.openInputStream(uri)?.use { stream ->
+                        stream.readBytes().toString(Charsets.UTF_8)
+                    } ?: throw BackupDecryptException("Backup non valido: file illeggibile")
+                    // Reader unificato v2/v1/plain. Password mai loggata, vive solo in memoria.
+                    val decoded = decodeBackupPayloadWithPassword(
+                        raw,
+                        getOrCreateBackupKey(),
+                        backupPassword.ifEmpty { null }
+                    )
+                    val json = runCatching { JSONObject(String(decoded, Charsets.UTF_8)) }
+                        .getOrElse { throw BackupDecryptException("Backup non valido: payload JSON illeggibile") }
+                    json.toString() to countRestoreEntries(json)
+                }
+            }
+            outcome.onSuccess { (jsonString, count) ->
+                restoreAttempts = 0
+                restorePendingJson = jsonString
+                restorePendingCount = count
+                showRestoreConfirm = true
+                status = "Backup pronto: sovrascrive $count voci. Conferma per ripristinare."
+            }.onFailure { error ->
+                val message = error.message ?: error.javaClass.simpleName
+                // Tre tentativi per password v2 poi errore esplicito, mai loggare la password.
+                if (message.contains("password errata", ignoreCase = true) ||
+                    message.contains("password richiesta", ignoreCase = true)
+                ) {
+                    restoreAttempts += 1
+                    status = if (restoreAttempts >= 3) {
+                        restoreAttempts = 0
+                        "Ripristino bloccato dopo tre tentativi: password errata. Re-inserisci la password e riprova."
+                    } else {
+                        "Ripristino non riuscito (tentativo $restoreAttempts/3): $message"
+                    }
+                } else {
+                    status = "Ripristino non riuscito: $message"
+                }
+            }
+        }
+    }
+
     if (showEraseHealthConfirm) {
         AlertDialog(
             onDismissRequest = { showEraseHealthConfirm = false },
@@ -472,6 +527,67 @@ internal fun SettingsScreen(
                 }) { Icon(Icons.Rounded.Delete, contentDescription = "Conferma eliminazione salute", tint = Color(0xFFFF7B8E)) }
             },
             dismissButton = { IconButton(onClick = { showEraseHealthConfirm = false }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
+        )
+    }
+
+    if (showRestoreConfirm) {
+        AlertDialog(
+            onDismissRequest = {
+                showRestoreConfirm = false
+                restorePendingJson = null
+            },
+            title = { Text("Ripristinare backup?") },
+            text = { Text("Il ripristino sovrascrive $restorePendingCount voci (backup-wins, mai chiavi sensibili). L'operazione non si può annullare.") },
+            confirmButton = {
+                IconButton(onClick = {
+                    val pending = restorePendingJson
+                    showRestoreConfirm = false
+                    restorePendingJson = null
+                    if (pending == null) {
+                        status = "Ripristino annullato: backup vuoto."
+                    } else {
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    restoreLocalBackup(context, JSONObject(pending), backupPassword.ifEmpty { null })
+                                }
+                            }
+                            result.onSuccess { report ->
+                                restoreReportText = "Ripristino completato: ${report.applied} impostazioni, " +
+                                    "${report.conversationsMerged} conversazioni, ${report.tasksMerged} task, " +
+                                    "${report.workspaceMerged} workspace. Saltate sensibili: ${report.skippedSensitive}."
+                                status = restoreReportText
+                                showRestoreReport = true
+                            }.onFailure { error ->
+                                restoreReportText = "Ripristino non riuscito: ${error.message ?: error.javaClass.simpleName}"
+                                status = restoreReportText
+                                showRestoreReport = true
+                            }
+                        }
+                    }
+                }) { Icon(Icons.Rounded.Sync, contentDescription = "Conferma ripristino", tint = Color.White) }
+            },
+            dismissButton = {
+                IconButton(onClick = {
+                    showRestoreConfirm = false
+                    restorePendingJson = null
+                    status = "Ripristino annullato."
+                }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla ripristino", tint = Color.White) }
+            }
+        )
+    }
+
+    if (showRestoreReport) {
+        AlertDialog(
+            onDismissRequest = { showRestoreReport = false },
+            title = { Text("Report ripristino") },
+            text = { Text(restoreReportText) },
+            confirmButton = {
+                IconButton(onClick = { showRestoreReport = false }) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Chiudi report", tint = Color.White)
+                }
+            },
+            dismissButton = null
         )
     }
 
@@ -960,6 +1076,9 @@ internal fun SettingsScreen(
                         }
                         IconButton(onClick = { backupImportPicker.launch(arrayOf("application/json")) }) {
                             Icon(Icons.Rounded.FolderOpen, contentDescription = "Importa backup locale", tint = Color.White)
+                        }
+                        IconButton(onClick = { backupRestorePicker.launch(arrayOf("application/json")) }) {
+                            Icon(Icons.Rounded.Sync, contentDescription = "Ripristina backup locale", tint = Color.White)
                         }
                     }
                 }

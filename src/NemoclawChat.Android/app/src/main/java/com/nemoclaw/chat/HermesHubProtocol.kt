@@ -79,13 +79,3 @@ internal data class HermesEventEnvelope(
     val sourceType: String,
     val runId: String?
 )
-
-internal data class HermesProtocolError(
-    val code: String,
-    val message: String,
-    val requestId: String,
-    val correlationId: String,
-    val retryable: Boolean,
-    val runId: String?,
-    val protocolVersion: Int = HermesHubProtocol.PROTOCOL_VERSION
-)

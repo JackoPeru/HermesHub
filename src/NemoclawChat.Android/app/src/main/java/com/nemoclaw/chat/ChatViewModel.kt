@@ -1,12 +1,8 @@
 package com.nemoclaw.chat
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import com.nemoclaw.chat.features.bots.BotChatContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -51,12 +47,9 @@ internal fun saveChatSnapshotToHandle(holder: ChatStateHolder, savedState: Saved
  * il costruttore (SavedStateHandle) e' supportato senza modifiche al call-site).
  * Draft + activeConversationId vengono persistiti in tempo reale con debounce
  * 500ms e ripristinati al boot solo se l'holder e' vuoto.
- * pendingBot vive qui (retained alla rotazione, non in remember AppRoot,
- * non Parcelable: plugin parcelize assente, preferito ViewModel).
  */
 internal class ChatViewModel(private val savedState: SavedStateHandle) : ViewModel() {
     val chatState = ChatStateHolder()
-    var pendingBot by mutableStateOf<BotChatContext?>(null)
 
     // Scope dedicato su Default (non viewModelScope/Main): resta testabile negli unit-test JVM.
     private val persistScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)

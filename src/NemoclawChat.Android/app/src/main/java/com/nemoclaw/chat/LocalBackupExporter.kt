@@ -4,7 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.util.Log
 import androidx.core.content.FileProvider
+import androidx.core.content.edit
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.security.KeyStore
@@ -401,8 +404,347 @@ private fun sharedPreferencesJson(context: Context, name: String): JSONObject {
     return obj
 }
 
-private fun isSensitiveBackupKey(key: String): Boolean {
+internal fun isSensitiveBackupKey(key: String): Boolean {
     val normalized = key.lowercase(Locale.ROOT).filter(Char::isLetterOrDigit)
     return listOf("apikey", "token", "secret", "password", "credential", "authorization")
         .any(normalized::contains)
+}
+
+// ---------------------------------------------------------------------------
+// RIPRISTINO backup locale (ADDITIVO: export/verify esistenti restano intatti).
+// Policy: backup-wins per chiavi non-sensibili, mai sensibili, merge per id
+// con last-write-wins su updatedAt, dry-run validante + scrittura atomica.
+// ---------------------------------------------------------------------------
+internal const val BACKUP_RESTORE_SCHEMA = "hermes-hub.local-backup.v1"
+private const val BACKUP_RESTORE_LOG_TAG = "BackupRestore"
+
+/** Errore esplicito di restore: payload malformato -> abort senza scritture. */
+internal class BackupRestoreException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/** Report finale restore: applicate / saltate-sensibili / merge / errori. */
+internal data class RestoreReport(
+    val applied: Int,
+    val skippedSensitive: Int,
+    val conversationsMerged: Int,
+    val tasksMerged: Int,
+    val workspaceMerged: Int,
+    val errors: List<String> = emptyList()
+)
+
+private fun logRestoreKey(suffix: String) {
+    // Solo nomi chiavi/id, mai valori e mai password. runCatching: Log non mockato nei test JVM.
+    runCatching { Log.i(BACKUP_RESTORE_LOG_TAG, suffix) }
+}
+
+private fun restoreValueKind(value: Any?): String = when (value) {
+    null -> "null"
+    is String -> "string"
+    is Boolean -> "bool"
+    is Number -> "number"
+    else -> value.javaClass.simpleName
+}
+
+/** Conta le voci ripristinabili (per dialog "sovrascrive N voci"). Puro/testabile. */
+internal fun countRestoreEntries(payload: JSONObject): Int {
+    var total = 0
+    payload.optJSONObject("settings")?.let { total += it.length() }
+    total += payload.optJSONArray("items")?.length()
+        ?: payload.optJSONArray("conversations")?.length()
+        ?: extractArchiveConversationsLenient(payload)
+    payload.optJSONArray("tasks")?.let { total += it.length() }
+    total += workspaceArrayLenient(payload)?.length() ?: 0
+    return total
+}
+
+private fun extractArchiveConversationsLenient(payload: JSONObject): Int {
+    val archive = payload.optJSONObject("archive") ?: return 0
+    archive.optJSONArray("items")?.let { return it.length() }
+    archive.optJSONArray("conversations")?.let { return it.length() }
+    val itemsRaw = archive.optString("items", "")
+    if (itemsRaw.isNotBlank()) {
+        return runCatching { JSONArray(itemsRaw).length() }.getOrDefault(0)
+    }
+    val convRaw = archive.optString("conversations", "")
+    if (convRaw.isNotBlank()) {
+        return runCatching { JSONArray(convRaw).length() }.getOrDefault(0)
+    }
+    return 0
+}
+
+private fun workspaceArrayLenient(payload: JSONObject): JSONArray? {
+    val ws = payload.opt("workspace") ?: return null
+    if (ws is JSONArray) return ws
+    if (ws is JSONObject) {
+        ws.optJSONArray("items")?.let { return it }
+        val raw = ws.optString("items", "")
+        if (raw.isNotBlank()) {
+            return runCatching { JSONArray(raw) }.getOrNull()
+        }
+        return JSONArray()
+    }
+    return null
+}
+
+private data class ValidatedRestore(
+    val settings: Map<String, Any?>,
+    val skippedSensitive: Int,
+    val conversations: List<JSONObject>,
+    val tasks: List<JSONObject>,
+    val workspace: List<JSONObject>
+)
+
+/** Dry-run puro: valida l'intero payload, una voce malformata -> abort. */
+private fun validateRestorePayload(payload: JSONObject): ValidatedRestore {
+    if (payload.has("schema")) {
+        val schema = payload.optString("schema", "")
+        if (schema != BACKUP_RESTORE_SCHEMA) {
+            throw BackupRestoreException("Backup non valido: schema non supportato ($schema)")
+        }
+    }
+    // --- settings: deve essere JSONObject con valori primitivi ---
+    val settingsMap = linkedMapOf<String, Any?>()
+    var skippedSensitive = 0
+    if (payload.has("settings")) {
+        val settingsObj = payload.optJSONObject("settings")
+            ?: throw BackupRestoreException("Backup non valido: sezione settings malformata")
+        val keys = settingsObj.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            if (key.isBlank()) {
+                throw BackupRestoreException("Backup non valido: settings con chiave vuota")
+            }
+            if (isSensitiveBackupKey(key)) {
+                skippedSensitive++
+                continue
+            }
+            if (settingsObj.isNull(key)) {
+                settingsMap[key] = null
+                continue
+            }
+            val value: Any? = settingsObj.opt(key)
+            when (value) {
+                is String, is Boolean, is Number -> settingsMap[key] = value
+                null -> settingsMap[key] = null
+                else -> throw BackupRestoreException(
+                    "Backup non valido: settings chiave malformata (${restoreValueKind(value)})"
+                )
+            }
+        }
+    }
+    // --- conversazioni: items > conversations > archive ---
+    val conversations = extractRestoreConversations(payload)
+    val tasks = extractRestoreTasks(payload)
+    val workspace = extractRestoreWorkspace(payload)
+    return ValidatedRestore(settingsMap, skippedSensitive, conversations, tasks, workspace)
+}
+
+private fun requireConversationObjects(array: JSONArray, label: String): List<JSONObject> {
+    val out = ArrayList<JSONObject>(array.length())
+    for (i in 0 until array.length()) {
+        val obj = array.optJSONObject(i)
+            ?: throw BackupRestoreException("Backup non valido: $label voce $i malformata (non oggetto)")
+        val id = obj.optString("id", "")
+        if (id.isBlank()) {
+            throw BackupRestoreException("Backup non valido: $label voce $i senza id")
+        }
+        out.add(obj)
+    }
+    return out
+}
+
+private fun extractRestoreConversations(payload: JSONObject): List<JSONObject> {
+    if (payload.has("items") && payload.optJSONArray("items") == null) {
+        throw BackupRestoreException("Backup non valido: sezione items malformata")
+    }
+    if (!payload.has("items") && payload.has("conversations") && payload.optJSONArray("conversations") == null) {
+        throw BackupRestoreException("Backup non valido: sezione conversations malformata")
+    }
+    payload.optJSONArray("items")?.let { return requireConversationObjects(it, "archivi") }
+    payload.optJSONArray("conversations")?.let { return requireConversationObjects(it, "archivi") }
+    if (payload.has("archive") && payload.optJSONObject("archive") == null && payload.optJSONArray("archive") == null) {
+        throw BackupRestoreException("Backup non valido: sezione archive malformata")
+    }
+    payload.optJSONArray("archive")?.let { return requireConversationObjects(it, "archivi") }
+    val archiveObj = payload.optJSONObject("archive") ?: return emptyList()
+    archiveObj.optJSONArray("items")?.let { return requireConversationObjects(it, "archivi") }
+    archiveObj.optJSONArray("conversations")?.let { return requireConversationObjects(it, "archivi") }
+    val itemsRaw = archiveObj.optString("items", "")
+    if (itemsRaw.isNotBlank()) {
+        val parsed = runCatching { JSONArray(itemsRaw) }.getOrElse {
+            throw BackupRestoreException("Backup non valido: archive.items malformato", it)
+        }
+        return requireConversationObjects(parsed, "archivi")
+    }
+    val convRaw = archiveObj.optString("conversations", "")
+    if (convRaw.isNotBlank()) {
+        val parsed = runCatching { JSONArray(convRaw) }.getOrElse {
+            throw BackupRestoreException("Backup non valido: archive.conversations malformato", it)
+        }
+        return requireConversationObjects(parsed, "archivi")
+    }
+    return emptyList()
+}
+
+private fun extractRestoreTasks(payload: JSONObject): List<JSONObject> {
+    if (!payload.has("tasks")) return emptyList()
+    val array = payload.optJSONArray("tasks")
+        ?: throw BackupRestoreException("Backup non valido: sezione tasks malformata")
+    return requireConversationObjects(array, "tasks")
+}
+
+private fun extractRestoreWorkspace(payload: JSONObject): List<JSONObject> {
+    if (!payload.has("workspace")) return emptyList()
+    val raw = payload.opt("workspace")
+    when (raw) {
+        is JSONArray -> return requireConversationObjects(raw, "workspace")
+        is JSONObject -> {
+            raw.optJSONArray("items")?.let { return requireConversationObjects(it, "workspace") }
+            val itemsRaw = raw.optString("items", "")
+            if (itemsRaw.isBlank()) return emptyList()
+            val parsed = runCatching { JSONArray(itemsRaw) }.getOrElse {
+                throw BackupRestoreException("Backup non valido: workspace.items malformato", it)
+            }
+            return requireConversationObjects(parsed, "workspace")
+        }
+        else -> throw BackupRestoreException("Backup non valido: sezione workspace malformata")
+    }
+}
+
+private fun mergeJsonObjectsById(existing: JSONArray, incoming: List<JSONObject>): Pair<JSONArray, Int> {
+    val byId = linkedMapOf<String, JSONObject>()
+    for (i in 0 until existing.length()) {
+        val obj = existing.optJSONObject(i) ?: continue
+        val id = obj.optString("id", "")
+        if (id.isBlank()) continue
+        byId[id] = obj
+    }
+    var merged = 0
+    for (item in incoming) {
+        val id = item.optString("id", "")
+        val current = byId[id]
+        if (current == null) {
+            byId[id] = item
+            merged++
+        } else {
+            val currentUpdated = current.optLong("updatedAt", 0L)
+            val incomingUpdated = item.optLong("updatedAt", 0L)
+            if (incomingUpdated >= currentUpdated) {
+                byId[id] = item
+                merged++
+            }
+        }
+    }
+    val sorted = byId.values.sortedByDescending { it.optLong("updatedAt", 0L) }
+    val array = JSONArray()
+    sorted.forEach { array.put(it) }
+    return array to merged
+}
+
+private fun readCurrentJsonArray(prefsName: String, context: Context): JSONArray {
+    val raw = runCatching {
+        context.getSharedPreferences(prefsName, Context.MODE_PRIVATE).getString("items", "[]") ?: "[]"
+    }.getOrDefault("[]")
+    return runCatching { JSONArray(raw) }.getOrDefault(JSONArray())
+}
+
+/**
+ * Applica le voci del backup a SharedPreferences/archivio.
+ * @param password conservato per firma: decode gia avvenuto a monte, mai loggato, mai persistito.
+ * Policy: backup-wins per chiavi non-sensibili con Log.i per chiave (mai valori);
+ * chiavi sensibili mai ripristinate; merge per id senza duplicati con
+ * last-write-wins su updatedAt; dry-run validante con abort senza scritture.
+ */
+internal fun restoreLocalBackup(context: Context, payload: JSONObject, @Suppress("UNUSED_PARAMETER") password: String? = null): RestoreReport {
+    // password: intenzionalmente inutilizzata qui (decode a monte); mai loggare né persistere.
+    val validated = validateRestorePayload(payload)
+    // --- Fase scrittura: solo dopo validazione completa (atomicita logica) ---
+    var settingsApplied = 0
+    if (validated.settings.isNotEmpty() || validated.skippedSensitive > 0) {
+        val prefs = migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
+        prefs.edit {
+            validated.settings.forEach { (key, value) ->
+                logRestoreKey("restore settings key=$key")
+                when (value) {
+                    null -> remove(key)
+                    is Boolean -> putBoolean(key, value)
+                    is Int -> putInt(key, value)
+                    is Long -> putLong(key, value)
+                    is Float -> putFloat(key, value)
+                    is Double -> putFloat(key, value.toFloat())
+                    is Number -> {
+                        // Interi oltre Int -> Long, decimali -> Float.
+                        val longValue = value.toLong()
+                        if (value.toDouble() % 1.0 == 0.0 && longValue in Int.MIN_VALUE..Int.MAX_VALUE) {
+                            putInt(key, longValue.toInt())
+                        } else if (value.toDouble() % 1.0 == 0.0) {
+                            putLong(key, longValue)
+                        } else {
+                            putFloat(key, value.toFloat())
+                        }
+                    }
+                    is String -> putString(key, value)
+                    else -> throw BackupRestoreException("Backup non valido: settings valore non supportato")
+                }
+                settingsApplied++
+            }
+        }
+    }
+    // --- Conversazioni: upsert per id, last-write-wins su updatedAt ---
+    var conversationsMerged = 0
+    if (validated.conversations.isNotEmpty()) {
+        val incomingArray = JSONArray()
+        validated.conversations.forEach { incomingArray.put(it) }
+        val backupList = readConversationsFromJsonArray(incomingArray)
+        val current = loadConversations(context, includeDeleted = true)
+        val byId = current.associateBy { it.id }.toMutableMap()
+        for (item in backupList) {
+            logRestoreKey("restore conversation id=${item.id}")
+            val existing = byId[item.id]
+            if (existing == null || item.updatedAt >= existing.updatedAt) {
+                byId[item.id] = item
+                conversationsMerged++
+            }
+        }
+        saveConversations(context, byId.values.toList())
+    }
+    // --- Tasks: merge JSON per id (preserva campi extra), cap 200 come saveTasks ---
+    var tasksMerged = 0
+    if (validated.tasks.isNotEmpty()) {
+        val current = readCurrentJsonArray("chatclaw_tasks", context)
+        val (merged, count) = mergeJsonObjectsById(current, validated.tasks)
+        validated.tasks.forEach { logRestoreKey("restore task id=${it.optString("id")}") }
+        val capped = JSONArray()
+        for (i in 0 until minOf(merged.length(), 200)) {
+            merged.optJSONObject(i)?.let { capped.put(it) }
+        }
+        context.getSharedPreferences("chatclaw_tasks", Context.MODE_PRIVATE)
+            .edit {
+                putString("items", capped.toString())
+            }
+        tasksMerged = count
+    }
+    // --- Workspace: merge JSON per id, cap 200 ---
+    var workspaceMerged = 0
+    if (validated.workspace.isNotEmpty()) {
+        val current = readCurrentJsonArray("chatclaw_workspace_requests", context)
+        val (merged, count) = mergeJsonObjectsById(current, validated.workspace)
+        validated.workspace.forEach { logRestoreKey("restore workspace id=${it.optString("id")}") }
+        val capped = JSONArray()
+        for (i in 0 until minOf(merged.length(), 200)) {
+            merged.optJSONObject(i)?.let { capped.put(it) }
+        }
+        context.getSharedPreferences("chatclaw_workspace_requests", Context.MODE_PRIVATE)
+            .edit {
+                putString("items", capped.toString())
+            }
+        workspaceMerged = count
+    }
+    return RestoreReport(
+        applied = settingsApplied,
+        skippedSensitive = validated.skippedSensitive,
+        conversationsMerged = conversationsMerged,
+        tasksMerged = tasksMerged,
+        workspaceMerged = workspaceMerged,
+        errors = emptyList()
+    )
 }

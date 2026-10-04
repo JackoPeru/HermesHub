@@ -2,6 +2,8 @@ package com.nemoclaw.chat.features.bots
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.Parcel
+import android.os.Parcelable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -143,7 +145,37 @@ internal data class BotChatContext(
     val multiplexEnabled: Boolean,
     val connectionId: String = "primary",
     val endpoint: String = ""
-)
+) : Parcelable {
+    private constructor(parcel: Parcel) : this(
+        parcel.readString().orEmpty(),
+        parcel.readString().orEmpty(),
+        parcel.readString().orEmpty(),
+        parcel.readString().orEmpty(),
+        parcel.readByte() != 0.toByte(),
+        parcel.readString().orEmpty(),
+        parcel.readString().orEmpty()
+    )
+
+    override fun writeToParcel(parcel: Parcel, flags: Int) {
+        parcel.writeString(profile)
+        parcel.writeString(sessionId)
+        parcel.writeString(displayName)
+        parcel.writeString(localConversationId)
+        parcel.writeByte(if (multiplexEnabled) 1 else 0)
+        parcel.writeString(connectionId)
+        parcel.writeString(endpoint)
+    }
+
+    override fun describeContents(): Int = 0
+
+    companion object {
+        @JvmField
+        val CREATOR: Parcelable.Creator<BotChatContext> = object : Parcelable.Creator<BotChatContext> {
+            override fun createFromParcel(parcel: Parcel): BotChatContext = BotChatContext(parcel)
+            override fun newArray(size: Int): Array<BotChatContext?> = arrayOfNulls(size)
+        }
+    }
+}
 
 internal suspend fun loadHermesBotRoster(
     settings: AppSettings,

@@ -60,9 +60,6 @@ internal object JarvisSessionController {
     private val rollingFrames = RollingFrameBuffer(3)
     private val lifecycle = JarvisLifecycleStateMachine()
 
-    internal val lifecycleState: JarvisLifecycleState
-        get() = lifecycle.state
-
     fun start(
         context: Context,
         settings: AppSettings,

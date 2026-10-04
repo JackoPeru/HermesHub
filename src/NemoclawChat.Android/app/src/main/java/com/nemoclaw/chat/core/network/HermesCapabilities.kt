@@ -137,9 +137,6 @@ internal fun parseHermesCapabilities(root: JSONObject): HermesCapabilities {
     )
 }
 
-/** Ladder canonica accettata da Hermes Agent attuale (v2026.9.14, _REASONING_EFFORTS). Mai hardcodare nel picker: usare capabilities. */
-internal val HERMES_REASONING_EFFORT_LADDER = listOf("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
-
 /**
  * Fallback quando il server non dichiara nessuna ladder: solo valori validi sia su
  * Hermes-native sia sui template TabbyAPI/EXL3 (xhigh = tetto documentato). Mai max/ultra.

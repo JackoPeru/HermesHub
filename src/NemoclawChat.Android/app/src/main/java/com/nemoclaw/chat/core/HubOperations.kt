@@ -829,18 +829,6 @@ internal fun workspaceInstructions(settings: AppSettings, kind: String, prompt: 
     }
 }
 
-internal fun workspaceOutputContract(kind: String): JSONObject {
-    return JSONObject()
-        .put("kind", kind)
-        .put("title", "string")
-        .put("summary", "string")
-        .put("status", "queued|running|ready|needs_feedback|failed")
-        .put("job_id", "string")
-        .put("stream_url", if (kind.equals("Video", ignoreCase = true)) "URL streaming video da PC/Hermes" else "")
-        .put("download_url", if (kind.equals("Video", ignoreCase = true)) "URL download opzionale" else "")
-        .put("sources", "array")
-}
-
 internal fun parseWorkspaceArtifact(kind: String, body: String): WorkspaceArtifact {
     val json = findFirstJSONObject(body) ?: return WorkspaceArtifact(result = body.limitText(1600))
     val title = json.extractString("title").orEmpty()
@@ -2711,15 +2699,6 @@ internal fun fallbackTaskResult(settings: AppSettings, task: AgentTask, message:
     }
 }
 
-internal fun replaceTask(tasks: MutableList<AgentTask>, updatedTask: AgentTask) {
-    val index = tasks.indexOfFirst { it.id == updatedTask.id }
-    if (index >= 0) {
-        tasks[index] = updatedTask
-    } else {
-        tasks.add(0, updatedTask)
-    }
-}
-
 internal suspend fun checkGithubUpdate(localVersion: String): UpdateCheckResult = withContext(Dispatchers.IO) {
     try {
         val request = Request.Builder()
@@ -3362,62 +3341,6 @@ internal fun findWorkspaceJobsArray(body: String): JSONArray {
         ?: JSONArray().put(root)
 }
 
-internal fun saveConversationExchange(
-    context: Context,
-    conversationId: String?,
-    mode: String,
-    prompt: String,
-    response: String,
-    source: String,
-    responseId: String? = null,
-    visualBlocks: List<VisualBlock> = emptyList(),
-    visualBlocksVersion: Int? = null
-): LocalConversation {
-    synchronized(localArchiveLock) {
-        val conversations = loadConversations(context, includeDeleted = true).toMutableList()
-        val index = conversations.indexOfFirst { it.id == conversationId && it.deletedAt == null }
-        val now = System.currentTimeMillis()
-        val newMessages = listOf(
-            ChatMessage("Tu", prompt, fromUser = true),
-            ChatMessage("Hermes", response, fromUser = false, visualBlocksVersion = visualBlocksVersion, visualBlocks = visualBlocks)
-        )
-        val newConversationId = conversationId?.takeIf { it.isNotBlank() } ?: "conv_$now"
-
-        val conversation = if (index >= 0) {
-            val current = conversations[index]
-            current.copy(
-                kind = if (mode == "Agente") "Task" else current.kind,
-                description = if (mode == "Agente") "Conversazione agente via $source." else "Conversazione chat via $source.",
-                prompt = prompt,
-                updatedAt = now,
-                messages = current.messages + newMessages,
-                previousResponseId = responseId ?: current.previousResponseId,
-                serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, current.id)
-            )
-        } else {
-            LocalConversation(
-                id = newConversationId,
-                title = UNTITLED_CHAT_TITLE,
-                kind = if (mode == "Agente") "Task" else "Chat",
-                description = if (mode == "Agente") "Conversazione agente via $source." else "Conversazione chat via $source.",
-                prompt = prompt,
-                updatedAt = now,
-                messages = newMessages,
-                previousResponseId = responseId,
-                serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, newConversationId)
-            )
-        }
-
-        if (index >= 0) {
-            conversations[index] = conversation
-        } else {
-            conversations.add(0, conversation)
-        }
-        saveConversations(context, conversations)
-        return conversation
-    }
-}
-
 internal fun saveConversationSnapshot(
     context: Context,
     conversationId: String?,
@@ -3882,35 +3805,6 @@ internal fun parseArchiveExportText(text: String): List<LocalConversation> {
     }
 }
 
-internal fun loadTasks(context: Context): List<AgentTask> {
-    synchronized(localTasksLock) {
-        val raw = migratePrefs(context, CURRENT_TASKS_PREFS, LEGACY_TASKS_PREFS).getString("items", "[]") ?: "[]"
-        return try {
-            val array = JSONArray(raw)
-            buildList {
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    add(
-                        AgentTask(
-                            id = obj.optString("id"),
-                            remoteId = obj.optString("remoteId").ifBlank { null },
-                            title = obj.optString("title"),
-                            mode = obj.optString("mode", "Locale"),
-                            status = obj.optString("status", "Pronto"),
-                            detail = obj.optString("detail"),
-                            requiresApproval = obj.optBoolean("requiresApproval", true),
-                            source = obj.optString("source", "Locale"),
-                            updatedAt = obj.optLong("updatedAt")
-                        )
-                    )
-                }
-            }.sortedByDescending { it.updatedAt }
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
-}
-
 internal suspend fun sendChatRequest(
     settings: AppSettings,
     mode: String,
@@ -4035,32 +3929,6 @@ internal suspend fun sendChatRequest(
             visualBlocks = if (shouldAttachVisualBlocks(settings, prompt)) visualBlockFixtures() else emptyList(),
             visualBlocksVersion = VISUAL_BLOCKS_VERSION
         )
-    }
-}
-
-internal fun saveTasks(context: Context, tasks: List<AgentTask>) {
-    synchronized(localTasksLock) {
-        val array = JSONArray()
-        tasks.sortedByDescending { it.updatedAt }
-            .take(200)
-            .forEach { task ->
-                array.put(
-                    JSONObject()
-                        .put("id", task.id)
-                        .put("remoteId", task.remoteId)
-                        .put("title", task.title)
-                        .put("mode", task.mode)
-                        .put("status", task.status)
-                        .put("detail", task.detail)
-                        .put("requiresApproval", task.requiresApproval)
-                        .put("source", task.source)
-                        .put("updatedAt", task.updatedAt)
-                )
-            }
-
-        context.getSharedPreferences(CURRENT_TASKS_PREFS, Context.MODE_PRIVATE).edit {
-            putString("items", array.toString())
-        }
     }
 }
 
@@ -4232,12 +4100,6 @@ internal fun openAndroidIntent(context: Context, intent: Intent): Boolean {
         false
     }
 }
-
-private val localTasksLock = Any()
-
-private const val CURRENT_TASKS_PREFS = "chatclaw_tasks"
-
-private const val LEGACY_TASKS_PREFS = "nemoclaw_tasks"
 
 internal const val VISUAL_BLOCKS_VERSION = 1
 private const val VISUAL_BLOCKS_MAX_PAYLOAD_BYTES = 500 * 1024

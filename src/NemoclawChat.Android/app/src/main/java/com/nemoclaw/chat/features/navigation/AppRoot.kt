@@ -225,6 +225,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
 import com.nemoclaw.chat.features.bots.BotsScreen
+import com.nemoclaw.chat.features.bots.BotChatContext
 import com.nemoclaw.chat.features.screen.ScreenScreen
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
@@ -313,6 +314,8 @@ internal fun ChatApp() {
     var voiceAutoStartToken by rememberSaveable { mutableLongStateOf(0L) }
     var pendingPrompt by rememberSaveable { mutableStateOf("") }
     var pendingConversationId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Parcelable: sopravvive anche al process death (prima solo ViewModel).
+    var pendingBot by rememberSaveable { mutableStateOf<BotChatContext?>(null) }
     var sidebarOpen by rememberSaveable { mutableStateOf(false) }
     var savedDraft by rememberSaveable { mutableStateOf("") }
     // Retained alla rotazione via ViewModel (prima: remember = stato perso).
@@ -323,7 +326,7 @@ internal fun ChatApp() {
     val incoming = IncomingIntentBus.request
     LaunchedEffect(incoming.version) {
         if (incoming.version == 0L) return@LaunchedEffect
-        chatViewModel.pendingBot = null
+        pendingBot = null
         pendingConversationId = incoming.conversationId.ifBlank { null }
         pendingPrompt = incoming.prompt
         if (incoming.uri.isNotBlank()) {
@@ -435,12 +438,12 @@ internal fun ChatApp() {
                 onClose = { sidebarOpen = false },
                 onNewChat = {
                 chatState.resetForNewChat()
-                chatViewModel.pendingBot = null
+                pendingBot = null
                 setSelectedTab(Tab.Chat)
                 sidebarOpen = false
                 },
                 onOpenConversation = { id ->
-                chatViewModel.pendingBot = null
+                pendingBot = null
                 pendingConversationId = id
                 pendingPrompt = ""
                 setSelectedTab(Tab.Chat)
@@ -480,14 +483,14 @@ internal fun ChatApp() {
                 state = chatState,
                 scope = chatScope,
                 conversationId = pendingConversationId,
-                botProfile = chatViewModel.pendingBot?.profile,
-                botSessionId = chatViewModel.pendingBot?.sessionId,
-                botDisplayName = chatViewModel.pendingBot?.displayName,
-                botMultiplexEnabled = chatViewModel.pendingBot?.multiplexEnabled == true,
-                botConnectionId = chatViewModel.pendingBot?.connectionId,
-                botEndpoint = chatViewModel.pendingBot?.endpoint,
+                botProfile = pendingBot?.profile,
+                botSessionId = pendingBot?.sessionId,
+                botDisplayName = pendingBot?.displayName,
+                botMultiplexEnabled = pendingBot?.multiplexEnabled == true,
+                botConnectionId = pendingBot?.connectionId,
+                botEndpoint = pendingBot?.endpoint,
                 onNewChat = {
-                    chatViewModel.pendingBot = null
+                    pendingBot = null
                     pendingConversationId = null
                     chatState.resetForNewChat()
                 },
@@ -509,13 +512,13 @@ internal fun ChatApp() {
                 saveSettings(context, updated)
                 },
                 onNewChat = {
-                chatViewModel.pendingBot = null
+                pendingBot = null
                 pendingConversationId = null
                 pendingPrompt = ""
                 setSelectedTab(Tab.Chat)
                 },
                 onOpenConversation = { id ->
-                chatViewModel.pendingBot = null
+                pendingBot = null
                 pendingConversationId = id
                 pendingPrompt = ""
                 setSelectedTab(Tab.Chat)
@@ -528,7 +531,7 @@ internal fun ChatApp() {
                         // Never carry normal-chat messages, attachments or
                         // previous-response state into a bot archive.
                         chatState.resetForNewChat()
-                        chatViewModel.pendingBot = bot
+                        pendingBot = bot
                         pendingConversationId = bot.localConversationId
                         pendingPrompt = ""
                         setSelectedTab(Tab.Chat)
@@ -540,12 +543,12 @@ internal fun ChatApp() {
                 composable(Tab.Artifacts.navRoute) { ArtifactLibraryScreen(
                 context = context,
                 settings = settings,
-                onOpenConversation = { id -> chatViewModel.pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) },
-                onRegenerate = { prompt -> chatViewModel.pendingBot = null; pendingConversationId = null; pendingPrompt = prompt; setSelectedTab(Tab.Chat) }
+                onOpenConversation = { id -> pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) },
+                onRegenerate = { prompt -> pendingBot = null; pendingConversationId = null; pendingPrompt = prompt; setSelectedTab(Tab.Chat) }
                 ) }
                 composable(Tab.Search.navRoute) { UniversalSearchScreen(context, settings) { kind, id ->
                 when (kind) {
-                "Chat", "Task" -> { chatViewModel.pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) }
+                "Chat", "Task" -> { pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) }
                 "Progetto" -> setSelectedTab(Tab.Projects)
                 "Artifact" -> setSelectedTab(Tab.Artifacts)
                 "Cron" -> setSelectedTab(Tab.Cron)
@@ -557,7 +560,7 @@ internal fun ChatApp() {
                 context = context,
                 onOpenConversation = { id, _ ->
                 chatState.resetForNewChat()
-                chatViewModel.pendingBot = null
+                pendingBot = null
                 pendingConversationId = id
                 pendingPrompt = ""
                 setSelectedTab(Tab.Chat)
@@ -565,22 +568,22 @@ internal fun ChatApp() {
                 ) }
                 composable(Tab.Cron.navRoute) { CronScreen(context, settings) }
                 composable(Tab.Notifications.navRoute) { NotificationsScreen(context, settings) { prompt ->
-                chatViewModel.pendingBot = null
+                pendingBot = null
                 pendingPrompt = prompt
                 setSelectedTab(Tab.Chat)
                 } }
-                composable(Tab.Continuity.navRoute) { ContinuityScreen(context, settings) { id -> chatViewModel.pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) } }
+                composable(Tab.Continuity.navRoute) { ContinuityScreen(context, settings) { id -> pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) } }
                 composable(Tab.Audit.navRoute) { AuditScreen(context, settings) }
                 composable(Tab.Server.navRoute) { ServerScreen(context, settings) }
                 composable(Tab.Hardware.navRoute) { HardwareScreen(context, settings) }
                 composable(Tab.Health.navRoute) { HealthDashboardScreen(context, settings) { setSelectedTab(Tab.Settings) } }
                 composable(Tab.Video.navRoute) { VideoScreen(context, settings) { prompt ->
-                chatViewModel.pendingBot = null
+                pendingBot = null
                 pendingPrompt = prompt
                 setSelectedTab(Tab.Chat)
                 } }
                 composable(Tab.News.navRoute) { NewsScreen(context, settings) { prompt ->
-                chatViewModel.pendingBot = null
+                pendingBot = null
                 pendingPrompt = prompt
                 setSelectedTab(Tab.Chat)
                 } }
