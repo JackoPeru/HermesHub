@@ -2,6 +2,16 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.209 - 2026-10-04
+
+- Audit completo app in 3 run: single-flight approvazioni + no-downgrade,
+  rehydrate foreground service, timeout SSE con watchdog, deeplink validati,
+  notifiche private su lockscreen, risposte tronche marcate, upload parziali
+  bloccanti; navigazione su Navigation-Compose, poll unificati lifecycle-aware,
+  ChatFeature spezzata in 7 file, bitmap loader con cache, stato chat nel
+  ViewModel, export cifrato (Keystore + password), backup ripristino draft.
+- Manager/agente: nodo H3MultiStream nel workflow video (split 2 GPU).
+
 ## 0.6.208 - 2026-10-04
 
 - Manager: modo DIRECT, ComfyUI diretto sulla tailnet con LLM scaricato
