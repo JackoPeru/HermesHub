@@ -1,4 +1,4 @@
-package com.nemoclaw.chat
+﻿package com.nemoclaw.chat
 import android.annotation.SuppressLint
 import android.Manifest
 import android.app.Activity
@@ -211,13 +211,19 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
-import com.nemoclaw.chat.features.bots.BotChatContext
 import com.nemoclaw.chat.features.bots.BotsScreen
 import com.nemoclaw.chat.features.screen.ScreenScreen
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
@@ -281,16 +287,11 @@ internal fun ChatApp() {
     ) {
         value = withContext(Dispatchers.IO) { LoadedGatewaySecret(loadGatewaySecret(context.applicationContext)) }
     }
-    var selectedTabName by rememberSaveable { mutableStateOf(Tab.Chat.name) }
-    val selectedTab = remember(selectedTabName) {
-        runCatching { Tab.valueOf(selectedTabName) }.getOrDefault(Tab.Chat)
-    }
-    var tabHistory by rememberSaveable { mutableStateOf(listOf(Tab.Chat.name)) }
+    val tabNavController = rememberNavController()
+    val tabNavBackStackEntry by tabNavController.currentBackStackEntryAsState()
+    val selectedTab = tabForNavRoute(tabNavBackStackEntry?.destination?.route)
     val setSelectedTab: (Tab) -> Unit = { tab ->
-        if (tab.name != selectedTabName) {
-            tabHistory = (tabHistory + tab.name).takeLast(10)
-            selectedTabName = tab.name
-        }
+        tabNavController.navigateToTab(tab)
     }
     val voiceProfileRevision = VoiceProfileEvents.revision
     val loadedWakeVoiceProfile by produceState<VoiceProfile?>(
@@ -309,7 +310,6 @@ internal fun ChatApp() {
     var voiceAutoStartToken by rememberSaveable { mutableLongStateOf(0L) }
     var pendingPrompt by rememberSaveable { mutableStateOf("") }
     var pendingConversationId by rememberSaveable { mutableStateOf<String?>(null) }
-    var pendingBot by remember { mutableStateOf<BotChatContext?>(null) }
     var sidebarOpen by rememberSaveable { mutableStateOf(false) }
     var savedDraft by rememberSaveable { mutableStateOf("") }
     // Retained alla rotazione via ViewModel (prima: remember = stato perso).
@@ -320,7 +320,7 @@ internal fun ChatApp() {
     val incoming = IncomingIntentBus.request
     LaunchedEffect(incoming.version) {
         if (incoming.version == 0L) return@LaunchedEffect
-        pendingBot = null
+        chatViewModel.pendingBot = null
         pendingConversationId = incoming.conversationId.ifBlank { null }
         pendingPrompt = incoming.prompt
         if (incoming.uri.isNotBlank()) {
@@ -363,10 +363,23 @@ internal fun ChatApp() {
             savedDraft = chatState.draft
         }
     }
-    LaunchedEffect(Unit) {
+    // Pull periodico Hub (120s) solo a lifecycle STARTED, stesso pattern
+    // LifecycleEventObserver usato in ChatTopBar.kt. Logica invariata:
+    // attach, pullFromHub + scheduleUpload ogni 120s, detach in finally.
+    val hubLifecycleOwner = LocalLifecycleOwner.current
+    var hubPollStarted by remember { mutableStateOf(true) }
+    DisposableEffect(hubLifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            hubPollStarted = event.targetState.isAtLeast(Lifecycle.State.STARTED)
+        }
+        hubLifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { hubLifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    LaunchedEffect(hubPollStarted) {
+        if (!hubPollStarted) return@LaunchedEffect
         ConversationArchiveAutoSync.attach(context)
         try {
-            while (true) {
+            while (hubPollStarted) {
                 ConversationArchiveAutoSync.pullFromHub(context)
                 ConversationArchiveAutoSync.scheduleUpload(context)
                 delay(120_000)
@@ -388,16 +401,10 @@ internal fun ChatApp() {
         fontScale = safeFontScale
     )
 
-    BackHandler(enabled = sidebarOpen || tabHistory.size > 1) {
-        if (sidebarOpen) {
-            sidebarOpen = false
-            return@BackHandler
-        }
-        if (tabHistory.size > 1) {
-            val popped = tabHistory.dropLast(1)
-            tabHistory = popped
-            selectedTabName = popped.last()
-        }
+    // Solo overlay sidebar: il back tra tab è gestito dal back stack reale
+    // del NavHost di sistema (torna al tab precedente poi esce).
+    BackHandler(enabled = sidebarOpen) {
+        sidebarOpen = false
     }
 
     CompositionLocalProvider(LocalDensity provides appDensity) {
@@ -425,12 +432,12 @@ internal fun ChatApp() {
                 onClose = { sidebarOpen = false },
                 onNewChat = {
                 chatState.resetForNewChat()
-                pendingBot = null
+                chatViewModel.pendingBot = null
                 setSelectedTab(Tab.Chat)
                 sidebarOpen = false
                 },
                 onOpenConversation = { id ->
-                pendingBot = null
+                chatViewModel.pendingBot = null
                 pendingConversationId = id
                 pendingPrompt = ""
                 setSelectedTab(Tab.Chat)
@@ -456,21 +463,24 @@ internal fun ChatApp() {
                 }
             },
             content = {
-                when (selectedTab) {
-                Tab.Chat -> ChatScreen(
+                NavHost(
+                    navController = tabNavController,
+                    startDestination = tabNavStartDestination
+                ) {
+                composable(Tab.Chat.navRoute) { ChatScreen(
                 context = context,
                 settings = settings,
                 state = chatState,
                 scope = chatScope,
                 conversationId = pendingConversationId,
-                botProfile = pendingBot?.profile,
-                botSessionId = pendingBot?.sessionId,
-                botDisplayName = pendingBot?.displayName,
-                botMultiplexEnabled = pendingBot?.multiplexEnabled == true,
-                botConnectionId = pendingBot?.connectionId,
-                botEndpoint = pendingBot?.endpoint,
+                botProfile = chatViewModel.pendingBot?.profile,
+                botSessionId = chatViewModel.pendingBot?.sessionId,
+                botDisplayName = chatViewModel.pendingBot?.displayName,
+                botMultiplexEnabled = chatViewModel.pendingBot?.multiplexEnabled == true,
+                botConnectionId = chatViewModel.pendingBot?.connectionId,
+                botEndpoint = chatViewModel.pendingBot?.endpoint,
                 onNewChat = {
-                    pendingBot = null
+                    chatViewModel.pendingBot = null
                     pendingConversationId = null
                     chatState.resetForNewChat()
                 },
@@ -481,10 +491,10 @@ internal fun ChatApp() {
                 },
                 onOpenSidebar = { sidebarOpen = true },
                 onSwitchTab = { tab -> setSelectedTab(tab) }
-                )
-                Tab.Voice -> VoiceModeScreen(settings, initialGatewaySecret.value, voiceAutoStartToken)
-                Tab.Jarvis -> JarvisModeScreen(settings, initialGatewaySecret.value)
-                Tab.Projects -> ProjectsScreen(
+                ) }
+                composable(Tab.Voice.navRoute) { VoiceModeScreen(settings, initialGatewaySecret.value, voiceAutoStartToken) }
+                composable(Tab.Jarvis.navRoute) { JarvisModeScreen(settings, initialGatewaySecret.value) }
+                composable(Tab.Projects.navRoute) { ProjectsScreen(
                 context = context,
                 settings = settings,
                 onSettingsChanged = { updated ->
@@ -492,82 +502,82 @@ internal fun ChatApp() {
                 saveSettings(context, updated)
                 },
                 onNewChat = {
-                pendingBot = null
+                chatViewModel.pendingBot = null
                 pendingConversationId = null
                 pendingPrompt = ""
                 setSelectedTab(Tab.Chat)
                 },
                 onOpenConversation = { id ->
-                pendingBot = null
+                chatViewModel.pendingBot = null
                 pendingConversationId = id
                 pendingPrompt = ""
                 setSelectedTab(Tab.Chat)
                 }
-                )
-                Tab.Bots -> BotsScreen(
+                ) }
+                composable(Tab.Bots.navRoute) { BotsScreen(
                     context = context,
                     settings = settings,
                 onOpenBot = { bot ->
                         // Never carry normal-chat messages, attachments or
                         // previous-response state into a bot archive.
                         chatState.resetForNewChat()
-                        pendingBot = bot
+                        chatViewModel.pendingBot = bot
                         pendingConversationId = bot.localConversationId
                         pendingPrompt = ""
                         setSelectedTab(Tab.Chat)
                     },
                     onOpenScreen = { setSelectedTab(Tab.Screen) },
                     onOpenCron = { setSelectedTab(Tab.Cron) }
-                )
-                Tab.Screen -> ScreenScreen(context = context, settings = settings)
-                Tab.Artifacts -> ArtifactLibraryScreen(
+                ) }
+                composable(Tab.Screen.navRoute) { ScreenScreen(context = context, settings = settings) }
+                composable(Tab.Artifacts.navRoute) { ArtifactLibraryScreen(
                 context = context,
                 settings = settings,
-                onOpenConversation = { id -> pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) },
-                onRegenerate = { prompt -> pendingBot = null; pendingConversationId = null; pendingPrompt = prompt; setSelectedTab(Tab.Chat) }
-                )
-                Tab.Search -> UniversalSearchScreen(context, settings) { kind, id ->
+                onOpenConversation = { id -> chatViewModel.pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) },
+                onRegenerate = { prompt -> chatViewModel.pendingBot = null; pendingConversationId = null; pendingPrompt = prompt; setSelectedTab(Tab.Chat) }
+                ) }
+                composable(Tab.Search.navRoute) { UniversalSearchScreen(context, settings) { kind, id ->
                 when (kind) {
-                "Chat", "Task" -> { pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) }
+                "Chat", "Task" -> { chatViewModel.pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) }
                 "Progetto" -> setSelectedTab(Tab.Projects)
                 "Artifact" -> setSelectedTab(Tab.Artifacts)
                 "Cron" -> setSelectedTab(Tab.Cron)
                 "Notifica" -> setSelectedTab(Tab.Notifications)
                 "Memoria" -> setSelectedTab(Tab.Profile)
                 }
-                }
-                Tab.Archive -> ArchiveScreen(
+                } }
+                composable(Tab.Archive.navRoute) { ArchiveScreen(
                 context = context,
                 onOpenConversation = { id, _ ->
                 chatState.resetForNewChat()
-                pendingBot = null
+                chatViewModel.pendingBot = null
                 pendingConversationId = id
                 pendingPrompt = ""
                 setSelectedTab(Tab.Chat)
                 }
-                )
-                Tab.Cron -> CronScreen(context, settings)
-                Tab.Notifications -> NotificationsScreen(context, settings) { prompt ->
-                pendingBot = null
+                ) }
+                composable(Tab.Cron.navRoute) { CronScreen(context, settings) }
+                composable(Tab.Notifications.navRoute) { NotificationsScreen(context, settings) { prompt ->
+                chatViewModel.pendingBot = null
                 pendingPrompt = prompt
                 setSelectedTab(Tab.Chat)
-                }
-                Tab.Continuity -> ContinuityScreen(context, settings) { id -> pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) }
-                Tab.Audit -> AuditScreen(context, settings)
-                Tab.Server -> ServerScreen(context, settings)
-                Tab.Hardware -> HardwareScreen(context, settings)
-                Tab.Health -> HealthDashboardScreen(context, settings) { setSelectedTab(Tab.Settings) }
-                Tab.Video -> VideoScreen(context, settings) { prompt ->
-                pendingBot = null
+                } }
+                composable(Tab.Continuity.navRoute) { ContinuityScreen(context, settings) { id -> chatViewModel.pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) } }
+                composable(Tab.Audit.navRoute) { AuditScreen(context, settings) }
+                composable(Tab.Server.navRoute) { ServerScreen(context, settings) }
+                composable(Tab.Hardware.navRoute) { HardwareScreen(context, settings) }
+                composable(Tab.Health.navRoute) { HealthDashboardScreen(context, settings) { setSelectedTab(Tab.Settings) } }
+                composable(Tab.Video.navRoute) { VideoScreen(context, settings) { prompt ->
+                chatViewModel.pendingBot = null
                 pendingPrompt = prompt
                 setSelectedTab(Tab.Chat)
-                }
-                Tab.News -> NewsScreen(context, settings) { prompt ->
-                pendingBot = null
+                } }
+                composable(Tab.News.navRoute) { NewsScreen(context, settings) { prompt ->
+                chatViewModel.pendingBot = null
                 pendingPrompt = prompt
                 setSelectedTab(Tab.Chat)
-                }
-                Tab.Settings -> SettingsScreen(
+                } }
+                composable(Tab.Settings.navRoute) { SettingsScreen(
                 settings = settings,
                 gatewaySecret = initialGatewaySecret.value,
                 voiceProfile = wakeVoiceProfile,
@@ -587,12 +597,12 @@ internal fun ChatApp() {
                 gatewaySecretRevision++
                 }
                 }
-                )
-                Tab.Profile -> ProfileScreen(
+                ) }
+                composable(Tab.Profile.navRoute) { ProfileScreen(
                 context = context,
                 settings = settings,
                 onOpenTab = { tab -> setSelectedTab(tab) }
-                )
+                ) }
                 }
             }
         )

@@ -78,6 +78,7 @@ import com.nemoclaw.chat.AppColors
 import com.nemoclaw.chat.AppSettings
 import com.nemoclaw.chat.AutoApproveChip
 import com.nemoclaw.chat.BitmapImageLoader
+import com.nemoclaw.chat.PollWhileStarted
 import com.nemoclaw.chat.ScreenStatusInfo
 import com.nemoclaw.chat.decodeScreenFrame
 import com.nemoclaw.chat.fetchScreenFrameBytes
@@ -475,33 +476,29 @@ internal fun BotsScreen(
     var screenStatus by remember(settings.gatewayUrl) { mutableStateOf<ScreenStatusInfo?>(null) }
     var screenPreview by remember { mutableStateOf<Bitmap?>(null) }
     var lastScreenSignature by remember { mutableStateOf<BitmapImageLoader.FrameSignature?>(null) }
-    LaunchedEffect(settings.gatewayUrl) {
-        while (isActive) {
-            val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
-            screenStatus = runCatching { withContext(Dispatchers.IO) { getScreenStatus(settings, key) } }.getOrNull()
-            delay(8_000L)
-        }
+    PollWhileStarted(settings.gatewayUrl, baseIntervalMs = 8_000L) {
+        val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
+        val next = runCatching { withContext(Dispatchers.IO) { getScreenStatus(settings, key) } }.getOrNull()
+        screenStatus = next
+        next != null
     }
-    LaunchedEffect(screenStatus?.running) {
+    PollWhileStarted(screenStatus?.running, baseIntervalMs = 6_000L) {
         if (screenStatus?.running != true) {
             screenPreview = null
             lastScreenSignature = null
-            return@LaunchedEffect
+            return@PollWhileStarted true
         }
-        while (isActive) {
-            val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
-            val bytes = withContext(Dispatchers.IO) { fetchScreenFrameBytes(settings, key, 480) }
-            // Skip re-decode se i byte sono identici ai precedenti (hash/lunghezza).
-            val signature = BitmapImageLoader.frameSignature(bytes)
-            if (signature != null && signature == lastScreenSignature) {
-                delay(6_000L)
-                continue
-            }
-            lastScreenSignature = signature
-            // reqWidth = larghezza view anteprima (loader: sampling + cache).
-            screenPreview = withContext(Dispatchers.IO) { decodeScreenFrame(bytes, 480) }
-            delay(6_000L)
+        val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
+        val bytes = withContext(Dispatchers.IO) { fetchScreenFrameBytes(settings, key, 480) }
+        // Skip re-decode se i byte sono identici ai precedenti (hash/lunghezza).
+        val signature = BitmapImageLoader.frameSignature(bytes)
+        if (signature != null && signature == lastScreenSignature) {
+            return@PollWhileStarted bytes != null
         }
+        lastScreenSignature = signature
+        // reqWidth = larghezza view anteprima (loader: sampling + cache).
+        screenPreview = withContext(Dispatchers.IO) { decodeScreenFrame(bytes, 480) }
+        bytes != null
     }
 
     val detail = detailBot

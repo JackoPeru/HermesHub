@@ -54,6 +54,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.nemoclaw.chat.AppColors
 import com.nemoclaw.chat.AppSettings
 import com.nemoclaw.chat.BitmapImageLoader
+import com.nemoclaw.chat.PollWhileStarted
 import com.nemoclaw.chat.ScreenStatusInfo
 import com.nemoclaw.chat.buildScreenViewerUrl
 import com.nemoclaw.chat.buildScreenWsUrl
@@ -205,21 +206,20 @@ internal fun ScreenPreviewImage(
     var lastSignature by remember { mutableStateOf<BitmapImageLoader.FrameSignature?>(null) }
     LaunchedEffect(settings.gatewayUrl, width) {
         lastSignature = null
-        while (isActive) {
-            val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
-            val bytes = withContext(Dispatchers.IO) { fetchScreenFrameBytes(settings, key, width) }
-            // Skip re-decode se i byte sono identici ai precedenti (hash+lunghezza).
-            val signature = BitmapImageLoader.frameSignature(bytes)
-            if (signature != null && signature == lastSignature) {
-                delay(refreshMs)
-                continue
-            }
-            lastSignature = signature
-            // reqWidth = larghezza view (loader: sampling + cache).
-            val decoded = withContext(Dispatchers.IO) { decodeScreenFrame(bytes, width) }
-            bitmap = decoded
-            delay(refreshMs)
+    }
+    PollWhileStarted(settings.gatewayUrl, width, baseIntervalMs = refreshMs) {
+        val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
+        val bytes = withContext(Dispatchers.IO) { fetchScreenFrameBytes(settings, key, width) }
+        // Skip re-decode se i byte sono identici ai precedenti (hash+lunghezza).
+        val signature = BitmapImageLoader.frameSignature(bytes)
+        if (signature != null && signature == lastSignature) {
+            return@PollWhileStarted bytes != null
         }
+        lastSignature = signature
+        // reqWidth = larghezza view (loader: sampling + cache).
+        val decoded = withContext(Dispatchers.IO) { decodeScreenFrame(bytes, width) }
+        bitmap = decoded
+        bytes != null
     }
     val current = bitmap
     if (current != null) {
@@ -259,18 +259,16 @@ internal fun ScreenScreen(
         return withContext(Dispatchers.IO) { getScreenStatus(settings, key) }
     }
 
-    LaunchedEffect(settings.gatewayUrl, reloadNonce) {
-        while (isActive) {
-            val next = runCatching { refreshStatus() }.getOrNull()
-            if (next != null) {
-                status = next
-                statusError = ""
-                if (next.holder != "human" && holding) holding = false
-            } else if (status == null) {
-                statusError = "Stato schermo non leggibile."
-            }
-            delay(5_000L)
+    PollWhileStarted(settings.gatewayUrl, reloadNonce, baseIntervalMs = 5_000L) {
+        val next = runCatching { refreshStatus() }.getOrNull()
+        if (next != null) {
+            status = next
+            statusError = ""
+            if (next.holder != "human" && holding) holding = false
+        } else if (status == null) {
+            statusError = "Stato schermo non leggibile."
         }
+        next != null
     }
 
     fun doTakeover() {

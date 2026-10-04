@@ -343,6 +343,8 @@ internal fun SettingsScreen(
     var modelCatalogModels by remember { mutableStateOf<List<HermesModelOption>>(emptyList()) }
     var reasoningLadder by remember { mutableStateOf<List<String>>(emptyList()) }
     var status by remember { mutableStateOf("Pronto.") }
+    // Password backup: solo memoria (remember, MAI rememberSaveable/persistita né salvata).
+    var backupPassword by remember { mutableStateOf("") }
     var showEraseHealthConfirm by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
     var advancedVisible by rememberSaveable { mutableStateOf(false) }
@@ -417,6 +419,36 @@ internal fun SettingsScreen(
         } else {
             healthSyncEnabled = false
             status = "Permessi salute incompleti: nessun dato inviato a Hermes."
+        }
+    }
+
+    val backupImportPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri == null) {
+            status = "Import backup annullato."
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            status = withContext(Dispatchers.IO) {
+                runCatching {
+                    val raw = context.contentResolver.openInputStream(uri)?.use { stream ->
+                        stream.readBytes().toString(Charsets.UTF_8)
+                    } ?: throw BackupDecryptException("Backup non valido: file illeggibile")
+                    // Password impostata -> import v2 con password (portabile, niente Keystore);
+                    // vuota -> comportamento attuale (v1 Keystore / legacy plain).
+                    val decoded = if (backupPassword.isNotEmpty()) {
+                        importWithPassword(raw, backupPassword)
+                    } else {
+                        decodeBackupPayload(raw, getOrCreateBackupKey())
+                    }
+                    val json = runCatching { JSONObject(String(decoded, Charsets.UTF_8)) }
+                        .getOrElse { throw BackupDecryptException("Backup non valido: payload JSON illeggibile") }
+                    val schema = json.optString("schema", "sconosciuto")
+                    val count = json.optJSONArray("items")?.length()
+                        ?: json.optJSONArray("conversations")?.length()
+                        ?: 0
+                    "Backup verificato ($schema, $count voci)."
+                }.getOrElse { "Import non riuscito: ${it.message ?: it.javaClass.simpleName}" }
+            }
         }
     }
 
@@ -781,6 +813,16 @@ internal fun SettingsScreen(
             }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingsPasswordField(
+                        "Password backup (vuota = chiave dispositivo)",
+                        backupPassword,
+                        { backupPassword = it }
+                    )
+                    Text(
+                        "Se impostata: export cifrato v2 con password (portabile su altri dispositivi) e import con password. Vuota: comportamento attuale con chiave Keystore.",
+                        color = AppColors.Muted,
+                        fontSize = 12.sp
+                    )
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -909,10 +951,15 @@ internal fun SettingsScreen(
                             )
                         }
                         IconButton(onClick = {
-                            status = runCatching { exportLocalBackup(context) }
-                                .getOrElse { "Backup non riuscito: ${it.message ?: it.javaClass.simpleName}" }
+                            status = runCatching {
+                                if (backupPassword.isNotEmpty()) exportLocalBackupWithPassword(context, backupPassword)
+                                else exportLocalBackup(context)
+                            }.getOrElse { "Backup non riuscito: ${it.message ?: it.javaClass.simpleName}" }
                         }) {
                             Icon(Icons.Rounded.Save, contentDescription = "Backup locale", tint = Color.White)
+                        }
+                        IconButton(onClick = { backupImportPicker.launch(arrayOf("application/json")) }) {
+                            Icon(Icons.Rounded.FolderOpen, contentDescription = "Importa backup locale", tint = Color.White)
                         }
                     }
                 }

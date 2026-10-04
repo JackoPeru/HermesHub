@@ -368,22 +368,25 @@ internal fun ChatScreen(
     var gatewayRuntime by remember(settings.gatewayUrl, settings.inferenceEndpoint, botConnectionId, botEndpoint) {
         mutableStateOf<GatewayRuntimeStatus?>(null)
     }
-    LaunchedEffect(networkOnline, botSettings.gatewayUrl, botSettings.inferenceEndpoint, botApiKey) {
+    PollWhileStarted(networkOnline, botSettings.gatewayUrl, botSettings.inferenceEndpoint, botApiKey, baseIntervalMs = 5_000L) {
         if (!networkOnline) {
             gatewayAvailable = false
-            return@LaunchedEffect
+            return@PollWhileStarted true
         }
-        while (true) {
-            gatewayAvailable = withContext(Dispatchers.IO) {
-                probeHermesGateway(botSettings, botApiKey)
-            }
-            gatewayRuntime = if (gatewayAvailable) {
-                withContext(Dispatchers.IO) { loadGatewayRuntimeStatus(botSettings, botApiKey) }
-            } else {
-                null
-            }
-            delay(if (gatewayAvailable) 15_000L else 5_000L)
+        val available = withContext(Dispatchers.IO) {
+            probeHermesGateway(botSettings, botApiKey)
         }
+        gatewayAvailable = available
+        gatewayRuntime = if (available) {
+            withContext(Dispatchers.IO) { loadGatewayRuntimeStatus(botSettings, botApiKey) }
+        } else {
+            null
+        }
+        if (available) {
+            // Successo: 15s totali come prima (5s base poller + 10s qui).
+            delay(10_000L)
+        }
+        available
     }
     // Capabilities + model catalog in background (fonte capability-driven, mai version check).
     LaunchedEffect(botSettings.gatewayUrl, botApiKey) {

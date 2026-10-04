@@ -2757,9 +2757,9 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
     var error by remember(base) { mutableStateOf("") }
     var busy by remember(base) { mutableStateOf(false) }
 
-    fun refresh() {
-        scope.launch {
-            busy = true
+    suspend fun refreshSuspend(): Boolean {
+        busy = true
+        try {
             error = runCatching {
                 val key = loadGatewaySecret(context)
                 val (statusCode, statusBody) = httpGetResponse("$base/status", key)
@@ -2773,16 +2773,21 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                 }
                 jobsBody = JSONObject(jobsBodyRaw).optJSONArray("jobs")
             }.exceptionOrNull()?.message ?: ""
+            return error.isBlank()
+        } finally {
             busy = false
         }
     }
 
-    LaunchedEffect(base) {
-        refresh()
-        while (true) {
-            delay(10_000)
-            if (!busy) refresh()
+    fun refresh() {
+        scope.launch {
+            refreshSuspend()
         }
+    }
+
+    PollWhileStarted(base, baseIntervalMs = 10_000L) {
+        if (busy) return@PollWhileStarted true
+        refreshSuspend()
     }
 
     Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {

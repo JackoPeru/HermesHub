@@ -69,10 +69,12 @@ android {
     lint {
         warningsAsErrors = true
         abortOnError = true
-        disable += listOf("GradleDependency", "MissingTranslation", "NewerVersionAvailable", "OldTargetApi", "AndroidGradlePluginVersion")
+        disable += listOf("GradleDependency", "MissingTranslation", "NewerVersionAvailable", "OldTargetApi", "AndroidGradlePluginVersion", "ObsoleteSdkInt")
         if (enableMetaDat) {
             // DAT requires minSdk 29. Shared sources intentionally retain API 26-28
             // branches because the standard Hermes Hub artifact still supports minSdk 26.
+            // ObsoleteSdkInt resta disabilitato anche nello standard: mipmap-anydpi-v26
+            // (adaptive icons) e i rami 26-28 sono intenzionali, non obsoleti.
             disable += "ObsoleteSdkInt"
         }
     }
@@ -87,6 +89,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
+    implementation("androidx.navigation:navigation-compose:2.9.8")
     implementation("androidx.work:work-runtime-ktx:2.11.0")
     implementation("androidx.health.connect:connect-client:1.1.0")
     implementation("androidx.media3:media3-exoplayer:1.10.1")
