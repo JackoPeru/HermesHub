@@ -95,7 +95,22 @@ internal fun shouldReattachStoredResponse(
     responseId: String?,
     hasContent: Boolean,
     sawTerminal: Boolean
-): Boolean = !sawTerminal && lastError == null && !responseId.isNullOrBlank() && !hasContent
+): Boolean = !sawTerminal && !responseId.isNullOrBlank() && !hasContent &&
+    isTransportFailureForReattach(lastError)
+
+/**
+ * Errori di puro trasporto (il server potrebbe aver continuato grazie al
+ * detach): assenza rete, inattivita, chiusura senza terminale. Errori
+ * HTTP/auth/applicativi -> mai reattach (ritentare e inutile o dannoso).
+ */
+internal fun isTransportFailureForReattach(lastError: String?): Boolean {
+    if (lastError == null) return true
+    if (isSseInactivityMessage(lastError)) return true
+    val lower = lastError.lowercase()
+    return lower.contains("non raggiungibile") ||
+        lower.contains("connessione chiusa prima dell'evento terminale") ||
+        lower.contains("stream parziale")
+}
 
 internal fun isSseInactivityMessage(message: String?): Boolean =
     message?.contains("nessun dato per 90s", ignoreCase = true) == true

@@ -961,6 +961,9 @@ internal fun ChatScreen(
 
                     state.messages.add(userMessage)
                     state.draft = ""
+                    // Cronologia presente (messaggio utente in lista): il reattach
+                    // DONE puo scrivere qui dentro da ora in poi.
+                    historyLoadedCid = state.activeConversationId
                     val streamCid = state.activeConversationId
                         ?: "conv_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(8)}"
                     state.activeConversationId = streamCid
@@ -1217,24 +1220,27 @@ internal fun ChatScreen(
                             }
                         } catch (_: CancellationException) {
                             interrupted = true
-                            if (smartJob != null && !smartHandled) {
-                                // Stop durante il fast path: via lo stato, allegati
-                                // ripristinati senza duplicati, job cancellato
-                                // sul server per non bruciare GPU a vuoto.
+                            if (!smartHandled) {
+                                // Stop prima/durante il fast path (F7: anche con smartJob
+                                // ancora null): via lo stato, allegati ripristinati
+                                // senza duplicati, job cancellato se esiste.
                                 smartStatus?.let { state.messages.remove(it) }
                                 state.pendingAttachments.addAll(
                                     attachments.filter { it !in state.pendingAttachments }
                                 )
-                                val sKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() }
-                                if (sKey != null) {
-                                    cancelSmartJob(
-                                        gpuManagerBase(settings.gatewayUrl), sKey, smartJob.jobId
-                                    )
+                                val sJob = smartJob
+                                if (sJob != null) {
+                                    val sKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() }
+                                    if (sKey != null) {
+                                        cancelSmartJob(
+                                            gpuManagerBase(settings.gatewayUrl), sKey, sJob.jobId
+                                        )
+                                    }
                                 }
                             }
                         } catch (ex: Exception) {
-                            if (smartJob != null && !smartHandled) {
-                                // Throw non-cancel dentro il fast path: come sopra,
+                            if (!smartHandled) {
+                                // Throw non-cancel prima/durante il fast path: come sopra,
                                 // senza lasciare status orfani.
                                 smartStatus?.let { state.messages.remove(it) }
                                 state.pendingAttachments.addAll(
@@ -1265,7 +1271,9 @@ internal fun ChatScreen(
                             }
 
                             val serverTerminalRun = finalState.runStatus.lowercase() in setOf("completed", "failed", "cancelled")
-                            if (boundRunIdForTurn != null) {
+                            if (boundRunIdForTurn != null && !interrupted) {
+                                // Mai su stop locale (interrupted): il POST dello stop decide
+                                // (clear), e ri-salvare qui resusciterebbe il binding in gara.
                                 if (serverTerminalRun) {
                                     // Terminale reale dal server: niente da continuare, pulizia.
                                     withContext(NonCancellable + Dispatchers.IO) { clearActiveWorkBinding(context, activeStreamCid) }
@@ -1438,12 +1446,15 @@ internal fun ChatScreen(
                                 404 -> "Run non trovato sul server (404)."
                                 else -> "Stop HTTP $code: ${body.take(160)}"
                             }
-                            state.messages.add(ChatMessage("Hermes Hub", msg, fromUser = false, isAction = true))
+                            if (state.activeConversationId == cid) {
+                                state.messages.add(ChatMessage("Hermes Hub", msg, fromUser = false, isAction = true))
+                            }
                         } else {
                             // Stop confermato dal server: niente da continuare, pulizia subito.
                             // (Se il POST fallisce, il binding resta e sara' il poll a decidere.)
+                            // Usa il cid catturato al tap, non quello corrente: se nel mentre
+                            // l'utente ha cambiato chat, non toccare il binding innocente.
                             runCatching {
-                                val cid = state.activeConversationId
                                 if (cid != null) clearActiveWorkBinding(context, cid)
                                 HermesWorkService.stop(context, activeRunId)
                                 if (state.backgroundWork?.runId == activeRunId) state.backgroundWork = null
