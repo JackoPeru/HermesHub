@@ -1007,6 +1007,10 @@ internal fun ChatScreen(
                                 context, settings, botApiKey, botProfile,
                                 botMultiplexEnabled, botAllowCompatAuth, text, attachments
                             )
+                            // Guardia invio globale (activeStreamJob non viene mai
+                            // settato dal flusso normale): secondo invio bloccato
+                            // finche il poll smart e attivo.
+                            if (smartJob != null) state.activeStreamJob = collectorJob
                         }
 
                         // Percorso primario: Sessions API quando capability presente, altriment legacy.
@@ -1128,12 +1132,17 @@ internal fun ChatScreen(
                         }
 
                         try {
-                            if (smartJob != null) {
-                                val managerBase = gpuManagerBase(settings.gatewayUrl)
-                                val managerKey = loadGatewaySecret(context)
+                            val smartKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() }
+                            if (smartJob != null && smartKey == null) {
+                                // Chiave sparita a meta strada: torna al flusso normale
+                                // (lo snapshot attachments e intatto, niente hang).
+                                smartJob = null
+                            }
+                            if (smartJob != null && smartKey != null) {
                                 smartHandled = runSmartCompletion(
-                                    context, state, settings, managerBase, managerKey,
-                                    activeStreamCid, displayText,
+                                    context, state, settings,
+                                    gpuManagerBase(settings.gatewayUrl), smartKey,
+                                    activeStreamCid, localHistory.toList(), mode, displayText, prevId,
                                     smartJob, attachments
                                 ) { smartStatus = it }
                             } else if (sessionIdForTurn != null) {
@@ -1203,11 +1212,28 @@ internal fun ChatScreen(
                             interrupted = true
                             if (smartJob != null && !smartHandled) {
                                 // Stop durante il fast path: via lo stato, allegati
-                                // ripristinati (file ancora in cache) per reinviare.
+                                // ripristinati senza duplicati, job cancellato
+                                // sul server per non bruciare GPU a vuoto.
                                 smartStatus?.let { state.messages.remove(it) }
-                                state.pendingAttachments.addAll(attachments)
+                                state.pendingAttachments.addAll(
+                                    attachments.filter { it !in state.pendingAttachments }
+                                )
+                                val sKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() }
+                                if (sKey != null) {
+                                    cancelSmartJob(
+                                        gpuManagerBase(settings.gatewayUrl), sKey, smartJob.jobId
+                                    )
+                                }
                             }
                         } catch (ex: Exception) {
+                            if (smartJob != null && !smartHandled) {
+                                // Throw non-cancel dentro il fast path: come sopra,
+                                // senza lasciare status orfani.
+                                smartStatus?.let { state.messages.remove(it) }
+                                state.pendingAttachments.addAll(
+                                    attachments.filter { it !in state.pendingAttachments }
+                                )
+                            }
                             val message = ex.message?.takeIf { it.isNotBlank() } ?: ex.javaClass.simpleName
                             localState = localState.applyEvent(ChatStreamEvent.Error("Errore runtime Hermes: $message"))
                             if (state.activeConversationId == activeStreamCid) {
@@ -1311,26 +1337,11 @@ internal fun ChatScreen(
                             }
                             } // fine append normali (smart: gia fatti in runSmartCompletion)
 
-                            val saved = withContext(NonCancellable + Dispatchers.IO) {
-                                saveConversationSnapshot(
-                                    context = context,
-                                    conversationId = activeStreamCid,
-                                    mode = mode,
-                                    prompt = displayText,
-                                    messages = if (smartHandled) state.messages.toList() else localHistory.toList(),
-                                    source = if (smartHandled) "Hermes fast path" else if (interrupted) "Hermes interrotto" else if (finalState.error != null) "Errore Hermes" else if (state.sessionRoute == "sessions") "Sessione Hermes" else "Hermes",
-                                    responseId = finalState.responseId ?: prevId,
-                                    hermesSessionId = state.hermesSessionId,
-                                    modelOverride = state.chatModelOverride,
-                                    providerOverride = state.chatProviderOverride,
-                                    reasoningEffort = state.chatReasoningEffort,
-                                    // Su stop non spingere subito sul gateway: la rete in finally
-                                    // allungherebbe lo sblocco del composer; ci pensa l'autosync.
-                                    syncAfterSave = !interrupted
-                                )
-                            }
+                            // Snapshot solo flusso normale: lo smart persiste da se con
+                            // i messaggi giusti (mai state.messages globale, che dopo
+                            // un cambio chat apparterrebbe all'altra conversazione).
                             if (smartHandled) {
-                                // Cleanup fast path: niente saved/response, solo reset stato.
+                                // Cleanup fast path: solo reset stato.
                                 if (state.activeConversationId == activeStreamCid) {
                                     val current = state.activeStreams[activeStreamCid]
                                     if (current == null || current.job == null || current.job === collectorJob) {
@@ -1340,36 +1351,56 @@ internal fun ChatScreen(
                                 } else {
                                     state.activeStreams.remove(activeStreamCid)
                                 }
-                            } else if (state.activeConversationId == activeStreamCid) {
-                                // Ripulisci solo se nessun invio successivo ha preso il posto di
-                                // questo stream: altrimenti cancelleresti lo stato del nuovo turno.
-                                val current = state.activeStreams[activeStreamCid]
-                                if (current == null || current.job == null || current.job === collectorJob) {
-                                    state.activeConversationId = saved.id
-                                    state.previousResponseId = saved.previousResponseId
-                                    state.streamingState = null
-                                    state.activeStreamJob = null
-                                }
                             } else {
-                                state.activeStreams.remove(activeStreamCid)
-                            }
-                            if (shouldGenerateTitle && !interrupted && finalState.error == null && finalText.isNotBlank()) {
-                                val generatedTitle = generateConversationTitle(
-                                    settings = settings,
-                                    firstPrompt = displayText,
-                                    firstAnswer = finalText,
-                                    apiKey = loadGatewaySecret(context)
-                                )
-                                withContext(NonCancellable + Dispatchers.IO) {
-                                    // Propaga rename alla sessione server quando disponibile.
-                                    // Se il server rifiuta/fallisce, il titolo resta da generare
-                                    // al prossimo turno: niente falso successo, niente divergenza.
-                                    runCatching {
-                                        renameHermesSessionForConversation(
-                                            context, botSettings, botApiKey, saved.id,
-                                            generatedTitle, botProfile, botMultiplexEnabled
-                                        )
-                                    }.getOrNull()
+                                val saved = withContext(NonCancellable + Dispatchers.IO) {
+                                    saveConversationSnapshot(
+                                        context = context,
+                                        conversationId = activeStreamCid,
+                                        mode = mode,
+                                        prompt = displayText,
+                                        messages = localHistory.toList(),
+                                        source = if (interrupted) "Hermes interrotto" else if (finalState.error != null) "Errore Hermes" else if (state.sessionRoute == "sessions") "Sessione Hermes" else "Hermes",
+                                        responseId = finalState.responseId ?: prevId,
+                                        hermesSessionId = state.hermesSessionId,
+                                        modelOverride = state.chatModelOverride,
+                                        providerOverride = state.chatProviderOverride,
+                                        reasoningEffort = state.chatReasoningEffort,
+                                        // Su stop non spingere subito sul gateway: la rete in finally
+                                        // allungherebbe lo sblocco del composer; ci pensa l'autosync.
+                                        syncAfterSave = !interrupted
+                                    )
+                                }
+                                if (state.activeConversationId == activeStreamCid) {
+                                    // Ripulisci solo se nessun invio successivo ha preso il posto di
+                                    // questo stream: altrimenti cancelleresti lo stato del nuovo turno.
+                                    val current = state.activeStreams[activeStreamCid]
+                                    if (current == null || current.job == null || current.job === collectorJob) {
+                                        state.activeConversationId = saved.id
+                                        state.previousResponseId = saved.previousResponseId
+                                        state.streamingState = null
+                                        state.activeStreamJob = null
+                                    }
+                                } else {
+                                    state.activeStreams.remove(activeStreamCid)
+                                }
+                                if (shouldGenerateTitle && !interrupted && finalState.error == null && finalText.isNotBlank()) {
+                                    val generatedTitle = generateConversationTitle(
+                                        settings = settings,
+                                        firstPrompt = displayText,
+                                        firstAnswer = finalText,
+                                        apiKey = loadGatewaySecret(context)
+                                    )
+                                    withContext(NonCancellable + Dispatchers.IO) {
+                                        // Propaga rename alla sessione server quando disponibile.
+                                        // Se il server rifiuta/fallisce, il titolo resta da generare
+                                        // al prossimo turno: niente falso successo, niente divergenza.
+                                        runCatching {
+                                            renameHermesSessionForConversation(
+                                                context, botSettings, botApiKey, saved.id,
+                                                generatedTitle, botProfile, botMultiplexEnabled
+                                            )
+                                        }.getOrNull()
+                                    }
                                 }
                             }
                         }

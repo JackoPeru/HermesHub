@@ -12,6 +12,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -21,6 +22,7 @@ import uuid
 import wave
 
 try:
+    # Canonical source: scripts/hermes_hub_gateway/triage.py (kept byte-identical).
     import triage as _triage_mod
 except ImportError:
     _triage_mod = None  # type: ignore[assignment]
@@ -324,6 +326,18 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
         src_path = Path(str(src))
         if not src_path.is_file():
             return None, f"input image missing: {src}"
+        # Incoming files must live under trusted roots (hub uploads, runtimes,
+        # outputs, tmp). No symlinks, no outside reads.
+        try:
+            resolved = src_path.resolve()
+        except OSError:
+            return None, f"input image unreadable: {src}"
+        if src_path.is_symlink() or not any(
+            str(resolved) == str(root) or str(resolved).startswith(str(root) + os.sep)
+            for root in (
+                Path("/home/matteo/.hermes"), Path("/opt/hermes"), Path("/tmp"))
+        ):
+            return None, f"input image outside trusted roots: {src}"
         if src_path.suffix.lower() not in IMAGE_EXTS:
             return None, f"unsupported input type: {src_path.suffix}"
         if src_path.stat().st_size > MAX_INPUT_MB * 1024 * 1024:
@@ -1048,8 +1062,20 @@ async def watch_direct() -> None:
     if unit in ("active", "activating", "reloading"):
         if await media_online():
             _state["direct_miss"] = 0
+            _state.pop("direct_silent_since", None)
             return
-        log.warning("direct Comfy unit %s but backend silent; waiting (restart?)", unit)
+        # Unit alive but backend silent: restart in progress (wait forever) or
+        # hung Comfy (deadline below). Never pull the rug on a live unit fast.
+        since = float(_state.get("direct_silent_since") or time.monotonic())
+        if "direct_silent_since" not in _state:
+            _state["direct_silent_since"] = since
+        if time.monotonic() - since > 900:
+            log.error("direct Comfy silent for 15min with live unit; forcing AUTO")
+            _state.pop("direct_silent_since", None)
+            _state["direct_miss"] = 0
+            _set_desired("AUTO")
+        else:
+            log.warning("direct Comfy unit %s but backend silent; waiting (restart?)", unit)
         return
     misses = int(_state.get("direct_miss") or 0) + 1
     _state["direct_miss"] = misses
@@ -1174,6 +1200,11 @@ async def finish_media_job(jid: str, prompt_id: str, entry: dict, vram_peak: flo
     dest_root.mkdir(parents=True, exist_ok=True)
     saved: list[str] = []
     for node_id, node_out in (entry.get("outputs") or {}).items():
+        # node_id comes from workflow keys (caller-controlled): strict allowlist,
+        # never a path.
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", str(node_id)):
+            log.warning("job %s skipping output with suspicious node id %r", jid, node_id)
+            continue
         for item in node_out.get("images", []) + node_out.get("gifs", []):
             name = Path(str(item.get("filename") or "")).name
             sub = str(item.get("subfolder", "") or "")
@@ -1575,6 +1606,15 @@ async def reconcile_boot() -> None:
             log.warning("boot: ComfyUI queue clear failed (backend down?): %s", exc)
     else:
         log.info("boot: same boot_id, preserving desired=%s", _state["desired_mode"])
+        # A process restart orphans in-flight tracking (prompt ids live in
+        # memory): requeue running rows as failed so users resubmit instead
+        # of waiting forever. Queued rows are untouched (no duplicates).
+        for (jid,) in db.execute(
+            "SELECT id FROM jobs WHERE status='running'"
+        ).fetchall():
+            update_job(jid, status="failed",
+                       error="manager restarted, tracking lost, resubmit")
+            log.info("job %s failed after manager restart", jid)
     llm_up = await llm_loaded()
     media_up = await media_online()
     threshold = float(CONFIG["switching"].get("vram_free_mb", 2500))
@@ -1715,6 +1755,10 @@ async def publish_smart_results(jid: str, paths: list[str]) -> list[str]:
         dest = root / f"{jid}_{name}"
         try:
             if not Path(str(src)).is_file():
+                continue
+            if dest.exists():
+                # Idempotent republish (retry paths): reuse, never overwrite.
+                urls.append(f"/v1/media/{dest.name}")
                 continue
             shutil.copy2(src, dest)
             urls.append(f"/v1/media/{dest.name}")
@@ -1916,8 +1960,8 @@ async def submit_job(request: Request, _: None = Depends(require_key)) -> JSONRe
 async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSONResponse:
     """Triage fast path: {text, input_images?} -> triage -> prompt-only LLM
     -> internal submit. Returns {"media": false} when this is not a media
-    task (caller uses the normal chat flow), 409 when the LLM is unavailable
-    (caller falls back to chat), 202 with job_id on accept."""
+    task or the LLM is unavailable (caller falls back to normal chat).
+    409 only for disabled/misconfigured/overloaded backend."""
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001
@@ -1927,13 +1971,19 @@ async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSON
         raise HTTPException(409, "smart fast path disabled")
     if _triage_mod is None:
         raise HTTPException(500, "triage module unavailable")
+    max_queued = int(CONFIG["media"].get("max_queued", 10))
+    backlog = len(queued_jobs()) + (1 if _state.get("current_job") else 0)
+    if backlog >= max_queued:
+        raise HTTPException(429, f"media queue full ({backlog}/{max_queued})")
     text = str(body.get("text", "") or "")
     images = body.get("input_images", []) or []
     if isinstance(images, str):
         images = [images]
     images = [str(p) for p in images[:4]]
     backend = _smart_backend()
-    decision = _triage_mod.triage(text, bool(images), backend=backend)
+    # Triage is sync (laya ~65ms): keep it off the event loop.
+    decision = await asyncio.to_thread(_triage_mod.triage, text, bool(images),
+                                       (), backend)
     if not decision.media or not decision.preset:
         return JSONResponse({"media": False, "reason": decision.reason})
     if not await llm_loaded():

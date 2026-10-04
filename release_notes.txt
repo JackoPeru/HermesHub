@@ -1,15 +1,17 @@
-Hermes Hub 0.6.212 (triage Laya + direct robusto)
+Hermes Hub 0.6.213 (fast path media end-to-end)
 
-- Triage media: decision core con backend regole + LayaBackend
-  (laya:multilingual via ollaya, gate 0.75, fallback, decision log
-  per calibrazione). Hook fast-path hub in arrivo.
-- Manager direct: watch tollerante ai restart di Comfy (mai auto-return
-  a backend vivo), boot preserve su stesso boot_id (solo il reboot vero
-  forza AUTO); supporto user-units systemd.
-- Server: SeedVR2 3B (upscale video) in Comfy, Kokoro int8 su CUDA,
-  STT scaldato, voce sempre con l'LLM.
-- Versioni: Windows/AdminBridge `0.6.212`; Android `versionName 0.6.212`, `versionCode 216`.
-- Asset: `HermesHub-0.6.212-android.apk` (binario Windows invariato).
-- SHA-256 Android: `faef013dca8c8007af553ee20ab1a6d630ba8c589a132842d07fd83cb60fb9d0`.
-- Asset: `HermesHub-0.6.212-linux-gateway.tar.gz`.
-- SHA-256 gateway: `c1685a8636b0fcd185a72bf1a8f6582a063010ca7f24a429e8975baad6113385`.
+- App: con allegati tenta prima /jobs/smart (triage Laya + prompt-only
+  LLM + submit interno) con poll ogni 10 s, progressi, viewer risultato
+  e titolo; fallback automatico al flusso normale su rifiuto/errore;
+  stop ripristina allegati e cancella il job sul server.
+- Manager: endpoint /jobs/smart con backpressure, triage off-loop,
+  gate LLM residente, publish idempotente in hub_uploads con media_urls.
+- Audit: input confinati a root fidate, node id sanitizzati, running
+  marcati failed al restart processo, deadline 15 min sul direct muto,
+  UI vincolata alla conversazione attiva, niente chiamate senza chiave,
+  job_id encodato, restore allegati senza duplicati.
+- Versioni: Windows/AdminBridge `0.6.213`; Android `versionName 0.6.213`, `versionCode 217`.
+- Asset: `HermesHub-0.6.213-android.apk` (binario Windows invariato).
+- SHA-256 Android: `7a88c8d5e445c396bd1488202eec267d8e72a0add0a678b3ed96751295bbc3e4`.
+- Asset: `HermesHub-0.6.213-linux-gateway.tar.gz`.
+- SHA-256 gateway: `293ab64dae71675273bb5e9f5f49b5c056d18fc3bbbf4cad7f7e7ea0ab22fc8b`.

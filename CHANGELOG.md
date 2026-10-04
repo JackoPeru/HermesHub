@@ -2,6 +2,17 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.213 - 2026-10-04
+
+- Fast path media: con allegati l'app tenta /jobs/smart (triage Laya,
+  prompt-only LLM, submit) con poll, progressi e rendering; fallback
+  automatico al flusso normale, stop cancella anche lato server.
+- Audit fast path: input confinati a root fidate, node id sanitizzati,
+  backpressure 429, triage off-loop, publish idempotente, running
+  marcati failed al restart processo, deadline watch direct, UI sempre
+  nella conversazione giusta, niente chiamate senza chiave, kind/mime
+  dall'estensione reale.
+
 ## 0.6.212 - 2026-10-04
 
 - Triage media: decision core con backend regole + LayaBackend multilingual

@@ -221,7 +221,9 @@ class LayaBackend:
         history_tail: Sequence[str] = (),
     ) -> TriageDecision:
         clean = (text or "").strip()
-        state = f"FOTO ALLEGATA: {'si' if has_image else 'no'}. TESTO: {clean}"
+        # State capped: laya context is 1024 tokens, everything beyond is noise
+        # (and a DoS vector). prompt_hint keeps the full text for the LLM.
+        state = f"FOTO ALLEGATA: {'si' if has_image else 'no'}. TESTO: {clean[:2000]}"
         choice, confidence = "", 0.0
         try:
             choice, confidence = self._ask(state)
