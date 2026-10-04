@@ -1573,25 +1573,45 @@ private suspend fun uploadAttachmentForTool(
     return UploadedAttachmentRef(attachment.filename, attachment.mimeType, null, null, lastError)
 }
 
-private fun ChatInputAttachment.streamingJsonUploadBody(): RequestBody = object : RequestBody() {
-    override fun contentType() = "application/json; charset=utf-8".toMediaType()
+/** Lunghezza base64 NO_WRAP esatta per n byte: serve al Content-Length senza bufferizzare. */
+internal fun base64EncodedLength(rawBytes: Long): Long = ((rawBytes + 2) / 3) * 4
 
-    override fun writeTo(sink: BufferedSink) {
-        val file = localFilePath?.let(::File)?.takeIf { it.isFile }
-        if (file == null) {
-            val payload = JSONObject()
-                .put("filename", filename)
-                .put("mime_type", mimeType)
-                .put("data_url", dataUrl)
-            sink.writeUtf8(payload.toString())
-            return
+private fun ChatInputAttachment.streamingJsonUploadBody(): RequestBody {
+    val file = localFilePath?.let(::File)?.takeIf { it.isFile }
+    if (file == null) {
+        val json = JSONObject()
+            .put("filename", filename)
+            .put("mime_type", mimeType)
+            .put("data_url", dataUrl)
+            .toString()
+            .toByteArray(Charsets.UTF_8)
+        return object : RequestBody() {
+            override fun contentType() = "application/json; charset=utf-8".toMediaType()
+            override fun contentLength() = json.size.toLong()
+            override fun writeTo(sink: BufferedSink) {
+                sink.write(json)
+            }
         }
-        sink.writeUtf8("{\"filename\":${JSONObject.quote(filename)},\"mime_type\":${JSONObject.quote(mimeType)},\"data_url\":\"data:${mimeType};base64,")
-        sink.flush()
-        val encoder = Base64OutputStream(sink.outputStream(), Base64.NO_WRAP or Base64.NO_CLOSE)
-        file.inputStream().use { input -> input.copyTo(encoder) }
-        encoder.close()
-        sink.writeUtf8("\"}")
+    }
+    // Content-Length esplicita: senza, OkHttp va in chunked e il gateway
+    // risponde 411 (Content-Length required). Lunghezza base64 esatta:
+    // 4 byte ogni 3 di file, senza wrap.
+    val prefix = "{\"filename\":${JSONObject.quote(filename)},\"mime_type\":${JSONObject.quote(mimeType)},\"data_url\":\"data:${mimeType};base64,"
+        .toByteArray(Charsets.UTF_8)
+    val suffix = "\"}".toByteArray(Charsets.UTF_8)
+    val base64Len = base64EncodedLength(file.length())
+    return object : RequestBody() {
+        override fun contentType() = "application/json; charset=utf-8".toMediaType()
+        override fun contentLength() = prefix.size + base64Len + suffix.size
+
+        override fun writeTo(sink: BufferedSink) {
+            sink.write(prefix)
+            sink.flush()
+            val encoder = Base64OutputStream(sink.outputStream(), Base64.NO_WRAP or Base64.NO_CLOSE)
+            file.inputStream().use { input -> input.copyTo(encoder) }
+            encoder.close()
+            sink.write(suffix)
+        }
     }
 }
 

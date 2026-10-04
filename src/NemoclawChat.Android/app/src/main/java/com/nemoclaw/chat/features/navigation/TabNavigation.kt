@@ -23,9 +23,14 @@ internal fun tabForNavRoute(route: String?): Tab =
 internal fun NavHostController.navigateToTab(tab: Tab) {
     val current = currentDestination?.route
     if (current == tab.navRoute) return
-    navigate(tab.navRoute) {
-        launchSingleTop = true
-        restoreState = true
+    // Riusa l'istanza esistente invece di duplicarla: niente schermate
+    // vuote/flash e niente stack infiniti. Il back continua a camminare
+    // sulla cronologia restante e poi esce.
+    if (!popBackStack(tab.navRoute, inclusive = false)) {
+        navigate(tab.navRoute) {
+            launchSingleTop = true
+            restoreState = true
+        }
     }
 }
 

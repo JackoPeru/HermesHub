@@ -26,6 +26,15 @@ media:
   job_timeout_video: 3600
   poll_interval: 2.0
 
+# Voce con LLM: Kokoro TTS + UniNote STT partono e scaldano a ogni restore
+# LLM, si fermano quando i media prendono le GPU. Mai fatali.
+# kokoro_key vive solo in /etc (segreto locale, mai nel repo).
+voice:
+  services: [hermes-kokoro-tts.service, uninote-stt.service]
+  kokoro_url: http://127.0.0.1:8020
+  stt_url: http://100.94.223.14:8010
+  kokoro_key: ""
+
 # Comfy diretto: stessa app/porta del backend agente, ma in ascolto sulla
 # tailnet (ufw: solo tailscale0) e senza Restart, cosi' la chiusura
 # fa auto-ritornare il manager su AUTO. Mai insieme al service media.

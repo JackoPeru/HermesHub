@@ -289,7 +289,10 @@ internal fun ChatApp() {
     }
     val tabNavController = rememberNavController()
     val tabNavBackStackEntry by tabNavController.currentBackStackEntryAsState()
-    val selectedTab = tabForNavRoute(tabNavBackStackEntry?.destination?.route)
+    // Mai null-transient: durante la navigate la route puo mancare per un
+    // frame e il fallback a Chat flashe rebbe la chrome. Resta sull'ultimo tab.
+    var selectedTab by rememberSaveable { mutableStateOf(Tab.Chat) }
+    tabNavBackStackEntry?.destination?.route?.let { selectedTab = tabForNavRoute(it) }
     val setSelectedTab: (Tab) -> Unit = { tab ->
         tabNavController.navigateToTab(tab)
     }
@@ -465,7 +468,11 @@ internal fun ChatApp() {
             content = {
                 NavHost(
                     navController = tabNavController,
-                    startDestination = tabNavStartDestination
+                    startDestination = tabNavStartDestination,
+                    enterTransition = { androidx.compose.animation.EnterTransition.None },
+                    exitTransition = { androidx.compose.animation.ExitTransition.None },
+                    popEnterTransition = { androidx.compose.animation.EnterTransition.None },
+                    popExitTransition = { androidx.compose.animation.ExitTransition.None }
                 ) {
                 composable(Tab.Chat.navRoute) { ChatScreen(
                 context = context,

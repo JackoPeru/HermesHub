@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import io
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ import subprocess
 import time
 import urllib.request
 import uuid
+import wave
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -778,8 +780,10 @@ async def transition_to_media() -> bool:
     """LLM_READY -> MEDIA_READY. Returns True when ComfyUI serves."""
     cfg = CONFIG["switching"]
     set_state("LLM_UNLOADING")
-    # Entering agent media from anywhere: the direct backend must go first.
+    # Entering agent media from anywhere: the direct backend must go first,
+    # then voice (every GB counts for Comfy).
     await systemctl("stop", direct_service_name())
+    await stop_voice()
     drain = float(cfg.get("llm_drain_timeout", 10))
     log.info("waiting %.0fs for in-flight LLM work to finish", drain)
     await asyncio.sleep(min(drain, 30))
@@ -835,6 +839,7 @@ async def transition_to_llm() -> bool:
         return False
     set_state("LLM_READY")
     _state["retries"] = 0
+    await ensure_voice_up(force_warm=True)
     return True
 
 
@@ -854,8 +859,89 @@ async def restore_llm_with_retries(context: str) -> bool:
     return False
 
 
-# ------------------------------------------------- direct comfyui ---
+# ------------------------------------------------------- voice (TTS/STT) ---
+# Kokoro TTS + UniNote STT vivono con l'LLM: partono e scaldano a ogni
+# restore LLM, si fermano quando i media prendono le GPU (ogni GB conta
+# per Comfy). Mai fatali: un problema voce non ferma mai le transizioni.
 
+def voice_services() -> list[str]:
+    v = CONFIG.get("voice", {})
+    svcs = v.get("services", ["hermes-kokoro-tts.service", "uninote-stt.service"])
+    return [str(s) for s in svcs] if isinstance(svcs, list) else []
+
+
+def _voice_cfg() -> tuple[str, str, str]:
+    v = CONFIG.get("voice", {})
+    return (
+        str(v.get("kokoro_url", "http://127.0.0.1:8020")),
+        str(v.get("stt_url", "http://100.94.223.14:8010")),
+        str(v.get("kokoro_key", "")),
+    )
+
+
+def _voice_warm_sync() -> str:
+    """Warmup bloccante (gira in thread): "" se TTS+STT rispondono davvero."""
+    kokoro_url, stt_url, kokoro_key = _voice_cfg()
+    problems: list[str] = []
+    try:
+        body = json.dumps({"input": "ok", "voice": "if_sara", "lang": "it"}).encode()
+        req = urllib.request.Request(
+            kokoro_url + "/v1/audio/speech", data=body, method="POST",
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {kokoro_key}"},
+        )
+        with urllib.request.urlopen(req, timeout=120) as r:
+            if r.status not in (200, 201) or not r.read(1):
+                problems.append(f"kokoro http {r.status}")
+    except Exception as exc:  # noqa: BLE001 - best effort, mai fatale
+        problems.append(f"kokoro: {exc!r}"[:160])
+    try:
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(16000)
+            w.writeframes(b"\x00" * 32000)
+        blob = buf.getvalue()
+        boundary = "hermesvoicewarm"
+        body = (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="file"; '
+            f'filename="warm.wav"\r\nContent-Type: audio/wav\r\n\r\n'
+        ).encode() + blob + f"\r\n--{boundary}--\r\n".encode()
+        req = urllib.request.Request(
+            stt_url + "/v1/audio/transcriptions", data=body, method="POST",
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        with urllib.request.urlopen(req, timeout=180) as r:
+            if r.status not in (200, 201):
+                problems.append(f"stt http {r.status}")
+    except Exception as exc:  # noqa: BLE001 - best effort, mai fatale
+        problems.append(f"stt: {exc!r}"[:160])
+    return "; ".join(problems)
+
+
+async def ensure_voice_up(force_warm: bool = False) -> None:
+    """Idempotente, mai solleva: servizi su, modelli scaldati se freddi."""
+    for svc in voice_services():
+        if not await service_active(svc):
+            log.info("voice: starting %s", svc)
+            await systemctl("start", svc)
+    if not force_warm and time.monotonic() - float(_state.get("voice_warm_ts") or 0.0) < 600:
+        return
+    problems = await asyncio.to_thread(_voice_warm_sync)
+    if problems:
+        log.warning("voice warmup issues: %s", problems)
+    else:
+        _state["voice_warm_ts"] = time.monotonic()
+        log.info("voice warm (tts+stt)")
+
+
+async def stop_voice() -> None:
+    for svc in voice_services():
+        await systemctl("stop", svc)
+
+
+# ------------------------------------------------- direct comfyui ---
 def direct_service_name() -> str:
     return str(CONFIG.get("direct", {}).get("service", "hermes-comfyui-direct.service"))
 
@@ -870,8 +956,10 @@ async def transition_to_direct() -> bool:
     direct = CONFIG.get("direct", {})
     service = direct_service_name()
     set_state("LLM_UNLOADING")
-    # Never run both backends: the agent headless Comfy goes first.
+    # Never run both backends: the agent headless Comfy goes first, then
+    # voice (every GB counts for the direct session too).
     await systemctl("stop", str(CONFIG["media"]["service"]))
+    await stop_voice()
     current = _state.get("current_job")
     if current:
         update_job(str(current), status="failed",
@@ -1208,6 +1296,8 @@ async def llm_watchdog() -> None:
         if not await llm_loaded():
             log.warning("watchdog: LLM_READY but backend not loaded; restoring")
             await restore_llm_with_retries("watchdog")
+        else:
+            await ensure_voice_up()
 
 
 async def _drive() -> None:
@@ -1508,6 +1598,7 @@ async def status(_: None = Depends(require_key)) -> dict:
         "media_online": await media_online(),
         "queue_length": len(queued_jobs()),
         "current_job": _state["current_job"],
+        "voice_services": {svc: await service_active(svc) for svc in voice_services()},
         "direct_url": direct_public_url(),
         "direct_active": desired == "DIRECT" and state == "DIRECT",
         "media_progress": (current or {}).get("progress", 0.0),
