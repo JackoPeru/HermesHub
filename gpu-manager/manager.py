@@ -1544,7 +1544,10 @@ async def reconcile_boot() -> None:
     except OSError:
         boot_now = ""
     prev_boot = db.execute("SELECT value FROM kv WHERE key='boot_id'").fetchone()
-    fresh_boot = bool(boot_now) and (not prev_boot or prev_boot[0] != boot_now)
+    # Solo un boot_id STORICO diverso prova un reboot vero. Senza riga
+    # storica (primo avvio col nuovo codice) si preserva: a installazione
+    # fresca il desired viene comunque dal default AUTO di config.
+    fresh_boot = bool(boot_now) and bool(prev_boot) and prev_boot[0] != boot_now
     if boot_now:
         db.execute(
             "INSERT INTO kv(key,value) VALUES('boot_id',?) "
