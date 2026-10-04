@@ -1504,6 +1504,13 @@ internal val archiveEventsHttpClient: OkHttpClient by lazy {
 
 @Volatile
 internal var activeTtsMediaPlayer: MediaPlayer? = null
+
+/** Ferma subito la lettura TTS in corso, se presente. Sicuro da chiamare sempre. */
+internal fun stopTtsPlayback() {
+    runCatching { activeTtsMediaPlayer?.stop() }
+    runCatching { activeTtsMediaPlayer?.release() }
+    activeTtsMediaPlayer = null
+}
 @Volatile
 internal var activeTtsFile: File? = null
 private val ttsPlaybackMutex = Mutex()
@@ -4196,6 +4203,7 @@ internal fun showHermesSystemNotification(context: Context, item: HubNotificatio
         .setContentTitle(item.title.ifBlank { "Hermes" })
         .setContentText(item.message.take(180))
         .setStyle(NotificationCompat.BigTextStyle().bigText(item.message.take(1200)))
+        .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
         .setContentIntent(pending)
         .addAction(replyAction)
         .setAutoCancel(true)

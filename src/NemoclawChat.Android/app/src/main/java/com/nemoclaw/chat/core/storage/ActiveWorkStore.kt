@@ -26,6 +26,56 @@ internal const val ACTIVE_WORK_PREFS = "chatclaw_active_work"
 private const val ACTIVE_WORK_KEY = "bindings"
 private val activeWorkLock = Any()
 
+private val approvalClaimLock = Any()
+private val claimedApprovalIds = mutableSetOf<String>()
+
+private val stopClaimLock = Any()
+private val claimedStopRuns = mutableSetOf<String>()
+
+/**
+ * Single-flight condiviso processo per i POST di approvazione.
+ * Ritorna true solo la prima volta per id, false per i duplicati (skip).
+ * Thread-safe via lock dedicato. Id vuoti mai reclamati.
+ */
+internal fun tryClaimApproval(approvalId: String): Boolean {
+    val clean = approvalId.trim()
+    if (clean.isEmpty()) return false
+    synchronized(approvalClaimLock) {
+        if (claimedApprovalIds.contains(clean)) return false
+        claimedApprovalIds.add(clean)
+        return true
+    }
+}
+
+internal fun resetApprovalClaimsForTest() {
+    synchronized(approvalClaimLock) { claimedApprovalIds.clear() }
+}
+
+/** Rilascia un claim dopo POST fallito: il retry resta possibile. */
+internal fun releaseApprovalClaim(approvalId: String) {
+    val clean = approvalId.trim()
+    if (clean.isEmpty()) return
+    synchronized(approvalClaimLock) { claimedApprovalIds.remove(clean) }
+}
+
+/**
+ * Single-flight per lo stop: secondo stop per stesso runId è no-op.
+ * Sincrono e idempotente, thread-safe.
+ */
+internal fun tryClaimStopRun(runId: String): Boolean {
+    val clean = runId.trim()
+    if (clean.isEmpty()) return false
+    synchronized(stopClaimLock) {
+        if (claimedStopRuns.contains(clean)) return false
+        claimedStopRuns.add(clean)
+        return true
+    }
+}
+
+internal fun resetStopClaimsForTest() {
+    synchronized(stopClaimLock) { claimedStopRuns.clear() }
+}
+
 internal fun encodeActiveWorkBinding(binding: ActiveWorkBinding): JSONObject = JSONObject()
     .put("conversationId", binding.conversationId)
     .put("runId", binding.runId)
@@ -128,7 +178,13 @@ internal fun parseRunApprovalPayload(body: String, runId: String = ""): HermesRu
     val node = root.optJSONObject("approval")
         ?: root.optJSONObject("payload")?.optJSONObject("approval")
         ?: return null
-    if (node.optString("approval_id", node.optString("request_id", node.optString("id", ""))).isBlank()) {
+    // Lettura separata senza shadowing: optString con fallback annidato nasconde
+    // request_id/id quando approval_id esiste ma è blank. Prendi la prima non-blank.
+    val approvalIdRaw = node.optString("approval_id").trim()
+    val requestIdRaw = node.optString("request_id").trim()
+    val idRaw = node.optString("id").trim()
+    val firstId = listOf(approvalIdRaw, requestIdRaw, idRaw).firstOrNull { it.isNotBlank() }.orEmpty()
+    if (firstId.isBlank()) {
         return null
     }
     val parsed = parseHermesApprovalRequest(node)

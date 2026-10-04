@@ -72,18 +72,24 @@ internal fun normalizeHermesApprovalChoice(raw: String): String? {
 
 /**
  * Scelta di auto-approvazione data modalita' utente e scelte offerte dal server.
- * Mai "deny" automatico. Ritorna null se (e solo se) nessuna offerta e' approvabile.
+ * No-downgrade: MAI ripiegare su un livello inferiore a quello configurato.
+ * Se il server offre solo [once, deny] e mode=always/session, NON approvare
+ * (ritorna null, il chiamante mostra la richiesta all'utente). Mai "deny" automatico.
+ * Ritorna null se (e solo se) nessuna offerta corrisponde al livello configurato.
  */
 internal fun pickAutoApprovalChoice(offered: List<String>, mode: String): String? {
     val clean = offered.map { it.trim().lowercase() }.filter { it in HERMES_APPROVAL_CHOICES }
     if (clean.isEmpty()) return null
-    val preferred = when (mode.trim().lowercase()) {
-        "always" -> listOf("always", "session", "once")
-        "session" -> listOf("session", "once")
-        else -> return null
-    }
-    for (candidate in preferred) {
-        if (candidate in clean) return candidate
+    val normalizedMode = mode.trim().lowercase()
+    if (normalizedMode != "always" && normalizedMode != "session") return null
+    // Livello richiesto esatto: always->always, session->session. Niente fallback a once.
+    val required = normalizedMode
+    if (required in clean) return required
+    runCatching {
+        android.util.Log.w(
+            "HermesRuns",
+            "no-downgrade: mode=$normalizedMode offered=$clean -> nessuna auto-approvazione"
+        )
     }
     return null
 }
@@ -141,9 +147,17 @@ internal fun parseHermesApprovalRequest(eventJson: JSONObject): HermesRunApprova
             allowPermanent = payload.optBoolean("allow_permanent", true)
         )
     }
+    // Lettura separata senza shadowing: prima non-blank tra approval_id/request_id/id.
+    // optString con fallback annidato nasconde gli altri id quando il primo esiste ma è blank.
+    val approvalIdRaw = payload.optString("approval_id").trim()
+    val requestIdRaw = payload.optString("request_id").trim()
+    val idRaw = payload.optString("id").trim()
+    val firstId = listOf(approvalIdRaw, requestIdRaw, idRaw).firstOrNull { it.isNotBlank() }.orEmpty()
+    val approvalId = approvalIdRaw.ifBlank { firstId }
+    val requestId = requestIdRaw.ifBlank { firstId }
     return HermesRunApprovalRequest(
-        approvalId = payload.optString("approval_id", payload.optString("request_id", payload.optString("id", ""))),
-        requestId = payload.optString("request_id", payload.optString("approval_id", payload.optString("id", ""))),
+        approvalId = approvalId,
+        requestId = requestId,
         tool = payload.optString("tool", ""),
         command = payload.optString("command", ""),
         description = payload.optString("description", payload.optString("prompt", "")),

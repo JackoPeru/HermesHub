@@ -123,12 +123,14 @@ class ActiveWorkStoreTest {
     }
 
     @Test
-    fun autoApproveFallsBackWithoutDeny() {
-        assertEquals("once", pickAutoApprovalChoice(listOf("once", "deny"), "always"))
-        assertEquals("once", pickAutoApprovalChoice(listOf("once", "deny"), "session"))
+    fun autoApproveNeverDowngrades() {
+        assertNull(pickAutoApprovalChoice(listOf("once", "deny"), "always"))
+        assertNull(pickAutoApprovalChoice(listOf("once", "deny"), "session"))
         assertNull(pickAutoApprovalChoice(listOf("deny"), "always"))
         assertNull(pickAutoApprovalChoice(emptyList(), "session"))
         assertNull(pickAutoApprovalChoice(listOf("mystery"), "always"))
+        assertEquals("always", pickAutoApprovalChoice(listOf("always", "once", "deny"), "always"))
+        assertEquals("session", pickAutoApprovalChoice(listOf("session", "once"), "session"))
     }
 
     @Test

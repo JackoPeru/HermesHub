@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.StrictMode
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
@@ -83,11 +84,20 @@ class MainActivity : ComponentActivity() {
                 IncomingIntentBus.publish(prompt = intent.getStringExtra("notification_reply").orEmpty())
             }
             uri?.scheme == "hermes-hub" -> {
-                IncomingIntentBus.publish(
-                    prompt = uri.getQueryParameter("prompt").orEmpty(),
-                    conversationId = uri.getQueryParameter("conversation").orEmpty(),
-                    tab = uri.host.orEmpty()
-                )
+                val parsed = parseHermesDeepLink(uri.toString())
+                if (parsed == null) {
+                    Log.w(TAG_HERMES_DEEPLINK, "Deeplink hermes-hub rifiutato (fuori allowlist): $uri")
+                } else {
+                    if (parsed.promptRequiresConfirmation) {
+                        // Il prompt finisce SOLO in bozza (anteprima): l'invio resta manuale.
+                        Log.i(TAG_HERMES_DEEPLINK, "Deeplink con prompt: anteprima in bozza, invio manuale.")
+                    }
+                    IncomingIntentBus.publish(
+                        prompt = parsed.prompt,
+                        conversationId = parsed.conversationId,
+                        tab = parsed.tab
+                    )
+                }
             }
         }
     }
@@ -128,4 +138,67 @@ internal object IncomingIntentBus {
     ) {
         request = IncomingIntentRequest(System.nanoTime(), prompt, uri, conversationId, tab)
     }
+}
+
+internal const val TAG_HERMES_DEEPLINK = "HermesDeepLink"
+
+/** Route deeplink ammesse (host allowlist): coprono tutti i produttori interni
+ *  (widget chat/voce, tile voce, notifiche HermesWorkService/Jarvis). */
+internal val allowedHermesDeepLinkHosts = setOf("chat", "voice", "jarvis")
+
+/** Query key ammesse sui deeplink hermes-hub. Tutto il resto rigetta il deeplink. */
+internal val allowedHermesDeepLinkQueryKeys = setOf("conversation", "prompt")
+
+internal const val MAX_HERMES_DEEPLINK_PROMPT_CHARS = 4000
+
+private val hermesConversationIdFormat = Regex("^[A-Za-z0-9_-]{1,128}$")
+
+internal data class ParsedHermesDeepLink(
+    val tab: String,
+    val conversationId: String = "",
+    val prompt: String = "",
+) {
+    /** Il prompt va solo in bozza (anteprima): mai auto-inviato. */
+    val promptRequiresConfirmation: Boolean get() = prompt.isNotBlank()
+}
+
+/**
+ * Valida un deeplink `hermes-hub://` contro l'allowlist di route note.
+ * Puro (java.net.URI, nessun framework): testabile in unit test JVM.
+ * Ritorna null per tutto ciò che è fuori allowlist (host/path/query/frammento).
+ */
+internal fun parseHermesDeepLink(raw: String?): ParsedHermesDeepLink? {
+    if (raw.isNullOrBlank()) return null
+    val uri = runCatching { java.net.URI(raw.trim()) }.getOrNull() ?: return null
+    if (!uri.scheme.equals("hermes-hub", ignoreCase = true)) return null
+    // Niente userinfo/porte: le route note non ne usano.
+    if (uri.userInfo != null || uri.port != -1) return null
+    val host = uri.host?.lowercase().orEmpty()
+    if (host !in allowedHermesDeepLinkHosts) return null
+    val path = uri.path.orEmpty()
+    if (path.isNotBlank() && path != "/") return null
+    if (uri.fragment != null) return null
+    val query = uri.rawQuery.orEmpty()
+    if (query.isBlank()) return ParsedHermesDeepLink(tab = host)
+    var conversationId = ""
+    var prompt = ""
+    val seenKeys = mutableSetOf<String>()
+    for (pair in query.split("&")) {
+        if (pair.isEmpty()) continue
+        val key = pair.substringBefore("=").lowercase()
+        if (key !in allowedHermesDeepLinkQueryKeys || !seenKeys.add(key)) return null
+        val encoded = pair.substringAfter("=", missingDelimiterValue = "")
+        val value = runCatching { java.net.URLDecoder.decode(encoded, "UTF-8") }.getOrNull() ?: return null
+        when (key) {
+            "conversation" -> {
+                val id = value.trim()
+                if (id.isNotEmpty() && !hermesConversationIdFormat.matches(id)) return null
+                conversationId = id
+            }
+            "prompt" -> {
+                prompt = value.trim().take(MAX_HERMES_DEEPLINK_PROMPT_CHARS)
+            }
+        }
+    }
+    return ParsedHermesDeepLink(tab = host, conversationId = conversationId, prompt = prompt)
 }

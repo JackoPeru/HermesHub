@@ -782,6 +782,7 @@ internal fun ChatScreen(
             }
         }
         var mediaRecorder by remember { mutableStateOf<android.media.MediaRecorder?>(null) }
+        var voiceRecordStartMs by remember { mutableLongStateOf(0L) }
         fun releaseVoiceRecorder(deleteTempFile: Boolean) {
             val recorder = mediaRecorder
             mediaRecorder = null
@@ -813,6 +814,7 @@ internal fun ChatScreen(
                 recorder.setOutputFile(tempFile.absolutePath)
                 recorder.prepare()
                 recorder.start()
+                voiceRecordStartMs = System.currentTimeMillis()
                 state.isRecordingVoiceNote = true
             } catch (ex: Exception) {
                 releaseVoiceRecorder(deleteTempFile = true)
@@ -1195,6 +1197,7 @@ internal fun ChatScreen(
                                 interrupted -> "Generazione interrotta."
                                 transportDetached && partialText.isNotEmpty() -> "$partialText\n\n_Stream scollegato: Hermes potrebbe continuare il lavoro sul gateway._"
                                 transportDetached -> ""
+                                finalState.error != null && partialText.isNotEmpty() -> "$partialText\n\n_Risposta troncata per errore: ${finalState.error}._"
                                 else -> finalState.text.ifEmpty { finalState.error ?: "" }
                             }
 
@@ -1376,6 +1379,18 @@ internal fun ChatScreen(
                     mediaRecorder = null
                     state.isRecordingVoiceNote = false
                     val file = state.tempVoiceNoteFile
+                    val recordMs = System.currentTimeMillis() - voiceRecordStartMs
+                    voiceRecordStartMs = 0L
+                    if (recordMs in 1..699) {
+                        // Troppo breve: stop() lancerebbe RuntimeException e il file
+                        // sarebbe corrotto. Scarta con messaggio esplicito.
+                        runCatching { recorder?.reset() }
+                        runCatching { recorder?.release() }
+                        file?.let { runCatching { it.delete() } }
+                        state.tempVoiceNoteFile = null
+                        state.messages.add(ChatMessage("Errore Voce", "Registrazione troppo breve, riprova.", fromUser = false, isAction = true))
+                        return@Composer
+                    }
                     try {
                         recorder?.stop()
                         if (file != null && file.exists()) {
@@ -2076,6 +2091,12 @@ internal fun MessageFooter(text: String, stats: ChatStreamStats?, settings: AppS
         androidx.compose.material3.IconButton(
             onClick = {
                 if (text.isBlank()) return@IconButton
+                if (speaking) {
+                    // Stop immediato della lettura in corso.
+                    stopTtsPlayback()
+                    speaking = false
+                    return@IconButton
+                }
                 scope.launch {
                     speaking = true
                     runCatching { speakChatMessage(context, settings, text, loadGatewaySecret(context)) }
@@ -2084,11 +2105,11 @@ internal fun MessageFooter(text: String, stats: ChatStreamStats?, settings: AppS
                 }
             },
             modifier = Modifier.size(24.dp),
-            enabled = text.isNotBlank() && !speaking
+            enabled = text.isNotBlank()
         ) {
             Icon(
-                imageVector = Icons.Rounded.PlayCircle,
-                contentDescription = "Leggi messaggio",
+                imageVector = if (speaking) Icons.Rounded.Stop else Icons.Rounded.PlayCircle,
+                contentDescription = if (speaking) "Ferma lettura" else "Leggi messaggio",
                 tint = AppColors.Muted,
                 modifier = Modifier.size(16.dp)
             )
@@ -2809,7 +2830,9 @@ internal fun DocumentSlimRow(
                 if (block.mimeType.isNotBlank()) {
                     intent.setDataAndType(viewUrl.toUri(), block.mimeType)
                 }
-                openAndroidIntent(context, intent)
+                if (!openAndroidIntent(context, intent)) {
+                    Toast.makeText(context, "Nessuna app per aprire questo file.", Toast.LENGTH_SHORT).show()
+                }
             }
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2857,7 +2880,9 @@ internal fun MediaFileBlock(block: VisualBlock) {
     val downloadNow: (String, String) -> Unit = { url, filename ->
         isDownloading = true
         android.widget.Toast.makeText(context, "Scaricamento: ${sanitizeDownloadFilename(filename)}", android.widget.Toast.LENGTH_SHORT).show()
-        scope.launch {
+        // Scope application-lifetime: lo scroll che ricicla la card non deve
+        // abortire il download a meta scrittura senza esito.
+        HermesStreamRuntime.scope.launch {
             val message = runCatching {
                 downloadHermesMediaFile(context, settings, url, filename, block.mimeType, loadGatewaySecret(context))
             }.getOrElse { "Download fallito: ${it.message ?: "errore sconosciuto"}" }
@@ -2975,7 +3000,9 @@ internal fun MediaFileBlock(block: VisualBlock) {
                             if (block.mimeType.isNotBlank()) {
                                 intent.setDataAndType(viewUrl.toUri(), block.mimeType)
                             }
-                            openAndroidIntent(context, intent)
+                            if (!openAndroidIntent(context, intent)) {
+                                Toast.makeText(context, "Nessuna app per aprire questo allegato.", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     ) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri allegato", tint = Color.White) }
                     IconButton(
@@ -3050,6 +3077,22 @@ suspend fun downloadHermesMediaFile(context: Context, settings: AppSettings, url
     throw IllegalStateException(lastError)
 }
 
+/**
+ * Aggiunge il token gateway come query `hub_token` all'URL media.
+ *
+ * SICUREZZA (audit header-vs-query): preferire SEMPRE l'header `Authorization: Bearer`.
+ * Già migrati a header: ExoPlayer (DefaultHttpDataSource via [authHeaders] in
+ * ChatInlineVideoPlayer/ChatInlineAudioPlayer), MediaMetadataRetriever
+ * ([loadVideoThumbnail] usa setDataSource con header), OkHttp/HttpURLConnection
+ * ([downloadHermesMediaFile]/[loadRemoteBitmapAttempt] inviano l'header; il secondo
+ * tentativo con query è solo fallback di compatibilità verso server che non accettano
+ * l'header). Il query token resta SOLO per gli Intent ACTION_VIEW esterni
+ * (DocumentSlimRow/apertura allegati): un'app esterna non può ricevere header custom,
+ * quindi l'URL non può essere autenticato altrimenti (tecnicamente impossibile).
+ * Nessun VideoView/MediaPlayer nativo usa questa funzione. Formato token ed endpoint
+ * invariati; la guardia same-origin [shouldAuthenticateHermesUrl] evita leak del token
+ * verso host esterni.
+ */
 internal fun withHermesMediaQueryToken(settings: AppSettings, url: String, apiKey: String?): String {
     val token = apiKey?.trim().orEmpty()
     return try {
@@ -3631,6 +3674,8 @@ internal fun ChatApprovalCards(
             val key = "${approval.approvalId}::${approval.requestId}"
             if (key in autoHandled) continue
             val choice = pickAutoApprovalChoice(approval.choices, autoMode) ?: continue
+            // Single-flight condiviso col service: se l'ha gia presa lui, skip.
+            if (!tryClaimApproval(approval.approvalId.ifBlank { approval.requestId })) continue
             autoHandled = autoHandled + key
             resolving = "$key::auto"
             val runId = approval.runId.ifBlank { state.streamingState?.activeRunId.orEmpty() }
@@ -3642,6 +3687,11 @@ internal fun ChatApprovalCards(
                 botSettings, runId, choice, botApiKey,
                 approval.requestId.takeIf { it.isNotBlank() }, botProfile, botMultiplexEnabled
             )
+            if (code !in 200..299) {
+                // POST fallito: rilascia il claim cosi un retry resta possibile.
+                releaseApprovalClaim(approval.approvalId.ifBlank { approval.requestId })
+                autoHandled = autoHandled - key
+            }
             if (code in 200..299) {
                 val cur = state.streamingState
                 if (cur != null) {
@@ -3684,10 +3734,17 @@ internal fun ChatApprovalCards(
                                     resolving = "${approval.approvalId}::$choice"
                                     status = ""
                                     scope.launch {
+                                        // Single-flight anche sul tap: niente doppi POST.
+                                        if (!tryClaimApproval(approval.approvalId.ifBlank { approval.requestId })) {
+                                            status = "Approval gia risolta."
+                                            resolving = ""
+                                            return@launch
+                                        }
                                         val runId = approval.runId.ifBlank { state.streamingState?.activeRunId.orEmpty() }
                                         if (runId.isBlank()) {
                                             status = "Run non disponibile per questa approval."
                                             resolving = ""
+                                            releaseApprovalClaim(approval.approvalId.ifBlank { approval.requestId })
                                             return@launch
                                         }
                                         val (code, body) = resolveHermesRunApproval(
@@ -3703,6 +3760,7 @@ internal fun ChatApprovalCards(
                                             }
                                             status = ""
                                         } else {
+                                            releaseApprovalClaim(approval.approvalId.ifBlank { approval.requestId })
                                             status = when (code) {
                                                 401, 403 -> "Chiave rifiutata (HTTP $code)."
                                                 404 -> "Approval/run non trovato (404)."

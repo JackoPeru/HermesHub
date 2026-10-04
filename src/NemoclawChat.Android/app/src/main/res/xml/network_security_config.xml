@@ -1,17 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     Hermes Hub deve raggiungere gateway personali configurabili su Tailnet/LAN, spesso
-    esposti in HTTP tramite MagicDNS o IP privato. Il cleartext resta quindi abilitato;
-    quando il gateway configurato offre HTTPS, il client usa comunque quell'URL.
+    esposti in HTTP tramite hostname MagicDNS (FQDN *.ts.net, short-name) o IP privato
+    letterale (100.64.0.0/10, RFC1918). Queste forme NON sono allowlistabili in XML
+    (<domain-config> accetta solo nomi o IP singoli, mai range CIDR), quindi il default
+    deve restare permissivo: base-config cleartext=true.
+
+    Il confine di sicurezza reale e altrove: Bearer su OGNI richiesta (mai in URL salvo
+    ACTION_VIEW esterni dove gli header sono impossibili), chiave nel Keystore,
+    allowBackup=false, rete privata (tailnet/LAN dell'utente). Quando il gateway
+    configurato offre HTTPS, il client usa quell'URL.
 -->
 <network-security-config xmlns:tools="http://schemas.android.com/tools">
-    <base-config
-        cleartextTrafficPermitted="true"
-        tools:ignore="InsecureBaseConfiguration">
+    <!-- tools:ignore: il cleartext verso host privati configurati e requisito
+         di prodotto (vedi commento sopra), non una svista. -->
+    <base-config cleartextTrafficPermitted="true" tools:ignore="InsecureBaseConfiguration">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">ts.net</domain>
+    </domain-config>
     <debug-overrides>
         <trust-anchors>
             <certificates src="user" />

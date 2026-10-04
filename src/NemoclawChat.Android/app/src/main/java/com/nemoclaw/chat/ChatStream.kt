@@ -4,7 +4,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
@@ -33,6 +35,7 @@ import java.net.ConnectException
 import java.net.URI
 import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.coroutines.resume
@@ -54,6 +57,38 @@ internal val streamHttpClient: OkHttpClient = OkHttpClient.Builder()
     .callTimeout(0, TimeUnit.SECONDS)
     .apply { debugHttpLoggingInterceptor()?.let { addInterceptor(it) } }
     .build()
+
+/** Timeout finiti del trasporto SSE (run lunghe fino a 30min). */
+internal const val SSE_CONNECT_TIMEOUT_SEC = 15L
+internal const val SSE_READ_TIMEOUT_SEC = 60L
+internal const val SSE_WRITE_TIMEOUT_SEC = 30L
+internal const val SSE_CALL_TIMEOUT_MIN = 30L
+/** Watchdog inattivita: nessun byte/evento per 90s -> errore esplicito e chiusura. */
+internal const val SSE_INACTIVITY_TIMEOUT_MS = 90_000L
+internal const val SSE_INACTIVITY_CHECK_MS = 10_000L
+internal const val SSE_INACTIVITY_ERROR_MESSAGE =
+    "Stream Hermes interrotto: nessun dato per 90s (timeout inattivita). Risposta non confermata."
+
+/**
+ * Client dedicato allo streaming SSE con timeout finiti.
+ * streamHttpClient resta invariato per le chiamate brevi che lo condividono
+ * (upload allegati, poll run JSON, run events): non cambiarlo.
+ */
+internal val sseStreamHttpClient: OkHttpClient = OkHttpClient.Builder()
+    .connectTimeout(SSE_CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
+    .readTimeout(SSE_READ_TIMEOUT_SEC, TimeUnit.SECONDS)
+    .writeTimeout(SSE_WRITE_TIMEOUT_SEC, TimeUnit.SECONDS)
+    .callTimeout(SSE_CALL_TIMEOUT_MIN, TimeUnit.MINUTES)
+    .apply { debugHttpLoggingInterceptor()?.let { addInterceptor(it) } }
+    .build()
+
+internal fun isSseInactivityExpired(lastProgressNs: Long, nowNs: Long, timeoutMs: Long = SSE_INACTIVITY_TIMEOUT_MS): Boolean {
+    if (timeoutMs <= 0L) return false
+    return nowNs - lastProgressNs >= timeoutMs * 1_000_000L
+}
+
+internal fun isSseInactivityMessage(message: String?): Boolean =
+    message?.contains("nessun dato per 90s", ignoreCase = true) == true
 
 private fun debugHttpLoggingInterceptor(): okhttp3.Interceptor? {
     if (!com.nemoclaw.chat.BuildConfig.DEBUG) return null
@@ -774,11 +809,15 @@ fun streamChatRequest(
     val attachmentPreparation = buildPromptWithAttachmentToolRefs(settings, prompt, attachments, apiKey, botProfile, botMultiplexEnabled, allowCompatAuth)
     val promptForModel = attachmentPreparation.prompt
     val payloadAttachments = attachmentPreparation.inlineAttachments
+    // Upload parziale: MAI fallback silenzioso a subset. Error blocca l'invio:
+    // ChatStreamEvent.Error imposta error+isDone ed e' impossibile non vederlo
+    // (StreamingBubbleView lo rende assertive; Status resterebbe una riga di log).
+    if (isPartialUploadBlocked(attachments.size, attachmentPreparation.uploadedCount, attachmentPreparation.uploadErrors)) {
+        emit(ChatStreamEvent.Error(partialUploadBlockMessage(attachments.size, attachmentPreparation.uploadedCount, attachmentPreparation.uploadErrors)))
+        return@flow
+    }
     if (attachmentPreparation.uploadedCount > 0) {
         emit(ChatStreamEvent.Status("Allegati caricati sul gateway: ${attachmentPreparation.uploadedCount}."))
-    }
-    if (attachmentPreparation.uploadErrors.isNotEmpty()) {
-        emit(ChatStreamEvent.Status("Upload parziale: ${attachmentPreparation.uploadErrors.joinToString("; ").take(320)}"))
     }
     val inlineBytes = payloadAttachments.sumOf { it.sizeBytes.coerceAtLeast(0) }
     val oversizedInline = payloadAttachments.firstOrNull { it.sizeBytes > INLINE_ATTACHMENT_MAX_BYTES }
@@ -1128,6 +1167,25 @@ private data class AttachmentPreparation(
     val uploadErrors: List<String>
 )
 
+/**
+ * Vera quando l'upload e' parziale o fallito: uploadErrors non vuoto oppure
+ * uploadedCount inferiore agli allegati richiesti. In quel caso l'invio va
+ * bloccato con Error esplicito, senza fallback al subset riuscito.
+ */
+internal fun isPartialUploadBlocked(totalAttachments: Int, uploadedCount: Int, uploadErrors: List<String>): Boolean {
+    if (totalAttachments <= 0) return false
+    if (uploadErrors.isNotEmpty()) return true
+    return uploadedCount < totalAttachments
+}
+
+internal fun partialUploadBlockMessage(totalAttachments: Int, uploadedCount: Int, uploadErrors: List<String>): String {
+    val detail = uploadErrors.joinToString("; ").take(320).ifBlank {
+        "$uploadedCount/$totalAttachments allegati caricati"
+    }
+    return "Upload allegati incompleto ($uploadedCount/$totalAttachments riusciti): $detail. " +
+        "Invio bloccato, nessun allegato inviato in forma parziale: riprova."
+}
+
 internal sealed interface SseAttemptSignal {
     data object Accepted : SseAttemptSignal
     data class Event(val event: ChatStreamEvent) : SseAttemptSignal
@@ -1189,7 +1247,10 @@ private suspend fun openSseStream(
             if (accepted) {
                 if (terminal) return SseOpenResult(true, true, null)
                 val detail = networkFailure ?: "connessione chiusa prima dell'evento terminale"
-                return SseOpenResult(true, false, "$label: stream parziale, $detail")
+                // Watchdog inattivita: messaggio esplicito SENZA la parola "parziale",
+                // cosi' streamChatRequest emette Error esplicito invece di sopprimerlo.
+                return if (isSseInactivityMessage(detail)) SseOpenResult(true, false, "$label: $detail")
+                else SseOpenResult(true, false, "$label: stream parziale, $detail")
             }
 
             httpFailure?.let { failure ->
@@ -1220,8 +1281,35 @@ private suspend fun openSseStream(
 }
 
 internal fun streamSseAttempt(request: Request): Flow<SseAttemptSignal> = callbackFlow {
-    val call = streamHttpClient.newCall(request)
-    fun sendSignal(signal: SseAttemptSignal): Boolean = trySendBlocking(signal).isSuccess
+    // Trasporto dedicato con timeout finiti (read 60s, call 30min): niente blocco infinito.
+    val call = sseStreamHttpClient.newCall(request)
+    val lastProgressNs = AtomicLong(System.nanoTime())
+    fun markProgress() {
+        lastProgressNs.set(System.nanoTime())
+    }
+    fun sendSignal(signal: SseAttemptSignal): Boolean {
+        markProgress()
+        return trySendBlocking(signal).isSuccess
+    }
+    // Watchdog inattivita: nessun byte/evento per 90s -> errore esplicito e chiusura.
+    // Nessun meccanismo simile esisteva: readTimeout copre solo stalli senza byte,
+    // non keepalive senza eventi. Il segnale parte PRIMA della cancel (onFailure
+    // post-cancel viene ignorato per via di isCanceled).
+    val watchdog = launch {
+        try {
+            while (true) {
+                delay(SSE_INACTIVITY_CHECK_MS)
+                if (isSseInactivityExpired(lastProgressNs.get(), System.nanoTime())) {
+                    trySendBlocking(SseAttemptSignal.NetworkFailure(SSE_INACTIVITY_ERROR_MESSAGE))
+                    call.cancel()
+                    close()
+                    break
+                }
+            }
+        } catch (_: CancellationException) {
+            // Chiusura normale o cancel utente: niente da segnalare.
+        }
+    }
     call.enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) {
             if (!call.isCanceled()) sendSignal(SseAttemptSignal.NetworkFailure(e.message ?: e.javaClass.simpleName))
@@ -1261,6 +1349,7 @@ internal fun streamSseAttempt(request: Request): Flow<SseAttemptSignal> = callba
 
                     while (!call.isCanceled()) {
                         val line = source.readUtf8LineBounded(SSE_LINE_MAX_BYTES) ?: break
+                        markProgress()
                         if (line.isEmpty()) {
                             if (!flushEvent()) return@use
                             continue
@@ -1289,7 +1378,10 @@ internal fun streamSseAttempt(request: Request): Flow<SseAttemptSignal> = callba
             }
         }
     })
-    awaitClose { call.cancel() }
+    awaitClose {
+        watchdog.cancel()
+        call.cancel()
+    }
 }
 
 internal fun shouldRetrySseAuth(
@@ -2411,12 +2503,24 @@ private fun inferMimeType(filename: String, url: String): String {
     }
 }
 
-private fun isLikelyRemoteImageUrl(url: String): Boolean {
-    val value = url.lowercase()
+internal val REMOTE_IMAGE_EXTENSIONS = listOf(".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
+
+/**
+ * Euristica ristretta per le immagini remote: SOLO https con estensione
+ * immagine oppure path /media/ o /proxy. La versione precedente accettava
+ * qualunque URL contenente sottostringhe generiche ("image", "photo") o
+ * host noti (picsum, unsplash, ...): chiaramente troppo permissiva.
+ */
+internal fun isStrictRemoteImageUrl(url: String): Boolean {
+    val value = url.trim().lowercase()
     if (!value.startsWith("https://")) return false
-    return listOf(".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp").any { value.substringBefore('?').substringBefore('#').endsWith(it) } ||
-        listOf("picsum.photos", "images.unsplash.com", "unsplash.com", "pexels.com", "pixabay.com", "cloudinary.com", "image", "photo").any { value.contains(it) }
+    val withoutQuery = value.substringBefore('?').substringBefore('#')
+    if (REMOTE_IMAGE_EXTENSIONS.any { withoutQuery.endsWith(it) }) return true
+    val uriPath = runCatching { URI(url.trim()).path?.lowercase().orEmpty() }.getOrDefault("")
+    return uriPath.contains("/media/") || uriPath.contains("/proxy/")
 }
+
+private fun isLikelyRemoteImageUrl(url: String): Boolean = isStrictRemoteImageUrl(url)
 
 private fun isSafeInlineMediaUrl(value: String): Boolean {
     if (value.isBlank()) return false

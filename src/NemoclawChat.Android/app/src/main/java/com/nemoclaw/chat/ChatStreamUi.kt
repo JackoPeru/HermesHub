@@ -3,6 +3,7 @@ package com.nemoclaw.chat
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -12,6 +13,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,10 +35,12 @@ import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.PlayCircle
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,8 +51,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -61,6 +68,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 
 internal data class MetricDisplayFilter(
     val ttft: Boolean = true,
@@ -1183,6 +1193,155 @@ internal fun SlashCommandList(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Stato di caricamento di un'immagine remota: mai "caricamento..." infinito.
+ * Fallimento/timeout -> Failed con messaggio e retry esplicito (max tentativi).
+ * Macchina a stati pura: testabile su JVM senza Compose.
+ */
+internal const val REMOTE_IMAGE_MAX_RETRIES = 2
+internal const val REMOTE_IMAGE_LOAD_TIMEOUT_MS = 30_000L
+internal const val REMOTE_IMAGE_ERROR_MAX_CHARS = 240
+
+internal enum class RemoteImageLoadPhase { Loading, Loaded, Failed }
+
+internal data class RemoteImageLoadState(
+    val phase: RemoteImageLoadPhase = RemoteImageLoadPhase.Loading,
+    val attempts: Int = 0,
+    val errorMessage: String? = null
+) {
+    val canRetry: Boolean get() = phase == RemoteImageLoadPhase.Failed && attempts <= REMOTE_IMAGE_MAX_RETRIES
+}
+
+internal fun remoteImageLoadInitial(): RemoteImageLoadState = RemoteImageLoadState()
+
+internal fun remoteImageLoadFailed(current: RemoteImageLoadState, error: String?): RemoteImageLoadState =
+    current.copy(
+        phase = RemoteImageLoadPhase.Failed,
+        attempts = current.attempts + 1,
+        errorMessage = error?.takeIf { it.isNotBlank() }?.take(REMOTE_IMAGE_ERROR_MAX_CHARS)
+            ?: "download fallito"
+    )
+
+internal fun remoteImageLoadRetrying(current: RemoteImageLoadState): RemoteImageLoadState =
+    if (!current.canRetry) current else current.copy(phase = RemoteImageLoadPhase.Loading)
+
+internal fun remoteImageLoadSucceeded(current: RemoteImageLoadState): RemoteImageLoadState =
+    current.copy(phase = RemoteImageLoadPhase.Loaded, errorMessage = null)
+
+/**
+ * Viewer inline per immagini remote con stati Loading/Loaded/Failed+retry.
+ * Il loader e' iniettato (default: nessun caricamento) cosi' la UI non dipende
+ * dal downloader di ChatFeature; applica isStrictRemoteImageUrl per non
+ * trattare da immagini URL non classificati come tali.
+ */
+@Composable
+internal fun RemoteStreamImage(
+    mediaUrl: String,
+    contentDescription: String?,
+    loadBitmap: suspend (String) -> Bitmap?,
+    modifier: Modifier = Modifier
+) {
+    if (!isStrictRemoteImageUrl(mediaUrl)) {
+        Text(
+            text = contentDescription?.takeIf { it.isNotBlank() } ?: mediaUrl,
+            color = AppColors.Muted,
+            fontSize = 13.sp,
+            modifier = modifier
+        )
+        return
+    }
+    var loadState by remember(mediaUrl) { mutableStateOf(remoteImageLoadInitial()) }
+    var bitmap by remember(mediaUrl) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(mediaUrl, loadState) {
+        if (loadState.phase != RemoteImageLoadPhase.Loading) return@LaunchedEffect
+        loadState = try {
+            val loaded = withTimeout(REMOTE_IMAGE_LOAD_TIMEOUT_MS) { loadBitmap(mediaUrl) }
+            if (loaded != null) {
+                bitmap = loaded
+                remoteImageLoadSucceeded(loadState)
+            } else {
+                remoteImageLoadFailed(loadState, "download fallito o formato non valido")
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            remoteImageLoadFailed(loadState, "timeout dopo ${REMOTE_IMAGE_LOAD_TIMEOUT_MS / 1000}s")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (ex: Exception) {
+            remoteImageLoadFailed(loadState, ex.message)
+        }
+    }
+    val snapshot = loadState
+    val loaded = bitmap
+    when {
+        snapshot.phase == RemoteImageLoadPhase.Loaded && loaded != null -> {
+            Image(
+                bitmap = loaded.asImageBitmap(),
+                contentDescription = contentDescription,
+                contentScale = ContentScale.FillWidth,
+                modifier = modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+            )
+        }
+        snapshot.phase == RemoteImageLoadPhase.Failed -> {
+            Column(
+                modifier = modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Error,
+                        contentDescription = null,
+                        tint = Color(0xFFFF453A),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "Immagine non caricata.",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Text(
+                    text = snapshot.errorMessage ?: "download fallito",
+                    color = AppColors.Muted,
+                    fontSize = 12.sp
+                )
+                if (snapshot.canRetry) {
+                    TextButton(onClick = { loadState = remoteImageLoadRetrying(snapshot) }) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = null,
+                            tint = AppColors.Muted,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.size(6.dp))
+                        Text("Riprova", color = AppColors.Muted, fontSize = 13.sp)
+                    }
+                } else {
+                    Text(
+                        text = "Tentativi esauriti (${snapshot.attempts}).",
+                        color = AppColors.Muted,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+        else -> {
+            Text(
+                text = if (snapshot.attempts > 0) "Nuovo tentativo di caricamento..." else "Caricamento immagine...",
+                color = AppColors.Muted,
+                fontSize = 13.sp,
+                modifier = modifier
+            )
         }
     }
 }
