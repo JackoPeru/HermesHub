@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.AppColors
 import com.nemoclaw.chat.AppSettings
 import com.nemoclaw.chat.AutoApproveChip
+import com.nemoclaw.chat.BitmapImageLoader
 import com.nemoclaw.chat.ScreenStatusInfo
 import com.nemoclaw.chat.decodeScreenFrame
 import com.nemoclaw.chat.fetchScreenFrameBytes
@@ -468,12 +469,15 @@ internal fun BotsScreen(
     var detailBot by remember { mutableStateOf<HermesBotItem?>(null) }
     val scope = rememberCoroutineScope()
 
+    // applicationContext: i polling screen non trattengono mai l'Activity.
+    val appContext = context.applicationContext
     // Stato schermo condiviso per roster e dettaglio (poll leggero, anteprima solo se acceso).
     var screenStatus by remember(settings.gatewayUrl) { mutableStateOf<ScreenStatusInfo?>(null) }
     var screenPreview by remember { mutableStateOf<Bitmap?>(null) }
+    var lastScreenSignature by remember { mutableStateOf<BitmapImageLoader.FrameSignature?>(null) }
     LaunchedEffect(settings.gatewayUrl) {
         while (isActive) {
-            val key = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+            val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
             screenStatus = runCatching { withContext(Dispatchers.IO) { getScreenStatus(settings, key) } }.getOrNull()
             delay(8_000L)
         }
@@ -481,12 +485,21 @@ internal fun BotsScreen(
     LaunchedEffect(screenStatus?.running) {
         if (screenStatus?.running != true) {
             screenPreview = null
+            lastScreenSignature = null
             return@LaunchedEffect
         }
         while (isActive) {
-            val key = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+            val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
             val bytes = withContext(Dispatchers.IO) { fetchScreenFrameBytes(settings, key, 480) }
-            screenPreview = decodeScreenFrame(bytes)
+            // Skip re-decode se i byte sono identici ai precedenti (hash/lunghezza).
+            val signature = BitmapImageLoader.frameSignature(bytes)
+            if (signature != null && signature == lastScreenSignature) {
+                delay(6_000L)
+                continue
+            }
+            lastScreenSignature = signature
+            // reqWidth = larghezza view anteprima (loader: sampling + cache).
+            screenPreview = withContext(Dispatchers.IO) { decodeScreenFrame(bytes, 480) }
             delay(6_000L)
         }
     }
@@ -1066,9 +1079,11 @@ internal fun BotDetailScreen(
     onOpenScreen: () -> Unit,
     onOpenCron: () -> Unit
 ) {
+    // applicationContext: remember/static non trattengono mai l'Activity.
+    val appContext = context.applicationContext
     var tab by remember(bot.identityKey) { mutableStateOf(BotDetailTab.Chat) }
     var autoMode by remember(bot.identityKey) {
-        mutableStateOf(loadBotAutoApproveMap(context)[bot.profile] ?: "off")
+        mutableStateOf(loadBotAutoApproveMap(appContext)[bot.profile] ?: "off")
     }
     val scope = rememberCoroutineScope()
     var opening by remember { mutableStateOf(false) }
@@ -1106,7 +1121,7 @@ internal fun BotDetailScreen(
                     onClick = {
                         opening = true
                         scope.launch {
-                            openHermesBotChat(context, settings, bot)
+                            openHermesBotChat(appContext, settings, bot)
                                 .onSuccess { onOpenChat(bot) }
                                 .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
                             opening = false
@@ -1121,7 +1136,7 @@ internal fun BotDetailScreen(
                     for ((label, value) in listOf("Chiedi" to "off", "Sessione" to "session", "Sempre" to "always")) {
                         val selected = autoMode == value
                         TextButton(onClick = {
-                            saveBotAutoApprove(context, bot.profile, value)
+                            saveBotAutoApprove(appContext, bot.profile, value)
                             autoMode = value
                         }) { Text(if (selected) "✓ $label" else label) }
                     }

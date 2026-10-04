@@ -1,7 +1,6 @@
 package com.nemoclaw.chat
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -87,11 +86,9 @@ internal suspend fun fetchScreenFrameBytes(settings: AppSettings, apiKey: String
         last
     }
 
-internal fun decodeScreenFrame(bytes: ByteArray?): Bitmap? {
-    if (bytes == null || bytes.isEmpty()) return null
-    return runCatching {
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-    }.getOrNull()
+internal fun decodeScreenFrame(bytes: ByteArray?, reqWidth: Int = BitmapImageLoader.DEFAULT_SCREEN_REQ_WIDTH): Bitmap? {
+    // Migrazione a loader centralizzato: sampling + cache, default = larghezza view.
+    return BitmapImageLoader.decodeScreenFrame(bytes, reqWidth)
 }
 
 /** Costruisce l'URL ws(s) del bridge a partire dal base manager. Puro, testabile. */

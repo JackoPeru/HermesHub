@@ -42,13 +42,18 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -88,7 +93,6 @@ internal fun StreamingBubbleView(
     showToolCalls: Boolean,
     showMessageMetrics: Boolean,
     metricFilter: MetricDisplayFilter,
-    uiTickNs: Long = System.nanoTime(),
     onSpeakMessage: (String) -> Unit = {}
 ) {
     androidx.compose.foundation.text.selection.SelectionContainer {
@@ -133,8 +137,8 @@ internal fun StreamingBubbleView(
             }
 
             if (state.isDone) {
-                val clipboardContext = LocalContext.current
-                val clipboardManager = remember(clipboardContext) { clipboardContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
+                val appContext = LocalContext.current.applicationContext
+                val clipboardManager = remember(appContext) { appContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
                 val parts = mutableListOf<String>()
                 if (showMessageMetrics) {
                     state.stats?.ttftMs?.takeIf { metricFilter.ttft && it > 0 }?.let { parts += "TTFT ${String.format(java.util.Locale.US, "%.1f", it / 1000.0)}s" }
@@ -207,7 +211,7 @@ internal fun StreamingBubbleView(
 }
 
 @Composable
-internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolean, uiTickNs: Long = System.nanoTime()) {
+internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolean) {
     var nowNs by remember(state.startedAtNs) { mutableLongStateOf(System.nanoTime()) }
     LaunchedEffect(state.startedAtNs, state.isDone) {
         while (!state.isDone) {
@@ -216,7 +220,7 @@ internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolea
         }
     }
     val active = !state.isDone
-    val elapsedNowNs = if (active) maxOf(nowNs, uiTickNs) else System.nanoTime()
+    val elapsedNowNs = if (active) nowNs else System.nanoTime()
     val elapsedSec = (elapsedNowNs - state.startedAtNs) / 1_000_000_000.0
     var thinkingExpanded by rememberSaveable(state.startedAtNs) { mutableStateOf(false) }
 
@@ -333,14 +337,16 @@ internal fun splitTimelinePrefill(timeline: List<AssistantActivity>): Pair<Assis
 
 @Composable
 private fun PrefillPinnedRow(text: String, active: Boolean) {
+    // Shimmer solo quando effettivamente in loading/streaming (derivedStateOf).
+    val showShimmer by remember(active) { derivedStateOf { active } }
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("Prefill", color = AppColors.Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-        if (active) {
-            ShimmerText(text.ifBlank { "…" })
+        if (showShimmer) {
+            ShimmerText(text.ifBlank { "…" }, enabled = true)
         } else {
             Text(
                 text.ifBlank { "—" },
@@ -356,6 +362,7 @@ private fun PrefillPinnedRow(text: String, active: Boolean) {
 
 @Composable
 private fun ReasoningCanvas(text: String, active: Boolean) {
+    val showShimmer by remember(active) { derivedStateOf { active } }
     var expanded by remember(text.take(64)) { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
@@ -366,8 +373,8 @@ private fun ReasoningCanvas(text: String, active: Boolean) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (active) {
-                ShimmerText("Ragionamento")
+            if (showShimmer) {
+                ShimmerText("Ragionamento", enabled = true)
             } else {
                 Text("Ragionamento", color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
@@ -523,6 +530,8 @@ internal fun ToolGroupExpander(tools: List<ToolCallState>) {
     val pending = tools.count { inferToolOutcome(it) == ToolOutcome.Pending }
     val failed = tools.count { inferToolOutcome(it) == ToolOutcome.Error }
     val completed = tools.size - pending - failed
+    // Shimmer solo quando ci sono tool effettivamente pending (derivedStateOf).
+    val showShimmer by remember(pending) { derivedStateOf { pending > 0 } }
     val status = when {
         pending > 0 -> "$pending in corso"
         failed > 0 -> "$failed falliti"
@@ -537,8 +546,8 @@ internal fun ToolGroupExpander(tools: List<ToolCallState>) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (pending > 0) {
-                ShimmerText("Tool")
+            if (showShimmer) {
+                ShimmerText("Tool", enabled = true)
             } else {
                 Text(text = "Tool", color = AppColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             }
@@ -569,6 +578,8 @@ internal fun ToolGroupExpander(tools: List<ToolCallState>) {
 
 @Composable
 private fun FlagRow(title: String, value: String, shimmer: Boolean) {
+    // Shimmer solo quando richiesto dal chiamante (che lo alza solo in loading/streaming).
+    val showShimmer by remember(shimmer) { derivedStateOf { shimmer } }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -576,8 +587,8 @@ private fun FlagRow(title: String, value: String, shimmer: Boolean) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        if (shimmer) {
-            ShimmerText(title)
+        if (showShimmer) {
+            ShimmerText(title, enabled = true)
         } else {
             Text(text = title, color = AppColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         }
@@ -632,6 +643,7 @@ internal fun ThinkingExpander(
     var localExpanded by rememberSaveable(thinking.take(96)) { mutableStateOf(false) }
     val isExpanded = expanded ?: localExpanded
     val setExpanded = onExpandedChange ?: { value: Boolean -> localExpanded = value }
+    val showShimmer by remember(active) { derivedStateOf { active } }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(
             modifier = Modifier
@@ -641,8 +653,8 @@ internal fun ThinkingExpander(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (active) {
-                ShimmerText("Ragionamento")
+            if (showShimmer) {
+                ShimmerText("Ragionamento", enabled = true)
                 Spacer(modifier = Modifier.weight(1f))
                 Text(text = if (thinking.isBlank()) "in attesa dal server" else "in corso", color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             } else {
@@ -680,7 +692,34 @@ internal fun ThinkingExpander(
 }
 
 @Composable
-internal fun ShimmerText(text: String) {
+internal fun ShimmerText(text: String, enabled: Boolean = true) {
+    // Transizione infinita SOLO quando il contenuto e' in loading/streaming (enabled)
+    // e la schermata e' visibile (resumed). A riposo o fuori schermo: testo statico.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var resumed by remember { mutableStateOf(true) }
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> resumed = true
+                Lifecycle.Event.ON_PAUSE -> resumed = false
+                else -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    val shouldAnimate by remember(enabled, resumed) {
+        derivedStateOf { enabled && resumed }
+    }
+    if (!shouldAnimate) {
+        Text(
+            text = text,
+            color = Color(0xFF8B95A5),
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 16.sp
+        )
+        return
+    }
     val transition = rememberInfiniteTransition(label = "shimmer")
     val phase by transition.animateFloat(
         initialValue = 0f,
@@ -714,6 +753,13 @@ internal fun ShimmerText(text: String) {
         )
     )
 }
+
+/**
+ * Gate puro per lo shimmer: solo loading/streaming e visibile.
+ * Testabile su JVM senza Compose.
+ */
+internal fun shouldShowShimmer(isLoadingOrStreaming: Boolean, isVisible: Boolean): Boolean =
+    isLoadingOrStreaming && isVisible
 
 @Composable
 internal fun ActivityLine(label: String, value: String, monospaced: Boolean = false) {
@@ -867,8 +913,8 @@ internal fun MarkdownText(
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    val clipboardContext = LocalContext.current
-                    val clipboardManager = remember(clipboardContext) { clipboardContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
+                    val appContext = LocalContext.current.applicationContext
+                    val clipboardManager = remember(appContext) { appContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),

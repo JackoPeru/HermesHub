@@ -86,7 +86,6 @@ internal class ChatStateHolder {
     var backgroundWork: BackgroundWorkUi? by mutableStateOf(null)
 
     val activeStreams: androidx.compose.runtime.snapshots.SnapshotStateMap<String, ActiveStreamState> = androidx.compose.runtime.mutableStateMapOf()
-    var streamUiTickNs: Long by mutableLongStateOf(System.nanoTime())
 
     val sending: Boolean
         get() = activeConversationId?.let { activeStreams[it] != null } ?: false

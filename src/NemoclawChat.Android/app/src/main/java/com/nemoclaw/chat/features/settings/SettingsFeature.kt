@@ -310,6 +310,7 @@ internal fun SettingsScreen(
     var fontScale by remember(settings.fontScale) { mutableFloatStateOf(settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)) }
     var showToolCalls by remember(settings.showToolCalls) { mutableStateOf(settings.showToolCalls) }
     var backgroundWork by remember(settings.backgroundWork) { mutableStateOf(settings.backgroundWork) }
+    var blockScreenshots by remember(settings.blockScreenshots) { mutableStateOf(settings.blockScreenshots) }
     var autoApprove by remember(settings.autoApprove) { mutableStateOf(settings.autoApprove) }
     var showMessageMetrics by remember(settings.showMessageMetrics) { mutableStateOf(settings.showMessageMetrics) }
     var metricTtft by remember(settings.metricTtft) { mutableStateOf(settings.metricTtft) }
@@ -376,6 +377,7 @@ internal fun SettingsScreen(
             fontScale = scale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE),
             showToolCalls = showToolCalls,
             backgroundWork = backgroundWork,
+            blockScreenshots = blockScreenshots,
             autoApprove = autoApprove,
             showMessageMetrics = showMessageMetrics,
             metricTtft = metricTtft,
@@ -655,6 +657,13 @@ internal fun SettingsScreen(
                     Switch(checked = backgroundWork, onCheckedChange = { backgroundWork = it })
                 }
                 Text("ON = se esci dall'app Hermes continua il lavoro sul gateway e ti avvisa alla fine.", color = AppColors.Muted, fontSize = 12.sp)
+            }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Blocca screenshot", color = Color.White, modifier = Modifier.weight(1f))
+                    Switch(checked = blockScreenshots, onCheckedChange = { blockScreenshots = it })
+                }
+                Text("ON = impedisce screenshot e registrazioni dell'app (anche i tuoi). Riavvia l'app per applicare.", color = AppColors.Muted, fontSize = 12.sp)
             }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

@@ -50,6 +50,7 @@ data class AppSettings(
     val sidebarAccount: Boolean = AppDefaults.sidebarAccount,
     val sidebarRecenti: Boolean = AppDefaults.sidebarRecenti,
     val backgroundWork: Boolean = AppDefaults.backgroundWork,
+    val blockScreenshots: Boolean = AppDefaults.blockScreenshots,
     /** Auto-approvazione run: "off" (chiedi sempre), "session", "always". Mai "deny" automatico. */
     val autoApprove: String = AppDefaults.autoApprove
 )
@@ -113,6 +114,7 @@ internal fun loadSettings(context: Context): AppSettings {
         sidebarAccount = prefs.getBoolean("sidebarAccount", AppDefaults.sidebarAccount),
         sidebarRecenti = prefs.getBoolean("sidebarRecenti", AppDefaults.sidebarRecenti),
         backgroundWork = prefs.getBoolean("backgroundWork", AppDefaults.backgroundWork),
+        blockScreenshots = prefs.getBoolean("blockScreenshots", AppDefaults.blockScreenshots),
         autoApprove = prefs.getString("autoApprove", AppDefaults.autoApprove)?.takeIf { it in setOf("off", "session", "always") } ?: AppDefaults.autoApprove
     )
     return normalizePlugAndPlaySettings(context, settings)
@@ -212,6 +214,7 @@ internal fun saveSettings(context: Context, settings: AppSettings) {
         putBoolean("sidebarAccount", settings.sidebarAccount)
         putBoolean("sidebarRecenti", settings.sidebarRecenti)
         putBoolean("backgroundWork", settings.backgroundWork)
+        putBoolean("blockScreenshots", settings.blockScreenshots)
         putString("autoApprove", settings.autoApprove.takeIf { it in setOf("off", "session", "always") } ?: AppDefaults.autoApprove)
     }
 }
@@ -261,6 +264,7 @@ internal object AppDefaults {
     const val sidebarAccount = true
     const val sidebarRecenti = true
     const val backgroundWork = true
+    const val blockScreenshots = false
     const val autoApprove = "off"
     const val releasesPage = "https://github.com/JackoPeru/HermesHub/releases"
     const val latestReleaseApi = "https://api.github.com/repos/JackoPeru/HermesHub/releases/latest"

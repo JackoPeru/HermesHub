@@ -42,6 +42,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableFloatStateOf
@@ -283,25 +284,29 @@ internal suspend fun previewVoiceProfile(
 @Composable
 internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartToken: Long = 0L) {
     val context = LocalContext.current
+    // applicationContext per prefs/permessi/toast: nessun retain dell'Activity.
+    val appContext = context.applicationContext
     val view = LocalView.current
     val vm: VoiceCallViewModel = viewModel()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var startRequested by remember { mutableStateOf(false) }
+    // Visibilita' schermata: il campo particellare anima solo quando visibile.
+    var isVisible by remember { mutableStateOf(true) }
     val voiceProfile = remember(settings.activeProjectId) {
-        loadVoiceProfile(context, settings.activeProjectId)
+        loadVoiceProfile(appContext, settings.activeProjectId)
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
             startRequested = true
         } else {
-            Toast.makeText(context, "Permesso microfono negato.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(appContext, "Permesso microfono negato.", Toast.LENGTH_SHORT).show()
         }
     }
 
     LaunchedEffect(autoStartToken) {
         if (autoStartToken == 0L || vm.callActive) return@LaunchedEffect
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             startRequested = true
         } else {
             permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -321,7 +326,7 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
     }
 
     DisposableEffect(view) {
-        val activity = context as? Activity
+        val activity = view.context as? Activity ?: context as? Activity
         val controller = activity?.let { WindowInsetsControllerCompat(it.window, view) }
         controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         controller?.hide(WindowInsetsCompat.Type.systemBars())
@@ -331,11 +336,17 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
     // Ends the call when the screen is really gone. Rotation also destroys the
     // Activity, but with isChangingConfigurations=true — the ViewModel (and the
     // call inside it) survives that case untouched.
+    // Stessa semantica di release di prima + tracking visibilita' per il loop.
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_DESTROY) {
-                val activity = context as? Activity
-                if (activity?.isChangingConfigurations != true) vm.shutdown()
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> isVisible = true
+                Lifecycle.Event.ON_PAUSE -> isVisible = false
+                Lifecycle.Event.ON_DESTROY -> {
+                    val activity = view.context as? Activity ?: context as? Activity
+                    if (activity?.isChangingConfigurations != true) vm.shutdown()
+                }
+                else -> Unit
             }
         }
         lifecycle.addObserver(observer)
@@ -354,6 +365,8 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
             assembled = assembled,
             speaking = speaking,
             particleShape = voiceProfile.particleShape,
+            isVisible = isVisible,
+            callActive = callActive,
             modifier = Modifier.fillMaxSize()
         )
 
@@ -372,7 +385,7 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
                         } else {
                             vm.endCall(settings, apiKey)
                         }
-                    } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                    } else if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                         startRequested = true
                     } else {
                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -452,12 +465,23 @@ private fun VoiceParticleField(
     assembled: Boolean,
     speaking: Boolean,
     particleShape: String,
+    isVisible: Boolean,
+    callActive: Boolean,
     modifier: Modifier = Modifier
 ) {
     val particles = remember(particleShape) { buildVoiceParticles(particleShape) }
     var assembly by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(assembled) {
+    // Animazione assembly solo quando visibile; fuori schermo snap senza withFrameNanos.
+    LaunchedEffect(assembled, isVisible) {
         val target = if (assembled) 1f else 0f
+        if (!isVisible) {
+            assembly = target
+            return@LaunchedEffect
+        }
+        if (abs(assembly - target) <= 0.001f) {
+            assembly = target
+            return@LaunchedEffect
+        }
         val duration = if (assembled) 2.8f else 1.2f
         var previousFrame = withFrameNanos { it }
         while (abs(assembly - target) > 0.001f) {
@@ -469,8 +493,14 @@ private fun VoiceParticleField(
         assembly = target
     }
     var time by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(Unit) {
-        val start = withFrameNanos { it }
+    // Loop temporale SOLO quando visibile e (chiamata attiva o parlato):
+    // a riposo frame statico, niente withFrameNanos. Stessa estetica quando attivo.
+    val timeActive by remember(isVisible, callActive, speaking) {
+        derivedStateOf { isVisible && (callActive || speaking) }
+    }
+    LaunchedEffect(timeActive) {
+        if (!timeActive) return@LaunchedEffect
+        val start = withFrameNanos { it } - (time * 1_000_000_000f).toLong()
         while (true) time = (withFrameNanos { it } - start) / 1_000_000_000f
     }
 
@@ -1286,9 +1316,11 @@ private fun writePcmWav(file: File, pcm: ByteArray, sampleRate: Int) {
     }
 }
 
+internal const val VoiceParticleCount = 220
+
 private fun buildVoiceParticles(particleShape: String): List<VoiceParticle> {
     val random = Random(8642)
-    val particleCount = 680
+    val particleCount = VoiceParticleCount
     return List(particleCount) { index ->
         val target = when (particleShape) {
             NeuralCoreParticleShape -> buildNeuralCoreTarget(index, particleCount, random)

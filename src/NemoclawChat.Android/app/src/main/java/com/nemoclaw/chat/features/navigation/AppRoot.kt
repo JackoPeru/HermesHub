@@ -312,7 +312,11 @@ internal fun ChatApp() {
     var pendingBot by remember { mutableStateOf<BotChatContext?>(null) }
     var sidebarOpen by rememberSaveable { mutableStateOf(false) }
     var savedDraft by rememberSaveable { mutableStateOf("") }
-    val chatState = remember { ChatStateHolder().apply { draft = savedDraft } }
+    // Retained alla rotazione via ViewModel (prima: remember = stato perso).
+    val chatViewModel: ChatViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val chatState = remember(chatViewModel) {
+        chatViewModel.chatState.apply { if (draft.isBlank()) draft = savedDraft }
+    }
     val incoming = IncomingIntentBus.request
     LaunchedEffect(incoming.version) {
         if (incoming.version == 0L) return@LaunchedEffect
@@ -323,12 +327,6 @@ internal fun ChatApp() {
             createAttachmentFromUri(context, incoming.uri.toUri(), settings.maxAttachmentMb)?.let { attachment -> chatState.pendingAttachments.add(attachment) }
         }
         setSelectedTab(tabForIncomingRoute(incoming.tab))
-    }
-    LaunchedEffect(chatState.activeStreams.size) {
-        while (chatState.activeStreams.isNotEmpty()) {
-            chatState.streamUiTickNs = System.nanoTime()
-            delay(500L)
-        }
     }
     LaunchedEffect(
         selectedTab,

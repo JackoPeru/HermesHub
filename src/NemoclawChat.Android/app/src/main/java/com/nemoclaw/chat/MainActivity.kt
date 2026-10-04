@@ -1,12 +1,14 @@
 package com.nemoclaw.chat
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.StrictMode
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
@@ -43,6 +45,7 @@ class MainActivity : ComponentActivity() {
             )
         }
         super.onCreate(savedInstanceState)
+        runCatching { applyScreenshotBlock(this, loadSettings(this).blockScreenshots) }
         handleIncomingIntent(intent)
         ensureHermesNotificationChannel(this)
         requestHermesNotificationPermission()
@@ -201,4 +204,19 @@ internal fun parseHermesDeepLink(raw: String?): ParsedHermesDeepLink? {
         }
     }
     return ParsedHermesDeepLink(tab = host, conversationId = conversationId, prompt = prompt)
+}
+
+/**
+ * Calcolo puro dei flag screenshot: aggiunge/rimuove FLAG_SECURE preservando gli altri bit.
+ * Testabile in unit test JVM (FLAG_SECURE e' costante inline, nessuna chiamata framework).
+ */
+internal fun applyScreenshotBlock(currentFlags: Int, enabled: Boolean): Int {
+    return if (enabled) currentFlags or WindowManager.LayoutParams.FLAG_SECURE
+    else currentFlags and WindowManager.LayoutParams.FLAG_SECURE.inv()
+}
+
+/** Applica FLAG_SECURE alla window solo se [enabled]; riusabile da qualsiasi Activity. */
+internal fun applyScreenshotBlock(activity: Activity, enabled: Boolean) {
+    if (enabled) activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
 }

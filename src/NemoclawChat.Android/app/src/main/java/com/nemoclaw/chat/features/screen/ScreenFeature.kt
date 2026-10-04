@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.nemoclaw.chat.AppColors
 import com.nemoclaw.chat.AppSettings
+import com.nemoclaw.chat.BitmapImageLoader
 import com.nemoclaw.chat.ScreenStatusInfo
 import com.nemoclaw.chat.buildScreenViewerUrl
 import com.nemoclaw.chat.buildScreenWsUrl
@@ -91,13 +92,13 @@ internal fun ScreenViewer(
     onViewerState: (String) -> Unit = {},
     onTicket: (ticketViewerId: String) -> Unit = {}
 ) {
-    val context = LocalContext.current
+    val appContext = LocalContext.current.applicationContext
     var viewerUrl by remember { mutableStateOf<String?>(null) }
     var loadNonce by remember { mutableStateOf(0) }
     val webViewRef = remember { arrayOfNulls<android.webkit.WebView>(1) }
     LaunchedEffect(loadNonce) {
         if (loadNonce == 0) return@LaunchedEffect
-        val key = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+        val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
         val base = gpuManagerBase(settings.gatewayUrl)
         val minted = withContext(Dispatchers.IO) { postScreenTicket(settings, key) }
         if (minted == null) {
@@ -198,13 +199,25 @@ internal fun ScreenPreviewImage(
     width: Int = 480,
     refreshMs: Long = 5_000L
 ) {
-    val context = LocalContext.current
+    // applicationContext: nessun retain dell'Activity nel polling.
+    val appContext = LocalContext.current.applicationContext
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var lastSignature by remember { mutableStateOf<BitmapImageLoader.FrameSignature?>(null) }
     LaunchedEffect(settings.gatewayUrl, width) {
+        lastSignature = null
         while (isActive) {
-            val key = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+            val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
             val bytes = withContext(Dispatchers.IO) { fetchScreenFrameBytes(settings, key, width) }
-            bitmap = decodeScreenFrame(bytes)
+            // Skip re-decode se i byte sono identici ai precedenti (hash+lunghezza).
+            val signature = BitmapImageLoader.frameSignature(bytes)
+            if (signature != null && signature == lastSignature) {
+                delay(refreshMs)
+                continue
+            }
+            lastSignature = signature
+            // reqWidth = larghezza view (loader: sampling + cache).
+            val decoded = withContext(Dispatchers.IO) { decodeScreenFrame(bytes, width) }
+            bitmap = decoded
             delay(refreshMs)
         }
     }
@@ -230,6 +243,8 @@ internal fun ScreenScreen(
     settings: AppSettings,
     onOpenBot: () -> Unit = {}
 ) {
+    // applicationContext: il polling trattiene solo il contesto app, mai l'Activity.
+    val appContext = context.applicationContext
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<ScreenStatusInfo?>(null) }
     var statusError by remember { mutableStateOf("") }
@@ -240,7 +255,7 @@ internal fun ScreenScreen(
     var reloadNonce by remember { mutableStateOf(0) }
 
     suspend fun refreshStatus(): ScreenStatusInfo? {
-        val key = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+        val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
         return withContext(Dispatchers.IO) { getScreenStatus(settings, key) }
     }
 
@@ -262,7 +277,7 @@ internal fun ScreenScreen(
         scope.launch {
             busy = true
             try {
-                val key = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
                 val ok = withContext(Dispatchers.IO) { postScreenTakeover(settings, key, viewerId.ifBlank { null }) }
                 if (ok) {
                     holding = true
@@ -280,7 +295,7 @@ internal fun ScreenScreen(
         scope.launch {
             busy = true
             try {
-                val key = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
                 withContext(Dispatchers.IO) { postScreenRelease(settings, key, viewerId.ifBlank { null }) }
                 holding = false
                 reloadNonce++
