@@ -19,6 +19,11 @@ import time
 import urllib.request
 import uuid
 import wave
+
+try:
+    import triage as _triage_mod
+except ImportError:
+    _triage_mod = None  # type: ignore[assignment]
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -1212,6 +1217,19 @@ async def finish_media_job(jid: str, prompt_id: str, entry: dict, vram_peak: flo
         vram_peak_mb=vram_peak,
     )
     log.info("job %s complete (%d files)", jid, len(saved))
+    try:
+        params = (get_job(jid) or {}).get("parameters") or {}
+    except Exception:  # noqa: BLE001 - publish is best effort
+        params = {}
+    if isinstance(params, dict) and params.get("smart"):
+        urls = await publish_smart_results(jid, saved + derivatives)
+        if urls:
+            params = dict(params)
+            params["media_urls"] = urls
+            db = _db_conn()
+            db.execute("UPDATE jobs SET params=? WHERE id=?",
+                       (json.dumps(params), jid))
+            db.commit()
     return True
 
 
@@ -1592,6 +1610,116 @@ async def worker_loop() -> None:
         await asyncio.sleep(2)
 
 
+# ------------------------------------------------------- smart fast path ---
+# POST /jobs/smart {text, input_images?}: triage (laya, fallback regole) ->
+# se media, prompt generato con UNA sola chiamata LLM (niente turn agentico),
+# submit interno e job_id. Altrimenti {"media": false} e il chiamante usa
+# il flusso chat normale. Mai solleva oltre HTTPException intenzionali.
+
+SMART_PROMPT_SYSTEM = (
+    "You translate the user's image/video request into ONE English diffusion "
+    "prompt. Output only the prompt, no quotes, no commentary, max 60 words. "
+    "Preserve subject, style, composition, lighting and mood from the request."
+)
+
+
+def _smart_cfg() -> dict:
+    cfg = CONFIG.get("smart", {})
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _smart_backend():
+    if _triage_mod is None:
+        return None
+    cfg = _smart_cfg()
+    if str(cfg.get("backend", "laya")).lower() == "rules":
+        return _triage_mod.RulesBackend()
+    return _triage_mod.LayaBackend(
+        url=str(cfg.get("laya_url", "http://127.0.0.1:11435")),
+        model=str(cfg.get("laya_model", "laya:multilingual")),
+        min_confidence=float(cfg.get("min_confidence", 0.75)),
+    )
+
+
+async def prompt_only_llm(user_text: str) -> str | None:
+    """One short LLM call, no tools. Returns the prompt or None."""
+    cfg = _smart_cfg()
+    code, body = await _http_async(
+        "POST",
+        llm_base() + "/v1/chat/completions",
+        {
+            "model": str(CONFIG["llm"].get("health_model") or "hermes-agent"),
+            "messages": [
+                {"role": "system", "content": SMART_PROMPT_SYSTEM},
+                {"role": "user", "content": user_text[:2000]},
+            ],
+            "max_tokens": int(cfg.get("prompt_max_tokens", 250)),
+            "temperature": 0.3,
+            "stream": False,
+        },
+        timeout=180,
+    )
+    if code != 200:
+        log.warning("smart: prompt-only LLM rc=%s", code)
+        return None
+    try:
+        content = json.loads(body)["choices"][0]["message"]["content"]
+        text = str(content or "").strip().strip('"')
+        return text or None
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, AttributeError):
+        return None
+
+
+def _submit_preset_job(kind_hint: str, preset: str, params: dict) -> tuple[dict | None, str, int]:
+    """Shared preset submit used by /jobs/image, /jobs/video and /jobs/smart."""
+    spec = PRESETS.get(preset)
+    if not spec:
+        return None, f"unknown preset {preset!r}", 400
+    if spec.get("disabled"):
+        return None, f"preset {preset} disabled: {spec['disabled']}", 409
+    kind = spec.get("kind", kind_hint)
+    tmp_id = "tmp"
+    workflow, problem = render_preset(preset, params, tmp_id)
+    if problem:
+        return None, problem, 400
+    job = create_job(kind, workflow, preset=preset,
+                     backend=str(spec.get("backend", "")),
+                     model=str(spec.get("model", "")), params=params)
+    workflow, problem = render_preset(preset, params, job["job_id"])
+    if problem:  # pragma: no cover - render already succeeded once
+        update_job(job["job_id"], status="failed", error=problem)
+        return None, problem, 400
+    db = _db_conn()
+    db.execute("UPDATE jobs SET workflow=? WHERE id=?", (json.dumps(workflow), job["job_id"]))
+    db.commit()
+    return get_job(job["job_id"]), "", 202
+
+
+async def publish_smart_results(jid: str, paths: list[str]) -> list[str]:
+    """Copy smart-job outputs where the hub serves /v1/media/* names."""
+    cfg = _smart_cfg()
+    root = Path(str(cfg.get("hub_uploads", "/home/matteo/.hermes/hub_uploads")))
+    urls: list[str] = []
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        log.warning("smart publish: hub_uploads not writable: %s", exc)
+        return urls
+    for src in paths:
+        name = Path(str(src)).name
+        if not name or ".." in name:
+            continue
+        dest = root / f"{jid}_{name}"
+        try:
+            if not Path(str(src)).is_file():
+                continue
+            shutil.copy2(src, dest)
+            urls.append(f"/v1/media/{dest.name}")
+        except OSError as exc:
+            log.warning("smart publish: copy failed %s: %s", src, exc)
+    return urls
+
+
 # -------------------------------------------------------------------- api ---
 
 app = FastAPI(title="Hermes GPU Manager", version="1.0.0",
@@ -1764,28 +1892,10 @@ async def submit_job(request: Request, _: None = Depends(require_key)) -> JSONRe
         if alias in body and alias not in params:
             params[alias] = body[alias]
     if preset:
-        spec = PRESETS.get(preset)
-        if not spec:
-            raise HTTPException(400, f"unknown preset {preset!r}")
-        if spec.get("disabled"):
-            raise HTTPException(409, f"preset {preset} disabled: {spec['disabled']}")
-        kind = spec.get("kind", kind)
-        # placeholder job id is replaced after creation: render with temp id then fix
-        tmp_id = "tmp"
-        workflow, problem = render_preset(preset, params, tmp_id)
+        job, problem, code = _submit_preset_job(kind, preset, params)
         if problem:
-            raise HTTPException(400, problem)
-        job = create_job(kind, workflow, preset=preset,
-                         backend=str(spec.get("backend", "")),
-                         model=str(spec.get("model", "")), params=params)
-        workflow, problem = render_preset(preset, params, job["job_id"])
-        if problem:  # pragma: no cover - render already succeeded once
-            update_job(job["job_id"], status="failed", error=problem)
-            raise HTTPException(400, problem)
-        db = _db_conn()
-        db.execute("UPDATE jobs SET workflow=? WHERE id=?", (json.dumps(workflow), job["job_id"]))
-        db.commit()
-        job = get_job(job["job_id"])
+            raise HTTPException(code, problem)
+        assert job is not None
     else:
         workflow = body.get("workflow", body.get("prompt", body))
         if isinstance(workflow, dict) and "prompt" in workflow and isinstance(workflow["prompt"], dict):
@@ -1797,6 +1907,51 @@ async def submit_job(request: Request, _: None = Depends(require_key)) -> JSONRe
     log.info("AUTO: media job received %s", job["job_id"])
     return JSONResponse({"job_id": job["job_id"], "status": "queued",
                          "preset": job.get("preset", "")}, status_code=202)
+
+
+@app.post("/jobs/smart")
+async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSONResponse:
+    """Triage fast path: {text, input_images?} -> triage -> prompt-only LLM
+    -> internal submit. Returns {"media": false} when this is not a media
+    task (caller uses the normal chat flow), 409 when the LLM is unavailable
+    (caller falls back to chat), 202 with job_id on accept."""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(400, "invalid JSON")
+    cfg = _smart_cfg()
+    if not cfg.get("enabled", True):
+        raise HTTPException(409, "smart fast path disabled")
+    if _triage_mod is None:
+        raise HTTPException(500, "triage module unavailable")
+    text = str(body.get("text", "") or "")
+    images = body.get("input_images", []) or []
+    if isinstance(images, str):
+        images = [images]
+    images = [str(p) for p in images[:4]]
+    backend = _smart_backend()
+    decision = _triage_mod.triage(text, bool(images), backend=backend)
+    if not decision.media or not decision.preset:
+        return JSONResponse({"media": False, "reason": decision.reason})
+    if not await llm_loaded():
+        return JSONResponse({"media": False, "reason": "llm-unloaded",
+                             "fallback": True})
+    prompt = await prompt_only_llm(decision.prompt_hint or text)
+    if not prompt:
+        raise HTTPException(502, "prompt-only LLM call failed")
+    spec = PRESETS.get(decision.preset) or {}
+    job, problem, code = _submit_preset_job(
+        spec.get("kind", "image"), decision.preset,
+        {"prompt": prompt, "input_images": images,
+         "smart": True, "smart_text": text[:500],
+         "smart_reason": decision.reason})
+    if problem or job is None:
+        raise HTTPException(code, problem or "submit failed")
+    log.info("SMART: %s preset=%s prompt=%.60s",
+             job["job_id"], decision.preset, prompt)
+    return JSONResponse({"media": True, "job_id": job["job_id"],
+                         "status": "queued", "preset": decision.preset,
+                         "prompt": prompt}, status_code=202)
 
 
 @app.get("/jobs")

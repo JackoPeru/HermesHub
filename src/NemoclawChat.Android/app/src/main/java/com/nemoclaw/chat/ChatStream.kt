@@ -755,7 +755,7 @@ data class ChatInputAttachment(
     val localFilePath: String? = null
 )
 
-private data class UploadedAttachmentRef(
+internal data class UploadedAttachmentRef(
     val filename: String,
     val mimeType: String,
     val path: String?,
@@ -1517,7 +1517,7 @@ private suspend fun buildPromptWithAttachmentToolRefs(
     return AttachmentPreparation(text, remaining, uploaded.size, errors)
 }
 
-private suspend fun uploadAttachmentForTool(
+internal suspend fun uploadAttachmentForTool(
     settings: AppSettings,
     attachment: ChatInputAttachment,
     apiKey: String?,

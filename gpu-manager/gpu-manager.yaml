@@ -26,6 +26,18 @@ media:
   job_timeout_video: 3600
   poll_interval: 2.0
 
+# Smart fast path: triage (laya, fallback regole) -> prompt-only LLM ->
+# submit interno. Solo con LLM residente; altrimenti 409 e il chiamante
+# usa il flusso chat normale.
+smart:
+  enabled: true
+  backend: laya
+  laya_url: http://127.0.0.1:11435
+  laya_model: laya:multilingual
+  min_confidence: 0.75
+  prompt_max_tokens: 250
+  hub_uploads: /home/matteo/.hermes/hub_uploads
+
 # Voce con LLM: Kokoro TTS + UniNote STT partono e scaldano a ogni restore
 # LLM, si fermano quando i media prendono le GPU. Mai fatali.
 # kokoro_key vive solo in /etc (segreto locale, mai nel repo).

@@ -996,12 +996,25 @@ internal fun ChatScreen(
                         val initialActiveState = state.activeStreams[streamCid] ?: ActiveStreamState(null, null)
                         state.activeStreams[activeStreamCid] = initialActiveState.copy(streamingState = localState, job = coroutineContext[kotlinx.coroutines.Job])
 
+                        // Fast path media: con allegati si tenta /jobs/smart prima del
+                        // turn agentico (triage -> prompt-only -> submit). Rifiutato o
+                        // fallito -> flusso normale invariato.
+                        var smartJob: SmartAccepted? = null
+                        var smartHandled = false
+                        var smartStatus: ChatMessage? = null
+                        if (attachments.isNotEmpty()) {
+                            smartJob = trySmartMediaSend(
+                                context, settings, botApiKey, botProfile,
+                                botMultiplexEnabled, botAllowCompatAuth, text, attachments
+                            )
+                        }
+
                         // Percorso primario: Sessions API quando capability presente, altriment legacy.
                         // Nessun fallback invisibile su 401/403 profile scope.
                         val capsSnapshot = state.chatCapabilities
                         val useSessions = capsSnapshot?.supportsModernSessions() == true && botSessionId.isNullOrBlank()
                         var sessionIdForTurn: String? = null
-                        if (useSessions) {
+                        if (smartJob == null && useSessions) {
                             state.sessionRoute = "sessions"
                             sessionIdForTurn = try {
                                 withContext(Dispatchers.IO) {
@@ -1115,7 +1128,15 @@ internal fun ChatScreen(
                         }
 
                         try {
-                            if (sessionIdForTurn != null) {
+                            if (smartJob != null) {
+                                val managerBase = gpuManagerBase(settings.gatewayUrl)
+                                val managerKey = loadGatewaySecret(context)
+                                smartHandled = runSmartCompletion(
+                                    context, state, settings, managerBase, managerKey,
+                                    activeStreamCid, displayText,
+                                    smartJob, attachments
+                                ) { smartStatus = it }
+                            } else if (sessionIdForTurn != null) {
                                 val sessionSettings = botSettings.copy(
                                     model = effModel,
                                     provider = effProvider,
@@ -1180,6 +1201,12 @@ internal fun ChatScreen(
                             }
                         } catch (_: CancellationException) {
                             interrupted = true
+                            if (smartJob != null && !smartHandled) {
+                                // Stop durante il fast path: via lo stato, allegati
+                                // ripristinati (file ancora in cache) per reinviare.
+                                smartStatus?.let { state.messages.remove(it) }
+                                state.pendingAttachments.addAll(attachments)
+                            }
                         } catch (ex: Exception) {
                             val message = ex.message?.takeIf { it.isNotBlank() } ?: ex.javaClass.simpleName
                             localState = localState.applyEvent(ChatStreamEvent.Error("Errore runtime Hermes: $message"))
@@ -1227,6 +1254,9 @@ internal fun ChatScreen(
                                 }
                             }
 
+                            // Fast path gestito: messaggi + snapshot gia fatti in
+                            // runSmartCompletion, qui solo cleanup sotto.
+                            if (!smartHandled) {
                             val newMessagesToAppend = mutableListOf<ChatMessage>()
 
                             if (finalState.activityTimeline.isNotEmpty() || finalText.isNotEmpty() || finalState.visualBlocks.isNotEmpty()) {
@@ -1279,6 +1309,7 @@ internal fun ChatScreen(
                             if (state.activeConversationId == activeStreamCid) {
                                 state.messages.addAll(newMessagesToAppend)
                             }
+                            } // fine append normali (smart: gia fatti in runSmartCompletion)
 
                             val saved = withContext(NonCancellable + Dispatchers.IO) {
                                 saveConversationSnapshot(
@@ -1286,8 +1317,8 @@ internal fun ChatScreen(
                                     conversationId = activeStreamCid,
                                     mode = mode,
                                     prompt = displayText,
-                                    messages = localHistory.toList(),
-                                    source = if (interrupted) "Hermes interrotto" else if (finalState.error != null) "Errore Hermes" else if (state.sessionRoute == "sessions") "Sessione Hermes" else "Hermes",
+                                    messages = if (smartHandled) state.messages.toList() else localHistory.toList(),
+                                    source = if (smartHandled) "Hermes fast path" else if (interrupted) "Hermes interrotto" else if (finalState.error != null) "Errore Hermes" else if (state.sessionRoute == "sessions") "Sessione Hermes" else "Hermes",
                                     responseId = finalState.responseId ?: prevId,
                                     hermesSessionId = state.hermesSessionId,
                                     modelOverride = state.chatModelOverride,
@@ -1298,7 +1329,18 @@ internal fun ChatScreen(
                                     syncAfterSave = !interrupted
                                 )
                             }
-                            if (state.activeConversationId == activeStreamCid) {
+                            if (smartHandled) {
+                                // Cleanup fast path: niente saved/response, solo reset stato.
+                                if (state.activeConversationId == activeStreamCid) {
+                                    val current = state.activeStreams[activeStreamCid]
+                                    if (current == null || current.job == null || current.job === collectorJob) {
+                                        state.streamingState = null
+                                        state.activeStreamJob = null
+                                    }
+                                } else {
+                                    state.activeStreams.remove(activeStreamCid)
+                                }
+                            } else if (state.activeConversationId == activeStreamCid) {
                                 // Ripulisci solo se nessun invio successivo ha preso il posto di
                                 // questo stream: altrimenti cancelleresti lo stato del nuovo turno.
                                 val current = state.activeStreams[activeStreamCid]
