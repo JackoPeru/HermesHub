@@ -1,21 +1,15 @@
-Hermes Hub 0.6.209 (audit completo app + H3 split)
+Hermes Hub 0.6.210 (upload/nav fix + voce in VRAM)
 
-- App: single-flight approvazioni UI/service con retry su fallimento,
-  no-downgrade always/session, rehydrate foreground service con
-  START_REDELIVER, stop idempotente, backoff poll.
-- App: timeout SSE finiti con watchdog 90 s, risposte tronche marcate,
-  upload parziali bloccanti, retry immagini remote, TTS con stop,
-  download resistenti allo scroll, registrazioni troppo brevi gestite.
-- App: deeplink validati (prompt solo in bozza), notifiche private su
-  lockscreen, export cifrato (Keystore + password opzionale),
-  blocco screenshot opt-in.
-- App: navigazione su Navigation-Compose (20 tab, UX invariata), poll
-  unificati lifecycle-aware, ChatFeature in 7 file, bitmap loader con
-  cache LRU, stato chat nel ViewModel, nessun ticker globale.
-- Manager/agente: H3MultiStream nel workflow i2v-turbo (split 2 GPU,
-  testato live: preview ok senza OOM).
-- Versioni: Windows/AdminBridge `0.6.209`; Android `versionName 0.6.209`, `versionCode 213`.
-- Asset: `HermesHub-0.6.209-android.apk` (binario Windows invariato).
-- SHA-256 Android: `e21c34f717c1de339a1cd783e2dd75b83df576d0eb9227dec640b377f62dfdde`.
-- Asset: `HermesHub-0.6.209-linux-gateway.tar.gz`.
-- SHA-256 gateway: `7812c3b20689ee8fb7501172440636e7fd4f756f51c3b784c64d4daa3e596777`.
+- App: upload allegati con Content-Length esplicito (risolve HTTP 411
+  "Content-Length required", niente piu chunked).
+- App: cambio tab senza flash (transizioni azzerate, istanza singola
+  per tab, nessun fallback transitorio a Chat).
+- Server: Kokoro TTS int8 su CUDA (344 MB VRAM) + UniNote STT scaldato
+  (2.1 GB VRAM); il manager li tiene con l'LLM (stop su media/direct
+  per liberare VRAM a Comfy, restart+warm a ogni restore LLM, check
+  dal watchdog; supporto user-units systemd).
+- Versioni: Windows/AdminBridge `0.6.210`; Android `versionName 0.6.210`, `versionCode 214`.
+- Asset: `HermesHub-0.6.210-android.apk` (binario Windows invariato).
+- SHA-256 Android: `0b5c32ec0b92bde5353d7ed4be65802cd785826574f0146058302f25926180e6`.
+- Asset: `HermesHub-0.6.210-linux-gateway.tar.gz`.
+- SHA-256 gateway: `9b682f24c6dcda4149d7cd33d40ef8b367b1f4c37fee4583f8b3e129e5c3e0c6`.

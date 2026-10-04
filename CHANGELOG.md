@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.210 - 2026-10-04
+
+- App: upload allegati con Content-Length esplicito (fix 411), navigazione
+  senza flash (no-anim, istanza singola per tab, nessun fallback a Chat).
+- Manager: TTS/STT sempre con l'LLM (Kokoro int8 su CUDA, warmup STT,
+  stop su media/direct, ensure dal watchdog); supporto user-units systemd.
+
 ## 0.6.209 - 2026-10-04
 
 - Audit completo app in 3 run: single-flight approvazioni + no-downgrade,
