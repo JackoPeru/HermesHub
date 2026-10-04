@@ -1,15 +1,16 @@
-Hermes Hub 0.6.210 (upload/nav fix + voce in VRAM)
+Hermes Hub 0.6.211 (audit run 4-5 + certificazione)
 
-- App: upload allegati con Content-Length esplicito (risolve HTTP 411
-  "Content-Length required", niente piu chunked).
-- App: cambio tab senza flash (transizioni azzerate, istanza singola
-  per tab, nessun fallback transitorio a Chat).
-- Server: Kokoro TTS int8 su CUDA (344 MB VRAM) + UniNote STT scaldato
-  (2.1 GB VRAM); il manager li tiene con l'LLM (stop su media/direct
-  per liberare VRAM a Comfy, restart+warm a ogni restore LLM, check
-  dal watchdog; supporto user-units systemd).
-- Versioni: Windows/AdminBridge `0.6.210`; Android `versionName 0.6.210`, `versionCode 214`.
-- Asset: `HermesHub-0.6.210-android.apk` (binario Windows invariato).
-- SHA-256 Android: `0b5c32ec0b92bde5353d7ed4be65802cd785826574f0146058302f25926180e6`.
-- Asset: `HermesHub-0.6.210-linux-gateway.tar.gz`.
-- SHA-256 gateway: `9b682f24c6dcda4149d7cd33d40ef8b367b1f4c37fee4583f8b3e129e5c3e0c6`.
+- App: timeout finiti anche sul polling run SSE con watchdog, claim
+  approvazioni/stop bounded LRU con rilascio a esaurimento, viewer
+  immagini con errore e Riprova, costanti centralizzate (WorkLimits),
+  dead code rimosso, resConfigs.
+- App: restore backup completo e sicuro (backup-wins non-sensibili,
+  dry-run atomico, doppia conferma), pendingBot oltre il process death.
+- Certificazione: ruff pulito, 245 test Python verdi (incluso test
+  riesumato da shadowing con semantica aggiornata), contratto
+  visual-blocks ok, 283 test Android + lint release verdi.
+- Versioni: Windows/AdminBridge `0.6.211`; Android `versionName 0.6.211`, `versionCode 215`.
+- Asset: `HermesHub-0.6.211-android.apk` (binario Windows invariato).
+- SHA-256 Android: `06b49254af66ec45b324d7e2b04e69248e8dfa1b8743a9a434b3f4fce5d121e7`.
+- Asset: `HermesHub-0.6.211-linux-gateway.tar.gz`.
+- SHA-256 gateway: `c5835bbba84dfd68b32e0874d7aac3ea60452f18214ade451d70b8b07a355055`.

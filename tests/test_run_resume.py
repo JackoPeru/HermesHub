@@ -15,7 +15,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts" / "hermes_hub_gateway"))
 
-import run_resume as rr
+import run_resume as rr  # noqa: E402 (sys.path setup sopra)
 
 
 def load_legacy_patcher():
@@ -218,13 +218,16 @@ class ReconcileTests(unittest.TestCase):
             self.assertEqual(deps.posts, [])
 
     def test_shutdown_cancel_without_user_stop_is_resumable(self):
-        # Upstream-cancelled WITHOUT a user stop is shutdown-caused: resumable.
+        # Upstream-cancelled WITHOUT a user stop is shutdown-caused: recorded
+        # as interrupted/shutdown (resumable later via reconcile_all adoption),
+        # never mirrored as terminal and never resumed inline here.
         store, _ = make_store()
         self._tracked(store)
         simulate_reboot(store)
         deps = FakeDeps(statuses={"run_1": "cancelled"}, counts={"sess_1": 4})
-        self.assertEqual(rr.reconcile_row(store, store.get("run_1"), deps), "resuming")
-        self.assertEqual(len(deps.posts), 1)
+        self.assertEqual(rr.reconcile_row(store, store.get("run_1"), deps), "interrupted")
+        self.assertEqual(store.get("run_1")["cancel_origin"], "shutdown")
+        self.assertEqual(deps.posts, [])
 
     def test_waiting_for_approval_needs_recovery(self):
         store, _ = make_store()
@@ -407,7 +410,7 @@ class ReconcileTests(unittest.TestCase):
         self.assertEqual(rr.reconcile_all(store, deps), {})
         self.assertEqual(deps.posts, [])
 
-    def test_shutdown_cancel_without_user_stop_is_resumable(self):
+    def test_shutdown_drain_cancel_without_user_stop_is_resumable(self):
         store, _ = make_store()
         self._tracked(store)
         store.record_started("run_1", "web_search", {"query": "x"})

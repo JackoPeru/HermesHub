@@ -2,6 +2,15 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.211 - 2026-10-04
+
+- App run 4-5: timeout anche sul polling run SSE, claim bounded LRU con
+  rilascio stop a esaurimento, viewer immagini con retry, costanti
+  centralizzate, dead code rimosso, restore backup completo e sicuro,
+  pendingBot oltre il process death.
+- Certificazione repo: ruff pulito, 245 test Python verdi, contratto
+  visual-blocks ok.
+
 ## 0.6.210 - 2026-10-04
 
 - App: upload allegati con Content-Length esplicito (fix 411), navigazione
