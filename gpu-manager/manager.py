@@ -582,6 +582,26 @@ async def service_active(unit: str) -> bool:
     return code == 0
 
 
+def _user_systemctl_cmd(action: str, unit: str, user: str = "matteo") -> list[str]:
+    return ["sudo", "-n", "-u", user, "env", "XDG_RUNTIME_DIR=/run/user/1000",
+            "systemctl", "--user", action, unit]
+
+
+async def systemctl_user(action: str, unit: str, timeout: int = 180) -> bool:
+    code, out = await _run_async(_user_systemctl_cmd(action, unit), timeout=timeout)
+    if code != 0:
+        log.warning("systemctl --user %s %s rc=%d: %s", action, unit, code, out[-300:])
+        return False
+    return True
+
+
+async def service_active_user(unit: str) -> bool:
+    code, _ = await _run_async(
+        _user_systemctl_cmd("is-active", unit) + ["--quiet"], timeout=15
+    )
+    return code == 0
+
+
 async def unload_llm() -> bool:
     code, body = await _http_async("POST", llm_base() + "/v1/model/unload", {}, timeout=120)
     if code == 200:
@@ -866,7 +886,13 @@ async def restore_llm_with_retries(context: str) -> bool:
 
 def voice_services() -> list[str]:
     v = CONFIG.get("voice", {})
-    svcs = v.get("services", ["hermes-kokoro-tts.service", "uninote-stt.service"])
+    svcs = v.get("services", ["hermes-kokoro-tts.service"])
+    return [str(s) for s in svcs] if isinstance(svcs, list) else []
+
+
+def voice_user_services() -> list[str]:
+    v = CONFIG.get("voice", {})
+    svcs = v.get("user_services", ["uninote-stt.service"])
     return [str(s) for s in svcs] if isinstance(svcs, list) else []
 
 
@@ -926,6 +952,10 @@ async def ensure_voice_up(force_warm: bool = False) -> None:
         if not await service_active(svc):
             log.info("voice: starting %s", svc)
             await systemctl("start", svc)
+    for svc in voice_user_services():
+        if not await service_active_user(svc):
+            log.info("voice: starting user %s", svc)
+            await systemctl_user("start", svc)
     if not force_warm and time.monotonic() - float(_state.get("voice_warm_ts") or 0.0) < 600:
         return
     problems = await asyncio.to_thread(_voice_warm_sync)
@@ -939,6 +969,8 @@ async def ensure_voice_up(force_warm: bool = False) -> None:
 async def stop_voice() -> None:
     for svc in voice_services():
         await systemctl("stop", svc)
+    for svc in voice_user_services():
+        await systemctl_user("stop", svc)
 
 
 # ------------------------------------------------- direct comfyui ---
@@ -1598,7 +1630,10 @@ async def status(_: None = Depends(require_key)) -> dict:
         "media_online": await media_online(),
         "queue_length": len(queued_jobs()),
         "current_job": _state["current_job"],
-        "voice_services": {svc: await service_active(svc) for svc in voice_services()},
+        "voice_services": (
+            {svc: await service_active(svc) for svc in voice_services()} |
+            {svc: await service_active_user(svc) for svc in voice_user_services()}
+        ),
         "direct_url": direct_public_url(),
         "direct_active": desired == "DIRECT" and state == "DIRECT",
         "media_progress": (current or {}).get("progress", 0.0),
