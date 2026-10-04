@@ -17,8 +17,13 @@ returns media=False and the normal agent turn runs untouched.
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import time
+import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, Sequence
 
 PRESET_CREATE_IMAGE = "create_image"
@@ -35,10 +40,11 @@ _EDIT_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Verbs that request MOTION/video from a photo.
+# Verbs that request MOTION/video from a photo (infinitive + imperative).
 _MOTION_RE = re.compile(
-    r"\b(anima|animami|video|muovi|movimento|moviment[ao]|dagli\s+vita|"
-    r"animate|motion|make\s+it\s+move|turn\s+into\s+a\s+video)\b",
+    r"\b(anima|animare|animami|video|muovi|muovere|movimento|moviment[ao]|"
+    r"dagli\s+vita|dare\s+vita|animate|motion|make\s+it\s+move|"
+    r"turn\s+into\s+a\s+video)\b",
     re.IGNORECASE,
 )
 
@@ -130,6 +136,129 @@ class RulesBackend:
 
 
 DEFAULT_BACKEND = RulesBackend()
+
+
+# Question set Baker: vince il wording semplice (V1) nei test live IT.
+# Non alzare le aspettative: sotto soglia si torna alle regole.
+LAYA_QUESTIONS = {
+    "media_task": {
+        "type": "choice",
+        "instructions": (
+            "Decidi cosa vuole l utente. FOTO ALLEGATA indica se c e una foto. "
+            "Se il testo chiede movimento, animazione o un video scegli "
+            "video_preview. Se chiede di cambiare la foto ferma scegli "
+            "edit_image. Se chiede di creare dal nulla scegli generate_image. "
+            "Altrimenti no_media."
+        ),
+        "criteria": {
+            "generate_image": "creare una immagine da zero, nessuna foto allegata",
+            "edit_image": "cambiare la foto ferma allegata",
+            "video_preview": "dare movimento alla foto, animarla, crearne un video",
+            "no_media": "altro: domande, analisi, chat, nessuna generazione",
+        },
+    }
+}
+
+LAYA_OPTION_TO_PRESET = {
+    "generate_image": PRESET_CREATE_IMAGE,
+    "edit_image": PRESET_EDIT_IMAGE,
+    "video_preview": PRESET_VIDEO_PREVIEW,
+    "no_media": "",
+}
+
+
+def _log_decision(record: dict) -> None:
+    """Decision log for calibration (best effort, never raises)."""
+    try:
+        path = Path(
+            os.environ.get(
+                "HERMES_TRIAGE_LOG",
+                str(Path.home() / ".hermes" / "laya-decisions.jsonl"),
+            )
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = dict(record)
+        record["ts"] = time.time()
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+@dataclass
+class LayaBackend:
+    """Router via ollaya/llama decision model (typed choice, ms latency).
+
+    Trusts laya only above min_confidence; anything lower (or any error)
+    falls back to the rules backend, which is conservative by design.
+    """
+
+    url: str = "http://127.0.0.1:11435"
+    model: str = "laya:multilingual"
+    min_confidence: float = 0.75
+    timeout: int = 15
+    fallback: DecisionBackend | None = None
+
+    def _ask(self, state: str) -> tuple[str, float]:
+        body = json.dumps(
+            {"model": self.model, "state": state, "questions": LAYA_QUESTIONS}
+        ).encode()
+        req = urllib.request.Request(
+            self.url + "/api/decide",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        answer = data["answers"]["media_task"]
+        return str(answer["choice"]), float(answer["confidence"])
+
+    def decide(
+        self,
+        text: str,
+        has_image: bool,
+        history_tail: Sequence[str] = (),
+    ) -> TriageDecision:
+        clean = (text or "").strip()
+        state = f"FOTO ALLEGATA: {'si' if has_image else 'no'}. TESTO: {clean}"
+        choice, confidence = "", 0.0
+        try:
+            choice, confidence = self._ask(state)
+        except Exception as exc:  # noqa: BLE001 - fallback covers everything
+            _log_decision(
+                {"backend": "laya", "error": repr(exc)[:160],
+                 "text": clean[:200], "has_image": has_image}
+            )
+        if choice in LAYA_OPTION_TO_PRESET and confidence >= self.min_confidence:
+            preset = LAYA_OPTION_TO_PRESET[choice]
+            decision = TriageDecision(
+                media=bool(preset),
+                preset=preset,
+                prompt_hint=clean,
+                reason=f"laya:{choice}@{confidence:.2f}",
+                confidence=confidence,
+            )
+            _log_decision(
+                {"backend": "laya", "choice": choice, "confidence": confidence,
+                 "preset": preset, "text": clean[:200], "has_image": has_image}
+            )
+            return decision
+        fb = self.fallback or RulesBackend()
+        decision = fb.decide(clean, has_image, history_tail)
+        decision = TriageDecision(
+            media=decision.media,
+            preset=decision.preset,
+            prompt_hint=decision.prompt_hint,
+            reason=f"laya-fallback:{choice}@{confidence:.2f}+{decision.reason}",
+            confidence=decision.confidence,
+        )
+        _log_decision(
+            {"backend": "laya-fallback", "choice": choice,
+             "confidence": confidence, "preset": decision.preset,
+             "text": clean[:200], "has_image": has_image}
+        )
+        return decision
 
 
 def triage(
