@@ -1,16 +1,15 @@
-Hermes Hub 0.6.211 (audit run 4-5 + certificazione)
+Hermes Hub 0.6.212 (triage Laya + direct robusto)
 
-- App: timeout finiti anche sul polling run SSE con watchdog, claim
-  approvazioni/stop bounded LRU con rilascio a esaurimento, viewer
-  immagini con errore e Riprova, costanti centralizzate (WorkLimits),
-  dead code rimosso, resConfigs.
-- App: restore backup completo e sicuro (backup-wins non-sensibili,
-  dry-run atomico, doppia conferma), pendingBot oltre il process death.
-- Certificazione: ruff pulito, 245 test Python verdi (incluso test
-  riesumato da shadowing con semantica aggiornata), contratto
-  visual-blocks ok, 283 test Android + lint release verdi.
-- Versioni: Windows/AdminBridge `0.6.211`; Android `versionName 0.6.211`, `versionCode 215`.
-- Asset: `HermesHub-0.6.211-android.apk` (binario Windows invariato).
-- SHA-256 Android: `06b49254af66ec45b324d7e2b04e69248e8dfa1b8743a9a434b3f4fce5d121e7`.
-- Asset: `HermesHub-0.6.211-linux-gateway.tar.gz`.
-- SHA-256 gateway: `c5835bbba84dfd68b32e0874d7aac3ea60452f18214ade451d70b8b07a355055`.
+- Triage media: decision core con backend regole + LayaBackend
+  (laya:multilingual via ollaya, gate 0.75, fallback, decision log
+  per calibrazione). Hook fast-path hub in arrivo.
+- Manager direct: watch tollerante ai restart di Comfy (mai auto-return
+  a backend vivo), boot preserve su stesso boot_id (solo il reboot vero
+  forza AUTO); supporto user-units systemd.
+- Server: SeedVR2 3B (upscale video) in Comfy, Kokoro int8 su CUDA,
+  STT scaldato, voce sempre con l'LLM.
+- Versioni: Windows/AdminBridge `0.6.212`; Android `versionName 0.6.212`, `versionCode 216`.
+- Asset: `HermesHub-0.6.212-android.apk` (binario Windows invariato).
+- SHA-256 Android: `faef013dca8c8007af553ee20ab1a6d630ba8c589a132842d07fd83cb60fb9d0`.
+- Asset: `HermesHub-0.6.212-linux-gateway.tar.gz`.
+- SHA-256 gateway: `c1685a8636b0fcd185a72bf1a8f6582a063010ca7f24a429e8975baad6113385`.

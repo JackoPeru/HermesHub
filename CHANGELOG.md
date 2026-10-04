@@ -2,6 +2,14 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.212 - 2026-10-04
+
+- Triage media: decision core con backend regole + LayaBackend multilingual
+  (gate 0.75, fallback, decision log); ollaya + laya:multilingual live.
+- Manager direct: watch tollerante ai restart Comfy, boot preserve su
+  stesso boot_id (reboot vero sempre AUTO).
+- Server: modelli SeedVR2 3B per upscale video in Comfy diretto.
+
 ## 0.6.211 - 2026-10-04
 
 - App run 4-5: timeout anche sul polling run SSE, claim bounded LRU con
