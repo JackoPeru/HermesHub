@@ -1555,6 +1555,12 @@ async def drain_media_queue() -> None:
             _state["media_cooldown_until"] = 0.0
         set_state("MEDIA_READY")
         _state["media_idle_since"] = time.monotonic()
+        # L'agente che aspetta il risultato ha bisogno dell'LLM per finalizzare:
+        # se non c'e altro in coda, ricaricalo SUBITO invece di aspettare
+        # l'idle-timeout (ogni secondo con Tabby giu rischia 503 al finalize).
+        # Manual MEDIA resta su (l'utente gestisce le GPU da se).
+        if not queued_jobs() and _state["desired_mode"] in ("AUTO", "LLM"):
+            await restore_llm_with_retries("media-job-done")
         return
     if _state["desired_mode"] != "AUTO":
         return  # manual MEDIA stays put until the user switches

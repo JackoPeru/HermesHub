@@ -38,12 +38,13 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.coroutines.coroutineContext
 import kotlin.coroutines.resume
 
 private const val STREAM_ACCUM_MAX_CHARS = 2_000_000
 private const val STREAM_UI_BATCH_MAX_CHARS = 2048
 private const val STREAM_UI_BATCH_NS = 33_000_000L
-private const val RUN_POLL_TIMEOUT_MS = 30 * 60 * 1000L
+private const val RUN_POLL_TIMEOUT_MS = 60 * 60 * 1000L
 private const val RUN_POLL_MAX_CONSECUTIVE_FAILURES = 5
 private const val INLINE_ATTACHMENT_MAX_BYTES = 8L * 1024 * 1024
 private const val INLINE_ATTACHMENTS_TOTAL_MAX_BYTES = 12L * 1024 * 1024
@@ -58,11 +59,11 @@ internal val streamHttpClient: OkHttpClient = OkHttpClient.Builder()
     .apply { debugHttpLoggingInterceptor()?.let { addInterceptor(it) } }
     .build()
 
-/** Timeout finiti del trasporto SSE (run lunghe fino a 30min). */
+/** Timeout finiti del trasporto SSE (run lunghe fino a 60min). */
 internal const val SSE_CONNECT_TIMEOUT_SEC = 15L
 internal const val SSE_READ_TIMEOUT_SEC = 60L
 internal const val SSE_WRITE_TIMEOUT_SEC = 30L
-internal const val SSE_CALL_TIMEOUT_MIN = 30L
+internal const val SSE_CALL_TIMEOUT_MIN = 60L
 /** Watchdog inattivita: nessun byte/evento per 90s -> errore esplicito e chiusura. */
 internal const val SSE_INACTIVITY_TIMEOUT_MS = 90_000L
 internal const val SSE_INACTIVITY_CHECK_MS = 10_000L
@@ -86,6 +87,15 @@ internal fun isSseInactivityExpired(lastProgressNs: Long, nowNs: Long, timeoutMs
     if (timeoutMs <= 0L) return false
     return nowNs - lastProgressNs >= timeoutMs * 1_000_000L
 }
+
+/** Solo transport morto a turno vivo, senza contenuto e con response_id:
+ *  unico caso in cui il reattach via GET ha senso. */
+internal fun shouldReattachStoredResponse(
+    lastError: String?,
+    responseId: String?,
+    hasContent: Boolean,
+    sawTerminal: Boolean
+): Boolean = !sawTerminal && lastError == null && !responseId.isNullOrBlank() && !hasContent
 
 internal fun isSseInactivityMessage(message: String?): Boolean =
     message?.contains("nessun dato per 90s", ignoreCase = true) == true
@@ -1130,7 +1140,54 @@ fun streamChatRequest(
         }
         return@flow
     }
+    suspend fun reattachStoredResponse(): Boolean {
+        val responseId = emittedResponseId?.takeIf { it.isNotBlank() } ?: return false
+        val url = profileUrl("/responses") + "/" + responseId
+        // Cap 60min: oltre scade anche la retention run lato hub (1h).
+        repeat(360) {
+            coroutineContext.ensureActive()
+            delay(10_000)
+            val (code, body) = httpGetResponse(url, apiKey)
+            if (code !in 200..299) return@repeat
+            val storedStatus = runCatching { JSONObject(body).optString("status") }.getOrNull() ?: return@repeat
+            if (storedStatus != "completed" && storedStatus != "failed") return@repeat
+            for (ev in parseFullBody(body)) emitAndTrack(ev)
+            if (storedStatus == "failed") {
+                emit(ChatStreamEvent.Error("Il turno recuperato risulta fallito sul server."))
+                return false
+            }
+            flushDeltaBatches()
+            for (extracted in thinkExtractor.flush()) {
+                emitAndTrackInternal(extracted)
+            }
+            flushDeltaBatches()
+            val totalMs = (System.nanoTime() - start) / 1_000_000.0
+            val tokensOut = completionTokens ?: max(1, accumText.length / 4)
+            emit(
+                ChatStreamEvent.Done(
+                    ChatStreamStats(
+                        ttftMs, totalMs, tokensOut, serverTokensPerSecond, promptTokens,
+                        contextTokens, contextLength, contextPercent, draftRate, draftLabel
+                    )
+                )
+            )
+            return true
+        }
+        return false
+    }
+
     if (!sawTerminal) {
+        // Transport morto a turno vivo e senza contenuto (caso video lunghi):
+        // il detach server-side continua il lavoro. Prima di dichiarare il
+        // turno morto, recupera la risposta archiviata via GET.
+        if (shouldReattachStoredResponse(
+                lastError, emittedResponseId,
+                accumText.isNotEmpty() || sawAnswerText || sawVisualOutput, sawTerminal
+            )
+        ) {
+            emit(ChatStreamEvent.Status("Connessione persa a turno vivo: recupero la risposta dal server..."))
+            if (reattachStoredResponse()) return@flow
+        }
         flushDeltaBatches()
         emit(ChatStreamEvent.Error("Stream Hermes chiuso senza evento terminale; risposta non confermata."))
         return@flow

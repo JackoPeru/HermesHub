@@ -17,7 +17,7 @@ class SseStreamingTimeoutsTest {
         assertEquals(15_000, sseStreamHttpClient.connectTimeoutMillis)
         assertEquals(60_000, sseStreamHttpClient.readTimeoutMillis)
         assertEquals(30_000, sseStreamHttpClient.writeTimeoutMillis)
-        assertEquals(30 * 60 * 1000, sseStreamHttpClient.callTimeoutMillis)
+        assertEquals(60 * 60 * 1000, sseStreamHttpClient.callTimeoutMillis)
     }
 
     @Test
@@ -27,8 +27,7 @@ class SseStreamingTimeoutsTest {
     }
 
     @Test
-    fun inactivityConstantsMatchSpec() {
-        assertEquals(90_000L, SSE_INACTIVITY_TIMEOUT_MS)
+    fun inactivityConstantsMatchSpec() {        assertEquals(90_000L, SSE_INACTIVITY_TIMEOUT_MS)
         assertTrue(SSE_INACTIVITY_CHECK_MS > 0L)
         assertTrue(SSE_INACTIVITY_CHECK_MS < SSE_INACTIVITY_TIMEOUT_MS)
         assertTrue(SSE_INACTIVITY_ERROR_MESSAGE.contains("nessun dato per 90s", ignoreCase = true))
@@ -56,5 +55,17 @@ class SseStreamingTimeoutsTest {
         assertTrue(isSseInactivityMessage("Stream Hermes interrotto: NESSUN DATO PER 90S."))
         assertFalse(isSseInactivityMessage("connessione chiusa prima dell'evento terminale"))
         assertFalse(isSseInactivityMessage(null))
+    }
+
+    @Test
+    fun reattachOnlyOnDeadTransportWithoutContent() {
+        // Caso video lunghi: transport morto, turno vivo, niente contenuto.
+        assertTrue(shouldReattachStoredResponse(null, "resp_abc", false, false))
+        // Con errore reale, terminale, contenuto o senza id: mai.
+        assertFalse(shouldReattachStoredResponse("boom", "resp_abc", false, false))
+        assertFalse(shouldReattachStoredResponse(null, "resp_abc", false, true))
+        assertFalse(shouldReattachStoredResponse(null, "resp_abc", true, false))
+        assertFalse(shouldReattachStoredResponse(null, "", false, false))
+        assertFalse(shouldReattachStoredResponse(null, null, false, false))
     }
 }

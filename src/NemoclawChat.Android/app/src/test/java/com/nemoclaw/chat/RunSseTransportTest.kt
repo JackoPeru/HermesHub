@@ -17,7 +17,7 @@ class RunSseTransportTest {
         assertEquals(15_000, runSseHttpClient.connectTimeoutMillis)
         assertEquals(60_000, runSseHttpClient.readTimeoutMillis)
         assertEquals(30_000, runSseHttpClient.writeTimeoutMillis)
-        assertEquals(30 * 60 * 1000, runSseHttpClient.callTimeoutMillis)
+        assertEquals(60 * 60 * 1000, runSseHttpClient.callTimeoutMillis)
     }
 
     @Test

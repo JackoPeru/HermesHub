@@ -304,7 +304,7 @@ class HermesRunClient(
 internal const val RUN_SSE_CONNECT_TIMEOUT_SEC = 15L
 internal const val RUN_SSE_READ_TIMEOUT_SEC = 60L
 internal const val RUN_SSE_WRITE_TIMEOUT_SEC = 30L
-internal const val RUN_SSE_CALL_TIMEOUT_MIN = 30L
+internal const val RUN_SSE_CALL_TIMEOUT_MIN = 60L
 /** Watchdog inattivita run-SSE: nessun byte/evento per 90s -> errore esplicito e chiusura. */
 internal const val RUN_SSE_INACTIVITY_TIMEOUT_MS = 90_000L
 internal const val RUN_SSE_INACTIVITY_CHECK_MS = 10_000L

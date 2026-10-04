@@ -20,7 +20,7 @@ object WorkLimits {
     const val WORK_POLL_MAX_MS = 60_000L
 
     /** Timeout run poll (mirror di ChatStream.RUN_POLL_TIMEOUT_MS, file vietato: non migrato). */
-    const val RUN_POLL_TIMEOUT_MS = 30 * 60 * 1000L
+    const val RUN_POLL_TIMEOUT_MS = 60 * 60 * 1000L
 
     /** Max failure consecutivi run poll (mirror di ChatStream, file vietato: non migrato). */
     const val RUN_POLL_MAX_CONSECUTIVE_FAILURES = 5

@@ -179,7 +179,8 @@ internal suspend fun runSmartCompletion(
     }
     var consecutiveErrors = 0
     var lastShown = ""
-    repeat(270) {
+    // Cap 70min: oltre il job_timeout_video di Comfy (60min).
+    repeat(420) {
         coroutineContext.ensureActive()
         delay(10_000)
         val encodedId = runCatching { URLEncoder.encode(smart.jobId, "UTF-8") }.getOrNull() ?: smart.jobId
