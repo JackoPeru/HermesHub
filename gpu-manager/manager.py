@@ -1029,12 +1029,29 @@ async def transition_to_direct() -> bool:
 
 async def watch_direct() -> None:
     """Parked while the user drives Comfy directly: the manager touches
-    nothing. When the direct backend disappears (closed/crashed) the mode
-    auto-returns to AUTO so the LLM is reloaded."""
-    if await service_active(direct_service_name()) and await media_online():
+    nothing. Auto-return to AUTO only when the unit is really gone
+    (closed/crashed, 3 consecutive misses): a live unit with a silent
+    backend means Comfy is (re)starting, so wait — never pull the rug
+    during a restart. The user closing it lands on inactive -> fast path."""
+    try:
+        code, out = await _run_async(
+            ["systemctl", "show", "-p", "ActiveState", "--value",
+             direct_service_name()], timeout=15)
+        unit = out.strip() if code == 0 else "unknown"
+    except Exception:  # noqa: BLE001 - never break the worker
+        unit = "unknown"
+    if unit in ("active", "activating", "reloading"):
+        if await media_online():
+            _state["direct_miss"] = 0
+            return
+        log.warning("direct Comfy unit %s but backend silent; waiting (restart?)", unit)
         return
-    log.info("direct ComfyUI gone; returning to AUTO")
-    _set_desired("AUTO")
+    misses = int(_state.get("direct_miss") or 0) + 1
+    _state["direct_miss"] = misses
+    if misses >= 3:
+        log.info("direct ComfyUI gone; returning to AUTO")
+        _state["direct_miss"] = 0
+        _set_desired("AUTO")
 
 
 # --------------------------------------------------------------- comfyui ---
@@ -1503,27 +1520,54 @@ async def drain_media_queue() -> None:
 
 async def reconcile_boot() -> None:
     log.info("boot reconcile: probing real hardware state")
-    # Policy: ogni (re)boot atterra su AUTO con la coda media svuotata.
-    # I job interrotti dal reboot vengono cancellati, non riaccodati.
-    _state["desired_mode"] = "AUTO"
-    _persist_desired()
-    log.info("boot: desired forced to AUTO, cancelling stale jobs + ComfyUI queue")
     db = _db_conn()
-    for (jid,) in db.execute(
-        "SELECT id FROM jobs WHERE status IN ('running','queued')"
-    ).fetchall():
-        update_job(jid, status="cancelled",
-                   error="cancelled by reboot, manager reset to AUTO")
-        log.info("job %s cancelled after reboot", jid)
     try:
-        await comfy_clear_all()
-    except Exception as exc:
-        log.warning("boot: ComfyUI queue clear failed (backend down?): %s", exc)
+        boot_now = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    except OSError:
+        boot_now = ""
+    prev_boot = db.execute("SELECT value FROM kv WHERE key='boot_id'").fetchone()
+    fresh_boot = bool(boot_now) and (not prev_boot or prev_boot[0] != boot_now)
+    if boot_now:
+        db.execute(
+            "INSERT INTO kv(key,value) VALUES('boot_id',?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (boot_now,),
+        )
+        db.commit()
+    if fresh_boot:
+        # Real (re)boot: policy is AUTO + empty media queue, always.
+        # A mere manager process restart keeps the desired mode instead,
+        # so deploys during DIRECT don't nuke the user's session.
+        log.info("boot: fresh boot_id, forcing AUTO")
+        _state["desired_mode"] = "AUTO"
+        _persist_desired()
+        log.info("boot: desired forced to AUTO, cancelling stale jobs + ComfyUI queue")
+        for (jid,) in db.execute(
+            "SELECT id FROM jobs WHERE status IN ('running','queued')"
+        ).fetchall():
+            update_job(jid, status="cancelled",
+                       error="cancelled by reboot, manager reset to AUTO")
+            log.info("job %s cancelled after reboot", jid)
+        try:
+            await comfy_clear_all()
+        except Exception as exc:
+            log.warning("boot: ComfyUI queue clear failed (backend down?): %s", exc)
+    else:
+        log.info("boot: same boot_id, preserving desired=%s", _state["desired_mode"])
     llm_up = await llm_loaded()
     media_up = await media_online()
     threshold = float(CONFIG["switching"].get("vram_free_mb", 2500))
     free = await vram_free(threshold)
     desired = _state["desired_mode"]
+    if desired == "DIRECT":
+        # Process restart with a live direct backend: adopt it, no churn.
+        if await service_active(direct_service_name()) and await media_online():
+            set_state("DIRECT", "boot-adopt")
+            return
+        log.info("boot: DIRECT desired but backend gone, falling back to AUTO")
+        desired = "AUTO"
+        _state["desired_mode"] = desired
+        _persist_desired()
     if desired == "MEDIA" and media_up:
         set_state("MEDIA_READY", "boot")
     elif desired == "MEDIA" and not media_up:
