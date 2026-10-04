@@ -1986,12 +1986,23 @@ async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSON
     if isinstance(images, str):
         images = [images]
     images = [str(p) for p in images[:4]]
+    has_image = bool(images) or bool(body.get("has_image"))
     backend = _smart_backend()
     # Triage is sync (laya ~65ms): keep it off the event loop.
-    decision = await asyncio.to_thread(_triage_mod.triage, text, bool(images),
+    decision = await asyncio.to_thread(_triage_mod.triage, text, has_image,
                                        (), backend)
     if not decision.media or not decision.preset:
         return JSONResponse({"media": False, "reason": decision.reason})
+    if body.get("triage_only"):
+        # Verdetto secco senza submit: il chiamante carica i file solo se serve.
+        spec = PRESETS.get(decision.preset) or {}
+        if spec.get("disabled"):
+            return JSONResponse({"media": False, "reason": "preset-disabled"})
+        return JSONResponse({"media": True, "preset": decision.preset,
+                             "reason": decision.reason})
+    if _state["desired_mode"] in ("LLM", "DIRECT"):
+        # Nessuno drenerebbe la coda: niente 202 orfani, torna al chat flow.
+        return JSONResponse({"media": False, "reason": "manual-mode"})
     if not await llm_loaded():
         return JSONResponse({"media": False, "reason": "llm-unloaded",
                              "fallback": True})

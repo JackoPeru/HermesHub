@@ -39,7 +39,22 @@ internal suspend fun trySmartMediaSend(
     attachments: List<ChatInputAttachment>
 ): SmartAccepted? {
     if (attachments.isEmpty()) return null
-    // Upload esplicito (stessa fn del flusso normale). Al primo errore si
+    // Chiave assente -> niente chiamate anonime al manager.
+    val managerKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() } ?: return null
+    val managerBase = gpuManagerBase(settings.gatewayUrl)
+    // Fase 0: verdetto senza file. Se non e media, il flusso normale carica
+    // una volta sola dentro streamChatRequest: niente doppio upload.
+    val verdictPayload = JSONObject()
+        .put("text", text)
+        .put("has_image", true)
+        .put("triage_only", true)
+    val (verdictCode, verdictBody) = postJson(
+        "$managerBase/jobs/smart", verdictPayload, managerKey, allowCompatAuth = false
+    )
+    if (verdictCode !in 200..299) return null
+    val verdict = runCatching { JSONObject(verdictBody) }.getOrNull() ?: return null
+    if (!verdict.optBoolean("media", false)) return null
+    // 1. Upload esplicito (stessa fn del flusso normale). Al primo errore si
     // abortisce e il flusso normale riprova da zero: niente subset silenziosi.
     // (I file gia caricati restano orfani sul gateway: retention lato server.)
     val serverPaths = mutableListOf<String>()
@@ -52,9 +67,7 @@ internal suspend fun trySmartMediaSend(
         val path = ref.path?.takeIf { it.isNotBlank() } ?: return null
         serverPaths.add(path)
     }
-    // Chiave assente -> niente chiamate anonime al manager.
-    val managerKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() } ?: return null
-    val managerBase = gpuManagerBase(settings.gatewayUrl)
+    // 2. Triage + submit manager.
     val payload = JSONObject()
         .put("text", text)
         .put("input_images", org.json.JSONArray(serverPaths))

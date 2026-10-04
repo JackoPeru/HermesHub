@@ -1158,11 +1158,14 @@ fun streamChatRequest(
     suspend fun reattachStoredResponse(): Boolean {
         val responseId = emittedResponseId?.takeIf { it.isNotBlank() } ?: return false
         val url = profileUrl("/responses") + "/" + responseId
-        // Cap 60min: oltre scade anche la retention run lato hub (1h).
-        repeat(360) {
+        // Cap 55min: oltre scade anche la retention run lato hub (1h).
+        repeat(330) {
             coroutineContext.ensureActive()
             delay(10_000)
             val (code, body) = httpGetResponse(url, apiKey)
+            // 401/403/404 sono permanenti (chiave, profilo, mai creata o scaduta):
+            // non ha senso tener vivo il collector per un'ora.
+            if (code == 401 || code == 403 || code == 404) return false
             if (code !in 200..299) return@repeat
             val storedStatus = runCatching { JSONObject(body).optString("status") }.getOrNull() ?: return@repeat
             if (storedStatus != "completed" && storedStatus != "failed") return@repeat

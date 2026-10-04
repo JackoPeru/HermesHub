@@ -331,6 +331,9 @@ internal fun ChatScreen(
     var historyLoadedCid by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(conversationId, initialPrompt) {
+        // Flag sempre aggiornato (anche senza saved): il gate del reattach
+        // DONE non deve sopprimere output legittimi per flag stale.
+        historyLoadedCid = conversationId?.takeIf { it.isNotBlank() }
         if (!conversationId.isNullOrBlank()) {
             val saved = withContext(Dispatchers.IO) { loadConversation(context, conversationId) }
             if (saved != null) {

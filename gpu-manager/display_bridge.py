@@ -20,10 +20,8 @@ framing follows RFB 3.8 §6.4, server bytes are pure passthrough.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import hmac
 import io
-import json
 import logging
 import os
 import secrets
@@ -32,7 +30,6 @@ import struct
 import sys
 import threading
 import time
-from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 LOG = logging.getLogger("hermes.display_bridge")
@@ -467,7 +464,6 @@ async def _bridge(websocket, rfb: socket.socket, viewer_id: str) -> None:
     handshake_remaining = 14
     last_lease_check = 0.0
     allowed_cache = False
-    closed = False
     beat = 0
     loop = asyncio.get_running_loop()
 
