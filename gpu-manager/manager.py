@@ -181,6 +181,7 @@ ALLOWED_NODE_CLASSES = frozenset({
     "EmptyLatentImage", "KSampler", "VAEDecode", "SaveImage",
     "LoadImage", "LoraLoader", "SaveAnimatedPNG",
     "MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo",
+    "H3MultiStream",
 })
 
 # Placeholders filled by trusted server-side values only; caller params
