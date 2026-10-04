@@ -325,6 +325,10 @@ internal fun ChatScreen(
     val botAllowCompatAuth = !remoteBot
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     var quickPrompt by remember { mutableStateOf<String?>(null) }
+    // Cronologia caricata da disco per cid: il reattach DONE aggiunge il
+    // risultato solo qui dentro, mai su lista vuota/stale (evita duplicati
+    // che poi crescono a ogni riapertura).
+    var historyLoadedCid by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(conversationId, initialPrompt) {
         if (!conversationId.isNullOrBlank()) {
@@ -349,6 +353,7 @@ internal fun ChatScreen(
                     loadedMessages.removeAt(loadedMessages.lastIndex)
                 }
                 state.messages.addAll(loadedMessages)
+                historyLoadedCid = saved.id
             }
         }
 
@@ -549,7 +554,9 @@ internal fun ChatScreen(
             }
             BackgroundWorkState.DONE_COMPLETED -> {
                 val output = info.output.orEmpty()
-                if (output.isNotBlank() && state.messages.none { !it.fromUser && it.text.contains(output.take(WorkLimits.TRUNC_60)) }) {
+                if (output.isNotBlank() && historyLoadedCid == cid &&
+                    state.messages.none { !it.fromUser && it.text.contains(output.take(WorkLimits.TRUNC_60)) }
+                ) {
                     state.messages.add(ChatMessage("Hermes", output, fromUser = false))
                 }
                 withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
@@ -1410,6 +1417,11 @@ internal fun ChatScreen(
             },
             onStop = {
                 val activeRunId = state.streamingState?.activeRunId
+                // Stop VERO: cancella il collector locale (prima non lo faceva:
+                // la generazione continuava e il composer restava bloccato).
+                val cid = state.activeConversationId
+                state.activeStreams[cid]?.job?.cancel()
+                state.activeStreamJob?.cancel()
                 // Aggiornamento UI immediato + vero POST /v1/runs/{id}/stop (non solo cancel locale).
                 state.streamingState = state.streamingState?.copy(
                     status = "Interruzione richiesta. Chiudo stream Hermes...",
