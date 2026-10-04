@@ -9,7 +9,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "gpu-manager"))
 
-import display_bridge as bridge
+import display_bridge as bridge  # noqa: E402 (sys.path setup sopra)
 
 
 class FramingTests(unittest.TestCase):
