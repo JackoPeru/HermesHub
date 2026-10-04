@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.nemoclaw.chat.core.WorkLimits
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -68,7 +69,7 @@ internal fun pollKeysChanged(oldKeys: Array<out Any?>, newKeys: Array<out Any?>)
 internal fun PollWhileStarted(
     vararg keys: Any?,
     baseIntervalMs: Long,
-    maxIntervalMs: Long = 60_000L,
+    maxIntervalMs: Long = WorkLimits.WORK_POLL_MAX_MS,
     immediate: Boolean = true,
     block: suspend () -> Boolean
 ) {

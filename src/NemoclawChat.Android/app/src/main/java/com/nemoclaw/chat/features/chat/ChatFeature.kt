@@ -246,6 +246,7 @@ import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import com.nemoclaw.chat.createVideoPlayerView
 import com.nemoclaw.chat.FullscreenVideoOrientationEffect
 import com.nemoclaw.chat.findActivity
+import com.nemoclaw.chat.core.WorkLimits
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -384,7 +385,7 @@ internal fun ChatScreen(
         }
         if (available) {
             // Successo: 15s totali come prima (5s base poller + 10s qui).
-            delay(10_000L)
+            delay(WorkLimits.WORK_POLL_BASE_MS)
         }
         available
     }
@@ -548,7 +549,7 @@ internal fun ChatScreen(
             }
             BackgroundWorkState.DONE_COMPLETED -> {
                 val output = info.output.orEmpty()
-                if (output.isNotBlank() && state.messages.none { !it.fromUser && it.text.contains(output.take(60)) }) {
+                if (output.isNotBlank() && state.messages.none { !it.fromUser && it.text.contains(output.take(WorkLimits.TRUNC_60)) }) {
                     state.messages.add(ChatMessage("Hermes", output, fromUser = false))
                 }
                 withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
@@ -1006,7 +1007,7 @@ internal fun ChatScreen(
                                 withContext(Dispatchers.IO) {
                                     ensureHermesChatSession(
                                         context, botSettings, botApiKey, activeStreamCid,
-                                        botProfile, botMultiplexEnabled, capsSnapshot, displayText.take(80)
+                                        botProfile, botMultiplexEnabled, capsSnapshot, displayText.take(WorkLimits.TRUNC_80)
                                     )
                                 }
                             } catch (se: SecurityException) {
@@ -1044,7 +1045,7 @@ internal fun ChatScreen(
                                         conversationId = activeStreamCid,
                                         runId = event.id,
                                         sessionId = sessionIdForTurn ?: state.hermesSessionId,
-                                        goal = displayText.take(140),
+                                        goal = displayText.take(WorkLimits.TRUNC_140),
                                         startedAtMs = System.currentTimeMillis()
                                     )
                                     withContext(Dispatchers.IO) { saveActiveWorkBinding(context, binding) }
@@ -1218,7 +1219,7 @@ internal fun ChatScreen(
                                         conversationId = activeStreamCid,
                                         runId = boundRunIdForTurn!!,
                                         sessionId = sessionIdForTurn ?: state.hermesSessionId,
-                                        goal = displayText.take(140),
+                                        goal = displayText.take(WorkLimits.TRUNC_140),
                                         startedAtMs = System.currentTimeMillis()
                                     )
                                     withContext(NonCancellable + Dispatchers.IO) { saveActiveWorkBinding(context, keepBinding) }
@@ -1544,10 +1545,6 @@ internal fun EmptyState(onPrompt: (String) -> Unit) {
     }
 }
 
-internal fun createInitialTasks(@Suppress("UNUSED_PARAMETER") settings: AppSettings): List<AgentTask> {
-    return emptyList()
-}
-
 @Composable
 internal fun SuggestionButton(text: String, onClick: () -> Unit) {
     Surface(
@@ -1666,14 +1663,14 @@ internal fun ChatModelSessionBar(
                 else -> "Legacy"
             }
             Text(routeLabel, color = AppColors.Muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
-            if (autoApproveMode == "session" || autoApproveMode == "always") {
+            if (autoApproveMode == WorkLimits.AUTO_APPROVE_SESSION || autoApproveMode == WorkLimits.AUTO_APPROVE_ALWAYS) {
                 Surface(
                     color = AppColors.Elevated,
                     shape = RoundedCornerShape(10.dp),
                     border = BorderStroke(1.dp, AppColors.Accent)
                 ) {
                     Text(
-                        if (autoApproveMode == "always") "AUTO SEMPRE" else "AUTO SESSIONE",
+                        if (autoApproveMode == WorkLimits.AUTO_APPROVE_ALWAYS) "AUTO SEMPRE" else "AUTO SESSIONE",
                         color = AppColors.Accent,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -1774,7 +1771,7 @@ internal fun BackgroundWorkBanner(
             )
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = if (work.goal.isBlank()) "Hermes al lavoro in background" else "Hermes al lavoro: ${work.goal.take(80)}",
+                    text = if (work.goal.isBlank()) "Hermes al lavoro in background" else "Hermes al lavoro: ${work.goal.take(WorkLimits.TRUNC_80)}",
                     color = Color.White,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -2057,7 +2054,7 @@ internal fun saveArtifactMetadata(context: Context, id: String, title: String, t
         if (index < 0) return
         items[index] = items[index].copy(
             title = title.trim().take(180).ifBlank { items[index].title },
-            tags = tags.map { it.take(80) }.distinctBy { it.lowercase() }.take(30),
+            tags = tags.map { it.take(WorkLimits.TRUNC_80) }.distinctBy { it.lowercase() }.take(30),
             updatedAt = System.currentTimeMillis()
         )
         saveConversations(context, items)

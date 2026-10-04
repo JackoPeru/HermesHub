@@ -246,6 +246,7 @@ import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import com.nemoclaw.chat.createVideoPlayerView
 import com.nemoclaw.chat.FullscreenVideoOrientationEffect
 import com.nemoclaw.chat.findActivity
+import com.nemoclaw.chat.core.WorkLimits
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -339,7 +340,7 @@ internal fun ChatApprovalCards(
                 state.messages.add(
                     ChatMessage(
                         "Hermes Hub",
-                        "Auto-approvato ($choice): ${(approval.tool.ifBlank { approval.command }).take(120)}",
+                        "Auto-approvato ($choice): ${(approval.tool.ifBlank { approval.command }).take(WorkLimits.TRUNC_120)}",
                         fromUser = false,
                         isAction = true
                     )
@@ -355,7 +356,7 @@ internal fun ChatApprovalCards(
                     Text("Approvazione Hermes richiesta", fontWeight = FontWeight.SemiBold, color = Color.White, fontSize = 13.sp)
                     Text(
                         listOf(approval.tool, approval.command, approval.description)
-                            .filter { it.isNotBlank() }.joinToString(" — ").take(300)
+                            .filter { it.isNotBlank() }.joinToString(" — ").take(WorkLimits.TRUNC_300)
                             .ifBlank { "Il run attende una decisione." },
                         color = AppColors.Muted, fontSize = 12.sp
                     )
@@ -402,7 +403,7 @@ internal fun ChatApprovalCards(
                                                 401, 403 -> "Chiave rifiutata (HTTP $code)."
                                                 404 -> "Approval/run non trovato (404)."
                                                 409 -> "Run non in attesa di approval (409)."
-                                                else -> "Approval fallita: HTTP $code ${body.take(140)}"
+                                                else -> "Approval fallita: HTTP $code ${body.take(WorkLimits.TRUNC_140)}"
                                             }
                                         }
                                         resolving = ""

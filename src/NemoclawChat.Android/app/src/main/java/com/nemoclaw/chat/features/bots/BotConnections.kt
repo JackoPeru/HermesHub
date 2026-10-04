@@ -11,6 +11,7 @@ import com.nemoclaw.chat.loadGatewaySecret
 import com.nemoclaw.chat.normalizeHermesProfileName
 import com.nemoclaw.chat.postJson
 import com.nemoclaw.chat.resolveHermesUrl
+import com.nemoclaw.chat.core.WorkLimits
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -98,7 +99,7 @@ internal fun loadHermesBotConnections(context: Context, settings: AppSettings): 
 internal fun addHermesBotConnection(context: Context, settings: AppSettings, label: String, endpoint: String): HermesBotConnection {
     val connection = HermesBotConnection(
         id = "connection-${UUID.randomUUID().toString().replace("-", "").take(20)}",
-        label = label.trim().take(120).ifBlank { error("Nome connessione obbligatorio.") },
+        label = label.trim().take(WorkLimits.TRUNC_120).ifBlank { error("Nome connessione obbligatorio.") },
         endpoint = normalizeBotEndpoint(endpoint, allowEmpty = false)
     )
     upsertHermesBotConnection(context, settings, connection)
@@ -108,7 +109,7 @@ internal fun addHermesBotConnection(context: Context, settings: AppSettings, lab
 internal fun upsertHermesBotConnection(context: Context, settings: AppSettings, connection: HermesBotConnection) {
     val normalized = connection.copy(
         id = connection.id.trim(),
-        label = connection.label.trim().take(120).ifBlank { error("Nome connessione obbligatorio.") },
+        label = connection.label.trim().take(WorkLimits.TRUNC_120).ifBlank { error("Nome connessione obbligatorio.") },
         endpoint = normalizeBotEndpoint(connection.endpoint, allowEmpty = false),
         isPrimary = false
     )

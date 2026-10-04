@@ -131,6 +131,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Speed
@@ -252,12 +253,14 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
@@ -296,35 +299,108 @@ internal fun ChatInlineImage(
     isDownloading: Boolean
 ) {
     var viewer by remember(block.mediaUrl) { mutableStateOf(false) }
-    val bitmap by produceState<Bitmap?>(initialValue = null, mediaUrl) {
-        value = withContext(Dispatchers.IO) { loadRemoteBitmap(settings, mediaUrl, apiKey) }
+    // Stessa macchina a stati di RemoteStreamImage: loading/errore con Riprova, mai loading infinito.
+    var loadState by remember(mediaUrl) { mutableStateOf(remoteImageLoadInitial()) }
+    var bitmap by remember(mediaUrl) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(mediaUrl, loadState) {
+        if (loadState.phase != RemoteImageLoadPhase.Loading) return@LaunchedEffect
+        loadState = try {
+            val loaded = withTimeout(REMOTE_IMAGE_LOAD_TIMEOUT_MS) {
+                withContext(Dispatchers.IO) { loadRemoteBitmap(settings, mediaUrl, apiKey) }
+            }
+            if (loaded != null) {
+                bitmap = loaded
+                remoteImageLoadSucceeded(loadState)
+            } else {
+                remoteImageLoadFailed(loadState, "download fallito o formato non valido")
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            remoteImageLoadFailed(loadState, "timeout dopo ${REMOTE_IMAGE_LOAD_TIMEOUT_MS / 1000}s")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (ex: Exception) {
+            remoteImageLoadFailed(loadState, ex.message)
+        }
     }
+    val snapshot = loadState
     val loaded = bitmap
-    if (loaded == null) {
-        Text(
-            "${block.alt.ifBlank { block.filename.ifBlank { "Immagine" } }}: caricamento immagine...",
-            color = AppColors.Muted,
-            fontSize = 13.sp
-        )
-        return
-    }
-    Image(
-        bitmap = loaded.asImageBitmap(),
-        contentDescription = block.alt.ifBlank { block.filename },
-        contentScale = ContentScale.FillWidth,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .clickable { viewer = true }
-    )
-    if (viewer) {
-        ChatImageViewerDialog(
-            bitmap = loaded,
-            alt = block.alt.ifBlank { block.filename },
-            isDownloading = isDownloading,
-            onClose = { viewer = false },
-            onDownload = { onDownload(mediaUrl, block.filename.ifBlank { block.title.ifBlank { "hermes-file" } }) }
-        )
+    val label = block.alt.ifBlank { block.filename.ifBlank { "Immagine" } }
+    when {
+        snapshot.phase == RemoteImageLoadPhase.Loaded && loaded != null -> {
+            Image(
+                bitmap = loaded.asImageBitmap(),
+                contentDescription = block.alt.ifBlank { block.filename },
+                contentScale = ContentScale.FillWidth,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable { viewer = true }
+            )
+            if (viewer) {
+                ChatImageViewerDialog(
+                    bitmap = loaded,
+                    alt = block.alt.ifBlank { block.filename },
+                    isDownloading = isDownloading,
+                    onClose = { viewer = false },
+                    onDownload = { onDownload(mediaUrl, block.filename.ifBlank { block.title.ifBlank { "hermes-file" } }) }
+                )
+            }
+        }
+        snapshot.phase == RemoteImageLoadPhase.Failed -> {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Error,
+                        contentDescription = null,
+                        tint = Color(0xFFFF453A),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "Immagine non caricata.",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Text(
+                    text = snapshot.errorMessage ?: "download fallito",
+                    color = AppColors.Muted,
+                    fontSize = 12.sp
+                )
+                if (snapshot.canRetry) {
+                    TextButton(onClick = { loadState = remoteImageLoadRetrying(snapshot) }) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = null,
+                            tint = AppColors.Muted,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.size(6.dp))
+                        Text("Riprova", color = AppColors.Muted, fontSize = 13.sp)
+                    }
+                } else {
+                    Text(
+                        text = "Tentativi esauriti (${snapshot.attempts}).",
+                        color = AppColors.Muted,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+        else -> {
+            Text(
+                if (snapshot.attempts > 0) "Nuovo tentativo di caricamento..." else "$label: caricamento immagine...",
+                color = AppColors.Muted,
+                fontSize = 13.sp
+            )
+        }
     }
 }
 
@@ -567,25 +643,102 @@ internal fun RemoteGalleryImage(settings: AppSettings, image: VisualGalleryImage
     }
     val apiKey = remember { loadGatewaySecret(context) }
 
-    val bitmap by produceState<Bitmap?>(initialValue = null, resolved) {
-        value = withContext(Dispatchers.IO) { loadRemoteBitmap(settings, resolved, apiKey) }
+    // Stessa macchina a stati di RemoteStreamImage: loading/errore con Riprova.
+    var loadState by remember(resolved) { mutableStateOf(remoteImageLoadInitial()) }
+    var bitmap by remember(resolved) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(resolved, loadState) {
+        if (loadState.phase != RemoteImageLoadPhase.Loading) return@LaunchedEffect
+        loadState = try {
+            val loaded = withTimeout(REMOTE_IMAGE_LOAD_TIMEOUT_MS) {
+                withContext(Dispatchers.IO) { loadRemoteBitmap(settings, resolved, apiKey) }
+            }
+            if (loaded != null) {
+                bitmap = loaded
+                remoteImageLoadSucceeded(loadState)
+            } else {
+                remoteImageLoadFailed(loadState, "download fallito o formato non valido")
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            remoteImageLoadFailed(loadState, "timeout dopo ${REMOTE_IMAGE_LOAD_TIMEOUT_MS / 1000}s")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (ex: Exception) {
+            remoteImageLoadFailed(loadState, ex.message)
+        }
     }
+    val snapshot = loadState
     val loaded = bitmap
-    if (loaded == null) {
-        Text("${image.alt}: caricamento immagine...", color = AppColors.Muted, fontSize = 13.sp)
-        return
+    when {
+        snapshot.phase == RemoteImageLoadPhase.Loaded && loaded != null -> {
+            val safeWidth = loaded.width.takeIf { it > 0 } ?: 1
+            val safeHeight = loaded.height.takeIf { it > 0 } ?: 1
+            val ratio = (safeWidth.toFloat() / safeHeight.toFloat()).coerceIn(0.7f, 1.9f)
+            Image(
+                bitmap = loaded.asImageBitmap(),
+                contentDescription = image.alt,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(ratio)
+                    .clip(RoundedCornerShape(8.dp))
+            )
+        }
+        snapshot.phase == RemoteImageLoadPhase.Failed -> {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Error,
+                        contentDescription = null,
+                        tint = Color(0xFFFF453A),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "Immagine non caricata.",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Text(
+                    text = snapshot.errorMessage ?: "download fallito",
+                    color = AppColors.Muted,
+                    fontSize = 12.sp
+                )
+                if (snapshot.canRetry) {
+                    TextButton(onClick = { loadState = remoteImageLoadRetrying(snapshot) }) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = null,
+                            tint = AppColors.Muted,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.size(6.dp))
+                        Text("Riprova", color = AppColors.Muted, fontSize = 13.sp)
+                    }
+                } else {
+                    Text(
+                        text = "Tentativi esauriti (${snapshot.attempts}).",
+                        color = AppColors.Muted,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+        else -> {
+            Text(
+                if (snapshot.attempts > 0) "Nuovo tentativo di caricamento..." else "${image.alt}: caricamento immagine...",
+                color = AppColors.Muted,
+                fontSize = 13.sp
+            )
+        }
     }
-
-    val ratio = (loaded.width.toFloat() / loaded.height.toFloat()).coerceIn(0.7f, 1.9f)
-    Image(
-        bitmap = loaded.asImageBitmap(),
-        contentDescription = image.alt,
-        contentScale = ContentScale.Crop,
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(ratio)
-            .clip(RoundedCornerShape(8.dp))
-    )
 }
 /** Messaggi d'errore manager: mai un HTTP fallito travestito da "tutto spento". */
 internal fun managerStatusErrorMessage(code: Int, body: String): String = when (code) {

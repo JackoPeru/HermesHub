@@ -1117,11 +1117,6 @@ internal fun AutoApproveChip(label: String, value: String, current: String, onSe
     }
 }
 
-internal fun appendPrompt(current: String, addition: String): String {
-    val trimmed = current.trim()
-    return if (trimmed.isEmpty()) addition else "$trimmed\n$addition"
-}
-
 internal fun validateSettings(settings: AppSettings): String? {
     return validateHttpUrl(settings.gatewayUrl, "Hermes API URL")
         ?: validateRequired(settings.provider, "Provider")
@@ -1140,18 +1135,6 @@ internal fun validateVisualBlocksMode(value: String): String? {
 internal fun validatePreferredApi(value: String): String? {
     return if (value == "hermes-native" || value == "openai-completions" || value == "openai-responses") null
     else "API preferita deve essere hermes-native, openai-completions o openai-responses."
-}
-
-internal fun validateWsUrl(value: String, label: String): String? {
-    if (value.isBlank()) return "$label obbligatorio."
-
-    return try {
-        val uri = URI(value)
-        val scheme = uri.scheme.orEmpty().lowercase()
-        if ((scheme == "ws" || scheme == "wss") && uri.host != null) null else "$label deve essere URL ws/wss valido."
-    } catch (_: Exception) {
-        "$label deve essere URL ws/wss valido."
-    }
 }
 
 internal fun validateHttpUrl(value: String, label: String): String? {

@@ -32,6 +32,7 @@ android {
         targetSdk = 36
         versionCode = 214
         versionName = "0.6.210"
+        resConfigs("en", "it")
         buildConfigField("boolean", "META_DAT_ENABLED", enableMetaDat.toString())
         manifestPlaceholders["mwdat_application_id"] = mwdatApplicationId
         manifestPlaceholders["mwdat_client_token"] = mwdatClientToken

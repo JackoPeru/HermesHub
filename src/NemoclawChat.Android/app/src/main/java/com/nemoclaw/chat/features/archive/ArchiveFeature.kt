@@ -242,6 +242,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
+import com.nemoclaw.chat.core.WorkLimits
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -500,7 +501,7 @@ internal fun ArchiveScreen(
             },
             text = {
                 val safeTitle = item.title.replace('\n', ' ').replace('\r', ' ').let {
-                    if (it.length > 60) it.take(60).trimEnd() + "..." else it
+                    if (it.length > WorkLimits.TRUNC_60) it.take(WorkLimits.TRUNC_60).trimEnd() + "..." else it
                 }
                 Text(
                     "Vuoi eliminare davvero \"$safeTitle\" dall'archivio locale?",
@@ -819,7 +820,7 @@ internal fun shareConversationExport(context: Context, conversation: LocalConver
     val normalized = format.lowercase()
     val extension = when (normalized) { "json" -> "json"; "html" -> "html"; "pdf" -> "pdf"; else -> "md" }
     val mime = when (normalized) { "json" -> "application/json"; "html" -> "text/html"; "pdf" -> "application/pdf"; else -> "text/markdown" }
-    val safeTitle = conversation.title.replace(Regex("[^A-Za-z0-9._-]+"), "-").trim('-').ifBlank { "conversazione-hermes" }.take(80)
+    val safeTitle = conversation.title.replace(Regex("[^A-Za-z0-9._-]+"), "-").trim('-').ifBlank { "conversazione-hermes" }.take(WorkLimits.TRUNC_80)
     val directory = File(context.cacheDir, "exports").apply { mkdirs() }
     val file = File(directory, "$safeTitle-${System.currentTimeMillis()}.$extension")
     runCatching {

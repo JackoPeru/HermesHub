@@ -26,11 +26,20 @@ internal const val ACTIVE_WORK_PREFS = "chatclaw_active_work"
 private const val ACTIVE_WORK_KEY = "bindings"
 private val activeWorkLock = Any()
 
+/** Bound claim LRU: i Set originali crescevano senza limite nel processo. Cap 500 con stessa semantica. */
+internal const val CLAIM_LRU_CAP = 500
+
 private val approvalClaimLock = Any()
-private val claimedApprovalIds = mutableSetOf<String>()
+private val claimedApprovalIds = object : LinkedHashMap<String, Unit>(CLAIM_LRU_CAP + 16, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Unit>?): Boolean =
+        size > CLAIM_LRU_CAP
+}
 
 private val stopClaimLock = Any()
-private val claimedStopRuns = mutableSetOf<String>()
+private val claimedStopRuns = object : LinkedHashMap<String, Unit>(CLAIM_LRU_CAP + 16, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Unit>?): Boolean =
+        size > CLAIM_LRU_CAP
+}
 
 /**
  * Single-flight condiviso processo per i POST di approvazione.
@@ -41,14 +50,22 @@ internal fun tryClaimApproval(approvalId: String): Boolean {
     val clean = approvalId.trim()
     if (clean.isEmpty()) return false
     synchronized(approvalClaimLock) {
-        if (claimedApprovalIds.contains(clean)) return false
-        claimedApprovalIds.add(clean)
+        if (claimedApprovalIds.containsKey(clean)) {
+            // Tocca la chiave per LRU access-order: il duplicato resta skip ma resta recente.
+            claimedApprovalIds[clean]
+            return false
+        }
+        claimedApprovalIds[clean] = Unit
         return true
     }
 }
 
 internal fun resetApprovalClaimsForTest() {
     synchronized(approvalClaimLock) { claimedApprovalIds.clear() }
+}
+
+internal fun approvalClaimSizeForTest(): Int {
+    synchronized(approvalClaimLock) { return claimedApprovalIds.size }
 }
 
 /** Rilascia un claim dopo POST fallito: il retry resta possibile. */
@@ -66,8 +83,11 @@ internal fun tryClaimStopRun(runId: String): Boolean {
     val clean = runId.trim()
     if (clean.isEmpty()) return false
     synchronized(stopClaimLock) {
-        if (claimedStopRuns.contains(clean)) return false
-        claimedStopRuns.add(clean)
+        if (claimedStopRuns.containsKey(clean)) {
+            claimedStopRuns[clean]
+            return false
+        }
+        claimedStopRuns[clean] = Unit
         return true
     }
 }
@@ -75,6 +95,23 @@ internal fun tryClaimStopRun(runId: String): Boolean {
 internal fun resetStopClaimsForTest() {
     synchronized(stopClaimLock) { claimedStopRuns.clear() }
 }
+
+internal fun stopClaimSizeForTest(): Int {
+    synchronized(stopClaimLock) { return claimedStopRuns.size }
+}
+
+/**
+ * Rilascia il claim stop dopo retry esauriti senza conferma server:
+ * un nuovo stop resta possibile (niente claim orfano per sempre).
+ */
+internal fun releaseStopClaim(runId: String) {
+    val clean = runId.trim()
+    if (clean.isEmpty()) return
+    synchronized(stopClaimLock) { claimedStopRuns.remove(clean) }
+}
+
+/** Puro e testabile: il claim stop va rilasciato solo a esaurimento senza conferma. */
+internal fun shouldReleaseStopClaimOnExhaustion(confirmed: Boolean): Boolean = !confirmed
 
 internal fun encodeActiveWorkBinding(binding: ActiveWorkBinding): JSONObject = JSONObject()
     .put("conversationId", binding.conversationId)

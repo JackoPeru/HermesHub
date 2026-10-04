@@ -228,6 +228,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
+import com.nemoclaw.chat.core.WorkLimits
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -1467,7 +1468,7 @@ internal fun loadGatewayRuntimeStatus(settings: AppSettings, apiKey: String?): G
             val json = runCatching { JSONObject(body) }.getOrNull() ?: return null
             val failure = json.optJSONObject("failure")
             return GatewayRuntimeStatus(
-                agentVersion = json.optString("agent_version").take(80),
+                agentVersion = json.optString("agent_version").take(WorkLimits.TRUNC_80),
                 status = json.optString("status").take(40),
                 failureReason = failure?.optString("reason").orEmpty().take(240)
             )
@@ -1514,7 +1515,6 @@ internal fun stopTtsPlayback() {
 @Volatile
 internal var activeTtsFile: File? = null
 private val ttsPlaybackMutex = Mutex()
-private const val TTS_REQUEST_TIMEOUT_MS = 90_000L
 
 internal data class TtsRequestResult(
     val statusCode: Int,
@@ -1539,7 +1539,7 @@ internal suspend fun speakChatMessage(context: Context, settings: AppSettings, t
     for (candidateUrl in ttsUrlCandidates(resolveTtsSpeechUrl(settings))) {
     for (token in hermesAuthCandidates(apiKey, allowCompatAuth = false)) {
             val response = try {
-                withTimeout(TTS_REQUEST_TIMEOUT_MS) {
+                withTimeout(WorkLimits.TTS_REQUEST_TIMEOUT_MS) {
                     executeTtsRequest(dir, candidateUrl, payload, token)
                 }
             } catch (ex: Exception) {

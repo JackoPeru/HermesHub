@@ -267,7 +267,8 @@ internal class HermesWorkService : Service() {
                 if (attempt < STOP_MAX_ATTEMPTS) delay(2000L * attempt)
             }
             if (!confirmed) {
-                Log.w(TAG, "stop runId=$cleanRunId code=$lastCode retry esauriti")
+                Log.w(TAG, "stop runId=$cleanRunId code=$lastCode retry esauriti, rilascio claim per nuovo stop")
+                releaseStopClaim(cleanRunId)
             }
             stopIfIdle()
         }

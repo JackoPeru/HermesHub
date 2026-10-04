@@ -2,6 +2,7 @@ package com.nemoclaw.chat
 
 import android.content.Context
 import androidx.core.content.edit
+import com.nemoclaw.chat.core.WorkLimits
 
 data class AppSettings(
     val gatewayUrl: String = AppDefaults.gatewayUrl,
@@ -115,7 +116,7 @@ internal fun loadSettings(context: Context): AppSettings {
         sidebarRecenti = prefs.getBoolean("sidebarRecenti", AppDefaults.sidebarRecenti),
         backgroundWork = prefs.getBoolean("backgroundWork", AppDefaults.backgroundWork),
         blockScreenshots = prefs.getBoolean("blockScreenshots", AppDefaults.blockScreenshots),
-        autoApprove = prefs.getString("autoApprove", AppDefaults.autoApprove)?.takeIf { it in setOf("off", "session", "always") } ?: AppDefaults.autoApprove
+        autoApprove = prefs.getString("autoApprove", AppDefaults.autoApprove)?.takeIf { it in WorkLimits.AUTO_APPROVE_MODES } ?: AppDefaults.autoApprove
     )
     return normalizePlugAndPlaySettings(context, settings)
 }
@@ -215,7 +216,7 @@ internal fun saveSettings(context: Context, settings: AppSettings) {
         putBoolean("sidebarRecenti", settings.sidebarRecenti)
         putBoolean("backgroundWork", settings.backgroundWork)
         putBoolean("blockScreenshots", settings.blockScreenshots)
-        putString("autoApprove", settings.autoApprove.takeIf { it in setOf("off", "session", "always") } ?: AppDefaults.autoApprove)
+        putString("autoApprove", settings.autoApprove.takeIf { it in WorkLimits.AUTO_APPROVE_MODES } ?: AppDefaults.autoApprove)
     }
 }
 

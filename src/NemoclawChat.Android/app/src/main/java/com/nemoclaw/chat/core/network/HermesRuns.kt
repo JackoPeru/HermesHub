@@ -4,14 +4,19 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.channels.trySendBlocking
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.UUID
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Runs API completa Hermes Agent (rif. v2026.9.14):
@@ -295,6 +300,37 @@ class HermesRunClient(
 }
 
 /** Trasporto SSE condiviso per run events (keepalive ignorato, eventi sconosciuti preservati). */
+/** Timeout finiti run-SSE: stessi valori dello streaming chat (connect 15s, read 60s, call 30min). */
+internal const val RUN_SSE_CONNECT_TIMEOUT_SEC = 15L
+internal const val RUN_SSE_READ_TIMEOUT_SEC = 60L
+internal const val RUN_SSE_WRITE_TIMEOUT_SEC = 30L
+internal const val RUN_SSE_CALL_TIMEOUT_MIN = 30L
+/** Watchdog inattivita run-SSE: nessun byte/evento per 90s -> errore esplicito e chiusura. */
+internal const val RUN_SSE_INACTIVITY_TIMEOUT_MS = 90_000L
+internal const val RUN_SSE_INACTIVITY_CHECK_MS = 10_000L
+internal const val RUN_SSE_INACTIVITY_ERROR_MESSAGE =
+    "Run Hermes interrotto: nessun dato per 90s (timeout inattivita). Risposta non confermata."
+
+/** Client dedicato run-SSE con timeout finiti (niente blocco infinito). */
+internal val runSseHttpClient: OkHttpClient = OkHttpClient.Builder()
+    .connectTimeout(RUN_SSE_CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
+    .readTimeout(RUN_SSE_READ_TIMEOUT_SEC, TimeUnit.SECONDS)
+    .writeTimeout(RUN_SSE_WRITE_TIMEOUT_SEC, TimeUnit.SECONDS)
+    .callTimeout(RUN_SSE_CALL_TIMEOUT_MIN, TimeUnit.MINUTES)
+    .build()
+
+internal fun isRunSseInactivityExpired(
+    lastProgressNs: Long,
+    nowNs: Long,
+    timeoutMs: Long = RUN_SSE_INACTIVITY_TIMEOUT_MS
+): Boolean {
+    if (timeoutMs <= 0L) return false
+    return nowNs - lastProgressNs >= timeoutMs * 1_000_000L
+}
+
+internal fun isRunSseInactivityMessage(message: String?): Boolean =
+    message?.contains("nessun dato per 90s", ignoreCase = true) == true
+
 internal suspend fun collectRunSseEvents(
     url: String,
     apiKey: String?,
@@ -311,11 +347,34 @@ internal suspend fun collectRunSseEvents(
             token?.let { builder.header("Authorization", "Bearer $it") }
             val request = builder.get().build()
             val delivered = kotlinx.coroutines.flow.callbackFlow {
-                val call = streamHttpClient.newCall(request)
+                // Trasporto dedicato con timeout finiti (connect 15s, read 60s, call 30min).
+                val call = runSseHttpClient.newCall(request)
+                val lastProgressNs = AtomicLong(System.nanoTime())
+                fun markProgress() {
+                    lastProgressNs.set(System.nanoTime())
+                }
                 fun send(pair: Pair<String?, String>): Boolean = try {
+                    markProgress()
                     trySendBlocking(pair).isSuccess
                 } catch (_: Exception) {
                     false
+                }
+                // Watchdog inattivita 90s: nessun byte/evento -> errore esplicito e chiusura.
+                // Stesso pattern di streamSseAttempt: il segnale parte PRIMA della cancel.
+                val watchdog = launch {
+                    try {
+                        while (true) {
+                            delay(RUN_SSE_INACTIVITY_CHECK_MS)
+                            if (isRunSseInactivityExpired(lastProgressNs.get(), System.nanoTime())) {
+                                trySendBlocking("error" to RUN_SSE_INACTIVITY_ERROR_MESSAGE)
+                                call.cancel()
+                                close()
+                                break
+                            }
+                        }
+                    } catch (_: CancellationException) {
+                        // Chiusura normale o cancel utente: niente da segnalare.
+                    }
                 }
                 call.enqueue(object : okhttp3.Callback {
                     override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
@@ -329,6 +388,7 @@ internal suspend fun collectRunSseEvents(
                                     return@use
                                 }
                                 if (!trySendBlocking("connected" to "").isSuccess) return@use
+                                markProgress()
                                 val source = current.body.source()
                                 val dataBuffer = StringBuilder()
                                 var eventName: String? = null
@@ -346,6 +406,8 @@ internal suspend fun collectRunSseEvents(
                                     } catch (_: Exception) {
                                         break
                                     }
+                                    // Ogni byte ricevuto resetta il watchdog (keepalive incluso).
+                                    markProgress()
                                     if (line.isEmpty()) {
                                         if (!flush()) return@use
                                         continue
@@ -372,7 +434,10 @@ internal suspend fun collectRunSseEvents(
                         }
                     }
                 })
-                awaitClose { call.cancel() }
+                awaitClose {
+                    watchdog.cancel()
+                    call.cancel()
+                }
             }
             var accepted = false
             var failed = false

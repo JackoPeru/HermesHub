@@ -86,6 +86,7 @@ import com.nemoclaw.chat.getScreenStatus
 import com.nemoclaw.chat.loadBotAutoApproveMap
 import com.nemoclaw.chat.loadGatewaySecret
 import com.nemoclaw.chat.saveBotAutoApprove
+import com.nemoclaw.chat.core.WorkLimits
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import com.nemoclaw.chat.loadBotAutoApproveMap
@@ -803,9 +804,9 @@ internal fun BotsScreen(
                     OutlinedTextField(soulInput, { soulInput = it }, label = { Text("SOUL.md (opzionale)") }, minLines = 4)
                     Text("Auto-approvazione run di questo bot (solo client, mai deny automatico)", color = AppColors.Muted, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for ((label, value) in listOf("Chiedi" to "off", "Sessione" to "session", "Sempre" to "always")) {
+                        for ((label, value) in listOf("Chiedi" to WorkLimits.AUTO_APPROVE_OFF, "Sessione" to WorkLimits.AUTO_APPROVE_SESSION, "Sempre" to WorkLimits.AUTO_APPROVE_ALWAYS)) {
                             val selected = loadBotAutoApproveMap(context)[editing?.profile.orEmpty()]?.let { it == value }
-                                ?: (value == "off")
+                                ?: (value == WorkLimits.AUTO_APPROVE_OFF)
                             TextButton(
                                 onClick = {
                                     val profile = (if (editing == null) profileInput else editing?.profile).orEmpty()
@@ -1130,7 +1131,7 @@ internal fun BotDetailScreen(
                 if (status.isNotBlank()) Text(status, color = AppColors.Muted, fontSize = 12.sp)
                 Text("Auto-approvazione run di ${bot.displayName}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for ((label, value) in listOf("Chiedi" to "off", "Sessione" to "session", "Sempre" to "always")) {
+                    for ((label, value) in listOf("Chiedi" to WorkLimits.AUTO_APPROVE_OFF, "Sessione" to WorkLimits.AUTO_APPROVE_SESSION, "Sempre" to WorkLimits.AUTO_APPROVE_ALWAYS)) {
                         val selected = autoMode == value
                         TextButton(onClick = {
                             saveBotAutoApprove(appContext, bot.profile, value)
