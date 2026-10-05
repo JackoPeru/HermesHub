@@ -229,6 +229,7 @@ import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import com.nemoclaw.chat.core.WorkLimits
+import com.nemoclaw.chat.features.bots.loadBotLinks
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -1971,9 +1972,19 @@ internal suspend fun restoreConversationsFromHub(
         }
         synchronized(localArchiveLock) {
             val byId = loadConversations(context, includeDeleted = true).associateBy { it.id }.toMutableMap()
+            // Chat collegate desktop: unisci i messaggi invece di sostituire
+            // l'entita intera (telefono+desktop scrivono lo stesso id).
+            val linkedIds = loadBotLinks(context).values.toSet()
             remote.forEach { incoming ->
                 val existing = byId[incoming.id]
-                if (existing == null || incoming.updatedAt >= existing.updatedAt) {
+                if (existing == null) {
+                    byId[incoming.id] = incoming
+                } else if (incoming.id in linkedIds) {
+                    byId[incoming.id] = incoming.copy(
+                        messages = unionChatMessages(existing.messages, incoming.messages),
+                        updatedAt = maxOf(existing.updatedAt, incoming.updatedAt)
+                    )
+                } else if (incoming.updatedAt >= existing.updatedAt) {
                     byId[incoming.id] = incoming
                 }
             }

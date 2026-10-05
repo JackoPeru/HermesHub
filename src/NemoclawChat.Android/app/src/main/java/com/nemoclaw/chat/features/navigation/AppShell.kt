@@ -525,7 +525,9 @@ internal fun HermesBotSidebar(
     val appContext = context.applicationContext
     var bots by remember { mutableStateOf(emptyList<com.nemoclaw.chat.features.bots.HermesBotItem>()) }
     var status by remember { mutableStateOf("Carico bot…") }
-    LaunchedEffect(Unit) {
+    var botRefreshNonce by remember { mutableIntStateOf(0) }
+    LaunchedEffect(botRefreshNonce) {
+        status = "Carico bot…"
         val loaded = withContext(Dispatchers.IO) {
             val pins = com.nemoclaw.chat.features.bots.loadBotPins(appContext)
             val hidden = com.nemoclaw.chat.features.bots.loadBotHiddenLocal(appContext)
@@ -555,6 +557,12 @@ internal fun HermesBotSidebar(
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 16.sp,
                     modifier = Modifier.weight(1f)
+                )
+                Text(
+                    "Aggiorna",
+                    color = AppColors.Muted,
+                    fontSize = 12.sp,
+                    modifier = Modifier.clickable { botRefreshNonce++ }
                 )
                 Text(
                     "Chiudi",

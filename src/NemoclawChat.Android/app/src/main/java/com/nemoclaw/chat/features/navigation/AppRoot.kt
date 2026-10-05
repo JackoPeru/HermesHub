@@ -257,6 +257,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
@@ -314,6 +315,10 @@ internal fun ChatApp() {
     // Sezione Bot: i bot non sono piu un tab sidebar ma [Chat | Bot] in alto
     // alla chat. true = roster/dettaglio bot visibile con slide da destra.
     var botSectionVisible by rememberSaveable { mutableStateOf(false) }
+    // Guard condivisa dai 4 entry-point di apertura bot (sidebar, last-bot,
+    // roster, menu link): un solo resolve alla volta. remember (non saveable):
+    // a processo morto non deve restare true senza coroutine viva.
+    var sidebarBotOpening by remember { mutableStateOf(false) }
     val setSelectedTab: (Tab) -> Unit = { tab ->
         // Bot e schermo vivono nella sezione interna alla Chat: navigare
         // pulisce sempre il flag (coerce anche da vecchi stati salvati).
@@ -349,17 +354,22 @@ internal fun ChatApp() {
     // Chat <- [Chat | Bot]: esci da bot chat verso chat nuova; dalla
     // sezione roster torni alla chat sottostante senza resettarla.
     // Il reset scarta la bozza: avvisa invece di perderla in silenzio.
+    // Mai durante apertura in corso (la coroutine sovrascriverebbe).
     val selectChatSegment: () -> Unit = {
-        if (pendingBot != null) {
-            if (chatState.draft.isNotBlank() || chatState.pendingAttachments.isNotEmpty()) {
-                Toast.makeText(context, "Bozza scartata, chat bot chiusa.", Toast.LENGTH_SHORT).show()
+        if (sidebarBotOpening) {
+            Toast.makeText(context, "Apertura in corso.", Toast.LENGTH_SHORT).show()
+        } else {
+            if (pendingBot != null) {
+                if (chatState.draft.isNotBlank() || chatState.pendingAttachments.isNotEmpty()) {
+                    Toast.makeText(context, "Bozza scartata, chat bot chiusa.", Toast.LENGTH_SHORT).show()
+                }
+                pendingBot = null
+                pendingConversationId = null
+                pendingPrompt = ""
+                chatState.resetForNewChat()
             }
-            pendingBot = null
-            pendingConversationId = null
-            pendingPrompt = ""
-            chatState.resetForNewChat()
+            botSectionVisible = false
         }
-        botSectionVisible = false
     }
     // Apertura bot: mai sopra un turno attivo (reset ammazzerebbe stream,
     // binding e coda senza pulizia). L'utente interrompe o aspetta.
@@ -453,7 +463,6 @@ internal fun ChatApp() {
     // (binding per identityKey, stabile); pendingConversationId porta
     // l'ARCHIVE id (entity desktop linkata oppure id stabile). ChatScreen
     // carica/salva per archiveId; lo stream usa la sessione del contesto.
-    var sidebarBotOpening by remember { mutableStateOf(false) }
     // Dialog collegamento chat desktop (vedi sotto): target pendente.
     var desktopLinkFor by remember { mutableStateOf<BotLinkTarget?>(null) }
 
@@ -495,14 +504,23 @@ internal fun ChatApp() {
     }
 
     fun openSidebarBot(bot: HermesBotItem) {
-        if (sidebarBotOpening) return
+        if (sidebarBotOpening) {
+            Toast.makeText(context, "Apertura gia in corso.", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (!canOpenBot()) return
         sidebarBotOpening = true
         chatScope.launch {
             try {
-                // Storia condivisa col desktop: tira il pull prima di aprire
-                // (best-effort; il poll 120s copre il resto).
-                runCatching { ConversationArchiveAutoSync.pullFromHub(context.applicationContext) }
+                val appCtx = context.applicationContext
+                // Linkata: pull con timeout (serve storia fresca); altrimenti
+                // non bloccare l'apertura (il poll copre).
+                val preHasLink = withContext(Dispatchers.IO) { loadBotLinks(appCtx)[bot.identityKey] != null }
+                if (preHasLink) {
+                    withTimeoutOrNull(15_000) { runCatching { ConversationArchiveAutoSync.pullFromHub(appCtx) } }
+                } else {
+                    chatScope.launch { runCatching { ConversationArchiveAutoSync.pullFromHub(appCtx) } }
+                }
                 resolveBotChat(context.applicationContext, settings, false, bot)
                     .onSuccess {
                         val appCtx = context.applicationContext
@@ -536,7 +554,15 @@ internal fun ChatApp() {
         sidebarBotOpening = true
         chatScope.launch {
             try {
-                runCatching { ConversationArchiveAutoSync.pullFromHub(context.applicationContext) }
+                val appCtx = context.applicationContext
+                val preHasLink = withContext(Dispatchers.IO) {
+                    loadBotLinks(appCtx)["${ref.connectionId}::${ref.profile}"] != null
+                }
+                if (preHasLink) {
+                    withTimeoutOrNull(15_000) { runCatching { ConversationArchiveAutoSync.pullFromHub(appCtx) } }
+                } else {
+                    chatScope.launch { runCatching { ConversationArchiveAutoSync.pullFromHub(appCtx) } }
+                }
                 resolveBotChat(context.applicationContext, settings, false, ref.toItem())
                     .onSuccess {
                         val appCtx = context.applicationContext
@@ -562,7 +588,10 @@ internal fun ChatApp() {
     val selectBotSegment: () -> Unit = {
         // Main page della sezione = chat dell'ultimo bot usato (non roster).
         // Da bot chat aperta: vai al roster tenendo il contesto.
-        if (!botSectionVisible) {
+        // Mai durante apertura in corso.
+        if (sidebarBotOpening) {
+            Toast.makeText(context, "Apertura in corso.", Toast.LENGTH_SHORT).show()
+        } else if (!botSectionVisible) {
             if (pendingBot != null) {
                 botSectionVisible = true
             } else if (!openLastBot()) {
@@ -689,7 +718,13 @@ internal fun ChatApp() {
                     settings = settings,
                 onOpenBot = { bot ->
                         if (!canOpenBot()) return@BotsScreen
+                        if (sidebarBotOpening) {
+                            Toast.makeText(context, "Apertura gia in corso.", Toast.LENGTH_SHORT).show()
+                            return@BotsScreen
+                        }
+                        sidebarBotOpening = true
                         chatScope.launch {
+                            try {
                             val appCtx = context.applicationContext
                             val item = SavedBotRef(bot.connectionId, bot.profile, bot.displayName).toItem()
                             val archiveId = botLinkedArchiveId(appCtx, item, bot.localConversationId)
@@ -702,6 +737,9 @@ internal fun ChatApp() {
                             saveLastBot(appCtx, bot.connectionId, bot.profile, bot.displayName)
                             setSelectedTab(Tab.Chat)
                             maybePromptDesktopLink(appCtx, item, bot.localConversationId)
+                            } finally {
+                                sidebarBotOpening = false
+                            }
                         }
                     },
                     onOpenScreen = { setSelectedTab(Tab.Screen) },
@@ -710,7 +748,13 @@ internal fun ChatApp() {
                     onLinkDesktop = { bot ->
                         // Dal menu: apri il bot e proponi il collegamento.
                         if (!canOpenBot()) return@BotsScreen
+                        if (sidebarBotOpening) {
+                            Toast.makeText(context, "Apertura gia in corso.", Toast.LENGTH_SHORT).show()
+                            return@BotsScreen
+                        }
+                        sidebarBotOpening = true
                         chatScope.launch {
+                            try {
                             val appCtx = context.applicationContext
                             runCatching { ConversationArchiveAutoSync.pullFromHub(appCtx) }
                             val stableId = stableBotConversationId(bot)
@@ -729,6 +773,9 @@ internal fun ChatApp() {
                                 }
                             if (resolved.isSuccess) {
                                 maybePromptDesktopLink(appCtx, bot, stableId, force = true)
+                            }
+                            } finally {
+                                sidebarBotOpening = false
                             }
                         }
                     },
@@ -911,11 +958,29 @@ internal fun ChatApp() {
                             if (chatState.sending) {
                                 Toast.makeText(context, "Finisci o interrompi il turno prima di collegare.", Toast.LENGTH_SHORT).show()
                             } else {
-                                saveBotLink(context.applicationContext, target.identityKey, entity.id)
-                                chatState.resetForNewChat()
-                                pendingConversationId = entity.id
-                                desktopLinkFor = null
-                                Toast.makeText(context, "Chat desktop collegata.", Toast.LENGTH_SHORT).show()
+                                val cur = pendingBot
+                                if (cur == null || "${cur.connectionId}::${cur.profile}" != target.identityKey) {
+                                    Toast.makeText(context, "Bot cambiato nel frattempo.", Toast.LENGTH_SHORT).show()
+                                    desktopLinkFor = null
+                                } else {
+                                    chatScope.launch {
+                                        // Rivalida: eliminata nel frattempo?
+                                        val fresh = withContext(Dispatchers.IO) {
+                                            loadConversations(context.applicationContext, includeDeleted = true)
+                                                .firstOrNull { it.id == entity.id }
+                                        }
+                                        if (fresh == null || fresh.deletedAt != null) {
+                                            Toast.makeText(context, "Chat non piu disponibile.", Toast.LENGTH_SHORT).show()
+                                            desktopLinkFor = null
+                                        } else {
+                                            saveBotLink(context.applicationContext, target.identityKey, entity.id)
+                                            chatState.resetForNewChat()
+                                            pendingConversationId = entity.id
+                                            desktopLinkFor = null
+                                            Toast.makeText(context, "Chat desktop collegata.", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
                             }
                         },
                         onSkip = {

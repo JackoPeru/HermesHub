@@ -317,8 +317,7 @@ internal fun saveBotLink(context: Context, identityKey: String, entityId: String
     botDisplayPrefs(context).edit { putString("links_json", root.toString()) }
 }
 
-internal fun clearBotLink(context: Context, identityKey: String) {
-    val next = loadBotLinks(context).toMutableMap()
+internal fun clearBotLink(context: Context, identityKey: String) {    val next = loadBotLinks(context).toMutableMap()
     next.remove(identityKey)
     val root = JSONObject()
     next.forEach { (k, v) -> root.put(k, v) }
@@ -333,6 +332,16 @@ internal fun loadBotLinkSkipped(context: Context): Set<String> = loadStringSet(c
 
 internal fun saveBotLinkSkipped(context: Context, values: Set<String>) {
     saveStringSet(context, "links_skipped", values)
+}
+
+/**
+ * True se l'id e target di un link desktop (chat condivisa): gli snapshot
+ * devono preservare i puntatori altrui, mai rinominare. Vale anche senza
+ * contesto bot (apertura da archivio di entity linkata).
+ */
+internal fun isLinkedArchiveId(context: Context, id: String?): Boolean {
+    if (id.isNullOrBlank() || isBotConversationId(id)) return false
+    return loadBotLinks(context).values.contains(id)
 }
 
 /**

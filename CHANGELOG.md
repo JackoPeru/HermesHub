@@ -2,6 +2,14 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.218 - 2026-10-05
+
+- Bot collegati al desktop: ogni bot si collega alla sua chat desktop
+  (stessa entity Hub, uso sequenziale); picker al primo uso, scollega
+  dal menu; snapshot con preserve dei puntatori e union anti-perdita.
+- Hardening apertura bot: gate unico anti doppio-tap sui 4 percorsi,
+  pull con timeout solo per linkate, guardie a turno attivo.
+
 ## 0.6.217 - 2026-10-05
 
 - Sezione Bot: la pagina principale e la chat dell'ultimo bot usato

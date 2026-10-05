@@ -423,7 +423,14 @@ internal fun unionChatMessages(
     if (remote.isEmpty()) return local
     if (local.isEmpty()) return remote
     val remoteIds = remote.map { it.id }.toSet()
-    return remote + local.filter { it.id !in remoteIds }
+    val merged = remote + local.filter { it.id !in remoteIds }
+    // Collassa duplicati adiacenti identici (stesso turno salvato dai due
+    // lati con id diversi: stesso autore+testo di fila).
+    return merged.fold(mutableListOf()) { acc, msg ->
+        val prev = acc.lastOrNull()
+        if (prev != null && prev.author == msg.author && prev.fromUser == msg.fromUser && prev.text == msg.text) acc
+        else acc.apply { add(msg) }
+    }
 }
 
 data class LocalConversation(

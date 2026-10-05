@@ -247,6 +247,7 @@ import com.nemoclaw.chat.createVideoPlayerView
 import com.nemoclaw.chat.FullscreenVideoOrientationEffect
 import com.nemoclaw.chat.findActivity
 import com.nemoclaw.chat.core.WorkLimits
+import com.nemoclaw.chat.features.bots.isLinkedArchiveId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -438,6 +439,21 @@ internal fun ChatScreen(
     // un contenitore vuoto senza spiegazione. Le chat nuove non salvate
     // (es. primo open di un bot) NON alzano il flag.
     var conversationDeletedNotice by remember(conversationId) { mutableStateOf(false) }
+    // Chat collegata al desktop (id Hub altrui): gli snapshot preservano i
+    // puntatori di continuazione esistenti. Vale anche senza contesto bot
+    // (apertura da archivio di entity linkata). Contratto: l'inferenza
+    // resta sulla SESSIONE bot (botSessionId), il preserve evita solo il
+    // clobber dello storage condiviso.
+    // pendingConversationId viene nulllato dopo il primo load: fallback su
+    // activeConversationId, altrimenti dal 2o turno preserve diventerebbe
+    // false e si distruggerebbe il serverConversationId desktop.
+    val preserveRemoteContinuity = remember(botProfile, conversationId, state.activeConversationId) {
+        val effective = conversationId?.takeIf { it.isNotBlank() }
+            ?: state.activeConversationId?.takeIf { it.isNotBlank() }
+        if (effective.isNullOrBlank()) false
+        else if (!botProfile.isNullOrBlank()) !isBotConversationId(effective)
+        else isLinkedArchiveId(context, effective)
+    }
 
     LaunchedEffect(conversationId, initialPrompt) {
         // Flag solo con id non-blank: al ritorno dalla sezione Bot (o da tab)
@@ -450,6 +466,10 @@ internal fun ChatScreen(
                 state.activeConversationId = saved.id
                 val expectedServerConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, saved.id)
                 state.previousResponseId = if (botProfile.isNullOrBlank() && saved.serverConversationId == expectedServerConversationId) {
+                    saved.previousResponseId
+                } else if (preserveRemoteContinuity) {
+                    // Chat collegata: conserva la catena esistente invece di
+                    // azzerarla (l'invio la usa solo dove ha senso).
                     saved.previousResponseId
                 } else {
                     null
@@ -549,17 +569,6 @@ internal fun ChatScreen(
     val isStreaming = state.streamingState != null
     val archivedBotWithoutContext = botProfile.isNullOrBlank() &&
         isBotConversationId(conversationId ?: state.activeConversationId)
-    // Chat bot collegata al desktop (id Hub altrui, non bot-*/botchat-*):
-    // gli snapshot preservano i puntatori di continuazione esistenti.
-    // Contratto: l'inferenza resta sulla SESSIONE bot (botSessionId), il
-    // preserve evita solo il clobber dello storage condiviso. effectiveId:
-    // pendingConversationId viene nulllato dopo il primo load, quindi
-    // fallback su activeConversationId (altrimenti dal 2o turno preserve
-    // diventerebbe false e si distruggerebbe il serverConversationId desktop).
-    val effectiveConversationId = conversationId?.takeIf { it.isNotBlank() }
-        ?: state.activeConversationId?.takeIf { it.isNotBlank() }
-    val preserveRemoteContinuity = !botProfile.isNullOrBlank() &&
-        !effectiveConversationId.isNullOrBlank() && !isBotConversationId(effectiveConversationId)
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             scope.launch {
@@ -894,11 +903,15 @@ internal fun ChatScreen(
             }
             if (isEmptyChat) {
                 // Empty state must stay above the transparent LazyColumn or the list consumes taps.
-                // Mai la home generica in contesto bot: attesa o header bot.
+                // Mai la home generica in contesto bot: attesa, errore rete o header bot.
                 if (chatBotOpening) {
-                    BotEmptyState(displayName = null, opening = true)
+                    BotEmptyState(displayName = null, opening = true, unreachable = false)
                 } else if (!botProfile.isNullOrBlank()) {
-                    BotEmptyState(displayName = botDisplayName?.takeIf { it.isNotBlank() } ?: botProfile, opening = false)
+                    BotEmptyState(
+                        displayName = botDisplayName?.takeIf { it.isNotBlank() } ?: botProfile,
+                        opening = false,
+                        unreachable = !gatewayAvailable
+                    )
                 } else {
                     EmptyState(onPrompt = { quickPrompt = it })
                 }
@@ -1838,7 +1851,7 @@ internal fun executeSlashCommand(
 
 
 @Composable
-internal fun BotEmptyState(displayName: String?, opening: Boolean) {
+internal fun BotEmptyState(displayName: String?, opening: Boolean, unreachable: Boolean = false) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1847,7 +1860,11 @@ internal fun BotEmptyState(displayName: String?, opening: Boolean) {
         horizontalAlignment = Alignment.Start
     ) {
         Text(
-            text = if (opening) "Apro la chat…" else displayName ?: "Bot",
+            text = when {
+                opening -> "Apro la chat…"
+                unreachable -> "Bot non raggiungibile"
+                else -> displayName ?: "Bot"
+            },
             color = Color.White,
             fontWeight = FontWeight.SemiBold,
             fontSize = 27.sp,
@@ -1855,8 +1872,11 @@ internal fun BotEmptyState(displayName: String?, opening: Boolean) {
         )
         Spacer(modifier = Modifier.height(10.dp))
         Text(
-            text = if (opening) "Recupero la storia condivisa con Hermes desktop."
-            else "Questa e la chat persistente del bot: la stessa su telefono e desktop. Scrivi per iniziare.",
+            text = when {
+                opening -> "Recupero la storia condivisa con Hermes desktop."
+                unreachable -> "Il gateway non risponde: controlla la connessione e riprova dal roster."
+                else -> "Questa e la chat persistente del bot: la stessa su telefono e desktop. Scrivi per iniziare."
+            },
             color = AppColors.Muted,
             fontSize = 14.sp,
             lineHeight = 20.sp

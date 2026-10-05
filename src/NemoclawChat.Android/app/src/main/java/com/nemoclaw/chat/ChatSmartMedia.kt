@@ -7,6 +7,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import com.nemoclaw.chat.features.bots.isLinkedArchiveId
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -340,6 +341,8 @@ private suspend fun persistSmartSnapshot(
     messages: List<ChatMessage>
 ) {
     withContext(Dispatchers.IO) {
+        // Chat condivisa col desktop: preserva i puntatori altrui.
+        val linked = isLinkedArchiveId(context, streamCid)
         saveConversationSnapshot(
             context = context,
             conversationId = streamCid,
@@ -349,6 +352,7 @@ private suspend fun persistSmartSnapshot(
             source = "Hermes fast path",
             responseId = prevId,
             projectId = settings.activeProjectId,
+            preserveRemoteContinuity = linked,
             syncAfterSave = false
         )
     }
@@ -361,7 +365,9 @@ private suspend fun renameSmartConversation(
     displayText: String,
     resultText: String
 ) {
-    // Stesso rename del flusso normale (best effort, mai fatale).
+    // Mai rinominare la chat condivisa col desktop (titolo altrui + bump
+    // updatedAt che vincerebbe LWW a sproposito).
+    if (isLinkedArchiveId(context, activeStreamCid)) return
     val title = runCatching {
         generateConversationTitle(
             settings = settings,

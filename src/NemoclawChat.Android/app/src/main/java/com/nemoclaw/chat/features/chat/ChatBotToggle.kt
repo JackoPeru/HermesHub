@@ -18,6 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,14 +60,12 @@ internal fun ChatBotToggle(
                 ChatBotSegment(
                     label = "Chat",
                     selected = !botActive,
-                    onClick = onSelectChat,
-                    contentDescription = if (botActive) "Vai alle chat" else "Sezione chat attiva"
+                    onClick = onSelectChat
                 )
                 ChatBotSegment(
                     label = "Bot",
                     selected = botActive,
-                    onClick = onSelectBot,
-                    contentDescription = if (botActive) "Sezione bot attiva" else "Vai ai bot"
+                    onClick = onSelectBot
                 )
             }
         }
@@ -75,9 +76,9 @@ internal fun ChatBotToggle(
 private fun ChatBotSegment(
     label: String,
     selected: Boolean,
-    onClick: () -> Unit,
-    contentDescription: String
+    onClick: () -> Unit
 ) {
+    val stateDesc = if (selected) "attiva" else "non attiva"
     Surface(
         modifier = Modifier
             .clip(CircleShape)
@@ -85,7 +86,10 @@ private fun ChatBotSegment(
                 selected = selected,
                 onClick = onClick,
                 role = Role.Tab
-            ),
+            )
+            .semantics(mergeDescendants = true) {
+                stateDescription = stateDesc
+            },
         color = if (selected) AppColors.Accent else Color.Transparent,
         shape = CircleShape
     ) {

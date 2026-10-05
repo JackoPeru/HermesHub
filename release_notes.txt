@@ -1,12 +1,16 @@
-Hermes Hub 0.6.217 (main page ultima chat bot)
+Hermes Hub 0.6.218 (bot collegati al desktop)
 
-- App: la pagina principale della sezione Bot e la chat dell'ultimo bot
-  usato (riuso sessione senza POST se c'e binding); roster solo al primo
-  uso, da bot chat o da "Gestisci bot".
-- Server: roster `/v1/hub/bots` ripristinato (mancavano ruamel.yaml e
-  pyyaml al python dell'hub): 7 bot come Hermes desktop.
-- Versioni: Windows/AdminBridge `0.6.217`; Android `versionName 0.6.217`, `versionCode 221`.
-- Asset: `HermesHub-0.6.217-android.apk` (binario Windows invariato).
-- SHA-256 Android: `df6e444b72fa8b78a38794d06aa13152cd888be62d840f7b74888d62c815a673`.
-- Asset: `HermesHub-0.6.217-linux-gateway.tar.gz`.
-- SHA-256 gateway: `fb95f608de394d72ff9767da15b499f5a6bfe7f9eb7fba75d364f7d0f68b945d`.
+- App: ogni bot si collega alla sua chat desktop (stessa entity Hub):
+  telefono e desktop leggono/scrivono la stessa chat (uso sequenziale).
+  Picker "Collega chat desktop" al primo uso o dal menu, "Scollega" per
+  tornare alla chat locale.
+- App: snapshot con preserve dei puntatori altrui (niente clobber),
+  union anti-perdita turni, niente rinomina della chat condivisa,
+  pull con timeout solo dove serve.
+- App: gate unico anti doppio-tap sui 4 percorsi di apertura bot,
+  sezioni/sidebar/menu coerenti, audit pre-release applicato.
+- Versioni: Windows/AdminBridge `0.6.218`; Android `versionName 0.6.218`, `versionCode 222`.
+- Asset: `HermesHub-0.6.218-android.apk` (binario Windows invariato).
+- SHA-256 Android: `c54968abe6b03d2a00641902325e38cc8e1a86727d907befc3437d5b32fb5f3b`.
+- Asset: `HermesHub-0.6.218-linux-gateway.tar.gz`.
+- SHA-256 gateway: `19a199bed0f0e8eac50ddca77c38fddc1b422078ce0a973354184fc7b58295be`.
