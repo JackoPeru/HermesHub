@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.219 - 2026-10-05
+
+- Bot canoniche desktop-parity: un bot = una forever-chat (sessione
+  titled "Bot Chat"), transcript condivisa col desktop, invii nella
+  stessa sessione, roster con anteprima ultimo messaggio; mai fork,
+  fail-closed sul registro, niente rename della canonica.
+
 ## 0.6.218 - 2026-10-05
 
 - Bot collegati al desktop: ogni bot si collega alla sua chat desktop
