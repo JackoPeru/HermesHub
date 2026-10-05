@@ -557,7 +557,7 @@ internal fun BotsScreen(
     var botAutoScreen by remember { mutableStateOf(setOf<String>()) }
     var botSections by remember { mutableStateOf(BotSections()) }
     var showHiddenBots by remember { mutableStateOf(false) }
-    var showSectionScreen by rememberSaveable { mutableStateOf(false) }
+    var showSectionScreen by remember { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<String?>(null) }
     var menuPage by remember { mutableStateOf(0) }
     var recentFor by remember { mutableStateOf<HermesBotItem?>(null) }
@@ -577,25 +577,31 @@ internal fun BotsScreen(
     var screenStatus by remember(settings.gatewayUrl) { mutableStateOf<ScreenStatusInfo?>(null) }
     var screenPreview by remember { mutableStateOf<Bitmap?>(null) }
     var lastScreenSignature by remember { mutableStateOf<BitmapImageLoader.FrameSignature?>(null) }
-    PollWhileStarted(settings.gatewayUrl, baseIntervalMs = 8_000L) {
+    PollWhileStarted(settings.gatewayUrl, showSectionScreen, baseIntervalMs = 8_000L) {
+        // Schermo gia aperto in sezione: niente doppio polling (ScreenScreen
+        // polla da se). True = successo, nessun backoff.
+        if (showSectionScreen) return@PollWhileStarted true
         val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
         val next = runCatching { withContext(Dispatchers.IO) { getScreenStatus(settings, key) } }.getOrNull()
         screenStatus = next
         // "Apri schermo quando il bot lo usa": fronte di un bot che prende
-        // lo schermo (holder: human -> altro) con almeno un bot flaggato.
-        // Mai mentre l'utente compila dialoghi. Solo segnale disponibile:
-        // holder e generico ("bot"), non attribuibile al singolo profilo.
+        // lo schermo (holder: human -> altro). Solo se UN solo bot e flaggato
+        // (holder e generico, non attribuibile: con piu flag niente auto-open,
+        // solo status). Mai mentre l'utente compila dialoghi.
         val holderNow = next?.holder ?: "human"
+        val flagged = roster?.items.orEmpty().filter { it.identityKey in botAutoScreen }
         if (next?.running == true && holderNow != "human" && lastScreenHolder == "human" &&
-            !showEditor && deleteBot == null && openGroup == null && recentFor == null &&
-            roster?.items.orEmpty().any { it.identityKey in botAutoScreen }) {
+            flagged.size == 1 && !showEditor && deleteBot == null && openGroup == null &&
+            recentFor == null && newSectionFor == null && !showConnectionEditor &&
+            removeConnection == null) {
             showSectionScreen = true
             status = "Un bot sta usando lo schermo: aperto automaticamente."
         }
         lastScreenHolder = holderNow
         next != null
     }
-    PollWhileStarted(screenStatus?.running, baseIntervalMs = 6_000L) {
+    PollWhileStarted(screenStatus?.running, showSectionScreen, baseIntervalMs = 6_000L) {
+        if (showSectionScreen) return@PollWhileStarted true
         if (screenStatus?.running != true) {
             screenPreview = null
             lastScreenSignature = null
@@ -628,8 +634,12 @@ internal fun BotsScreen(
     // o "sessione recente" forzano/riusano esplicitamente e aggiornano il
     // binding. Se la sessione riusata e scaduta, lo stream fallisce con
     // errore esplicito: basta "Nuova chat con questo bot".
-    fun openBotSession(bot: HermesBotItem, fresh: Boolean = false, session: BotSessionEntry? = null) {
-        if (opening != null) return
+    // Ritorna false se non acquisisce la guard (chiamante: non chiudere menu).
+    fun openBotSession(bot: HermesBotItem, fresh: Boolean = false, session: BotSessionEntry? = null): Boolean {
+        if (opening != null) {
+            Toast.makeText(context, "Apertura gia in corso.", Toast.LENGTH_SHORT).show()
+            return false
+        }
         opening = bot.identityKey
         scope.launch {
             try {
@@ -661,13 +671,20 @@ internal fun BotsScreen(
                         }
                         .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
                 }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                // Connessione remota cancellata, prefs corrotte, ecc: mai
+                // silenzio (il path fresh ha onFailure, il riuso no).
+                status = e.message ?: "Apertura bot fallita."
             } finally {
                 opening = null
             }
         }
+        return true
     }
 
-    fun openPersistent(bot: HermesBotItem) = openBotSession(bot)
+    fun openPersistent(bot: HermesBotItem): Boolean = openBotSession(bot)
 
     val detail = detailBot
     if (detail != null) {
@@ -681,7 +698,9 @@ internal fun BotsScreen(
             // Singola POST via funnel (guard + finally): il dettaglio non
             // posta mai da solo, delega sempre qui.
             onOpenChat = { bot -> openPersistent(bot) },
-            onOpenScreen = onOpenScreen,
+            // Schermo sempre interno alla sezione (il tab Screen non esiste
+            // piu): "Apri schermo live" torna al roster con schermo aperto.
+            onOpenScreen = { showSectionScreen = true; detailBot = null },
             onOpenCron = onOpenCron,
             busy = opening != null
         )
@@ -706,6 +725,15 @@ internal fun BotsScreen(
         roster = result
         status = result.status
         if (!result.chatSupported) status += " Apri Bot Chat richiede multiplexing profili attivo."
+        // Pota orfani solo a roster valido: con fallimenti di sorgente il
+        // roster puo essere vuoto per errore rete, mai potare allora.
+        if (result.sourceFailures.isEmpty()) {
+            botSections = pruneBotDisplayPrefs(
+                appContext,
+                result.items.map { it.identityKey }.toSet()
+            )
+            reloadBotDisplayPrefs()
+        }
     }
 
     // Roster da mostrare: via i nascosti (server o locali) salvo toggle,
@@ -744,16 +772,18 @@ internal fun BotsScreen(
             menu = BotMenuHost(
                 expanded = menuFor == bot.identityKey,
                 page = if (menuFor == bot.identityKey) menuPage else 0,
+                busy = opening != null,
                 pinned = isPinned,
                 hidden = bot.identityKey in botHiddenLocal,
                 autoScreen = bot.identityKey in botAutoScreen,
                 sections = botSections.order,
                 currentSection = currentSection,
-                onDismiss = { menuFor = null },
+                onDismiss = { menuFor = null; menuPage = 0 },
                 onPage = { menuPage = it },
-                onOpenChat = { menuFor = null; openPersistent(bot) },
+                onOpenChat = { if (openPersistent(bot)) menuFor = null },
                 onOpenScreen = { menuFor = null; showSectionScreen = true },
                 onToggleAutoScreen = {
+                    // Checkable: il menu resta aperto (come desktop).
                     val next = botAutoScreen.toMutableSet()
                     if (bot.identityKey in next) next.remove(bot.identityKey) else next.add(bot.identityKey)
                     botAutoScreen = next
@@ -767,15 +797,21 @@ internal fun BotsScreen(
                     setBotPinned(appContext, bot.identityKey, bot.identityKey in next)
                 },
                 onToggleHide = {
-                    menuFor = null
-                    val next = botHiddenLocal.toMutableSet()
-                    if (bot.identityKey in next) next.remove(bot.identityKey) else next.add(bot.identityKey)
-                    botHiddenLocal = next
-                    setBotHiddenLocal(appContext, bot.identityKey, bot.identityKey in next)
+                    // Nascosto dal server: il flag locale e inutile, spiega e resta.
+                    if (bot.hidden && bot.identityKey !in botHiddenLocal) {
+                        Toast.makeText(context, "Nascosto dal server.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        menuFor = null
+                        val next = botHiddenLocal.toMutableSet()
+                        if (bot.identityKey in next) next.remove(bot.identityKey) else next.add(bot.identityKey)
+                        botHiddenLocal = next
+                        setBotHiddenLocal(appContext, bot.identityKey, bot.identityKey in next)
+                    }
                 },
                 onEdit = { menuFor = null; openEditor(bot) },
                 onManageGroups = {
                     menuFor = null
+                    status = "Gruppi qui sotto: creali e lanciali da questa scheda."
                     scope.launch { botListState.animateScrollToItem(2) }
                 },
                 onDuplicate = {
@@ -791,7 +827,7 @@ internal fun BotsScreen(
                     showEditor = true
                     Toast.makeText(context, "Soul non copiata: il server non la espone, ricompilala.", Toast.LENGTH_LONG).show()
                 },
-                onNewChat = { menuFor = null; openBotSession(bot, fresh = true) },
+                onNewChat = { if (openBotSession(bot, fresh = true)) menuFor = null },
                 onRecentSessions = { menuFor = null; recentFor = bot },
                 onMoveToSection = { name ->
                     menuFor = null
@@ -984,7 +1020,7 @@ internal fun BotsScreen(
             }
         }
         if (hiddenCount > 0) {
-            item {
+            item(key = "hidden-row") {
                 BotHiddenRow(
                     hiddenCount = hiddenCount,
                     showing = showHiddenBots,
@@ -994,7 +1030,7 @@ internal fun BotsScreen(
         }
         // Fissati sempre in alto, poi sezioni utente, poi non assegnati.
         if (pinnedBots.isNotEmpty()) {
-            item { BotSectionHeader("Fissati") }
+            item(key = "header-pinned") { BotSectionHeader("Fissati") }
             items(pinnedBots, key = { "pin-${it.identityKey}" }) { bot ->
                 BotCardWithMenu(bot = bot)
             }
@@ -1017,8 +1053,7 @@ internal fun BotsScreen(
             bot = bot,
             entries = binding.recent,
             onPick = { entry ->
-                recentFor = null
-                openBotSession(bot, session = entry)
+                if (openBotSession(bot, session = entry)) recentFor = null
             },
             onDismiss = { recentFor = null }
         )
@@ -1028,9 +1063,11 @@ internal fun BotsScreen(
         BotSectionNameDialog(
             onConfirm = { name ->
                 if (name.isNotEmpty()) {
-                    val order = (botSections.order + name).distinct()
+                    // Dedup case-insensitive: "Lavoro" == "lavoro".
+                    val existing = botSections.order.firstOrNull { it.equals(name, ignoreCase = true) } ?: name
+                    val order = (botSections.order + existing).distinct()
                     val assign = botSections.assign.toMutableMap()
-                    assign[bot.identityKey] = name
+                    assign[bot.identityKey] = existing
                     val next = BotSections(order, assign)
                     botSections = next
                     saveBotSections(appContext, next)
@@ -1202,6 +1239,9 @@ internal fun BotsScreen(
                                 .onSuccess {
                                     status = "Bot eliminato."
                                     deleteBot = null
+                                    // Pulisci pin/hide/sezioni/sessioni locali del bot.
+                                    withContext(Dispatchers.IO) { removeBotDisplayPrefs(appContext, bot.identityKey) }
+                                    reloadBotDisplayPrefs()
                                     refreshNonce++
                                 }
                                 .onFailure { status = it.message ?: "Eliminazione bot fallita." }

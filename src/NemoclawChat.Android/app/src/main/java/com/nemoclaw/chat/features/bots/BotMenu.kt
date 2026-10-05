@@ -63,7 +63,8 @@ private fun loadStringSet(context: Context, key: String): MutableSet<String> =
     botDisplayPrefs(context).getStringSet(key, emptySet())?.toMutableSet() ?: mutableSetOf()
 
 private fun saveStringSet(context: Context, key: String, values: Set<String>) {
-    botDisplayPrefs(context).edit(commit = true) { putStringSet(key, values.toSet()) }
+    // apply(): niente I/O sincrono su UI thread (era commit=true).
+    botDisplayPrefs(context).edit { putStringSet(key, values.toSet()) }
 }
 
 /** Fissa in alto: identityKey pinnati. */
@@ -119,7 +120,7 @@ internal fun saveBotSections(context: Context, sections: BotSections) {
     val assign = JSONObject()
     sections.assign.forEach { (k, v) -> assign.put(k, v) }
     root.put("assign", assign)
-    botDisplayPrefs(context).edit(commit = true) { putString("sections_json", root.toString()) }
+    botDisplayPrefs(context).edit { putString("sections_json", root.toString()) }
 }
 
 internal fun sanitizeSectionName(raw: String): String =
@@ -177,7 +178,45 @@ internal fun saveBotSessionBinding(
     recent.forEach { arr.put(JSONObject().put("sid", it.sessionId).put("mpx", it.multiplexEnabled).put("ts", it.openedAt)) }
     obj.put("recent", arr)
     all.put(identityKey, obj)
-    prefs.edit(commit = true) { putString("sessions_json", all.toString()) }
+    prefs.edit { putString("sessions_json", all.toString()) }
+}
+
+/** Rimuove ogni traccia locale di un bot eliminato (niente orfani). */
+internal fun removeBotDisplayPrefs(context: Context, identityKey: String) {
+    setBotPinned(context, identityKey, false)
+    setBotHiddenLocal(context, identityKey, false)
+    setBotAutoScreen(context, identityKey, false)
+    val sections = loadBotSections(context)
+    val assign = sections.assign.toMutableMap()
+    assign.remove(identityKey)
+    saveBotSections(context, sections.copy(assign = assign))
+    val prefs = botDisplayPrefs(context)
+    val all = runCatching { JSONObject(prefs.getString("sessions_json", null) ?: "{}") }.getOrDefault(JSONObject())
+    all.remove(identityKey)
+    prefs.edit { putString("sessions_json", all.toString()) }
+}
+
+/**
+ * Pota preferenze orfane (bot spariti dal roster) e sezioni svuotate.
+ * Chiamare solo a roster valido (niente sourceFailures): a roster vuoto
+ * per errore rete NON si pota mai.
+ */
+internal fun pruneBotDisplayPrefs(context: Context, validKeys: Set<String>): BotSections {
+    saveStringSet(context, "pins", loadBotPins(context).intersect(validKeys))
+    saveStringSet(context, "hidden", loadBotHiddenLocal(context).intersect(validKeys))
+    saveStringSet(context, "screen_auto", loadBotAutoScreen(context).intersect(validKeys))
+    val sections = loadBotSections(context)
+    val assign = sections.assign.filterKeys { it in validKeys }
+    val order = sections.order.filter { name -> assign.values.any { it == name } }
+    val pruned = BotSections(order, assign)
+    saveBotSections(context, pruned)
+    val prefs = botDisplayPrefs(context)
+    val all = runCatching { JSONObject(prefs.getString("sessions_json", null) ?: "{}") }.getOrDefault(JSONObject())
+    val stale = mutableListOf<String>()
+    all.keys().forEach { key -> if (key !in validKeys) stale.add(key) }
+    stale.forEach(all::remove)
+    prefs.edit { putString("sessions_json", all.toString()) }
+    return pruned
 }
 
 // ------------------------------------------------------- pure helpers ---
@@ -207,6 +246,7 @@ internal fun groupBotsBySection(
 internal data class BotMenuHost(
     val expanded: Boolean,
     val page: Int, // 0 = principale, 1 = sposta in sezione
+    val busy: Boolean = false,
     val pinned: Boolean,
     val hidden: Boolean,
     val autoScreen: Boolean,
@@ -233,12 +273,14 @@ private fun BotMenuItem(
     label: String,
     icon: @Composable (() -> Unit)? = null,
     trailing: @Composable (() -> Unit)? = null,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     DropdownMenuItem(
-        text = { Text(label, color = Color.White, fontSize = 14.sp) },
+        text = { Text(label, color = if (enabled) Color.White else AppColors.Faint, fontSize = 14.sp) },
         leadingIcon = icon,
         trailingIcon = trailing,
+        enabled = enabled,
         onClick = onClick
     )
 }
@@ -276,6 +318,7 @@ internal fun BotCardMenu(bot: HermesBotItem, host: BotMenuHost) {
         BotMenuItem(
             label = "Apri Bot Chat",
             icon = { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, tint = AppColors.Accent) },
+            enabled = !host.busy,
             onClick = host.onOpenChat
         )
         BotMenuItem(
@@ -327,11 +370,13 @@ internal fun BotCardMenu(bot: HermesBotItem, host: BotMenuHost) {
         BotMenuItem(
             label = "Nuova chat con questo bot",
             icon = { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, tint = Color.White) },
+            enabled = !host.busy,
             onClick = host.onNewChat
         )
         BotMenuItem(
             label = "Apri sessione recente",
             icon = { Icon(Icons.Rounded.History, contentDescription = null, tint = Color.White) },
+            enabled = !host.busy,
             onClick = host.onRecentSessions
         )
         BotMenuItem(

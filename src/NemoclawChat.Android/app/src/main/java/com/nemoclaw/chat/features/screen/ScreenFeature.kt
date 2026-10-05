@@ -306,6 +306,22 @@ internal fun ScreenScreen(
         }
     }
 
+    // Uscita dalla vista in takeover (toggle sezione, cambio tab): il
+    // controllo va restituito, altrimenti resta appeso. Best-effort: scope
+    // dedicato (quello della composition muore nel dispose), niente UI.
+    DisposableEffect(Unit) {
+        onDispose {
+            if (holding) {
+                runCatching {
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        val key = loadGatewaySecret(appContext)
+                        postScreenRelease(settings, key, viewerId.ifBlank { null })
+                    }
+                }
+            }
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize().background(AppColors.Background).padding(16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
