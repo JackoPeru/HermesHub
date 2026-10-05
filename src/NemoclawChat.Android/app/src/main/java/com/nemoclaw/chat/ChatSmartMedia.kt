@@ -28,6 +28,35 @@ internal data class SmartAccepted(
     val kind: String
 )
 
+/**
+ * Risolve il prompt da incollare per un caso: template vuoto = "auto"
+ * (una chiamata LLM lato manager); con "{testo}" = template con testo
+ * utente; senza placeholder = fisso, zero chiamate LLM. Ritorna null se
+ * il caso e disattivato (None = usa il flusso normale).
+ */
+internal fun resolveSmartPrompt(template: String, enabled: Boolean, text: String): String? {
+    if (!enabled) return null
+    val clean = template.trim()
+    if (clean.isEmpty()) return "" // auto: decide il manager via LLM
+    return if ("{testo}" in clean) clean.replace("{testo}", text.trim()) else clean
+}
+
+/** Mappa preset manager -> (toggle, template) dalle impostazioni. */
+internal fun smartCaseConfig(settings: AppSettings, preset: String): Pair<Boolean, String>? = when (preset) {
+    "create_image" -> settings.smartCreate to settings.smartCreatePrompt
+    "edit_image" -> settings.smartEdit to settings.smartEditPrompt
+    "journey_video_preview" -> settings.smartVideo to settings.smartVideoPrompt
+    else -> null
+}
+
+/** Foto senza istruzioni con modalita blank=video: preset forzato o null. */
+internal fun blankPhotoForcedPreset(settings: AppSettings, text: String, hasImage: Boolean): String? =
+    if (hasImage && text.isBlank() && settings.smartBlankPhoto == "video" && settings.smartVideo) {
+        "journey_video_preview"
+    } else {
+        null
+    }
+
 internal suspend fun trySmartMediaSend(
     context: android.content.Context,
     settings: AppSettings,
@@ -39,11 +68,12 @@ internal suspend fun trySmartMediaSend(
     attachments: List<ChatInputAttachment>
 ): SmartAccepted? {
     if (attachments.isEmpty()) return null
+    if (!settings.smartFastPath) return null
     // Chiave assente -> niente chiamate anonime al manager.
     val managerKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() } ?: return null
     val managerBase = gpuManagerBase(settings.gatewayUrl)
-    // Fase 0: verdetto senza file. Se non e media, il flusso normale carica
-    // una volta sola dentro streamChatRequest: niente doppio upload.
+    // Fase 0: verdetto senza file. Se non e media (o caso disattivato), il
+    // flusso normale carica una volta sola dentro streamChatRequest.
     val verdictPayload = JSONObject()
         .put("text", text)
         .put("has_image", true)
@@ -53,7 +83,13 @@ internal suspend fun trySmartMediaSend(
     )
     if (verdictCode !in 200..299) return null
     val verdict = runCatching { JSONObject(verdictBody) }.getOrNull() ?: return null
-    if (!verdict.optBoolean("media", false)) return null
+    var preset = if (verdict.optBoolean("media", false)) verdict.optString("preset") else ""
+    if (preset.isBlank()) {
+        // Foto senza istruzioni con modalita video: preset forzato dalle impostazioni.
+        preset = blankPhotoForcedPreset(settings, text, true) ?: return null
+    }
+    val caseConfig = smartCaseConfig(settings, preset) ?: (true to "")
+    val resolvedPrompt = resolveSmartPrompt(caseConfig.second, caseConfig.first, text) ?: return null
     // 1. Upload esplicito (stessa fn del flusso normale). Al primo errore si
     // abortisce e il flusso normale riprova da zero: niente subset silenziosi.
     // (I file gia caricati restano orfani sul gateway: retention lato server.)
@@ -67,10 +103,12 @@ internal suspend fun trySmartMediaSend(
         val path = ref.path?.takeIf { it.isNotBlank() } ?: return null
         serverPaths.add(path)
     }
-    // 2. Triage + submit manager.
+    // 2. Submit manager (con prompt incollato oppure auto via LLM).
     val payload = JSONObject()
         .put("text", text)
+        .put("preset", preset)
         .put("input_images", org.json.JSONArray(serverPaths))
+    if (resolvedPrompt.isNotBlank()) payload.put("prompt", resolvedPrompt)
     val (code, body) = postJson(
         "$managerBase/jobs/smart", payload, managerKey, allowCompatAuth = false
     )
@@ -78,10 +116,9 @@ internal suspend fun trySmartMediaSend(
     val root = runCatching { JSONObject(body) }.getOrNull() ?: return null
     if (!root.optBoolean("media", false)) return null
     val jobId = root.optString("job_id").takeIf { it.isNotBlank() } ?: return null
-    val preset = root.optString("preset")
-    val prompt = root.optString("prompt")
-    val kind = if (preset.startsWith("journey_video")) "video" else "image"
-    return SmartAccepted(jobId, preset, prompt, kind)
+    val finalPreset = root.optString("preset").takeIf { it.isNotBlank() } ?: preset
+    val kind = if (finalPreset.startsWith("journey_video")) "video" else "image"
+    return SmartAccepted(jobId, finalPreset, resolvedPrompt, kind)
 }
 
 /** Cancella un job smart lato server (fire-and-forget, mai fatale). */

@@ -312,6 +312,14 @@ internal fun SettingsScreen(
     var backgroundWork by remember(settings.backgroundWork) { mutableStateOf(settings.backgroundWork) }
     var blockScreenshots by remember(settings.blockScreenshots) { mutableStateOf(settings.blockScreenshots) }
     var autoApprove by remember(settings.autoApprove) { mutableStateOf(settings.autoApprove) }
+    var smartFastPath by remember(settings.smartFastPath) { mutableStateOf(settings.smartFastPath) }
+    var smartCreate by remember(settings.smartCreate) { mutableStateOf(settings.smartCreate) }
+    var smartCreatePrompt by remember(settings.smartCreatePrompt) { mutableStateOf(settings.smartCreatePrompt) }
+    var smartEdit by remember(settings.smartEdit) { mutableStateOf(settings.smartEdit) }
+    var smartEditPrompt by remember(settings.smartEditPrompt) { mutableStateOf(settings.smartEditPrompt) }
+    var smartVideo by remember(settings.smartVideo) { mutableStateOf(settings.smartVideo) }
+    var smartVideoPrompt by remember(settings.smartVideoPrompt) { mutableStateOf(settings.smartVideoPrompt) }
+    var smartBlankPhoto by remember(settings.smartBlankPhoto) { mutableStateOf(settings.smartBlankPhoto) }
     var showMessageMetrics by remember(settings.showMessageMetrics) { mutableStateOf(settings.showMessageMetrics) }
     var metricTtft by remember(settings.metricTtft) { mutableStateOf(settings.metricTtft) }
     var metricTokensPerSecond by remember(settings.metricTokensPerSecond) { mutableStateOf(settings.metricTokensPerSecond) }
@@ -388,6 +396,14 @@ internal fun SettingsScreen(
             backgroundWork = backgroundWork,
             blockScreenshots = blockScreenshots,
             autoApprove = autoApprove,
+            smartFastPath = smartFastPath,
+            smartCreate = smartCreate,
+            smartCreatePrompt = smartCreatePrompt,
+            smartEdit = smartEdit,
+            smartEditPrompt = smartEditPrompt,
+            smartVideo = smartVideo,
+            smartVideoPrompt = smartVideoPrompt,
+            smartBlankPhoto = smartBlankPhoto,
             showMessageMetrics = showMessageMetrics,
             metricTtft = metricTtft,
             metricTokensPerSecond = metricTokensPerSecond,
@@ -828,6 +844,52 @@ internal fun SettingsScreen(
                 }
             }
             item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Fast path media", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Switch(checked = smartFastPath, onCheckedChange = { smartFastPath = it })
+                    }
+                    Text(
+                        "Con allegati, prova prima la via veloce (triage + prompt + Comfy) senza turn agentico. Spento = sempre chat normale.",
+                        color = AppColors.Muted, fontSize = 12.sp
+                    )
+                    SmartCaseRow(
+                        title = "1. Crea immagine",
+                        subtitle = "Prompt vuoto = auto via una chiamata LLM; con {testo} = template; senza placeholder = fisso, zero LLM.",
+                        enabled = smartCreate,
+                        onEnabledChange = { smartCreate = it },
+                        prompt = smartCreatePrompt,
+                        onPromptChange = { smartCreatePrompt = it }
+                    )
+                    SmartCaseRow(
+                        title = "2. Modifica foto",
+                        subtitle = "Come sopra, per le modifiche alla foto allegata.",
+                        enabled = smartEdit,
+                        onEnabledChange = { smartEdit = it },
+                        prompt = smartEditPrompt,
+                        onPromptChange = { smartEditPrompt = it }
+                    )
+                    SmartCaseRow(
+                        title = "3. Video da foto",
+                        subtitle = "Come sopra, per animare la foto allegata.",
+                        enabled = smartVideo,
+                        onEnabledChange = { smartVideo = it },
+                        prompt = smartVideoPrompt,
+                        onPromptChange = { smartVideoPrompt = it }
+                    )
+                    Text("4. Domande sulla foto", color = Color.White)
+                    Text(
+                        "Vanno sempre in chat normale: nessuna generazione, nessun fast path.",
+                        color = AppColors.Muted, fontSize = 12.sp
+                    )
+                    Text("5. Foto senza istruzioni", color = Color.White)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AutoApproveChip("Chat normale", "chat", smartBlankPhoto) { smartBlankPhoto = it }
+                        AutoApproveChip("Video preview", "video", smartBlankPhoto) { smartBlankPhoto = it }
+                    }
+                }
+            }
+            item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Metriche messaggi", color = Color.White, modifier = Modifier.weight(1f))
                     Switch(checked = showMessageMetrics, onCheckedChange = { showMessageMetrics = it })
@@ -1233,6 +1295,25 @@ internal fun AutoApproveChip(label: String, value: String, current: String, onSe
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
         )
+    }
+}
+
+@Composable
+internal fun SmartCaseRow(
+    title: String,
+    subtitle: String,
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    prompt: String,
+    onPromptChange: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, color = Color.White, modifier = Modifier.weight(1f))
+            Switch(checked = enabled, onCheckedChange = onEnabledChange)
+        }
+        Text(subtitle, color = AppColors.Muted, fontSize = 12.sp)
+        SettingsField("Prompt incollato (vuoto = auto, {testo} = template)", prompt, onPromptChange)
     }
 }
 

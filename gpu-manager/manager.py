@@ -1989,8 +1989,19 @@ async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSON
     has_image = bool(images) or bool(body.get("has_image"))
     backend = _smart_backend()
     # Triage is sync (laya ~65ms): keep it off the event loop.
-    decision = await asyncio.to_thread(_triage_mod.triage, text, has_image,
-                                       (), backend)
+    forced = str(body.get("preset", "") or "")
+    if forced:
+        spec = PRESETS.get(forced)
+        if not spec or spec.get("disabled"):
+            return JSONResponse({"media": False, "reason": "forced-preset-invalid"})
+        decision = _triage_mod.triage(text, has_image, backend=backend)
+        decision = type(decision)(media=True, preset=forced,
+                                  prompt_hint=decision.prompt_hint or text,
+                                  reason=f"forced:{forced}",
+                                  confidence=1.0)
+    else:
+        decision = await asyncio.to_thread(_triage_mod.triage, text, has_image,
+                                           (), backend)
     if not decision.media or not decision.preset:
         return JSONResponse({"media": False, "reason": decision.reason})
     if body.get("triage_only"):
@@ -2003,12 +2014,19 @@ async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSON
     if _state["desired_mode"] in ("LLM", "DIRECT"):
         # Nessuno drenerebbe la coda: niente 202 orfani, torna al chat flow.
         return JSONResponse({"media": False, "reason": "manual-mode"})
-    if not await llm_loaded():
-        return JSONResponse({"media": False, "reason": "llm-unloaded",
-                             "fallback": True})
-    prompt = await prompt_only_llm(decision.prompt_hint or text)
-    if not prompt:
-        raise HTTPException(502, "prompt-only LLM call failed")
+    given = str(body.get("prompt", "") or "").strip()
+    if given:
+        # Prompt incollato dal chiamante (impostazioni app): zero chiamate LLM,
+        # funziona anche a LLM scarico.
+        prompt = given[:2000]
+        log.info("SMART: canned prompt (%d chars)", len(prompt))
+    else:
+        if not await llm_loaded():
+            return JSONResponse({"media": False, "reason": "llm-unloaded",
+                                 "fallback": True})
+        prompt = await prompt_only_llm(decision.prompt_hint or text)
+        if not prompt:
+            raise HTTPException(502, "prompt-only LLM call failed")
     spec = PRESETS.get(decision.preset) or {}
     job, problem, code = _submit_preset_job(
         spec.get("kind", "image"), decision.preset,

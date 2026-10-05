@@ -52,6 +52,17 @@ data class AppSettings(
     val sidebarRecenti: Boolean = AppDefaults.sidebarRecenti,
     val backgroundWork: Boolean = AppDefaults.backgroundWork,
     val blockScreenshots: Boolean = AppDefaults.blockScreenshots,
+    /** Fast path media: master + per-caso. Prompt vuoto = auto via una chiamata LLM;
+     *  con "{testo}" = template; senza placeholder = fisso, zero chiamate LLM. */
+    val smartFastPath: Boolean = AppDefaults.smartFastPath,
+    val smartCreate: Boolean = AppDefaults.smartCreate,
+    val smartCreatePrompt: String = AppDefaults.smartCreatePrompt,
+    val smartEdit: Boolean = AppDefaults.smartEdit,
+    val smartEditPrompt: String = AppDefaults.smartEditPrompt,
+    val smartVideo: Boolean = AppDefaults.smartVideo,
+    val smartVideoPrompt: String = AppDefaults.smartVideoPrompt,
+    /** Foto senza istruzioni: "chat" (normale) oppure "video" (forza preview). */
+    val smartBlankPhoto: String = AppDefaults.smartBlankPhoto,
     /** Auto-approvazione run: "off" (chiedi sempre), "session", "always". Mai "deny" automatico. */
     val autoApprove: String = AppDefaults.autoApprove
 )
@@ -116,6 +127,14 @@ internal fun loadSettings(context: Context): AppSettings {
         sidebarRecenti = prefs.getBoolean("sidebarRecenti", AppDefaults.sidebarRecenti),
         backgroundWork = prefs.getBoolean("backgroundWork", AppDefaults.backgroundWork),
         blockScreenshots = prefs.getBoolean("blockScreenshots", AppDefaults.blockScreenshots),
+        smartFastPath = prefs.getBoolean("smartFastPath", AppDefaults.smartFastPath),
+        smartCreate = prefs.getBoolean("smartCreate", AppDefaults.smartCreate),
+        smartCreatePrompt = prefs.getString("smartCreatePrompt", AppDefaults.smartCreatePrompt) ?: AppDefaults.smartCreatePrompt,
+        smartEdit = prefs.getBoolean("smartEdit", AppDefaults.smartEdit),
+        smartEditPrompt = prefs.getString("smartEditPrompt", AppDefaults.smartEditPrompt) ?: AppDefaults.smartEditPrompt,
+        smartVideo = prefs.getBoolean("smartVideo", AppDefaults.smartVideo),
+        smartVideoPrompt = prefs.getString("smartVideoPrompt", AppDefaults.smartVideoPrompt) ?: AppDefaults.smartVideoPrompt,
+        smartBlankPhoto = prefs.getString("smartBlankPhoto", AppDefaults.smartBlankPhoto)?.takeIf { it == "video" } ?: "chat",
         autoApprove = prefs.getString("autoApprove", AppDefaults.autoApprove)?.takeIf { it in WorkLimits.AUTO_APPROVE_MODES } ?: AppDefaults.autoApprove
     )
     return normalizePlugAndPlaySettings(context, settings)
@@ -216,6 +235,14 @@ internal fun saveSettings(context: Context, settings: AppSettings) {
         putBoolean("sidebarRecenti", settings.sidebarRecenti)
         putBoolean("backgroundWork", settings.backgroundWork)
         putBoolean("blockScreenshots", settings.blockScreenshots)
+        putBoolean("smartFastPath", settings.smartFastPath)
+        putBoolean("smartCreate", settings.smartCreate)
+        putString("smartCreatePrompt", settings.smartCreatePrompt)
+        putBoolean("smartEdit", settings.smartEdit)
+        putString("smartEditPrompt", settings.smartEditPrompt)
+        putBoolean("smartVideo", settings.smartVideo)
+        putString("smartVideoPrompt", settings.smartVideoPrompt)
+        putString("smartBlankPhoto", settings.smartBlankPhoto.takeIf { it == "video" } ?: "chat")
         putString("autoApprove", settings.autoApprove.takeIf { it in WorkLimits.AUTO_APPROVE_MODES } ?: AppDefaults.autoApprove)
     }
 }
@@ -266,6 +293,14 @@ internal object AppDefaults {
     const val sidebarRecenti = true
     const val backgroundWork = true
     const val blockScreenshots = false
+    const val smartFastPath = true
+    const val smartCreate = true
+    const val smartCreatePrompt = ""
+    const val smartEdit = true
+    const val smartEditPrompt = ""
+    const val smartVideo = true
+    const val smartVideoPrompt = ""
+    const val smartBlankPhoto = "chat"
     const val autoApprove = "off"
     const val releasesPage = "https://github.com/JackoPeru/HermesHub/releases"
     const val latestReleaseApi = "https://api.github.com/repos/JackoPeru/HermesHub/releases/latest"
