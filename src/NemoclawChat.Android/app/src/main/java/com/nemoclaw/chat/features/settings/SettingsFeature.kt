@@ -620,27 +620,39 @@ internal fun SettingsScreen(
         Spacer(modifier = Modifier.height(18.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
-                FontScaleControl(
-                    value = fontScale,
-                    onValueChange = { scale ->
-                        fontScale = scale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
-                        status = "Dimensione caratteri: ${(fontScale * 100).toInt()}%. Premi Salva per applicare."
-                    }
-                )
+                SettingsSectionHeader(title = "Connessione", subtitle = "Il tuo server Hermes.")
             }
             item {
                 PremiumPanel {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Connessione Hermes", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Dove vive il tuo server e con quale chiave parlarci. Senza questi due, niente funziona.",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp
+                        )
                         SettingsField("Indirizzo server Hermes", gatewayUrl, { gatewayUrl = it })
                         SettingsPasswordField("API key Hermes", apiKey, { apiKey = it })
                         SettingsField("Cartella video Hermes (dal server)", videoLibraryPath, { }, readOnly = true)
                         SettingsField("Cartella news Hermes", newsLibraryPath, { newsLibraryPath = it })
+                        Text(
+                            "Le cartelle dicono all'app dove il server tiene video e news. Quella video e fissata dal server.",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp
+                        )
                         SettingsField("Limite allegati file (MB, max 150)", maxAttachmentMb.toString(), { value ->
                             maxAttachmentMb = value.filter { it.isDigit() }.toIntOrNull()?.coerceIn(1, 150) ?: maxAttachmentMb
                         })
+                        Text(
+                            "Dimensione massima dei file che puoi allegare in chat. Oltre, l'invio viene rifiutato.",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp
+                        )
                     }
                 }
+            }
+            item {
+                SettingsSectionHeader(title = "Voce e chiamata", subtitle = "Voci, velocita, wake word e Bluetooth.")
             }
             item {
                 PremiumPanel {
@@ -735,26 +747,38 @@ internal fun SettingsScreen(
                 }
             }
             item {
-                IconButton(onClick = { advancedVisible = !advancedVisible }) {
-                    Icon(
-                        if (advancedVisible) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                        contentDescription = if (advancedVisible) "Nascondi avanzate" else "Mostra avanzate",
-                        tint = Color.White
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SettingsSectionHeader(title = "Avanzate", subtitle = "Solo se sai cosa stai toccando.", modifier = Modifier.weight(1f))
+                    IconButton(onClick = { advancedVisible = !advancedVisible }) {
+                        Icon(
+                            if (advancedVisible) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            contentDescription = if (advancedVisible) "Nascondi avanzate" else "Mostra avanzate",
+                            tint = Color.White
+                        )
+                    }
                 }
             }
             if (advancedVisible) {
                 item {
                     PremiumPanel {
                         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("Avanzate", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Parametri letti dal server: cambiali solo se Hermes non risponde o su indicazione specifica.",
+                                color = AppColors.Muted,
+                                fontSize = 12.sp
+                            )
                             SettingsField("Provider", provider, { provider = it })
                             SettingsField("Endpoint inferenza server", inferenceEndpoint, { inferenceEndpoint = it })
                             SettingsField("Protocollo preferito", preferredApi, { preferredApi = it })
                             SettingsField("Modello", model, { model = it })
                             SettingsField("Reasoning effort (vuoto = default server)", reasoningEffort, { reasoningEffort = it.lowercase().trim() })
                             SettingsField("Service tier (vuoto = default)", serviceTier, { serviceTier = it })
-                            SettingsField("Session key stabile (X-Hermes-Session-Key, vuoto = disattivata)", hermesSessionKey, { hermesSessionKey = it })
+                            SettingsField("Session key stabile (vuoto = disattivata)", hermesSessionKey, { hermesSessionKey = it })
+                            Text(
+                                "Session key: identifica le tue sessioni sul server tra un avvio e l'altro. Lasciala vuota se non ti serve.",
+                                color = AppColors.Muted,
+                                fontSize = 12.sp
+                            )
                             Text(
                                 if (reasoningLadder.isEmpty()) "Reasoning: ladder non ancora letta da /v1/capabilities. Premi sotto per caricare picker e ladder."
                                 else "Reasoning supportati dal server: ${reasoningLadder.joinToString(", ")}.",
@@ -803,35 +827,95 @@ internal fun SettingsScreen(
                                 }
                             }
                             SettingsField("Accesso", accessMode, { accessMode = it })
-                            SettingsField("Modalita visuale (auto / always / never)", visualBlocksMode, { visualBlocksMode = it })
+                            Text(
+                                "Etichetta che descrive come raggiungi il server (es. Tailscale/LAN). Non cambia il comportamento, solo promemoria.",
+                                color = AppColors.Muted,
+                                fontSize = 12.sp
+                            )
                         }
                     }
                 }
             }
             item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Tool call in chat", color = Color.White, modifier = Modifier.weight(1f))
-                    Switch(checked = showToolCalls, onCheckedChange = { showToolCalls = it })
-                }
-                Text("ON = mostra pannello tool compatto. Output lunghi restano collassati.", color = AppColors.Muted, fontSize = 12.sp)
+                SettingsSectionHeader(title = "Chat e risposte", subtitle = "Come si presenta la conversazione.")
             }
             item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Lavoro in background", color = Color.White, modifier = Modifier.weight(1f))
-                    Switch(checked = backgroundWork, onCheckedChange = { backgroundWork = it })
+                PremiumPanel {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Tool call in chat", color = Color.White, modifier = Modifier.weight(1f))
+                            Switch(checked = showToolCalls, onCheckedChange = { showToolCalls = it })
+                        }
+                        Text("ON = mostra il pannello compatto degli strumenti usati da Hermes. Output lunghi restano collassati.", color = AppColors.Muted, fontSize = 12.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Metriche messaggi", color = Color.White, modifier = Modifier.weight(1f))
+                            Switch(checked = showMessageMetrics, onCheckedChange = { showMessageMetrics = it })
+                        }
+                        Text("ON = mostra sotto ogni messaggio tempi e token (TTFT, token, velocita).", color = AppColors.Muted, fontSize = 12.sp)
+                        Text("Dettaglio metriche", color = Color.White)
+                        MetricSwitch("Tempo primo token", metricTtft) { metricTtft = it }
+                        MetricSwitch("Token/sec", metricTokensPerSecond) { metricTokensPerSecond = it }
+                        MetricSwitch("Token output", metricOutputTokens) { metricOutputTokens = it }
+                        MetricSwitch("Token input", metricPromptTokens) { metricPromptTokens = it }
+                        MetricSwitch("Contesto", metricContextTokens) { metricContextTokens = it }
+                        MetricSwitch("Durata totale", metricDuration) { metricDuration = it }
+                        MetricSwitch("Acceptance rate (speculative)", metricAcceptanceRate) { metricAcceptanceRate = it }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Solo modalità nativa", color = Color.White, modifier = Modifier.weight(1f))
+                            Switch(checked = strictNativeMode, onCheckedChange = { strictNativeMode = it })
+                        }
+                        Text(
+                            "ON = parla solo il protocollo Hermes nativo. Se fallisce, errore esplicito invece di ripiegare su Chat Completions.",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Risposta offline di emergenza", color = Color.White, modifier = Modifier.weight(1f))
+                            Switch(checked = demoMode, onCheckedChange = { demoMode = it })
+                        }
+                        Text(
+                            "ON = se il server non risponde, l'app prova a rispondere da sola in locale (qualita limitata, niente tool).",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp
+                        )
+                        SettingsField("Blocchi visuali (auto / always / never)", visualBlocksMode, { visualBlocksMode = it })
+                        Text(
+                            "auto = immagini e schede quando utili; always = sempre; never = mai, solo testo.",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp
+                        )
+                    }
                 }
-                Text("ON = se esci dall'app Hermes continua il lavoro sul gateway e ti avvisa alla fine.", color = AppColors.Muted, fontSize = 12.sp)
             }
             item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Blocca screenshot", color = Color.White, modifier = Modifier.weight(1f))
-                    Switch(checked = blockScreenshots, onCheckedChange = { blockScreenshots = it })
-                }
-                Text("ON = impedisce screenshot e registrazioni dell'app (anche i tuoi). Riavvia l'app per applicare.", color = AppColors.Muted, fontSize = 12.sp)
+                SettingsSectionHeader(title = "Aspetto", subtitle = "Dimensione del testo in app.")
             }
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Auto-approvazione run", color = Color.White)
+                PremiumPanel {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        FontScaleControl(
+                            value = fontScale,
+                            onValueChange = { scale ->
+                                fontScale = scale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+                                status = "Dimensione caratteri: ${(fontScale * 100).toInt()}%. Premi Salva per applicare."
+                            }
+                        )
+                    }
+                }
+            }
+            item {
+                SettingsSectionHeader(title = "Automazione", subtitle = "Lavoro senza mani: background, approvazioni, media.")
+            }
+            item {
+                PremiumPanel {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Lavoro in background", color = Color.White, modifier = Modifier.weight(1f))
+                            Switch(checked = backgroundWork, onCheckedChange = { backgroundWork = it })
+                        }
+                        Text("ON = se esci dall'app Hermes continua il lavoro sul gateway e ti avvisa alla fine.", color = AppColors.Muted, fontSize = 12.sp)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Auto-approvazione run", color = Color.White)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         AutoApproveChip("Chiedi", "off", autoApprove) { autoApprove = it }
                         AutoApproveChip("Sessione", "session", autoApprove) { autoApprove = it }
@@ -842,8 +926,6 @@ internal fun SettingsScreen(
                         color = AppColors.Muted, fontSize = 12.sp
                     )
                 }
-            }
-            item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Fast path media", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -887,45 +969,51 @@ internal fun SettingsScreen(
                         AutoApproveChip("Chat normale", "chat", smartBlankPhoto) { smartBlankPhoto = it }
                         AutoApproveChip("Video preview", "video", smartBlankPhoto) { smartBlankPhoto = it }
                     }
-                }
-            }
+                } // Column fast path
+                    } // Column pannello Automazione
+                } // PremiumPanel Automazione
+            } // item Automazione
             item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Metriche messaggi", color = Color.White, modifier = Modifier.weight(1f))
-                    Switch(checked = showMessageMetrics, onCheckedChange = { showMessageMetrics = it })
-                }
-                Text("ON = mostra TTFT, token e t/s nei messaggi.", color = AppColors.Muted, fontSize = 12.sp)
+                SettingsSectionHeader(title = "Privacy e dati", subtitle = "Screenshot, backup e ripristino.")
             }
             item {
                 PremiumPanel {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Metriche visibili", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        MetricSwitch("Tempo primo token", metricTtft) { metricTtft = it }
-                        MetricSwitch("Token/sec", metricTokensPerSecond) { metricTokensPerSecond = it }
-                        MetricSwitch("Token output", metricOutputTokens) { metricOutputTokens = it }
-                        MetricSwitch("Token input", metricPromptTokens) { metricPromptTokens = it }
-                        MetricSwitch("Contesto", metricContextTokens) { metricContextTokens = it }
-                        MetricSwitch("Durata totale", metricDuration) { metricDuration = it }
-                        MetricSwitch("Acceptance rate (speculative)", metricAcceptanceRate) { metricAcceptanceRate = it }
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Blocca screenshot", color = Color.White, modifier = Modifier.weight(1f))
+                            Switch(checked = blockScreenshots, onCheckedChange = { blockScreenshots = it })
+                        }
+                        Text("ON = impedisce screenshot e registrazioni dell'app (anche i tuoi). Riavvia l'app per applicare.", color = AppColors.Muted, fontSize = 12.sp)
+                        SettingsPasswordField(
+                            "Password backup (vuota = chiave dispositivo)",
+                            backupPassword,
+                            { backupPassword = it }
+                        )
+                        Text(
+                            "Se impostata: export cifrato con password (lo riapri anche su altri dispositivi). Vuota: usa la chiave del telefono.",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                status = runCatching {
+                                    if (backupPassword.isNotEmpty()) exportLocalBackupWithPassword(context, backupPassword)
+                                    else exportLocalBackup(context)
+                                }.getOrElse { "Backup non riuscito: ${it.message ?: it.javaClass.simpleName}" }
+                            }) { Text("Esporta") }
+                            Button(onClick = { backupImportPicker.launch(arrayOf("application/json")) }) { Text("Verifica") }
+                            Button(onClick = { backupRestorePicker.launch(arrayOf("application/json")) }) { Text("Ripristina") }
+                        }
+                        Text(
+                            "Esporta = salva una copia. Verifica = controlla un file senza toccare nulla. Ripristina = sovrascrive le impostazioni attuali (chiede conferma).",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp
+                        )
                     }
                 }
             }
             item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Solo modalit├á nativa", color = Color.White, modifier = Modifier.weight(1f))
-                    Switch(checked = strictNativeMode, onCheckedChange = { strictNativeMode = it })
-                }
-                Text(
-                    "ON = niente fallback Chat Completions/no-auth se Hermes Native/Responses fallisce.",
-                    color = AppColors.Muted,
-                    fontSize = 12.sp
-                )
-            }
-            item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Risposta offline di emergenza", color = Color.White, modifier = Modifier.weight(1f))
-                    Switch(checked = demoMode, onCheckedChange = { demoMode = it })
-                }
+                SettingsSectionHeader(title = "Salute", subtitle = "Dati dal Galaxy Watch.")
             }
             item {
                 PremiumPanel {
@@ -990,17 +1078,10 @@ internal fun SettingsScreen(
                 }
             }
             item {
+                SettingsSectionHeader(title = "Azioni e manutenzione", subtitle = "Salva, verifica, reset.")
+            }
+            item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsPasswordField(
-                        "Password backup (vuota = chiave dispositivo)",
-                        backupPassword,
-                        { backupPassword = it }
-                    )
-                    Text(
-                        "Se impostata: export cifrato v2 con password (portabile su altri dispositivi) e import con password. Vuota: comportamento attuale con chiave Keystore.",
-                        color = AppColors.Muted,
-                        fontSize = 12.sp
-                    )
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -1103,7 +1184,7 @@ internal fun SettingsScreen(
                             AlertDialog(
                                 onDismissRequest = { showResetConfirm = false },
                                 title = { Text("Ripristinare tutto?") },
-                                text = { Text("Verranno rimossi API key (Keystore), profilo voce e impostazioni. L'operazione non si pu├▓ annullare.") },
+                                 text = { Text("Verranno rimossi API key (Keystore), profilo voce e impostazioni. L'operazione non si può annullare.") },
                                 confirmButton = {
                                     TextButton(onClick = {
                                         showResetConfirm = false
@@ -1127,20 +1208,6 @@ internal fun SettingsScreen(
                                 },
                                 dismissButton = { IconButton(onClick = { showResetConfirm = false }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla reset", tint = Color.White) } }
                             )
-                        }
-                        IconButton(onClick = {
-                            status = runCatching {
-                                if (backupPassword.isNotEmpty()) exportLocalBackupWithPassword(context, backupPassword)
-                                else exportLocalBackup(context)
-                            }.getOrElse { "Backup non riuscito: ${it.message ?: it.javaClass.simpleName}" }
-                        }) {
-                            Icon(Icons.Rounded.Save, contentDescription = "Backup locale", tint = Color.White)
-                        }
-                        IconButton(onClick = { backupImportPicker.launch(arrayOf("application/json")) }) {
-                            Icon(Icons.Rounded.FolderOpen, contentDescription = "Importa backup locale", tint = Color.White)
-                        }
-                        IconButton(onClick = { backupRestorePicker.launch(arrayOf("application/json")) }) {
-                            Icon(Icons.Rounded.Sync, contentDescription = "Ripristina backup locale", tint = Color.White)
                         }
                     }
                 }
@@ -1295,6 +1362,14 @@ internal fun AutoApproveChip(label: String, value: String, current: String, onSe
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
         )
+    }
+}
+
+@Composable
+internal fun SettingsSectionHeader(modifier: Modifier = Modifier, title: String, subtitle: String = "") {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title.uppercase(java.util.Locale.ROOT), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        if (subtitle.isNotBlank()) Text(subtitle, color = AppColors.Muted, fontSize = 12.sp)
     }
 }
 
