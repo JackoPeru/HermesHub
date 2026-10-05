@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.221 - 2026-10-05
+
+- Bot canoniche: scan del registro con include_hidden (le Bot Chat sono
+  sempre hidden); risolte le aperture finite in HTTP 400 per duplicato.
+
 ## 0.6.220 - 2026-10-05
 
 - Editor bot: validazione limiti server (profilo, nomi, descrizione,
