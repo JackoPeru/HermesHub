@@ -102,6 +102,8 @@ import kotlinx.coroutines.isActive
 import com.nemoclaw.chat.loadBotAutoApproveMap
 import com.nemoclaw.chat.saveBotAutoApprove
 import com.nemoclaw.chat.httpGetResponse
+import com.nemoclaw.chat.HermesSession
+import com.nemoclaw.chat.HermesSessionClient
 import com.nemoclaw.chat.normalizeHermesProfileName
 import com.nemoclaw.chat.postJson
 import com.nemoclaw.chat.resolveHermesUrl
@@ -115,7 +117,9 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -334,93 +338,137 @@ internal fun stableBotConversationId(bot: HermesBotItem): String {
 }
 
 /**
- * Apertura persistente: una sola sessione server per tap (mai doppia POST)
- * e localConversationId stabile, cosi la storia del bot si accumula sotto
- * lo stesso id invece di creare un contenitore nuovo a ogni apertura.
+ * Chat canonica del bot, desktop-parity: UN bot, UNA chat per sempre,
+ * identificata per NOME (sessione titled esattamente "Bot Chat" sul
+ * profilo), mai per puntatore. Stesse regole del desktop: lookup fallito
+ * = fail-closed con "riprova" (mai aprire/mintare al buio: si forkerebbe
+ * la forever-chat); scan vuoto = crea la canonica titled una volta sola.
  */
-internal suspend fun openPersistentBotChat(
+internal const val CANONICAL_BOT_CHAT_TITLE = "Bot Chat"
+internal const val CANONICAL_SESSION_LIST_LIMIT = 200
+
+internal data class CanonicalBotChat(
+    val sessionId: String,
+    val messageCount: Int,
+    val preview: String,
+    val lastActiveMs: Long
+)
+
+internal sealed interface CanonicalBotResolve {
+    data class Found(val chat: CanonicalBotChat, val duplicates: Int = 0) : CanonicalBotResolve
+    data object Empty : CanonicalBotResolve
+    data class Failed(val message: String) : CanonicalBotResolve
+}
+
+/** Singleflight cross-path: un solo resolve/create per bot alla volta
+ *  (funnel roster/detail + sidebar + last-bot condividono la guard UI
+ *  locale, ma corse tra path diversi mintavano due forever-chat). */
+internal object CanonicalBotOpenLocks {
+    private val locks = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
+    suspend fun <T> withBotLock(key: String, block: suspend () -> T): T {
+        val mutex = locks.computeIfAbsent(key) { kotlinx.coroutines.sync.Mutex() }
+        return mutex.withLock { block() }
+    }
+}
+
+/** Registry lookup: prima riga con titolo esattamente "Bot Chat"
+ *  (root_title vince come sul desktop). Puro e testabile. */
+internal fun pickCanonicalRow(rows: List<HermesSession>): HermesSession? {
+    return rows.firstOrNull { row ->
+        val rootTitle = row.raw?.optString("root_title").orEmpty().trim()
+        rootTitle == CANONICAL_BOT_CHAT_TITLE ||
+            (rootTitle.isEmpty() && row.title.trim() == CANONICAL_BOT_CHAT_TITLE)
+    }
+}
+
+internal fun canonicalPreviewOf(row: HermesSession): CanonicalBotChat {
+    val raw = row.raw
+    val count = raw?.optInt("live_message_count", -1)?.takeIf { it >= 0 }
+        ?: raw?.optInt("message_count", 0) ?: 0
+    val preview = raw?.optString("preview").orEmpty()
+    val lastActiveMs = ((raw?.optDouble("last_active", 0.0) ?: 0.0) * 1000).toLong()
+    return CanonicalBotChat(row.id, count, preview, lastActiveMs)
+}
+
+/** Etichetta relativa stile desktop (ora/5m/3h/2g). Puro e testabile. */
+internal fun relativeTimeLabel(nowMs: Long, tsMs: Long): String {
+    if (tsMs <= 0) return ""
+    val seconds = ((nowMs - tsMs).coerceAtLeast(0)) / 1000
+    return when {
+        seconds < 60 -> "ora"
+        seconds < 3600 -> "${seconds / 60}m"
+        seconds < 86400 -> "${seconds / 3600}h"
+        else -> "${seconds / 86400}g"
+    }
+}
+
+internal suspend fun resolveCanonicalBotChat(
     context: Context,
     settings: AppSettings,
     bot: HermesBotItem,
-    apiKey: String? = null
-): Result<BotChatContext> {
-    return openHermesBotChat(context, settings, bot, apiKey)
-        .map { it.copy(localConversationId = stableBotConversationId(bot)) }
+    rosterMultiplex: Boolean,
+    createIfMissing: Boolean = true
+): CanonicalBotResolve = withContext(Dispatchers.IO) {
+    try {
+        val connection = connectionForBot(context, settings, bot)
+        val effective = settingsForBotConnection(settings, connection)
+        val secret = secretForBotConnection(context, connection)
+        val client = HermesSessionClient(effective, secret, bot.profile, rosterMultiplex, null)
+        val (listCode, rows) = client.list(limit = CANONICAL_SESSION_LIST_LIMIT, title = CANONICAL_BOT_CHAT_TITLE)
+        if (listCode !in 200..299) {
+            return@withContext CanonicalBotResolve.Failed(
+                "Registro Bot Chat non leggibile (HTTP $listCode): riprova."
+            )
+        }
+        pickCanonicalRow(rows)?.let { row ->
+            // Fork pregressi: piu righe "Bot Chat" = chat sdoppiata in
+            // passato. Si usa la prima, ma si avvisa (niente repair auto).
+            val dups = rows.count { candidate ->
+                val rootTitle = candidate.raw?.optString("root_title").orEmpty().trim()
+                rootTitle == CANONICAL_BOT_CHAT_TITLE ||
+                    (rootTitle.isEmpty() && candidate.title.trim() == CANONICAL_BOT_CHAT_TITLE)
+            } - 1
+            return@withContext CanonicalBotResolve.Found(canonicalPreviewOf(row), dups.coerceAtLeast(0))
+        }
+        if (!createIfMissing) return@withContext CanonicalBotResolve.Empty
+        val (createCode, created) = client.create(title = CANONICAL_BOT_CHAT_TITLE, source = "hermes-hub-android")
+        if (createCode !in 200..299 || created == null) {
+            return@withContext CanonicalBotResolve.Failed("Creazione Bot Chat fallita (HTTP $createCode).")
+        }
+        CanonicalBotResolve.Found(CanonicalBotChat(created.id, 0, "", System.currentTimeMillis()))
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (e: Exception) {
+        CanonicalBotResolve.Failed(e.message ?: "Bot non raggiungibile.")
+    }
 }
 
 /**
- * Risolve il BotChatContext per un bot: riusa l'ultima sessione nota
- * (binding locale, niente POST, la chat resta sempre la stessa) oppure
- * ne crea una nuova (fresh=true, o nessun binding) salvando il binding.
- * Puro I/O (Dispatchers.IO), niente stato UI: usato dal funnel BotsScreen
- * e dalla sidebar-bot. Result fallito = errore esplicito da mostrare.
+ * Contesto chat per un bot: sessione CANONICA condivisa col desktop
+ * (stessa transcript, stessi turni). localConversationId resta l'id
+ * stabile locale (cache/snapshot); la storia autorevole e sul server.
  */
-internal suspend fun resolveBotChat(
-    appContext: Context,
-    settings: AppSettings,
-    rosterMultiplexEnabled: Boolean,
-    bot: HermesBotItem,
-    fresh: Boolean = false,
-    session: BotSessionEntry? = null
-): Result<BotChatContext> = withContext(Dispatchers.IO) {
-    runCatching {
-        val stableId = stableBotConversationId(bot)
-        val explicit = session
-            ?: if (!fresh) loadBotSessionBinding(appContext, bot.identityKey).current else null
-        if (explicit != null) {
-            val connection = connectionForBot(appContext, settings, bot)
-            BotChatContext(
-                profile = bot.profile,
-                sessionId = explicit.sessionId,
-                displayName = bot.displayName,
-                localConversationId = stableId,
-                multiplexEnabled = explicit.multiplexEnabled || rosterMultiplexEnabled,
-                connectionId = connection.id,
-                endpoint = connection.endpoint
-            )
-        } else {
-            openPersistentBotChat(appContext, settings, bot).getOrThrow().also {
-                saveBotSessionBinding(appContext, bot.identityKey, it.sessionId, it.multiplexEnabled)
-            }
-        }
-    }
-}
-
-internal suspend fun openHermesBotChat(
+internal suspend fun resolveCanonicalBotContext(
     context: Context,
     settings: AppSettings,
     bot: HermesBotItem,
-    apiKey: String? = null
-): Result<BotChatContext> = withContext(Dispatchers.IO) {
-    runCatching {
-        val connection = connectionForBot(context, settings, bot)
-        val effective = settingsForBotConnection(settings, connection)
-        val secret = secretForBotConnection(context, connection) ?: apiKey
-        val encoded = URLEncoder.encode(normalizeHermesProfileName(bot.profile), "UTF-8")
-        val response = botPostForConnection(
-            effective,
-            connection,
-            secret,
-            "/v1/hub/bots/$encoded/chat",
-            JSONObject(),
-            method = "POST"
-        )
-        if (response.first !in 200..299) error(safeBotError(response.first, response.second, "Chat bot non disponibile"))
-        val root = JSONObject(response.second)
-        val multiplex = root.optBoolean("multiplex_enabled", false)
-        val supported = root.optBoolean("chat_supported", false)
-        val sessionId = root.optString("session_id").trim()
-        if (!multiplex || !supported || sessionId.isBlank()) error("Chat bot rifiutata: multiplexing Hermes non pronto.")
-        BotChatContext(
-            profile = root.optString("profile", bot.profile),
-            sessionId = sessionId,
-            displayName = bot.displayName,
-            localConversationId = "bot-${bot.connectionId}-${bot.profile}-${sessionId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }}",
-            multiplexEnabled = multiplex,
-            connectionId = connection.id,
-            endpoint = connection.endpoint
-        )
+    rosterMultiplex: Boolean
+): Result<BotChatContext> = runCatching {
+    val found = when (val resolved = resolveCanonicalBotChat(context, settings, bot, rosterMultiplex)) {
+        is CanonicalBotResolve.Found -> resolved.chat
+        is CanonicalBotResolve.Empty -> error("Nessuna Bot Chat per ${bot.displayName}: riprova.")
+        is CanonicalBotResolve.Failed -> error(resolved.message)
     }
+    val connection = withContext(Dispatchers.IO) { connectionForBot(context.applicationContext, settings, bot) }
+    BotChatContext(
+        profile = bot.profile,
+        sessionId = found.sessionId,
+        displayName = bot.displayName,
+        localConversationId = stableBotConversationId(bot),
+        multiplexEnabled = rosterMultiplex,
+        connectionId = connection.id,
+        endpoint = connection.endpoint
+    )
 }
 
 private fun safeBotError(status: Int, body: String, fallback: String): String {
@@ -557,9 +605,8 @@ internal fun BotsScreen(
     onOpenCron: () -> Unit = {},
     // Apre la sidebar in modalita bot (lista bot stile desktop).
     onOpenSidebar: () -> Unit = {},
-    // Collegamento chat desktop (dialog in AppRoot).
-    onLinkDesktop: (HermesBotItem) -> Unit = {},
-    onUnlinkDesktop: (HermesBotItem) -> Unit = {}
+    // Vieta apertura a turno attivo (reset ammazzerebbe stream/binding/coda).
+    canOpenBotChat: () -> Boolean = { true }
 ) {
     var roster by remember(settings.gatewayUrl) { mutableStateOf<HermesBotRoster?>(null) }
     var connections by remember(settings.gatewayUrl) {
@@ -600,12 +647,10 @@ internal fun BotsScreen(
     var botHiddenLocal by remember { mutableStateOf(setOf<String>()) }
     var botAutoScreen by remember { mutableStateOf(setOf<String>()) }
     var botSections by remember { mutableStateOf(BotSections()) }
-    var botLinks by remember { mutableStateOf(mapOf<String, String>()) }
     var showHiddenBots by remember { mutableStateOf(false) }
     var showSectionScreen by remember { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<String?>(null) }
     var menuPage by remember { mutableStateOf(0) }
-    var recentFor by remember { mutableStateOf<HermesBotItem?>(null) }
     var newSectionFor by remember { mutableStateOf<HermesBotItem?>(null) }
     var lastScreenHolder by remember { mutableStateOf("human") }
 
@@ -617,7 +662,6 @@ internal fun BotsScreen(
         botHiddenLocal = loadBotHiddenLocal(appContext)
         botAutoScreen = loadBotAutoScreen(appContext)
         botSections = loadBotSections(appContext)
-        botLinks = loadBotLinks(appContext)
     }
     // Stato schermo condiviso per roster e dettaglio (poll leggero, anteprima solo se acceso).
     var screenStatus by remember(settings.gatewayUrl) { mutableStateOf<ScreenStatusInfo?>(null) }
@@ -638,7 +682,7 @@ internal fun BotsScreen(
         val flagged = roster?.items.orEmpty().filter { it.identityKey in botAutoScreen }
         if (next?.running == true && holderNow != "human" && lastScreenHolder == "human" &&
             flagged.size == 1 && !showEditor && deleteBot == null && openGroup == null &&
-            recentFor == null && newSectionFor == null && !showConnectionEditor &&
+            newSectionFor == null && !showConnectionEditor &&
             removeConnection == null) {
             showSectionScreen = true
             status = "Un bot sta usando lo schermo: aperto automaticamente."
@@ -670,33 +714,48 @@ internal fun BotsScreen(
     // (l'handler AppRoot consumerebbe il back altrimenti).
     BackHandler(enabled = detailBot != null) { detailBot = null }
 
-    // Funnel unico di apertura: guard SINCRONA anti doppio-tap (lo state
-    // write e immediato, la ricomposizione che disabilita i bottoni no) +
-    // finally (mai opening appeso su cancel) + una sola POST per tap.
-    // Serializza anche A-poi-B: il secondo tap aspetta il primo.
-    //
-    // Sessioni: "Apri Bot Chat" riusa l'ultima sessione nota (binding locale,
-    // niente POST, la chat resta sempre la stessa); "Nuova chat" (fresh=true)
-    // o "sessione recente" forzano/riusano esplicitamente e aggiornano il
-    // binding. Se la sessione riusata e scaduta, lo stream fallisce con
-    // errore esplicito: basta "Nuova chat con questo bot".
+    // Funnel unico di apertura canonica: guard SINCRONA anti doppio-tap
+    // (lo state write e immediato, la ricomposizione che disabilita i
+    // bottoni no) + finally (mai opening appeso su cancel). Risolve la
+    // forever-chat condivisa col desktop (mai fork, mai sessioni per-tap).
     // Ritorna false se non acquisisce la guard (chiamante: non chiudere menu).
-    fun openBotSession(bot: HermesBotItem, fresh: Boolean = false, session: BotSessionEntry? = null): Boolean {
+    fun openBotSession(bot: HermesBotItem): Boolean {
         if (opening != null) {
             Toast.makeText(context, "Apertura gia in corso.", Toast.LENGTH_SHORT).show()
             return false
         }
+        if (!canOpenBotChat()) return false
         opening = bot.identityKey
         scope.launch {
             try {
-                resolveBotChat(appContext, settings, roster?.multiplexEnabled == true, bot, fresh, session)
-                    .onSuccess { onOpenBot(it) }
-                    .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
+                CanonicalBotOpenLocks.withBotLock(bot.identityKey) {
+                    when (val resolved = resolveCanonicalBotChat(appContext, settings, bot, roster?.multiplexEnabled == true)) {
+                        is CanonicalBotResolve.Found -> {
+                            if (resolved.duplicates > 0) {
+                                status = "Attenzione: ${resolved.duplicates + 1} Bot Chat per ${bot.displayName}, uso la prima."
+                            }
+                            val connection = withContext(Dispatchers.IO) { connectionForBot(appContext, settings, bot) }
+                            onOpenBot(
+                                BotChatContext(
+                                    profile = bot.profile,
+                                    sessionId = resolved.chat.sessionId,
+                                    displayName = bot.displayName,
+                                    localConversationId = stableBotConversationId(bot),
+                                    multiplexEnabled = roster?.multiplexEnabled == true,
+                                    connectionId = connection.id,
+                                    endpoint = connection.endpoint
+                                )
+                            )
+                        }
+                        is CanonicalBotResolve.Empty ->
+                            status = "Nessuna Bot Chat per ${bot.displayName}: riprova."
+                        is CanonicalBotResolve.Failed ->
+                            status = resolved.message
+                    }
+                }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (e: Exception) {
-                // Connessione remota cancellata, prefs corrotte, ecc: mai
-                // silenzio (il path fresh ha onFailure, il riuso no).
                 status = e.message ?: "Apertura bot fallita."
             } finally {
                 opening = null
@@ -706,6 +765,32 @@ internal fun BotsScreen(
     }
 
     fun openPersistent(bot: HermesBotItem): Boolean = openBotSession(bot)
+    // Anteprime roster stile desktop (ultimo messaggio + tempo per bot):
+    // scan canonico senza mintare, best-effort e silenzioso.
+    var botPreviews by remember { mutableStateOf(mapOf<String, CanonicalBotChat>()) }
+    LaunchedEffect(roster?.items) {
+        val items = roster?.items.orEmpty()
+        if (items.isEmpty()) {
+            botPreviews = emptyMap()
+            return@LaunchedEffect
+        }
+        botPreviews = try {
+            withTimeoutOrNull(20_000) {
+                items.map { bot ->
+                    async(Dispatchers.IO) {
+                        bot.identityKey to runCatching {
+                            when (val resolved = resolveCanonicalBotChat(appContext, settings, bot, roster?.multiplexEnabled == true, createIfMissing = false)) {
+                                is CanonicalBotResolve.Found -> resolved.chat
+                                else -> null
+                            }
+                        }.getOrNull()
+                    }
+                }.awaitAll().mapNotNull { (key, chat) -> chat?.let { key to it } }.toMap()
+            } ?: botPreviews
+        } catch (_: Exception) {
+            botPreviews
+        }
+    }
 
     val detail = detailBot
     if (detail != null) {
@@ -782,6 +867,11 @@ internal fun BotsScreen(
         val isPinned = bot.identityKey in botPins
         val isHidden = bot.hidden || bot.identityKey in botHiddenLocal
         val currentSection = botSections.assign[bot.identityKey]?.takeIf { it in botSections.order }
+        val preview = botPreviews[bot.identityKey]
+        // Anteprima testo o conteggio (chat vuota e scan fallito restano
+        // distinti: solo la prima mostra riga).
+        val previewLine = preview?.preview?.takeIf { it.isNotBlank() }
+            ?: preview?.takeIf { it.messageCount > 0 }?.let { "${it.messageCount} messaggi" }
         BotRosterCard(
             bot = bot,
             screenRunning = screenStatus?.running == true,
@@ -790,6 +880,8 @@ internal fun BotsScreen(
             busy = opening != null,
             pinned = isPinned,
             hiddenBadge = showHiddenBots && isHidden,
+            previewText = previewLine,
+            previewTime = preview?.let { relativeTimeLabel(System.currentTimeMillis(), it.lastActiveMs) }?.takeIf { it.isNotBlank() },
             menu = BotMenuHost(
                 expanded = menuFor == bot.identityKey,
                 page = if (menuFor == bot.identityKey) menuPage else 0,
@@ -797,7 +889,6 @@ internal fun BotsScreen(
                 pinned = isPinned,
                 hidden = bot.identityKey in botHiddenLocal,
                 autoScreen = bot.identityKey in botAutoScreen,
-                linked = botLinks[bot.identityKey] != null,
                 sections = botSections.order,
                 currentSection = currentSection,
                 onDismiss = { menuFor = null; menuPage = 0 },
@@ -848,15 +939,6 @@ internal fun BotsScreen(
                     selectedConnectionId = bot.connectionId
                     showEditor = true
                     Toast.makeText(context, "Soul non copiata: il server non la espone, ricompilala.", Toast.LENGTH_LONG).show()
-                },
-                onNewChat = { if (openBotSession(bot, fresh = true)) menuFor = null },
-                onRecentSessions = { menuFor = null; recentFor = bot },
-                onLinkDesktop = { menuFor = null; onLinkDesktop(bot) },
-                onUnlinkDesktop = {
-                    menuFor = null
-                    // Ottimistico: il badge si aggiorna subito.
-                    botLinks = botLinks - bot.identityKey
-                    onUnlinkDesktop(bot)
                 },
                 onMoveToSection = { name ->
                     menuFor = null
@@ -1076,20 +1158,6 @@ internal fun BotsScreen(
                 BotCardWithMenu(bot = bot)
             }
         }
-    }
-
-    recentFor?.let { bot ->
-        val binding = remember(bot.identityKey) {
-            loadBotSessionBinding(appContext, bot.identityKey)
-        }
-        BotRecentSessionsDialog(
-            bot = bot,
-            entries = binding.recent,
-            onPick = { entry ->
-                if (openBotSession(bot, session = entry)) recentFor = null
-            },
-            onDismiss = { recentFor = null }
-        )
     }
 
     newSectionFor?.let { bot ->
@@ -1406,6 +1474,9 @@ internal fun BotRosterCard(
     // Menu contestuale stile desktop (long-press / ⋮).
     pinned: Boolean = false,
     hiddenBadge: Boolean = false,
+    // Anteprima ultimo messaggio stile desktop (dal registro canonico).
+    previewText: String? = null,
+    previewTime: String? = null,
     menu: BotMenuHost? = null,
     onMenuRequest: () -> Unit = {}
 ) {
@@ -1436,6 +1507,15 @@ internal fun BotRosterCard(
                         if (hiddenBadge) Text("NASCOSTO", color = AppColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                         Text("@${bot.handle} · ${bot.connectionLabel}", color = AppColors.Muted, fontSize = 12.sp)
+                    if (!previewText.isNullOrBlank()) {
+                        Text(
+                            (if (!previewTime.isNullOrBlank()) "$previewTime · " else "") + previewText,
+                            color = AppColors.Muted,
+                            fontSize = 12.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     Text(
                         if (screenRunning) "Schermo live" else if (bot.isDefault) "Profilo predefinito" else bot.profile,
                         color = if (screenRunning) Color(0xFF4CAF50) else AppColors.Faint,

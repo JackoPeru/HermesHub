@@ -475,7 +475,13 @@ internal fun ChatScreen(
                     null
                 }
                 state.hermesSessionId = saved.hermesSessionId
-                    ?: withContext(Dispatchers.IO) { loadSessionBinding(context, saved.id, botProfile) }
+                    ?: if (botProfile.isNullOrBlank()) {
+                        withContext(Dispatchers.IO) { loadSessionBinding(context, saved.id, botProfile) }
+                    } else {
+                        // Bot canonico: i binding pre-migrazione (bot-*) sono
+                        // ombre stale, mai usarli per helper run/rename/fork.
+                        null
+                    }
                 state.chatModelOverride = saved.modelOverride
                 state.chatProviderOverride = saved.providerOverride
                 state.chatReasoningEffort = saved.reasoningEffort
@@ -499,6 +505,39 @@ internal fun ChatScreen(
                         .firstOrNull { it.id == cid }?.deletedAt != null
                 }
                 conversationDeletedNotice = tombstoned
+            }
+        }
+        // Chat bot canonica: storia autorevole dal server (stessa transcript
+        // del desktop). Sostituisce la cache se non vuota; fallback locale
+        // in caso di errore/offline. Vale anche al primo open (saved null).
+        if (!botProfile.isNullOrBlank() && !botSessionId.isNullOrBlank()) {
+            val transcript = withContext(Dispatchers.IO) {
+                runCatching {
+                    loadCanonicalBotTranscript(
+                        botSettings, botApiKey, botProfile, botSessionId, botMultiplexEnabled
+                    )
+                }.getOrNull()
+            }
+            if (!transcript.isNullOrEmpty()) {
+                state.messages.clear()
+                state.messages.addAll(transcript)
+                val cid = state.activeConversationId ?: conversationId
+                historyLoadedCid = cid
+                if (!cid.isNullOrBlank()) {
+                    state.activeConversationId = cid
+                    withContext(NonCancellable + Dispatchers.IO) {
+                        saveConversationSnapshot(
+                            context = context,
+                            conversationId = cid,
+                            mode = "Chat",
+                            prompt = "",
+                            messages = transcript,
+                            source = "Bot Chat condivisa",
+                            syncAfterSave = false
+                        )
+                    }
+                }
+                drainQueuedPrompt()
             }
         }
 
@@ -1222,8 +1261,11 @@ internal fun ChatScreen(
                             )
                         }
                         // Mai rinominare la chat condivisa col desktop: titolo e
-                        // rename restano quelli esistenti.
-                        val shouldGenerateTitle = initialConversation.title == UNTITLED_CHAT_TITLE && !preserveRemoteContinuity
+                        // rename restano quelli esistenti. Mai rinominare una
+                        // bot chat canonica: il titolo esatto "Bot Chat" e
+                        // l'identita del registro, cambiarlo forkerebbe.
+                        val shouldGenerateTitle = initialConversation.title == UNTITLED_CHAT_TITLE &&
+                            !preserveRemoteContinuity && botProfile.isNullOrBlank()
                         val persistedStreamCid = initialConversation.id
                         if (persistedStreamCid != streamCid) {
                             state.activeStreams.remove(streamCid)?.let { state.activeStreams[persistedStreamCid] = it }
@@ -1252,11 +1294,23 @@ internal fun ChatScreen(
 
                         // Percorso primario: Sessions API quando capability presente, altriment legacy.
                         // Nessun fallback invisibile su 401/403 profile scope.
+                        // Chat bot canonica: botSessionId e la forever-chat condivisa
+                        // (mai ensure/crea: si invia nella stessa sessione del desktop).
                         val capsSnapshot = state.chatCapabilities
-                        val useSessions = capsSnapshot?.supportsModernSessions() == true && botSessionId.isNullOrBlank()
+                        val canonicalBotSession =
+                            if (!botProfile.isNullOrBlank() && !botSessionId.isNullOrBlank()) botSessionId else null
+                        val useSessions = capsSnapshot?.supportsModernSessions() == true &&
+                            (botSessionId.isNullOrBlank() || canonicalBotSession != null)
                         var sessionIdForTurn: String? = null
                         if (smartJob == null && useSessions) {
-                            state.sessionRoute = "sessions"
+                            if (canonicalBotSession != null) {
+                                state.sessionRoute = "sessions"
+                                sessionIdForTurn = canonicalBotSession
+                                // La forever-chat non si binda come sessione
+                                // effimera, ma hermesSessionId serve al turno
+                                // (binding run, checkpoint). Niente saveSessionBinding.
+                                state.hermesSessionId = canonicalBotSession
+                            } else {
                             sessionIdForTurn = try {
                                 withContext(Dispatchers.IO) {
                                     ensureHermesChatSession(
@@ -1276,6 +1330,7 @@ internal fun ChatScreen(
                                 withContext(NonCancellable + Dispatchers.IO) {
                                     saveSessionBinding(context, activeStreamCid, botProfile, sessionIdForTurn)
                                 }
+                            }
                             }
                         } else {
                             state.sessionRoute = "legacy"
@@ -1428,6 +1483,14 @@ internal fun ChatScreen(
                                         botAllowCompatAuth
                                     )
                                 )
+                            } else if (canonicalBotSession != null && localState.error == null) {
+                                // Forever-chat senza Sessions API: niente fallback
+                                // legacy silenzioso (scriverebbe fuori dalla chat
+                                // condivisa). Errore esplicito, riprova dopo.
+                                localState = localState.applyEvent(
+                                    ChatStreamEvent.Error("Bot Chat richiede Sessions API non disponibili: riprova tra poco.")
+                                )
+                                if (state.activeConversationId == activeStreamCid) state.streamingState = localState
                             } else if (localState.error == null) {
                                 collectFlow(
                                     streamChatRequest(

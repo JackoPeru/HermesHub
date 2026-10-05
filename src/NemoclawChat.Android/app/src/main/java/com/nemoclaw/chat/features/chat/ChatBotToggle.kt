@@ -18,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -28,9 +27,9 @@ import androidx.compose.ui.unit.sp
 /**
  * Selettore [Chat | Bot] in alto alla chat: pill sottile (~20dp) ed elegante.
  * Il segmento illuminato dice in che sezione si e: Chat = conversazioni
- * proprie, Bot = sezione bot con la chat persistente del bot (una per bot,
- * condivisa con Hermes desktop via autosync archivio). Lo stato e issato
- * in AppRoot; il contenuto sotto scorre con slide orizzontale.
+ * proprie, Bot = sezione bot con la forever-chat canonica condivisa col
+ * desktop. Lo stato e issato in AppRoot; il contenuto sotto scorre con
+ * slide orizzontale.
  */
 @Composable
 internal fun ChatBotToggle(

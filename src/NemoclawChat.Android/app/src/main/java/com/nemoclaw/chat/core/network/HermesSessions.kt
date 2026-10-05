@@ -31,6 +31,82 @@ data class HermesSessionMessage(
     val raw: JSONObject? = null
 )
 
+/**
+ * Riga transcript server -> messaggi chat. Puro e testabile.
+ * user->Tu, assistant->Hermes (thinking da reasoning, tool_calls anche
+ * come riga azione), tool->azione compatta, turni falliti marcati,
+ * system/developer scartati, resto ignoto solo con testo.
+ */
+internal fun HermesSessionMessage.toBotChatMessages(): List<ChatMessage> {
+    val toolCalls = raw?.optJSONArray("tool_calls")
+    val toolName = raw?.optString("tool_name").orEmpty().ifBlank {
+        toolCalls?.optJSONObject(0)?.optString("name").orEmpty().ifBlank {
+            toolCalls?.optJSONObject(0)?.optJSONObject("function")?.optString("name").orEmpty()
+        }
+    }
+    val reasoning = raw?.optString("reasoning_content").orEmpty()
+        .ifBlank { raw?.optString("reasoning").orEmpty() }
+    val failed = raw?.optString("display_kind").orEmpty() == "failed_turn"
+    val failedPrefix = if (failed) "(fallito) " else ""
+    fun toolAction(): ChatMessage? {
+        if (toolName.isBlank() && (toolCalls == null || toolCalls.length() == 0)) return null
+        val names = (0 until (toolCalls?.length() ?: 0)).mapNotNull { i ->
+            toolCalls?.optJSONObject(i)?.optString("name")?.takeIf { it.isNotBlank() }
+                ?: toolCalls?.optJSONObject(i)?.optJSONObject("function")?.optString("name")?.takeIf { it.isNotBlank() }
+        }.distinct().take(3)
+        val label = names.ifEmpty { listOf(toolName.ifBlank { "strumento" }) }.joinToString(", ")
+        return ChatMessage("Hermes", "🛠 $failedPrefix$label", fromUser = false, isAction = true)
+    }
+    return when (role.lowercase()) {
+        "user", "tu" -> listOf(ChatMessage("Tu", content, fromUser = true))
+        "assistant" -> buildList {
+            if (content.isNotBlank()) add(ChatMessage("Hermes", "$failedPrefix$content", fromUser = false, thinking = reasoning))
+            toolAction()?.let { add(it) }
+        }
+        "tool" -> {
+            val text = content.ifBlank { "(nessun output)" }
+            val short = if (text.length > 300) text.take(300) + "… (+${text.length - 300})" else text
+            listOf(ChatMessage("Strumento", "$failedPrefix${toolName.ifBlank { "tool" }}: $short", fromUser = false, isAction = true))
+        }
+        "system", "developer" -> emptyList()
+        "compaction", "summary" -> if (content.isNotBlank()) {
+            listOf(ChatMessage("Hermes", "(contesto compattato) ${content.take(300)}", fromUser = false, isAction = true))
+        } else emptyList()
+        else -> if (content.isNotBlank()) listOf(ChatMessage("Hermes", content, fromUser = false)) else emptyList()
+    }
+}
+
+/** Compat: singolo messaggio (primo), null se niente da mostrare. */
+internal fun HermesSessionMessage.toBotChatMessage(): ChatMessage? =
+    toBotChatMessages().firstOrNull()
+
+/**
+ * Transcript canonico di una sessione bot (cronologia autorevole condivisa
+ * col desktop). latest-first dal server, reso cronologico (ordina per
+ * timestamp quando presenti, altrimenti ordine API). Null in caso di
+ * errore/offline: il chiamante usa la cache locale.
+ */
+internal suspend fun loadCanonicalBotTranscript(
+    settings: AppSettings,
+    apiKey: String?,
+    profile: String,
+    sessionId: String,
+    multiplexEnabled: Boolean,
+    limit: Int = 500
+): List<ChatMessage>? = withContext(Dispatchers.IO) {
+    runCatching {
+        val client = HermesSessionClient(settings, apiKey, profile, multiplexEnabled, null)
+        val (code, rows) = client.messages(id = sessionId, limit = limit, order = "latest", includeCompacted = true)
+        if (code !in 200..299 || rows.isEmpty()) return@runCatching null
+        val chronological = if (rows.all { (it.raw?.optDouble("timestamp", 0.0) ?: 0.0) > 0 }) {
+            rows.sortedBy { it.raw?.optDouble("timestamp", 0.0) }
+        } else {
+            rows.asReversed()
+        }
+        chronological.flatMap { it.toBotChatMessages() }.takeIf { it.isNotEmpty() }
+    }.getOrNull()
+}
+
 internal fun hermesApiRoot(settings: AppSettings): String {
     // hermesRoot e' definito in HubOperations; qui replica leggera per evitare dipendenze circolari.
     val base = settings.gatewayUrl.trim().trimEnd('/')
@@ -130,10 +206,12 @@ class HermesSessionClient(
         if (capabilities != null && !ok) throw UnsupportedOperationException("Funzione non supportata dal server: $name")
     }
 
-    suspend fun list(limit: Int = 50, offset: Int = 0, source: String? = null): Pair<Int, List<HermesSession>> = withContext(Dispatchers.IO) {
+    suspend fun list(limit: Int = 50, offset: Int = 0, source: String? = null, title: String? = null): Pair<Int, List<HermesSession>> = withContext(Dispatchers.IO) {
         requireCapability(capabilities?.sessionList ?: true, "session_list")
         var url = sessionUrl("/api/sessions?limit=$limit&offset=$offset")
         if (!source.isNullOrBlank()) url += "&source=${java.net.URLEncoder.encode(source, "UTF-8")}"
+        // Filtro titolo esatto indicizzato (registro canonical bot: title="Bot Chat").
+        if (!title.isNullOrBlank()) url += "&title=${java.net.URLEncoder.encode(title, "UTF-8")}"
         val res = httpGetResponse(url, apiKey)
         if (res.first !in 200..299) return@withContext res.first to emptyList()
         res.first to parseHermesSessionList(res.second)
@@ -170,9 +248,12 @@ class HermesSessionClient(
         postJson(sessionUrl("/api/sessions/$id"), JSONObject(), apiKey, method = "DELETE").first
     }
 
-    suspend fun messages(id: String, limit: Int = 200): Pair<Int, List<HermesSessionMessage>> = withContext(Dispatchers.IO) {
+    suspend fun messages(id: String, limit: Int = 200, order: String? = null, includeCompacted: Boolean = false): Pair<Int, List<HermesSessionMessage>> = withContext(Dispatchers.IO) {
         requireCapability(capabilities?.sessionMessages ?: true, "session_messages")
-        val res = httpGetResponse(sessionUrl("/api/sessions/$id/messages?limit=$limit"), apiKey)
+        var url = sessionUrl("/api/sessions/$id/messages?limit=$limit")
+        if (!order.isNullOrBlank()) url += "&order=$order"
+        if (includeCompacted) url += "&include_compacted=true"
+        val res = httpGetResponse(url, apiKey)
         if (res.first !in 200..299) return@withContext res.first to emptyList()
         res.first to parseHermesSessionMessages(res.second)
     }
