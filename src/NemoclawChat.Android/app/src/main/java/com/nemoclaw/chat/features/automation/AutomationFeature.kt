@@ -512,7 +512,7 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
         AlertDialog(
             onDismissRequest = { pendingDeleteJob = null },
             title = { Text("Elimina ${target.name}") },
-            text = { Text("Eliminare la routine \"${target.name}\" (${target.schedule})? L'operazione non si pu├▓ annullare.") },
+            text = { Text("Eliminare la routine \"${target.name}\" (${target.schedule})? L'operazione non si può annullare.") },
             confirmButton = {
                 IconButton(onClick = {
                     pendingDeleteJob = null

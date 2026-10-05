@@ -426,6 +426,10 @@ internal fun ChatScreen(
     // risultato solo qui dentro, mai su lista vuota/stale (evita duplicati
     // che poi crescono a ogni riapertura).
     var historyLoadedCid by remember { mutableStateOf<String?>(null) }
+    // True se l'id aperto risulta eliminato (tombstone): evita di mostrare
+    // un contenitore vuoto senza spiegazione. Le chat nuove non salvate
+    // (es. primo open di un bot) NON alzano il flag.
+    var conversationDeletedNotice by remember(conversationId) { mutableStateOf(false) }
 
     LaunchedEffect(conversationId, initialPrompt) {
         // Flag sempre aggiornato (anche senza saved): il gate del reattach
@@ -454,8 +458,18 @@ internal fun ChatScreen(
                 }
                 state.messages.addAll(loadedMessages)
                 historyLoadedCid = saved.id
+                conversationDeletedNotice = false
                 // Rientro con coda pendente: se libero, il prossimo parte da solo.
                 drainQueuedPrompt()
+            } else {
+                // Id noto ma file assente: mostra avviso solo se esiste tombstone
+                // (eliminata); le chat nuove non ancora salvate restano silenti.
+                val cid = conversationId
+                val tombstoned = withContext(Dispatchers.IO) {
+                    loadConversations(context, includeDeleted = true)
+                        .firstOrNull { it.id == cid }?.deletedAt != null
+                }
+                conversationDeletedNotice = tombstoned
             }
         }
 
@@ -782,6 +796,26 @@ internal fun ChatScreen(
                         modifier = Modifier.weight(1f)
                     )
                     IconButton(onClick = { onSwitchTab(Tab.Bots) }) { Icon(Icons.Rounded.SmartToy, contentDescription = "Apri Bot Hermes", tint = Color.White) }
+                }
+            }
+        }
+        if (conversationDeletedNotice) {
+            Surface(color = Color(0xFF5A1A1A), modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Conversazione eliminata: stai vedendo un contenitore vuoto, i messaggi non torneranno. Creane una nuova.",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { conversationDeletedNotice = false; onNewChat() }) {
+                        Text("Nuova chat", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
         }
@@ -2010,6 +2044,7 @@ internal fun BackgroundWorkBanner(
     work: BackgroundWorkUi,
     onStop: () -> Unit
 ) {
+    val ctx = LocalContext.current
     Surface(
         color = AppColors.Elevated,
         shape = RoundedCornerShape(16.dp),
@@ -2038,7 +2073,13 @@ internal fun BackgroundWorkBanner(
                 )
                 Text(work.statusText, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            IconButton(onClick = onStop, modifier = Modifier.size(36.dp)) {
+            IconButton(
+                onClick = {
+                    onStop()
+                    Toast.makeText(ctx, "Interruzione richiesta.", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.size(48.dp)
+            ) {
                 Icon(Icons.Rounded.Stop, contentDescription = "Ferma lavoro", tint = Color.White)
             }
         }

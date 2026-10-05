@@ -103,7 +103,9 @@ internal object JarvisSessionController {
         controllerScope.launch {
             lifecycleMutex.withLock {
                 reportError(error)
-                stopLocked(context.applicationContext, notifyGateway = true, preserveError = true)
+                // Fallimento LOCALE (permesso notifiche): mai cancellare la
+                // sessione sul gateway per questo.
+                stopLocked(context.applicationContext, notifyGateway = false, preserveError = true)
             }
         }
     }

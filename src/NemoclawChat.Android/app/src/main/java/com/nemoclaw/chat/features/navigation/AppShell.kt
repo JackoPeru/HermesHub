@@ -383,7 +383,7 @@ internal fun HermesSidebar(
                 )
             }
             item {
-                SidebarSectionLabel("OPERATIVIT├Ç", settings.sidebarOperativita) { onToggleSidebarSection("operativita") }
+                SidebarSectionLabel("OPERATIVITÀ", settings.sidebarOperativita) { onToggleSidebarSection("operativita") }
             }
             if (settings.sidebarOperativita) {
                 item {

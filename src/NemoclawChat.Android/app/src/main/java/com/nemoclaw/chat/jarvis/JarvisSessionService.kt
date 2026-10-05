@@ -18,7 +18,15 @@ internal class JarvisSessionService : Service() {
         super.onCreate()
         ensureChannel()
         try {
-            startForeground(NOTIFICATION_ID, notification())
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                startForeground(
+                    NOTIFICATION_ID, notification(),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification())
+            }
         } catch (error: SecurityException) {
             stopSelf()
             JarvisSessionController.serviceStartFailed(this, error)

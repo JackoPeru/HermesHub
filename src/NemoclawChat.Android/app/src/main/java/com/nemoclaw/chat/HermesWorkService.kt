@@ -124,8 +124,16 @@ internal class HermesWorkService : Service() {
     }
 
     private fun startPoller(runId: String) {
-        if (pollers.containsKey(runId)) return
-        pollers[runId] = scope.launch {
+        val job = scope.launch { pollLoop(runId) }
+        if (pollers.putIfAbsent(runId, job) != null) {
+            // Gara vinta da un altro thread: cancella il doppione mai partito.
+            job.cancel()
+            return
+        }
+    }
+
+    private suspend fun pollLoop(runId: String) {
+        try {
             var backoffMs = POLL_BASE_MS
             var consecutiveErrors = 0
             while (true) {
@@ -207,6 +215,7 @@ internal class HermesWorkService : Service() {
                 }
                 delay(POLL_BASE_MS)
             }
+        } finally {
             pollers.remove(runId)
         }
     }
@@ -330,7 +339,7 @@ internal class HermesWorkService : Service() {
                 .putExtra(EXTRA_RUN_ID, runId),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        return NotificationCompat.Action.Builder(0, "Stop", pending).build()
+        return NotificationCompat.Action.Builder(0, "Interrompi", pending).build()
     }
 
     private fun progressNotification(title: String, text: String): Notification =

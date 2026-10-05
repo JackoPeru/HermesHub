@@ -595,7 +595,7 @@ internal fun Composer(
                     val canSend = (value.isNotBlank() || attachments.isNotEmpty()) && !isBusy
                     Surface(
                         modifier = Modifier
-                            .size(46.dp)
+                            .size(48.dp)
                             .clickable {
                                 if (isBusy) onStop()
                                 else if (canSend) onSend()

@@ -268,8 +268,14 @@ manager_busy_reason() {
     printf 'no API key available for manager busy check'
     return 0
   fi
-  local body
-  body="$(curl --fail --silent --connect-timeout 3 --max-time 8 -H "Authorization: Bearer $key" "$MANAGER_URL/status" 2>/dev/null || true)"
+  local body curl_cfg
+  # Chiave via file di config curl (-K), mai in argv: con -H resterebbe
+  # visibile in `ps` per tutta la durata della richiesta.
+  curl_cfg="$(mktemp "${TMPDIR:-/tmp}/hermes-curl.XXXXXX")" || { printf 'manager unreachable'; return 0; }
+  chmod 600 "$curl_cfg"
+  printf 'header = "Authorization: Bearer %s"\n' "$key" > "$curl_cfg"
+  body="$(curl --fail --silent --connect-timeout 3 --max-time 8 -K "$curl_cfg" "$MANAGER_URL/status" 2>/dev/null || true)"
+  rm -f "$curl_cfg"
   if [ -z "$body" ]; then
     printf 'manager unreachable'
     return 0
@@ -792,16 +798,22 @@ if [ "$RESTART" = "true" ]; then
   fi
 
   probe_ok=false
+  # Chiave via file di config curl (-K), mai in argv (visibile in `ps`).
+  PROBE_AUTH_CONF="$(mktemp "${TMPDIR:-/tmp}/hermes-probe.XXXXXX")"
+  chmod 600 "$PROBE_AUTH_CONF"
+  printf 'header = "Authorization: Bearer %s"\n' "$PROBE_API_KEY" > "$PROBE_AUTH_CONF"
+  PROBE_API_KEY=""
   for _ in $(seq 1 "$PROBE_ATTEMPTS"); do
     if curl --fail --silent --show-error \
       --connect-timeout 2 --max-time 5 \
-      -H "Authorization: Bearer $PROBE_API_KEY" \
+      -K "$PROBE_AUTH_CONF" \
       "$PROBE_URL" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert isinstance(data, dict)' >/dev/null 2>&1; then
       probe_ok=true
       break
     fi
     sleep "$PROBE_SLEEP_SECONDS"
   done
+  rm -f "$PROBE_AUTH_CONF"
   if [ "$probe_ok" != "true" ]; then
     echo "ERROR: gateway readiness probe failed after restart: $PROBE_URL" >&2
     exit 1

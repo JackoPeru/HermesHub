@@ -33,6 +33,18 @@ object BitmapImageLoader {
         // potrebbe essere ancora referenziata dalla UI.
     }
 
+    /**
+     * Pressione memoria dal sistema (via Application.onTrimMemory): sgonfia
+     * la cache invece di farsi killare con stream/coda non persistiti dentro.
+     */
+    fun onTrimMemory(level: Int) {
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            bitmapCache.evictAll()
+        } else if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            bitmapCache.trimToSize(maxCacheKb / 2)
+        }
+    }
+
     /** Firma leggera per skip re-decode di frame identici (hash + lunghezza). */
     data class FrameSignature(val length: Int, val hash: Int)
 

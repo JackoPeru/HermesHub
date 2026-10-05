@@ -101,6 +101,7 @@ import androidx.compose.material.icons.rounded.AccountCircle
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Download
@@ -110,6 +111,7 @@ import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.NetworkCheck
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Visibility
@@ -818,15 +820,33 @@ internal fun SettingsScreen(
                             if (modelCatalogModels.isNotEmpty()) {
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     modelCatalogModels.take(12).forEach { opt ->
-                                        Text(
-                                            "${opt.displayName} — ${opt.provider.ifBlank { "default" }}${if (opt.contextWindow != null) " — ctx ${opt.contextWindow}" else ""}${if (opt.reasoningSupported) " — reasoning" else ""}${opt.warning?.let { " — $it" }.orEmpty()}",
-                                            color = AppColors.Muted, fontSize = 12.sp
-                                        )
+                                        // Riga cliccabile: seleziona il modello nel campo Modello qui sotto.
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { model = opt.id },
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                if (model == opt.id) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                                                contentDescription = if (model == opt.id) "Modello selezionato" else "Seleziona ${opt.displayName}",
+                                                tint = if (model == opt.id) AppColors.Accent else AppColors.Muted,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Text(
+                                                "${opt.displayName} — ${opt.provider.ifBlank { "default" }}${if (opt.contextWindow != null) " — ctx ${opt.contextWindow}" else ""}${if (opt.reasoningSupported) " — reasoning" else ""}${opt.warning?.let { " — $it" }.orEmpty()}",
+                                                color = if (model == opt.id) Color.White else AppColors.Muted,
+                                                fontSize = 12.sp,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
                                     }
                                     if (modelCatalogModels.size > 12) Text("+${modelCatalogModels.size - 12} altri...", color = AppColors.Muted, fontSize = 12.sp)
                                 }
                             }
-                            SettingsField("Accesso", accessMode, { accessMode = it })
+                            SettingsField("Tipo rete", accessMode, { accessMode = it })
                             Text(
                                 "Etichetta che descrive come raggiungi il server (es. Tailscale/LAN). Non cambia il comportamento, solo promemoria.",
                                 color = AppColors.Muted,
@@ -1399,7 +1419,7 @@ internal fun validateSettings(settings: AppSettings): String? {
         ?: validatePreferredApi(settings.preferredApi)
         ?: validateRequired(settings.model, "Modello")
         ?: validateRequired(settings.voiceModel, "Modello Voce")
-        ?: validateRequired(settings.accessMode, "Accesso")
+        ?: validateRequired(settings.accessMode, "Tipo rete")
         ?: validateVisualBlocksMode(settings.visualBlocksMode)
 }
 

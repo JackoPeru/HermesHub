@@ -410,8 +410,20 @@ internal fun ArchiveScreen(
         if (results.isEmpty()) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Archivio vuoto.", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text("Le conversazioni vengono salvate qui automaticamente. Inizia una nuova chat dalla sidebar.", color = AppColors.Muted, fontSize = 13.sp)
+                    if (query.isNotBlank() || filter != "Tutto") {
+                        Text("Nessun risultato.", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Niente corrisponde alla ricerca/filtro: l'archivio e intatto. Azzera per vedere tutto.",
+                            color = AppColors.Muted,
+                            fontSize = 13.sp
+                        )
+                        TextButton(onClick = { query = ""; filter = "Tutto" }) {
+                            Text("Azzera filtri", color = AppColors.Accent)
+                        }
+                    } else {
+                        Text("Archivio vuoto.", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text("Le conversazioni vengono salvate qui automaticamente. Inizia una nuova chat dalla sidebar.", color = AppColors.Muted, fontSize = 13.sp)
+                    }
                 }
             }
         }
