@@ -325,6 +325,9 @@ internal fun ChatScreen(
     val botAllowCompatAuth = !remoteBot
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     var quickPrompt by remember { mutableStateOf<String?>(null) }
+    // Invio mentre Hermes lavora: scelta Accoda/Correggi per ogni invio.
+    var pendingBusySend by remember { mutableStateOf<PendingBusySend?>(null) }
+    var showSendChoiceDialog by remember { mutableStateOf(false) }
 
     // Svuota la coda prompt quando libero: il prossimo parte da solo via
     // quickPrompt (stesso percorso del tasto invio, niente duplicazioni).
@@ -336,6 +339,69 @@ internal fun ChatScreen(
         state.queuedPrompts.remove(next)
         state.pendingAttachments.addAll(next.attachments.filter { it !in state.pendingAttachments })
         quickPrompt = next.text
+    }
+
+    // "Correggi ora": ferma tutto (come lo stop, ma senza svuotare la coda)
+    // e invia subito il nuovo prompt per raddrizzare l'agente a meta run.
+    fun correctNow(choice: PendingBusySend) {
+        showSendChoiceDialog = false
+        pendingBusySend = null
+        val cid = state.activeConversationId ?: return
+        HermesStreamRuntime.scope.launch {
+            state.activeStreams[cid]?.job?.cancel()
+            state.activeStreamJob?.cancel()
+            state.streamingState?.activeRunId?.let { runId ->
+                runCatching {
+                    stopHermesRun(botSettings, runId, botApiKey, botProfile, botMultiplexEnabled, botAllowCompatAuth)
+                }
+            }
+            for (i in 0 until 25) {
+                if (!state.sending && state.activeStreamJob == null) break
+                delay(200)
+            }
+            if (state.sending || state.activeStreamJob != null) {
+                // Ancora occupato: accoda invece di perdersi.
+                if (canEnqueuePrompt(state.queuedPrompts.toList(), cid)) {
+                    state.queuedPrompts.add(QueuedPrompt(cid, choice.text, choice.attachments))
+                    state.draft = ""
+                    state.pendingAttachments.clear()
+                }
+                return@launch
+            }
+            state.draft = choice.text
+            state.pendingAttachments.addAll(choice.attachments.filter { it !in state.pendingAttachments })
+            // Stesso percorso del tasto invio (il guard qui sopra e libero).
+            quickPrompt = choice.text
+        }
+    }
+
+    fun enqueueBusySend(choice: PendingBusySend) {
+        showSendChoiceDialog = false
+        pendingBusySend = null
+        val cid = state.activeConversationId ?: return
+        if (!canEnqueuePrompt(state.queuedPrompts.toList(), cid)) {
+            state.messages.add(
+                ChatMessage(
+                    "Hermes Hub",
+                    "Coda piena ($MAX_QUEUED_PROMPTS_PER_CHAT prompt): aspetta la fine del turno.",
+                    fromUser = false,
+                    isAction = true
+                )
+            )
+            return
+        }
+        state.queuedPrompts.add(QueuedPrompt(cid, choice.text, choice.attachments))
+        state.draft = ""
+        state.pendingAttachments.clear()
+        val n = state.queuedPrompts.count { it.conversationId == cid }
+        state.messages.add(
+            ChatMessage(
+                "Hermes Hub",
+                "Accodato ($n in coda): parte da solo a fine turno.",
+                fromUser = false,
+                isAction = true
+            )
+        )
     }
     // Cronologia caricata da disco per cid: il reattach DONE aggiunge il
     // risultato solo qui dentro, mai su lista vuota/stale (evita duplicati
@@ -511,6 +577,14 @@ internal fun ChatScreen(
             savePendingAttachments(context, state.activeConversationId, state.pendingAttachments.toList())
             saveDraft(context, state.activeConversationId, state.draft)
         }
+    }
+    LaunchedEffect(state.queuedPrompts.size) {
+        // La coda sopravvive al kill dell'app: ripartenza automatica al rientro.
+        saveQueuedPrompts(context, state.queuedPrompts.toList())
+    }
+    LaunchedEffect(Unit) {
+        val loaded = withContext(Dispatchers.IO) { loadQueuedPrompts(context) }
+        loaded.filter { it !in state.queuedPrompts }.forEach { state.queuedPrompts.add(it) }
     }
     // Re-attach lavoro background: se per questa conversazione esiste un binding
     // e nessuno stream locale lo sta gia' seguendo, interroga il server e agisci.
@@ -930,6 +1004,23 @@ internal fun ChatScreen(
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
         }
+        val busyChoice = pendingBusySend
+        if (showSendChoiceDialog && busyChoice != null) {
+            AlertDialog(
+                onDismissRequest = { showSendChoiceDialog = false; pendingBusySend = null },
+                title = { Text("Hermes sta lavorando") },
+                text = { Text("Accoda il prompt (parte da solo alla fine) oppure ferma tutto e correggi subito?") },
+                confirmButton = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { enqueueBusySend(busyChoice) }) { Text("Accoda") }
+                        TextButton(onClick = { correctNow(busyChoice) }) { Text("Ferma e correggi") }
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showSendChoiceDialog = false; pendingBusySend = null }) { Text("Annulla") }
+                }
+            )
+        }
         Composer(
             value = state.draft,
             attachments = state.pendingAttachments,
@@ -972,30 +1063,9 @@ internal fun ChatScreen(
                 val sendCid = state.activeConversationId
                 val sendBusy = state.sending || state.activeStreamJob != null
                 if ((text.isNotEmpty() || state.pendingAttachments.isNotEmpty()) && sendBusy && sendCid != null) {
-                    // Turno in corso: accoda invece di cancellarlo. Parte da solo alla fine.
-                    if (!canEnqueuePrompt(state.queuedPrompts.toList(), sendCid)) {
-                        state.messages.add(
-                            ChatMessage(
-                                "Hermes Hub",
-                                "Coda piena (5 prompt): aspetta la fine del turno.",
-                                fromUser = false,
-                                isAction = true
-                            )
-                        )
-                    } else {
-                        state.queuedPrompts.add(QueuedPrompt(sendCid, text, state.pendingAttachments.toList()))
-                        state.draft = ""
-                        state.pendingAttachments.clear()
-                        val n = state.queuedPrompts.count { it.conversationId == sendCid }
-                        state.messages.add(
-                            ChatMessage(
-                                "Hermes Hub",
-                                "Accodato ($n in coda): parte da solo a fine turno.",
-                                fromUser = false,
-                                isAction = true
-                            )
-                        )
-                    }
+                    // Turno in corso: l'utente decide per ogni invio (dialog Accoda/Correggi).
+                    pendingBusySend = PendingBusySend(text, state.pendingAttachments.toList())
+                    showSendChoiceDialog = true
                     return@Composer
                 }
                 if ((text.isNotEmpty() || state.pendingAttachments.isNotEmpty()) && !state.sending && state.activeStreamJob == null) {

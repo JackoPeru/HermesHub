@@ -14,6 +14,71 @@ import org.json.JSONObject
 import java.io.File
 
 private const val PENDING_ATTACHMENTS_PREFS = "chatclaw_pending_attachments"
+private const val QUEUED_PROMPTS_KEY = "queued:v1"
+
+internal fun saveQueuedPrompts(context: Context, queue: List<QueuedPrompt>) {
+    runCatching {
+        val arr = JSONArray()
+        queue.take(MAX_QUEUED_PROMPTS_PER_CHAT * 4).forEach { q ->
+            val files = JSONArray()
+            q.attachments.forEach {
+                val path = it.localFilePath
+                if (!path.isNullOrBlank() && File(path).isFile) {
+                    files.put(
+                        JSONObject()
+                            .put("filename", it.filename)
+                            .put("mimeType", it.mimeType)
+                            .put("sizeBytes", it.sizeBytes)
+                            .put("localFilePath", path)
+                    )
+                }
+            }
+            arr.put(
+                JSONObject()
+                    .put("conversationId", q.conversationId)
+                    .put("text", q.text)
+                    .put("attachments", files)
+                    .put("atMs", q.atMs)
+            )
+        }
+        context.getSharedPreferences(PENDING_ATTACHMENTS_PREFS, Context.MODE_PRIVATE).edit {
+            putString(QUEUED_PROMPTS_KEY, arr.toString())
+        }
+    }
+}
+
+internal fun loadQueuedPrompts(context: Context): List<QueuedPrompt> = runCatching {
+    val raw = context.getSharedPreferences(PENDING_ATTACHMENTS_PREFS, Context.MODE_PRIVATE)
+        .getString(QUEUED_PROMPTS_KEY, null) ?: return emptyList()
+    val arr = JSONArray(raw)
+    List(arr.length()) { index ->
+        val obj = arr.getJSONObject(index)
+        val files = mutableListOf<ChatInputAttachment>()
+        val filesArr = obj.optJSONArray("attachments")
+        if (filesArr != null) {
+            for (i in 0 until filesArr.length()) {
+                val fileObj = filesArr.optJSONObject(i) ?: continue
+                val path = fileObj.optString("localFilePath").takeIf { it.isNotBlank() }
+                if (path != null && File(path).isFile) {
+                    files.add(
+                        ChatInputAttachment(
+                            filename = fileObj.optString("filename"),
+                            mimeType = fileObj.optString("mimeType"),
+                            sizeBytes = fileObj.optLong("sizeBytes"),
+                            localFilePath = path
+                        )
+                    )
+                }
+            }
+        }
+        QueuedPrompt(
+            conversationId = obj.optString("conversationId"),
+            text = obj.optString("text"),
+            attachments = files,
+            atMs = obj.optLong("atMs", System.currentTimeMillis())
+        )
+    }.filter { it.conversationId.isNotBlank() && (it.text.isNotBlank() || it.attachments.isNotEmpty()) }
+}.getOrDefault(emptyList())
 
 internal fun savePendingAttachments(context: Context, conversationId: String?, attachments: List<ChatInputAttachment>) {
     runCatching {
@@ -75,7 +140,13 @@ internal data class QueuedPrompt(
     val atMs: Long = System.currentTimeMillis()
 )
 
-internal const val MAX_QUEUED_PROMPTS_PER_CHAT = 5
+internal const val MAX_QUEUED_PROMPTS_PER_CHAT = 10
+
+/** Prompt in attesa di invio mentre il turno e occupato (scelta Accoda/Correggi). */
+internal data class PendingBusySend(
+    val text: String,
+    val attachments: List<ChatInputAttachment> = emptyList()
+)
 
 /** Prossimo prompt in coda per cid (FIFO), o null. Puro/testabile. */
 internal fun nextQueuedFor(queue: List<QueuedPrompt>, cid: String): QueuedPrompt? =

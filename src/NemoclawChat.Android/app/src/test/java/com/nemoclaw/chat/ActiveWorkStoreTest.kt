@@ -236,7 +236,7 @@ class ActiveWorkStoreTest {
     }
 
     @Test
-    fun queuedPromptsCapAtFivePerChat() {
+    fun queuedPromptsCapPerChat() {
         val full = (1..MAX_QUEUED_PROMPTS_PER_CHAT).map { QueuedPrompt("a", "p$it") }
         assertFalse(canEnqueuePrompt(full, "a"))
         assertTrue(canEnqueuePrompt(full.dropLast(1), "a"))
