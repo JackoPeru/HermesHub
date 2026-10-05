@@ -25,7 +25,14 @@ class BotPersistentChatTest {
     @Test
     fun serverChatIdWinsOverProfileFallback() {
         val id = stableBotConversationId(item("helper", chatId = "abc-123"))
-        assertEquals("botchat-abc-123", id)
+        assertEquals("botchat-primary-abc-123", id)
+    }
+
+    @Test
+    fun sameChatIdOnDifferentConnectionsStaysSeparate() {
+        val a = stableBotConversationId(item("helper", "primary", chatId = "srv-1"))
+        val b = stableBotConversationId(item("helper", "remote1", chatId = "srv-1"))
+        assertNotEquals(a, b)
     }
 
     @Test

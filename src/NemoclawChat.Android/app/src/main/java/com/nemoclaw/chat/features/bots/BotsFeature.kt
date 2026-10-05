@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.os.Parcel
 import android.os.Parcelable
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -34,6 +35,7 @@ import com.nemoclaw.chat.features.screen.ScreenScreen
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
@@ -307,9 +309,14 @@ internal fun assignStableBotHandles(items: List<HermesBotItem>): List<HermesBotI
  * connessione+profilo normalizzati. Sanitizzato [A-Za-z0-9-_].
  */
 internal fun stableBotConversationId(bot: HermesBotItem): String {
+    val conn = bot.connectionId
+        .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+        .take(48).ifBlank { "primary" }
     bot.chatId?.trim()?.takeIf { it.isNotEmpty() }?.let { raw ->
-        val safe = raw.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(96)
-        if (safe.isNotEmpty()) return "botchat-$safe"
+        val safe = raw.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(64)
+        // Connessione inclusa: stesso chat_id su primary e remoto non deve
+        // mai mescolare le storie (la sanitizzazione e lossy).
+        if (safe.isNotEmpty()) return "botchat-$conn-$safe"
     }
     val profile = (
         runCatching { normalizeHermesProfileName(bot.profile) }.getOrNull()
@@ -317,9 +324,6 @@ internal fun stableBotConversationId(bot: HermesBotItem): String {
             ?: bot.profile.lowercase().filter { it.isLetterOrDigit() || it == '-' || it == '_' }
         )
         .take(64).ifBlank { "bot" }
-    val conn = bot.connectionId
-        .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
-        .take(48).ifBlank { "primary" }
     return "bot-$conn-$profile"
 }
 
@@ -572,6 +576,28 @@ internal fun BotsScreen(
         bytes != null
     }
 
+    // Back dal dettaglio torna al roster, non fuori dalla sezione
+    // (l'handler AppRoot consumerebbe il back altrimenti).
+    BackHandler(enabled = detailBot != null) { detailBot = null }
+
+    // Funnel unico di apertura: guard SINCRONA anti doppio-tap (lo state
+    // write e immediato, la ricomposizione che disabilita i bottoni no) +
+    // finally (mai opening appeso su cancel) + una sola POST per tap.
+    // Serializza anche A-poi-B: il secondo tap aspetta il primo.
+    fun openPersistent(bot: HermesBotItem) {
+        if (opening != null) return
+        opening = bot.identityKey
+        scope.launch {
+            try {
+                openPersistentBotChat(context, settings, bot)
+                    .onSuccess { onOpenBot(it) }
+                    .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
+            } finally {
+                opening = null
+            }
+        }
+    }
+
     val detail = detailBot
     if (detail != null) {
         BotDetailScreen(
@@ -581,16 +607,9 @@ internal fun BotsScreen(
             screenStatus = screenStatus,
             screenPreview = screenPreview,
             onBack = { detailBot = null },
-            onOpenChat = { bot ->
-                opening = bot.identityKey
-                scope.launch {
-                    // Singola POST: il dettaglio delega, mai doppio open.
-                    openPersistentBotChat(context, settings, bot)
-                        .onSuccess { onOpenBot(it) }
-                        .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
-                    opening = null
-                }
-            },
+            // Singola POST via funnel (guard + finally): il dettaglio non
+            // posta mai da solo, delega sempre qui.
+            onOpenChat = { bot -> openPersistent(bot) },
             onOpenScreen = onOpenScreen,
             onOpenCron = onOpenCron,
             busy = opening != null
@@ -773,15 +792,7 @@ internal fun BotsScreen(
                 chatSupported = roster?.chatSupported == true,
                 busy = opening != null,
                 onOpenDetail = { detailBot = bot },
-                onOpenChat = {
-                    opening = bot.identityKey
-                    scope.launch {
-                        openPersistentBotChat(context, settings, bot)
-                            .onSuccess { onOpenBot(it) }
-                            .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
-                        opening = null
-                    }
-                },
+                onOpenChat = { openPersistent(bot) },
                 onOpenScreen = onOpenScreen,
                 onEdit = { openEditor(bot) },
                 onDelete = {
@@ -1083,7 +1094,7 @@ internal fun BotRosterCard(
     Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenDetail),
+                modifier = Modifier.fillMaxWidth().clickable(onClickLabel = "Apri dettaglio bot", onClick = onOpenDetail),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1160,7 +1171,7 @@ internal fun BotDetailScreen(
     Column(modifier = Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Indietro", tint = Color.White)
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = Color.White)
             }
             BotAvatar(bot.displayName, bot.profile, 44.dp)
             Column(modifier = Modifier.weight(1f)) {
@@ -1174,7 +1185,10 @@ internal fun BotDetailScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             BotDetailTab.values().forEach { entry ->
                 val selected = tab == entry
-                TextButton(onClick = { tab = entry }) {
+                TextButton(
+                    onClick = { tab = entry },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
                     Text(
                         entry.label,
                         color = if (selected) AppColors.Accent else Color.White,

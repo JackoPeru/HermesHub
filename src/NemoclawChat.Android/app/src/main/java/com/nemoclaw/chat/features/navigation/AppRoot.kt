@@ -335,8 +335,12 @@ internal fun ChatApp() {
     }
     // Chat <- [Chat | Bot]: esci da bot chat verso chat nuova; dalla
     // sezione roster torni alla chat sottostante senza resettarla.
+    // Il reset scarta la bozza: avvisa invece di perderla in silenzio.
     val selectChatSegment: () -> Unit = {
         if (pendingBot != null) {
+            if (chatState.draft.isNotBlank() || chatState.pendingAttachments.isNotEmpty()) {
+                Toast.makeText(context, "Bozza scartata, chat bot chiusa.", Toast.LENGTH_SHORT).show()
+            }
             pendingBot = null
             pendingConversationId = null
             pendingPrompt = ""
@@ -346,6 +350,15 @@ internal fun ChatApp() {
     }
     val selectBotSegment: () -> Unit = {
         if (!botSectionVisible) botSectionVisible = true
+    }
+    // Apertura bot: mai sopra un turno attivo (reset ammazzerebbe stream,
+    // binding e coda senza pulizia). L'utente interrompe o aspetta.
+    fun canOpenBot(): Boolean {
+        if (chatState.sending || chatState.backgroundWork != null) {
+            Toast.makeText(context, "Finisci o interrompi il turno prima di aprire un bot.", Toast.LENGTH_SHORT).show()
+            return false
+        }
+        return true
     }
     val incoming = IncomingIntentBus.request
     LaunchedEffect(incoming.version) {
@@ -535,6 +548,7 @@ internal fun ChatApp() {
                     context = context,
                     settings = settings,
                 onOpenBot = { bot ->
+                        if (!canOpenBot()) return@BotsScreen
                         // Never carry normal-chat messages, attachments or
                         // previous-response state into a bot archive.
                         chatState.resetForNewChat()
@@ -603,21 +617,15 @@ internal fun ChatApp() {
                 setSelectedTab(Tab.Chat)
                 }
                 ) }
-                composable(Tab.Bots.navRoute) { BotsScreen(
-                    context = context,
-                    settings = settings,
-                onOpenBot = { bot ->
-                        // Never carry normal-chat messages, attachments or
-                        // previous-response state into a bot archive.
-                        chatState.resetForNewChat()
-                        pendingBot = bot
-                        pendingConversationId = bot.localConversationId
-                        pendingPrompt = ""
-                        setSelectedTab(Tab.Chat)
-                    },
-                    onOpenScreen = { setSelectedTab(Tab.Screen) },
-                    onOpenCron = { setSelectedTab(Tab.Cron) }
-                ) }
+                // Rotta legacy: i bot non sono piu un tab. Tenuta per vecchi
+                // backstack salvati: redirect a Chat con sezione Bot attiva.
+                composable(Tab.Bots.navRoute) {
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                // setSelectedTab azzera il flag: ordine obbligato.
+                setSelectedTab(Tab.Chat)
+                botSectionVisible = true
+                }
+                }
                 composable(Tab.Screen.navRoute) { ScreenScreen(context = context, settings = settings) }
                 composable(Tab.Artifacts.navRoute) { ArtifactLibraryScreen(
                 context = context,

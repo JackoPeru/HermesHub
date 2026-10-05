@@ -155,6 +155,12 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="hermes-hub" android:host="jarvis" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="hermes-hub" android:host="bots" />
+            </intent-filter>
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
     </application>

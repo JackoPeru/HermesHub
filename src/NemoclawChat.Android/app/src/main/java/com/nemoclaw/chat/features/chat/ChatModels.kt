@@ -399,6 +399,16 @@ internal data class ArchiveItem(
     val prompt: String
 )
 
+/**
+ * True se l'id e di una chat bot persistente: "bot-<conn>-<profilo>" oppure
+ * "botchat-<conn>-<chatId>" (chat_id canonico server). Usato per banner e
+ * toggle quando pendingBot e null (process death, apertura da archivio).
+ */
+internal fun isBotConversationId(id: String?): Boolean {
+    if (id.isNullOrBlank()) return false
+    return id.startsWith("bot-") || id.startsWith("botchat-")
+}
+
 data class LocalConversation(
     val id: String,
     val title: String,

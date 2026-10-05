@@ -31,6 +31,9 @@ class HermesDeepLinkValidationTest {
     fun `internal voice and jarvis routes still work`() {
         assertEquals("voice", parseHermesDeepLink("hermes-hub://voice")!!.tab)
         assertEquals("jarvis", parseHermesDeepLink("hermes-hub://jarvis")!!.tab)
+        // Sezione Bot: i bot non sono piu un tab, "bots" apre la Chat con
+        // sezione Bot attiva (AppRoot imposta botSectionVisible).
+        assertEquals("bots", parseHermesDeepLink("hermes-hub://bots")!!.tab)
         // Widget camera: prompt va in bozza, mai auto-inviato (conferma utente).
         val widget = parseHermesDeepLink("hermes-hub://chat?prompt=Scansiona%20e%20analizza%20un%20documento.")
         assertNotNull(widget)

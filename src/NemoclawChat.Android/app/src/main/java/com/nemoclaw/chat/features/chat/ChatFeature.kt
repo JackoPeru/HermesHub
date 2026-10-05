@@ -437,9 +437,10 @@ internal fun ChatScreen(
     var conversationDeletedNotice by remember(conversationId) { mutableStateOf(false) }
 
     LaunchedEffect(conversationId, initialPrompt) {
-        // Flag sempre aggiornato (anche senza saved): il gate del reattach
-        // DONE non deve sopprimere output legittimi per flag stale.
-        historyLoadedCid = conversationId?.takeIf { it.isNotBlank() }
+        // Flag solo con id non-blank: al ritorno dalla sezione Bot (o da tab)
+        // l'effect rigira con (null, "") e NON deve azzerarlo, altrimenti il
+        // gate reattach DONE sopprimerebbe output background legittimi.
+        conversationId?.takeIf { it.isNotBlank() }?.let { historyLoadedCid = it }
         if (!conversationId.isNullOrBlank()) {
             val saved = withContext(Dispatchers.IO) { loadConversation(context, conversationId) }
             if (saved != null) {
@@ -544,8 +545,7 @@ internal fun ChatScreen(
     }
     val isStreaming = state.streamingState != null
     val archivedBotWithoutContext = botProfile.isNullOrBlank() &&
-        (conversationId ?: state.activeConversationId)
-            ?.startsWith("bot-", ignoreCase = true) == true
+        isBotConversationId(conversationId ?: state.activeConversationId)
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             scope.launch {

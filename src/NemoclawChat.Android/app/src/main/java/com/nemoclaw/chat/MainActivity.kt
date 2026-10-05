@@ -146,8 +146,9 @@ internal object IncomingIntentBus {
 internal const val TAG_HERMES_DEEPLINK = "HermesDeepLink"
 
 /** Route deeplink ammesse (host allowlist): coprono tutti i produttori interni
- *  (widget chat/voce, tile voce, notifiche HermesWorkService/Jarvis). */
-internal val allowedHermesDeepLinkHosts = setOf("chat", "voice", "jarvis")
+ *  (widget chat/voce, tile voce, notifiche HermesWorkService/Jarvis).
+ *  "bots" apre la Chat con sezione Bot attiva (i bot non sono piu un tab). */
+internal val allowedHermesDeepLinkHosts = setOf("chat", "voice", "jarvis", "bots")
 
 /** Query key ammesse sui deeplink hermes-hub. Tutto il resto rigetta il deeplink. */
 internal val allowedHermesDeepLinkQueryKeys = setOf("conversation", "prompt")
