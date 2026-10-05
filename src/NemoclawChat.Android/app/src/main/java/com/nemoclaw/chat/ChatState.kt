@@ -38,6 +38,7 @@ internal fun saveQueuedPrompts(context: Context, queue: List<QueuedPrompt>) {
                     .put("conversationId", q.conversationId)
                     .put("text", q.text)
                     .put("attachments", files)
+                    .put("attachmentCount", q.attachmentCount)
                     .put("atMs", q.atMs)
             )
         }
@@ -75,6 +76,7 @@ internal fun loadQueuedPrompts(context: Context): List<QueuedPrompt> = runCatchi
             conversationId = obj.optString("conversationId"),
             text = obj.optString("text"),
             attachments = files,
+            attachmentCount = obj.optInt("attachmentCount", files.size),
             atMs = obj.optLong("atMs", System.currentTimeMillis())
         )
     }.filter { it.conversationId.isNotBlank() && (it.text.isNotBlank() || it.attachments.isNotEmpty()) }
@@ -137,7 +139,9 @@ internal data class QueuedPrompt(
     val conversationId: String,
     val text: String,
     val attachments: List<ChatInputAttachment> = emptyList(),
-    val atMs: Long = System.currentTimeMillis()
+    val atMs: Long = System.currentTimeMillis(),
+    /** Allegati originali (prima del filtro file mancanti): per avvisare se spariti. */
+    val attachmentCount: Int = attachments.size
 )
 
 internal const val MAX_QUEUED_PROMPTS_PER_CHAT = 10
@@ -174,6 +178,8 @@ internal class ChatStateHolder {
     var isRecordingVoiceNote: Boolean by mutableStateOf(false)
     var tempVoiceNoteFile: java.io.File? = null
     var backgroundWork: BackgroundWorkUi? by mutableStateOf(null)
+    /** Inizio ms dell'ultimo turno inviato: per cancellare i job media nati dopo. */
+    var lastTurnStartMs: Long by mutableLongStateOf(0L)
 
     val activeStreams: androidx.compose.runtime.snapshots.SnapshotStateMap<String, ActiveStreamState> = androidx.compose.runtime.mutableStateMapOf()
 

@@ -134,6 +134,36 @@ internal fun cancelSmartJob(managerBase: String, managerKey: String?, jobId: Str
     }
 }
 
+/** Un job manager va cancellato con lo stop solo se nato durante questo turno. */
+internal fun shouldCancelManagerJob(status: String, createdAtSec: Double, sinceMs: Long): Boolean =
+    (status == "queued" || status == "running") && createdAtSec * 1000 >= sinceMs - 2000
+
+/**
+ * Cancella i job media nati dopo l'inizio turno (quelli dell'agente, invisibili
+ * al client). Solo se non ci sono altri stream attivi, per non ammazzare il
+ * lavoro altrui. Ritorna i cancellati, mai solleva.
+ */
+internal suspend fun cancelManagerJobsSince(
+    managerBase: String,
+    managerKey: String?,
+    sinceMs: Long
+): Int {
+    if (sinceMs <= 0L) return 0
+    var cancelled = 0
+    val (listCode, listBody) = httpGetResponse("$managerBase/jobs?limit=100", managerKey)
+    if (listCode !in 200..299) return 0
+    val jobs = runCatching { JSONObject(listBody).optJSONArray("jobs") } .getOrNull() ?: return 0
+    for (i in 0 until jobs.length()) {
+        val job = jobs.optJSONObject(i) ?: continue
+        if (!shouldCancelManagerJob(job.optString("status"), job.optDouble("created_at"), sinceMs)) continue
+        val jid = job.optString("job_id").takeIf { it.isNotBlank() } ?: continue
+        val encoded = runCatching { URLEncoder.encode(jid, "UTF-8") }.getOrNull() ?: jid
+        val (code, _) = postJson("$managerBase/jobs/$encoded/cancel", JSONObject(), managerKey, allowCompatAuth = false)
+        if (code in 200..299 || code == 404) cancelled++
+    }
+    return cancelled
+}
+
 internal fun smartMimeType(url: String): String {
     val lower = url.substringBefore("?").lowercase()
     return when {

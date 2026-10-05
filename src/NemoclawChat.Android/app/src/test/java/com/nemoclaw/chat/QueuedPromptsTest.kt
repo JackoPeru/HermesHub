@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -98,5 +99,41 @@ class QueuedPromptsTest {
         val full = (1..10).map { QueuedPrompt("a", "p$it") }
         assertTrue(!canEnqueuePrompt(full, "a"))
         assertTrue(canEnqueuePrompt(full.dropLast(1), "a"))
+    }
+
+    @Test
+    fun attachmentCountSurvivesRoundTrip() {
+        val context = FakeQueueContext()
+        val file = File.createTempFile("queue-", ".jpg")
+        try {
+            val queue = listOf(
+                QueuedPrompt(
+                    "a", "testo",
+                    listOf(ChatInputAttachment(filename = "f.jpg", mimeType = "image/jpeg", sizeBytes = 10, localFilePath = file.absolutePath)),
+                    attachmentCount = 3
+                )
+            )
+            saveQueuedPrompts(context, queue)
+            val loaded = loadQueuedPrompts(context)
+            assertEquals(1, loaded.size)
+            assertEquals(1, loaded[0].attachments.size)
+            assertEquals(3, loaded[0].attachmentCount)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun shouldCancelManagerJobOnlyForTurnYoungActiveJobs() {
+        val nowMs = System.currentTimeMillis()
+        val sinceMs = nowMs - 60_000
+        val createdSec = nowMs / 1000.0
+        assertTrue(shouldCancelManagerJob("queued", createdSec, sinceMs))
+        assertTrue(shouldCancelManagerJob("running", createdSec, sinceMs))
+        assertFalse(shouldCancelManagerJob("done", createdSec, sinceMs))
+        assertFalse(shouldCancelManagerJob("failed", createdSec, sinceMs))
+        assertFalse(shouldCancelManagerJob("cancelled", createdSec, sinceMs))
+        assertFalse(shouldCancelManagerJob("queued", createdSec - 3600, sinceMs))
+        assertFalse(shouldCancelManagerJob("", createdSec, sinceMs))
     }
 }

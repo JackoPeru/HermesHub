@@ -338,6 +338,17 @@ internal fun ChatScreen(
         val next = nextQueuedFor(state.queuedPrompts.toList(), cid) ?: return
         state.queuedPrompts.remove(next)
         state.pendingAttachments.addAll(next.attachments.filter { it !in state.pendingAttachments })
+        val missingFiles = (next.attachmentCount - next.attachments.size).coerceAtLeast(0)
+        if (missingFiles > 0) {
+            state.messages.add(
+                ChatMessage(
+                    "Hermes Hub",
+                    "Attenzione: $missingFiles allegati in coda non esistono piu (cache pulita). Parte solo il testo.",
+                    fromUser = false,
+                    isAction = true
+                )
+            )
+        }
         quickPrompt = next.text
     }
 
@@ -353,6 +364,14 @@ internal fun ChatScreen(
             state.streamingState?.activeRunId?.let { runId ->
                 runCatching {
                     stopHermesRun(botSettings, runId, botApiKey, botProfile, botMultiplexEnabled, botAllowCompatAuth)
+                }
+            }
+            if (state.activeStreams.size <= 1) {
+                val stopKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() }
+                if (stopKey != null) {
+                    cancelManagerJobsSince(
+                        gpuManagerBase(settings.gatewayUrl), stopKey, state.lastTurnStartMs
+                    )
                 }
             }
             for (i in 0 until 25) {
@@ -1086,6 +1105,8 @@ internal fun ChatScreen(
 
                     state.messages.add(userMessage)
                     state.draft = ""
+                    // Marca inizio turno: lo stop cancellera anche i job media nati dopo.
+                    state.lastTurnStartMs = System.currentTimeMillis()
                     // Cronologia presente (messaggio utente in lista): il reattach
                     // DONE puo scrivere qui dentro da ora in poi.
                     historyLoadedCid = state.activeConversationId
@@ -1559,6 +1580,18 @@ internal fun ChatScreen(
                 state.activeStreamJob?.cancel()
                 // Stop cancella anche la coda prompt (niente partenze a sorpresa).
                 state.queuedPrompts.removeAll { it.conversationId == cid }
+                // Job media nati in questo turno (invisibili al client): cancellali,
+                // ma solo se non ci sono altri stream attivi a usar le GPU.
+                if (state.activeStreams.size <= 1) {
+                    val stopKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() }
+                    if (stopKey != null) {
+                        HermesStreamRuntime.scope.launch {
+                            cancelManagerJobsSince(
+                                gpuManagerBase(settings.gatewayUrl), stopKey, state.lastTurnStartMs
+                            )
+                        }
+                    }
+                }
                 // Aggiornamento UI immediato + vero POST /v1/runs/{id}/stop (non solo cancel locale).
                 state.streamingState = state.streamingState?.copy(
                     status = "Interruzione richiesta. Chiudo stream Hermes...",
