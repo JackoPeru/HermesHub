@@ -556,7 +556,10 @@ internal fun BotsScreen(
     onOpenScreen: () -> Unit = {},
     onOpenCron: () -> Unit = {},
     // Apre la sidebar in modalita bot (lista bot stile desktop).
-    onOpenSidebar: () -> Unit = {}
+    onOpenSidebar: () -> Unit = {},
+    // Collegamento chat desktop (dialog in AppRoot).
+    onLinkDesktop: (HermesBotItem) -> Unit = {},
+    onUnlinkDesktop: (HermesBotItem) -> Unit = {}
 ) {
     var roster by remember(settings.gatewayUrl) { mutableStateOf<HermesBotRoster?>(null) }
     var connections by remember(settings.gatewayUrl) {
@@ -597,6 +600,7 @@ internal fun BotsScreen(
     var botHiddenLocal by remember { mutableStateOf(setOf<String>()) }
     var botAutoScreen by remember { mutableStateOf(setOf<String>()) }
     var botSections by remember { mutableStateOf(BotSections()) }
+    var botLinks by remember { mutableStateOf(mapOf<String, String>()) }
     var showHiddenBots by remember { mutableStateOf(false) }
     var showSectionScreen by remember { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<String?>(null) }
@@ -613,6 +617,7 @@ internal fun BotsScreen(
         botHiddenLocal = loadBotHiddenLocal(appContext)
         botAutoScreen = loadBotAutoScreen(appContext)
         botSections = loadBotSections(appContext)
+        botLinks = loadBotLinks(appContext)
     }
     // Stato schermo condiviso per roster e dettaglio (poll leggero, anteprima solo se acceso).
     var screenStatus by remember(settings.gatewayUrl) { mutableStateOf<ScreenStatusInfo?>(null) }
@@ -792,6 +797,7 @@ internal fun BotsScreen(
                 pinned = isPinned,
                 hidden = bot.identityKey in botHiddenLocal,
                 autoScreen = bot.identityKey in botAutoScreen,
+                linked = botLinks[bot.identityKey] != null,
                 sections = botSections.order,
                 currentSection = currentSection,
                 onDismiss = { menuFor = null; menuPage = 0 },
@@ -845,6 +851,13 @@ internal fun BotsScreen(
                 },
                 onNewChat = { if (openBotSession(bot, fresh = true)) menuFor = null },
                 onRecentSessions = { menuFor = null; recentFor = bot },
+                onLinkDesktop = { menuFor = null; onLinkDesktop(bot) },
+                onUnlinkDesktop = {
+                    menuFor = null
+                    // Ottimistico: il badge si aggiorna subito.
+                    botLinks = botLinks - bot.identityKey
+                    onUnlinkDesktop(bot)
+                },
                 onMoveToSection = { name ->
                     menuFor = null
                     val assign = botSections.assign.toMutableMap()
@@ -1259,9 +1272,11 @@ internal fun BotsScreen(
                                 .onSuccess {
                                     status = "Bot eliminato."
                                     deleteBot = null
-                                    // Pulisci pin/hide/sezioni/sessioni locali del bot.
-                                    withContext(Dispatchers.IO) { removeBotDisplayPrefs(appContext, bot.identityKey) }
-                                    clearLastBotIf(appContext, bot.identityKey)
+                                    // Pulisci pin/hide/sezioni/sessioni/link locali del bot.
+                                    withContext(Dispatchers.IO) {
+                                        removeBotDisplayPrefs(appContext, bot.identityKey)
+                                        clearLastBotIf(appContext, bot.identityKey)
+                                    }
                                     reloadBotDisplayPrefs()
                                     refreshNonce++
                                 }

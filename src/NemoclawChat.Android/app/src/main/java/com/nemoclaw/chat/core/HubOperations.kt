@@ -3354,7 +3354,12 @@ internal fun saveConversationSnapshot(
     hermesSessionId: String? = null,
     modelOverride: String? = null,
     providerOverride: String? = null,
-    reasoningEffort: String? = null
+    reasoningEffort: String? = null,
+    // Chat collegata al desktop (stesso id Hub): non sovrascrivere i
+    // puntatori di continuazione altrui (serverConversationId e
+    // previousResponseId restano quelli esistenti). Vale anche per
+    // override e hermesSessionId: la chat condivisa non si ri-brandizza.
+    preserveRemoteContinuity: Boolean = false
 ): LocalConversation {
     synchronized(localArchiveLock) {
         val conversations = loadConversations(context, includeDeleted = true).toMutableList()
@@ -3369,12 +3374,16 @@ internal fun saveConversationSnapshot(
                 prompt = prompt,
                 updatedAt = now,
                 messages = messages,
-                previousResponseId = responseId ?: current.previousResponseId,
-                serverConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, current.id),
-                hermesSessionId = hermesSessionId ?: current.hermesSessionId,
-                modelOverride = modelOverride ?: current.modelOverride,
-                providerOverride = providerOverride ?: current.providerOverride,
-                reasoningEffort = reasoningEffort ?: current.reasoningEffort,
+                previousResponseId = if (preserveRemoteContinuity) current.previousResponseId else responseId ?: current.previousResponseId,
+                serverConversationId = if (preserveRemoteContinuity) {
+                    current.serverConversationId
+                } else {
+                    hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, current.id)
+                },
+                hermesSessionId = if (preserveRemoteContinuity) current.hermesSessionId else hermesSessionId ?: current.hermesSessionId,
+                modelOverride = if (preserveRemoteContinuity) current.modelOverride else modelOverride ?: current.modelOverride,
+                providerOverride = if (preserveRemoteContinuity) current.providerOverride else providerOverride ?: current.providerOverride,
+                reasoningEffort = if (preserveRemoteContinuity) current.reasoningEffort else reasoningEffort ?: current.reasoningEffort,
                 projectId = current.projectId.ifBlank { projectId.orEmpty() }
             )
         } else {

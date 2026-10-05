@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.DriveFileMove
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
@@ -18,6 +20,7 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
@@ -40,6 +43,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.edit
 import com.nemoclaw.chat.AppColors
+import com.nemoclaw.chat.LocalConversation
+import com.nemoclaw.chat.isBotConversationId
+import com.nemoclaw.chat.loadConversations
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.DateFormat
@@ -185,6 +191,7 @@ internal fun saveBotSessionBinding(
     setBotPinned(context, identityKey, false)
     setBotHiddenLocal(context, identityKey, false)
     setBotAutoScreen(context, identityKey, false)
+    clearBotLink(context, identityKey)
     val sections = loadBotSections(context)
     val assign = sections.assign.toMutableMap()
     assign.remove(identityKey)
@@ -204,6 +211,11 @@ internal fun pruneBotDisplayPrefs(context: Context, validKeys: Set<String>): Bot
     saveStringSet(context, "pins", loadBotPins(context).intersect(validKeys))
     saveStringSet(context, "hidden", loadBotHiddenLocal(context).intersect(validKeys))
     saveStringSet(context, "screen_auto", loadBotAutoScreen(context).intersect(validKeys))
+    val links = loadBotLinks(context).filterKeys { it in validKeys }
+    val linksRoot = JSONObject()
+    links.forEach { (k, v) -> linksRoot.put(k, v) }
+    botDisplayPrefs(context).edit { putString("links_json", linksRoot.toString()) }
+    saveBotLinkSkipped(context, loadBotLinkSkipped(context).intersect(validKeys))
     val sections = loadBotSections(context)
     val assign = sections.assign.filterKeys { it in validKeys }
     val order = sections.order.filter { name -> assign.values.any { it == name } }
@@ -219,7 +231,6 @@ internal fun pruneBotDisplayPrefs(context: Context, validKeys: Set<String>): Bot
 }
 
 // -------------------------------------------------------- ultimo bot ---
-
 /**
  * Ultimo bot usato: la "pagina principale" della sezione Bot e la sua
  * chat persistente, non il roster. Solo riferimento leggero (connessione,
@@ -278,6 +289,80 @@ internal fun clearLastBotIf(context: Context, identityKey: String) {
     }
 }
 
+// ------------------------------------------- collegamento chat desktop ---
+
+/**
+ * Collega la chat persistente del bot a una conversazione desktop esistente
+ * (stesso id Hub): telefono e desktop leggono/scrivono lo STESSO oggetto
+ * (merge hub per id, vince updatedAt piu recente; uso sequenziale).
+ * Senza link si usa l'id stabile locale.
+ */
+internal fun loadBotLinks(context: Context): Map<String, String> {
+    val raw = botDisplayPrefs(context).getString("links_json", null) ?: return emptyMap()
+    return runCatching {
+        val root = JSONObject(raw)
+        buildMap {
+            root.keys().forEach { key ->
+                root.optString(key).takeIf { it.isNotBlank() }?.let { put(key, it) }
+            }
+        }
+    }.getOrDefault(emptyMap())
+}
+
+internal fun saveBotLink(context: Context, identityKey: String, entityId: String) {
+    val next = loadBotLinks(context).toMutableMap()
+    next[identityKey] = entityId
+    val root = JSONObject()
+    next.forEach { (k, v) -> root.put(k, v) }
+    botDisplayPrefs(context).edit { putString("links_json", root.toString()) }
+}
+
+internal fun clearBotLink(context: Context, identityKey: String) {
+    val next = loadBotLinks(context).toMutableMap()
+    next.remove(identityKey)
+    val root = JSONObject()
+    next.forEach { (k, v) -> root.put(k, v) }
+    botDisplayPrefs(context).edit { putString("links_json", root.toString()) }
+    // Via anche lo skip: riproporre il picker al prossimo giro.
+    val skipped = loadBotLinkSkipped(context).toMutableSet()
+    skipped.remove(identityKey)
+    saveBotLinkSkipped(context, skipped)
+}
+
+internal fun loadBotLinkSkipped(context: Context): Set<String> = loadStringSet(context, "links_skipped")
+
+internal fun saveBotLinkSkipped(context: Context, values: Set<String>) {
+    saveStringSet(context, "links_skipped", values)
+}
+
+/**
+ * Candidate collegabili: conversazioni non-Android su Hub (desktop e
+ * altre surface) non eliminate, escluse quelle gia linkate ad altri bot
+ * e gli id stabili bot. Puro I/O locale, niente rete.
+ */
+internal fun desktopLinkCandidates(context: Context, limit: Int = 30): List<LocalConversation> {
+    val linkedIds = loadBotLinks(context).values.toSet()
+    return loadConversations(context)
+        .filter { conv ->
+            conv.deletedAt == null &&
+                conv.id !in linkedIds &&
+                !isBotConversationId(conv.id) &&
+                (conv.serverConversationId ?: "").startsWith("hermes-hub:") &&
+                !(conv.serverConversationId ?: "").startsWith("hermes-hub:android-app:")
+        }
+        .sortedByDescending { it.updatedAt }
+        .take(limit.coerceIn(1, 50))
+}
+
+private fun candidateSurfaceLabel(item: LocalConversation): String {
+    val surface = (item.serverConversationId ?: "").split(":").getOrNull(1).orEmpty()
+    return when {
+        surface.isBlank() -> "locale"
+        surface == "windows-app" -> "desktop"
+        else -> surface
+    }
+}
+
 // ------------------------------------------------------- pure helpers ---
 
 /** Fissati prima (ordine server), poi gli altri. Puro: testabile. */
@@ -309,6 +394,7 @@ internal data class BotMenuHost(
     val pinned: Boolean,
     val hidden: Boolean,
     val autoScreen: Boolean,
+    val linked: Boolean = false,
     val sections: List<String>,
     val currentSection: String?,
     val onDismiss: () -> Unit,
@@ -323,6 +409,8 @@ internal data class BotMenuHost(
     val onDuplicate: () -> Unit,
     val onNewChat: () -> Unit,
     val onRecentSessions: () -> Unit,
+    val onLinkDesktop: () -> Unit = {},
+    val onUnlinkDesktop: () -> Unit = {},
     val onMoveToSection: (String?) -> Unit,
     val onNewSection: (String) -> Unit
 )
@@ -439,6 +527,11 @@ internal fun BotCardMenu(bot: HermesBotItem, host: BotMenuHost) {
             onClick = host.onRecentSessions
         )
         BotMenuItem(
+            label = if (host.linked) "Scollega chat desktop" else "Collega chat desktop…",
+            icon = { Icon(Icons.Rounded.Link, contentDescription = null, tint = Color.White) },
+            onClick = if (host.linked) host.onUnlinkDesktop else host.onLinkDesktop
+        )
+        BotMenuItem(
             label = "Sposta in sezione",
             icon = { Icon(Icons.AutoMirrored.Rounded.DriveFileMove, contentDescription = null, tint = Color.White) },
             trailing = { Icon(Icons.Rounded.ChevronRight, contentDescription = "Sotto menu", tint = AppColors.Muted) },
@@ -487,8 +580,51 @@ internal fun BotRecentSessionsDialog(
 }
 
 @Composable
-internal fun BotSectionNameDialog(
-    initial: String = "",
+internal fun BotDesktopLinkDialog(
+    botDisplayName: String,
+    candidates: List<LocalConversation>,
+    onPick: (LocalConversation) -> Unit,
+    onSkip: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val dateFormat = remember { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Collega chat desktop · $botDisplayName", color = Color.White) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Scegli la chat desktop da condividere: telefono e desktop leggeranno e scriveranno la STESSA chat (vince l'ultimo che scrive). Senza scelta resta la chat locale.",
+                    color = AppColors.Muted,
+                    fontSize = 12.sp
+                )
+                if (candidates.isEmpty()) {
+                    Text("Nessuna chat desktop sincronizzata.", color = AppColors.Muted, fontSize = 13.sp)
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 320.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        items(candidates, key = { it.id }) { item ->
+                            TextButton(onClick = { onPick(item) }) {
+                                Text(
+                                    "${item.title.ifBlank { "Senza titolo" }.take(38)} · ${candidateSurfaceLabel(item)} · ${item.messages.size} msg · ${dateFormat.format(Date(item.updatedAt))}",
+                                    color = AppColors.Accent,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onSkip) { Text("Non collegare", color = Color.White) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Chiudi", color = AppColors.Muted) } }
+    )
+}
+
+@Composable
+internal fun BotSectionNameDialog(    initial: String = "",
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit
 ) {

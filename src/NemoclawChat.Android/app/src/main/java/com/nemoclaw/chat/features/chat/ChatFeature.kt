@@ -549,6 +549,17 @@ internal fun ChatScreen(
     val isStreaming = state.streamingState != null
     val archivedBotWithoutContext = botProfile.isNullOrBlank() &&
         isBotConversationId(conversationId ?: state.activeConversationId)
+    // Chat bot collegata al desktop (id Hub altrui, non bot-*/botchat-*):
+    // gli snapshot preservano i puntatori di continuazione esistenti.
+    // Contratto: l'inferenza resta sulla SESSIONE bot (botSessionId), il
+    // preserve evita solo il clobber dello storage condiviso. effectiveId:
+    // pendingConversationId viene nulllato dopo il primo load, quindi
+    // fallback su activeConversationId (altrimenti dal 2o turno preserve
+    // diventerebbe false e si distruggerebbe il serverConversationId desktop).
+    val effectiveConversationId = conversationId?.takeIf { it.isNotBlank() }
+        ?: state.activeConversationId?.takeIf { it.isNotBlank() }
+    val preserveRemoteContinuity = !botProfile.isNullOrBlank() &&
+        !effectiveConversationId.isNullOrBlank() && !isBotConversationId(effectiveConversationId)
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             scope.launch {
@@ -1116,7 +1127,7 @@ internal fun ChatScreen(
             reasoningOptions = reasoningLadder,
             onReasoningChange = {
                 state.chatReasoningEffort = it
-                persistChatOverrides(context, state)
+                persistChatOverrides(context, state, preserveRemoteContinuity)
             },
             quickPrompt = quickPrompt,
             onQuickPromptConsumed = { quickPrompt = null },
@@ -1193,10 +1204,13 @@ internal fun ChatScreen(
                                 source = "Hermes in corso",
                                 responseId = prevId,
                                 projectId = settings.activeProjectId,
+                                preserveRemoteContinuity = preserveRemoteContinuity,
                                 syncAfterSave = false
                             )
                         }
-                        val shouldGenerateTitle = initialConversation.title == UNTITLED_CHAT_TITLE
+                        // Mai rinominare la chat condivisa col desktop: titolo e
+                        // rename restano quelli esistenti.
+                        val shouldGenerateTitle = initialConversation.title == UNTITLED_CHAT_TITLE && !preserveRemoteContinuity
                         val persistedStreamCid = initialConversation.id
                         if (persistedStreamCid != streamCid) {
                             state.activeStreams.remove(streamCid)?.let { state.activeStreams[persistedStreamCid] = it }
@@ -1334,6 +1348,7 @@ internal fun ChatScreen(
                                             modelOverride = state.chatModelOverride,
                                             providerOverride = state.chatProviderOverride,
                                             reasoningEffort = state.chatReasoningEffort,
+                                            preserveRemoteContinuity = preserveRemoteContinuity,
                                             syncAfterSave = false
                                         )
                                     }
@@ -1567,19 +1582,33 @@ internal fun ChatScreen(
                                     state.activeStreams.remove(activeStreamCid)
                                 }
                             } else {
+                                // Snapshot finale: su chat collegata unisci i messaggi
+                                // remoti arrivati durante il turno (niente turni persi).
+                                val finalMessages = if (preserveRemoteContinuity) {
+                                    val fresh = withContext(NonCancellable + Dispatchers.IO) {
+                                        loadConversation(context, activeStreamCid)
+                                    }
+                                    unionChatMessages(
+                                        fresh?.messages.orEmpty(),
+                                        localHistory.toList()
+                                    )
+                                } else {
+                                    localHistory.toList()
+                                }
                                 val saved = withContext(NonCancellable + Dispatchers.IO) {
                                     saveConversationSnapshot(
                                         context = context,
                                         conversationId = activeStreamCid,
                                         mode = mode,
                                         prompt = displayText,
-                                        messages = localHistory.toList(),
+                                        messages = finalMessages,
                                         source = if (interrupted) "Hermes interrotto" else if (finalState.error != null) "Errore Hermes" else if (state.sessionRoute == "sessions") "Sessione Hermes" else "Hermes",
                                         responseId = finalState.responseId ?: prevId,
                                         hermesSessionId = state.hermesSessionId,
                                         modelOverride = state.chatModelOverride,
                                         providerOverride = state.chatProviderOverride,
                                         reasoningEffort = state.chatReasoningEffort,
+                                        preserveRemoteContinuity = preserveRemoteContinuity,
                                         // Su stop non spingere subito sul gateway: la rete in finally
                                         // allungherebbe lo sblocco del composer; ci pensa l'autosync.
                                         syncAfterSave = !interrupted
@@ -2065,7 +2094,7 @@ internal fun ChatModelSessionBar(
     }
 }
 
-private fun persistChatOverrides(context: Context, state: ChatStateHolder) {
+private fun persistChatOverrides(context: Context, state: ChatStateHolder, preserveRemoteContinuity: Boolean = false) {
     val cid = state.activeConversationId ?: return
     runCatching {
         val current = loadConversation(context, cid) ?: return
@@ -2081,6 +2110,7 @@ private fun persistChatOverrides(context: Context, state: ChatStateHolder) {
             modelOverride = state.chatModelOverride,
             providerOverride = state.chatProviderOverride,
             reasoningEffort = state.chatReasoningEffort,
+            preserveRemoteContinuity = preserveRemoteContinuity,
             syncAfterSave = false
         )
     }

@@ -228,12 +228,21 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
+import com.nemoclaw.chat.features.bots.BotDesktopLinkDialog
 import com.nemoclaw.chat.features.bots.BotsScreen
 import com.nemoclaw.chat.features.bots.BotChatContext
 import com.nemoclaw.chat.features.bots.HermesBotItem
+import com.nemoclaw.chat.features.bots.SavedBotRef
+import com.nemoclaw.chat.features.bots.clearBotLink
+import com.nemoclaw.chat.features.bots.desktopLinkCandidates
+import com.nemoclaw.chat.features.bots.loadBotLinkSkipped
+import com.nemoclaw.chat.features.bots.loadBotLinks
 import com.nemoclaw.chat.features.bots.loadLastBot
 import com.nemoclaw.chat.features.bots.resolveBotChat
+import com.nemoclaw.chat.features.bots.saveBotLink
+import com.nemoclaw.chat.features.bots.saveBotLinkSkipped
 import com.nemoclaw.chat.features.bots.saveLastBot
+import com.nemoclaw.chat.features.bots.stableBotConversationId
 import com.nemoclaw.chat.features.screen.ScreenScreen
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
@@ -440,8 +449,51 @@ internal fun ChatApp() {
         }
     }
     val chatScope = rememberCoroutineScope()
-    // Sidebar-bot stile desktop: apre la chat persistente del bot.
+    // Invariante bot-side: BotChatContext porta la SESSIONE server per-bot
+    // (binding per identityKey, stabile); pendingConversationId porta
+    // l'ARCHIVE id (entity desktop linkata oppure id stabile). ChatScreen
+    // carica/salva per archiveId; lo stream usa la sessione del contesto.
     var sidebarBotOpening by remember { mutableStateOf(false) }
+    // Dialog collegamento chat desktop (vedi sotto): target pendente.
+    var desktopLinkFor by remember { mutableStateOf<BotLinkTarget?>(null) }
+
+    suspend fun botLinkedArchiveId(
+        appCtx: Context,
+        bot: HermesBotItem,
+        stableId: String
+    ): String = withContext(Dispatchers.IO) {
+        val link = loadBotLinks(appCtx)[bot.identityKey] ?: return@withContext stableId
+        // Solo tombstone esplicita invalida il link: se l'entity manca
+        // (offline, non ancora pullata) il link resta e si usa stabile.
+        val existing = loadConversations(appCtx, includeDeleted = true).firstOrNull { it.id == link }
+        if (existing != null && existing.deletedAt != null) {
+            clearBotLink(appCtx, bot.identityKey)
+            return@withContext stableId
+        }
+        link
+    }
+
+    suspend fun maybePromptDesktopLink(appCtx: Context, bot: HermesBotItem, stableId: String, force: Boolean = false) {
+        val target = withContext(Dispatchers.IO) {
+            if (!force) {
+                if (loadBotLinks(appCtx)[bot.identityKey] != null) return@withContext null
+                if (loadBotLinkSkipped(appCtx).contains(bot.identityKey)) return@withContext null
+                if (loadConversation(appCtx, stableId)?.messages.isNullOrEmpty() == false) return@withContext null
+            }
+            if (desktopLinkCandidates(appCtx).isEmpty()) {
+                if (force) {
+                    // show() vuole il Looper: Main, ma con applicationContext.
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(appCtx, "Nessuna chat desktop sincronizzata.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                return@withContext null
+            }
+            BotLinkTarget(bot.profile, bot.connectionId, bot.displayName, bot.identityKey, stableId)
+        }
+        if (target != null) desktopLinkFor = target
+    }
+
     fun openSidebarBot(bot: HermesBotItem) {
         if (sidebarBotOpening) return
         if (!canOpenBot()) return
@@ -453,13 +505,16 @@ internal fun ChatApp() {
                 runCatching { ConversationArchiveAutoSync.pullFromHub(context.applicationContext) }
                 resolveBotChat(context.applicationContext, settings, false, bot)
                     .onSuccess {
+                        val appCtx = context.applicationContext
+                        val archiveId = botLinkedArchiveId(appCtx, bot, it.localConversationId)
                         chatState.resetForNewChat()
                         pendingBot = it
-                        pendingConversationId = it.localConversationId
+                        pendingConversationId = archiveId
                         pendingPrompt = ""
-                        saveLastBot(context.applicationContext, it.connectionId, it.profile, it.displayName)
+                        saveLastBot(appCtx, it.connectionId, it.profile, it.displayName)
                         botSectionVisible = false
                         sidebarOpen = false
+                        maybePromptDesktopLink(appCtx, bot, it.localConversationId)
                     }
                     .onFailure {
                         Toast.makeText(context, it.message ?: "Apertura Bot Chat fallita.", Toast.LENGTH_LONG).show()
@@ -484,11 +539,15 @@ internal fun ChatApp() {
                 runCatching { ConversationArchiveAutoSync.pullFromHub(context.applicationContext) }
                 resolveBotChat(context.applicationContext, settings, false, ref.toItem())
                     .onSuccess {
+                        val appCtx = context.applicationContext
+                        // openLastBot: ref e gia HermesBotItem, riusalo per il link.
+                        val archiveId = botLinkedArchiveId(appCtx, ref.toItem(), it.localConversationId)
                         chatState.resetForNewChat()
                         pendingBot = it
-                        pendingConversationId = it.localConversationId
+                        pendingConversationId = archiveId
                         pendingPrompt = ""
                         botSectionVisible = false
+                        maybePromptDesktopLink(appCtx, ref.toItem(), it.localConversationId)
                     }
                     .onFailure {
                         botSectionVisible = true
@@ -630,18 +689,62 @@ internal fun ChatApp() {
                     settings = settings,
                 onOpenBot = { bot ->
                         if (!canOpenBot()) return@BotsScreen
-                        // Never carry normal-chat messages, attachments or
-                        // previous-response state into a bot archive.
-                        chatState.resetForNewChat()
-                        pendingBot = bot
-                        pendingConversationId = bot.localConversationId
-                        pendingPrompt = ""
-                        saveLastBot(context.applicationContext, bot.connectionId, bot.profile, bot.displayName)
-                        setSelectedTab(Tab.Chat)
+                        chatScope.launch {
+                            val appCtx = context.applicationContext
+                            val item = SavedBotRef(bot.connectionId, bot.profile, bot.displayName).toItem()
+                            val archiveId = botLinkedArchiveId(appCtx, item, bot.localConversationId)
+                            // Never carry normal-chat messages, attachments or
+                            // previous-response state into a bot archive.
+                            chatState.resetForNewChat()
+                            pendingBot = bot
+                            pendingConversationId = archiveId
+                            pendingPrompt = ""
+                            saveLastBot(appCtx, bot.connectionId, bot.profile, bot.displayName)
+                            setSelectedTab(Tab.Chat)
+                            maybePromptDesktopLink(appCtx, item, bot.localConversationId)
+                        }
                     },
                     onOpenScreen = { setSelectedTab(Tab.Screen) },
                     onOpenCron = { setSelectedTab(Tab.Cron) },
-                    onOpenSidebar = { sidebarOpen = true }
+                    onOpenSidebar = { sidebarOpen = true },
+                    onLinkDesktop = { bot ->
+                        // Dal menu: apri il bot e proponi il collegamento.
+                        if (!canOpenBot()) return@BotsScreen
+                        chatScope.launch {
+                            val appCtx = context.applicationContext
+                            runCatching { ConversationArchiveAutoSync.pullFromHub(appCtx) }
+                            val stableId = stableBotConversationId(bot)
+                            val archiveId = botLinkedArchiveId(appCtx, bot, stableId)
+                            val resolved = resolveBotChat(appCtx, settings, false, bot)
+                                .onSuccess {
+                                    chatState.resetForNewChat()
+                                    pendingBot = it
+                                    pendingConversationId = archiveId
+                                    pendingPrompt = ""
+                                    saveLastBot(appCtx, it.connectionId, it.profile, it.displayName)
+                                    botSectionVisible = false
+                                }
+                                .onFailure {
+                                    Toast.makeText(context, it.message ?: "Apertura Bot Chat fallita.", Toast.LENGTH_LONG).show()
+                                }
+                            if (resolved.isSuccess) {
+                                maybePromptDesktopLink(appCtx, bot, stableId, force = true)
+                            }
+                        }
+                    },
+                    onUnlinkDesktop = { bot ->
+                        clearBotLink(context.applicationContext, bot.identityKey)
+                        // Se la chat aperta ERA quella linkata, torna stabile
+                        // subito: altrimenti i save continuerebbero sul desktop.
+                        if (pendingBot != null &&
+                            "${pendingBot?.connectionId}::${pendingBot?.profile}" == bot.identityKey &&
+                            !isBotConversationId(pendingConversationId)
+                        ) {
+                            chatState.resetForNewChat()
+                            pendingConversationId = stableBotConversationId(bot)
+                        }
+                        Toast.makeText(context, "Scollegato.", Toast.LENGTH_SHORT).show()
+                    }
                 )
                 }
                 }
@@ -794,7 +897,54 @@ internal fun ChatApp() {
                 onOpenTab = { tab -> setSelectedTab(tab) }
                 ) }
                 }
+                // Dialog collegamento chat desktop (apertura bot o menu).
+                desktopLinkFor?.let { target ->
+                    val linkCandidates = remember(target.identityKey) {
+                        desktopLinkCandidates(context.applicationContext)
+                    }
+                    BotDesktopLinkDialog(
+                        botDisplayName = target.displayName,
+                        candidates = linkCandidates,
+                        onPick = { entity ->
+                            // Mai cambiare chat a turno in corso: stream e
+                            // checkpoint resterebbero legati alla vecchia.
+                            if (chatState.sending) {
+                                Toast.makeText(context, "Finisci o interrompi il turno prima di collegare.", Toast.LENGTH_SHORT).show()
+                            } else {
+                                saveBotLink(context.applicationContext, target.identityKey, entity.id)
+                                chatState.resetForNewChat()
+                                pendingConversationId = entity.id
+                                desktopLinkFor = null
+                                Toast.makeText(context, "Chat desktop collegata.", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onSkip = {
+                            saveBotLinkSkipped(
+                                context.applicationContext,
+                                loadBotLinkSkipped(context.applicationContext) + target.identityKey
+                            )
+                            desktopLinkFor = null
+                        },
+                        // Chiudi = non collegare (niente loop al prossimo open).
+                        onDismiss = {
+                            saveBotLinkSkipped(
+                                context.applicationContext,
+                                loadBotLinkSkipped(context.applicationContext) + target.identityKey
+                            )
+                            desktopLinkFor = null
+                        }
+                    )
+                }
             }
         )
     }
 }
+
+/** Target del dialog collegamento: quale bot collegare a quale chat desktop. */
+internal data class BotLinkTarget(
+    val profile: String,
+    val connectionId: String,
+    val displayName: String,
+    val identityKey: String,
+    val stableId: String
+)

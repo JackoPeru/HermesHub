@@ -409,6 +409,23 @@ internal fun isBotConversationId(id: String?): Boolean {
     return id.startsWith("bot-") || id.startsWith("botchat-")
 }
 
+/**
+ * Unione anti-perdita per chat condivise (telefono+desktop sullo stesso id
+ * Hub, merge LWW a entita intera): i messaggi remoti arrivati mentre il
+ * turno era in corso non vengono sovrascritti. Ordine: remoto esistente,
+ * poi locali nuovi (per id). I messaggi cancellati altrove resuscitano:
+ * limite noto, meglio che perdere turni.
+ */
+internal fun unionChatMessages(
+    remote: List<ChatMessage>,
+    local: List<ChatMessage>
+): List<ChatMessage> {
+    if (remote.isEmpty()) return local
+    if (local.isEmpty()) return remote
+    val remoteIds = remote.map { it.id }.toSet()
+    return remote + local.filter { it.id !in remoteIds }
+}
+
 data class LocalConversation(
     val id: String,
     val title: String,
