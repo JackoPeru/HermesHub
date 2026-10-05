@@ -2,6 +2,15 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.216 - 2026-10-05
+
+- Toggle [Chat|Bot] ridisegnato: pill sottile (~20dp) elegante al posto
+  dei bottoni grandi.
+- Sidebar in modalita bot stile Hermes desktop: con il lato bot attivo
+  mostra tutti i bot con cui parlare (fissati/nascosti rispettati, bot
+  attivo evidenziato) invece di tab e chat normali; apertura diretta
+  della chat persistente.
+
 ## 0.6.215 - 2026-10-05
 
 - Sezione Bot: toggle [Chat|Bot] in alto alla chat con slide da destra;

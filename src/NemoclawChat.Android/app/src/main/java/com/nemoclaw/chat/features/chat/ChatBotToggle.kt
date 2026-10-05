@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
@@ -24,7 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Selettore [Chat | Bot] in alto alla chat: pill compatta ed elegante.
+ * Selettore [Chat | Bot] in alto alla chat: pill sottile (~20dp) ed elegante.
  * Il segmento illuminato dice in che sezione si e: Chat = conversazioni
  * proprie, Bot = sezione bot con la chat persistente del bot (una per bot,
  * condivisa con Hermes desktop via autosync archivio). Lo stato e issato
@@ -40,7 +39,7 @@ internal fun ChatBotToggle(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .padding(horizontal = 16.dp, vertical = 2.dp)
             .selectableGroup(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
@@ -51,7 +50,7 @@ internal fun ChatBotToggle(
             border = androidx.compose.foundation.BorderStroke(1.dp, AppColors.Border)
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -81,7 +80,6 @@ private fun ChatBotSegment(
 ) {
     Surface(
         modifier = Modifier
-            .heightIn(min = 32.dp)
             .clip(CircleShape)
             .selectable(
                 selected = selected,
@@ -92,23 +90,24 @@ private fun ChatBotSegment(
         shape = CircleShape
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 22.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (selected) {
                 Box(
                     modifier = Modifier
-                        .padding(end = 7.dp)
-                        .size(6.dp)
+                        .padding(end = 5.dp)
+                        .size(5.dp)
                         .background(Color(0xFF171009), CircleShape)
                 )
             }
             Text(
                 text = label,
                 color = if (selected) Color(0xFF171009) else AppColors.Muted,
-                fontSize = 13.sp,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                fontSize = 11.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                lineHeight = 13.sp
             )
         }
     }
