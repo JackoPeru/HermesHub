@@ -1,10 +1,13 @@
-Hermes Hub 0.6.221 (fix apertura bot canoniche)
+Hermes Hub 0.6.222 (bot live esterno)
 
-- App: la scan del registro Bot Chat passa include_hidden (le canoniche
-  sono sempre hidden): niente piu scan vuote che finivano in creazione
-  duplicata con HTTP 400.
-- Versioni: Windows/AdminBridge `0.6.221`; Android `versionName 0.6.221`, `versionCode 225`.
-- Asset: `HermesHub-0.6.221-android.apk` (binario Windows invariato).
-- SHA-256 Android: `25b5b5b79e4475aeeee66da8e8bbf038ee4c5f78eb44e24ebb2980c664562dc0`.
-- Asset: `HermesHub-0.6.221-linux-gateway.tar.gz`.
-- SHA-256 gateway: `c41aff4118c09d7b7be50a586f4833f8813fa296e84706611d6af867487163aa`.
+- App: le chat bot mostrano il lavoro in corso altrove (desktop) con
+  banner shimmer e stato ("Sta usando X…", "Sta ragionando…",
+  "Sta scrivendo…"); i nuovi messaggi arrivano in diretta.
+- App: stop attivo col quadrato anche senza turno locale (da li si
+  capisce se il bot e in esecuzione); stop dei turni altrui solo dal
+  desktop (nessuna API remota), con avviso onesto.
+- Versioni: Windows/AdminBridge `0.6.222`; Android `versionName 0.6.222`, `versionCode 226`.
+- Asset: `HermesHub-0.6.222-android.apk` (binario Windows invariato).
+- SHA-256 Android: `b26ba2d7a121799750c9c2a380bdbaacb5e30878f628cfc523fa71354bba1b30`.
+- Asset: `HermesHub-0.6.222-linux-gateway.tar.gz`.
+- SHA-256 gateway: `88dee8371b2277cff0c5add8721484e9fd87b7e35fa84948e9e049730dbff378`.

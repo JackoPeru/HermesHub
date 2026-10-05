@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.222 - 2026-10-05
+
+- Bot live esterno: la chat mostra quando il bot lavora altrove con
+  banner shimmer e stato (tool, ragionamento, scrittura); stop attivo
+  anche senza turno locale; nuovi messaggi in diretta.
+
 ## 0.6.221 - 2026-10-05
 
 - Bot canoniche: scan del registro con include_hidden (le Bot Chat sono
