@@ -327,7 +327,13 @@ internal fun HermesSidebar(
     onNewChat: () -> Unit,
     onOpenConversation: (String) -> Unit,
     onOpenTab: (Tab) -> Unit,
-    onToggleSidebarSection: (String) -> Unit
+    onToggleSidebarSection: (String) -> Unit,
+    // Modalita bot stile Hermes desktop: niente tab/chat normali, solo
+    // la lista dei bot con cui parlare + gestione.
+    botMode: Boolean = false,
+    activeBotKey: String? = null,
+    onOpenBotItem: (com.nemoclaw.chat.features.bots.HermesBotItem) -> Unit = {},
+    onManageBots: () -> Unit = {}
 ) {
     val conversations = remember { loadConversations(context).sortedByDescending { it.updatedAt } }
     Surface(
@@ -337,6 +343,16 @@ internal fun HermesSidebar(
             .clickable { },
         color = AppColors.Sidebar
     ) {
+        if (botMode) {
+            HermesBotSidebar(
+                context = context,
+                settings = settings,
+                activeBotKey = activeBotKey,
+                onClose = onClose,
+                onOpenBotItem = onOpenBotItem,
+                onManageBots = onManageBots
+            )
+        } else {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -487,6 +503,120 @@ internal fun HermesSidebar(
                     }
                 }
             }
+        }
+        }
+    }
+}
+
+/**
+ * Sidebar in modalita bot (stile Hermes desktop): niente tab ne chat
+ * normali, solo la lista dei bot con cui parlare + gestione. La chat
+ * resta quella persistente del bot (una per bot).
+ */
+@Composable
+internal fun HermesBotSidebar(
+    context: Context,
+    settings: AppSettings,
+    activeBotKey: String?,
+    onClose: () -> Unit,
+    onOpenBotItem: (com.nemoclaw.chat.features.bots.HermesBotItem) -> Unit,
+    onManageBots: () -> Unit
+) {
+    val appContext = context.applicationContext
+    var bots by remember { mutableStateOf(emptyList<com.nemoclaw.chat.features.bots.HermesBotItem>()) }
+    var status by remember { mutableStateOf("Carico bot…") }
+    LaunchedEffect(Unit) {
+        val loaded = withContext(Dispatchers.IO) {
+            val pins = com.nemoclaw.chat.features.bots.loadBotPins(appContext)
+            val hidden = com.nemoclaw.chat.features.bots.loadBotHiddenLocal(appContext)
+            val result = com.nemoclaw.chat.features.bots.loadAllHermesBotRosters(appContext, settings)
+            val visible = result.items.filter { !it.hidden && it.identityKey !in hidden }
+            com.nemoclaw.chat.features.bots.sortBotsForRoster(visible, pins) to result.status
+        }
+        bots = loaded.first
+        status = loaded.second
+    }
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    "Bot",
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    "Chiudi",
+                    color = AppColors.Muted,
+                    fontSize = 12.sp,
+                    modifier = Modifier.clickable(onClick = onClose)
+                )
+            }
+            Text(
+                if (bots.isEmpty()) status else "${bots.size} bot · tocca per parlare",
+                color = AppColors.Muted,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+            )
+        }
+        items(bots, key = { it.identityKey }) { bot ->
+            val selected = activeBotKey != null && bot.identityKey == activeBotKey
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (selected) AppColors.NavIndicator else Color.Transparent)
+                    .clickable { onOpenBotItem(bot) }
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                com.nemoclaw.chat.features.bots.BotAvatar(bot.displayName, bot.profile, 40.dp)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        bot.displayName,
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        "@${bot.handle}",
+                        color = AppColors.Muted,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (selected) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(AppColors.Accent, CircleShape)
+                    )
+                }
+            }
+        }
+        item {
+            SidebarRow(
+                icon = Icons.Rounded.Tune,
+                title = "Gestisci bot",
+                subtitle = "Roster, sezioni e schermo",
+                selected = false,
+                onClick = onManageBots
+            )
         }
     }
 }

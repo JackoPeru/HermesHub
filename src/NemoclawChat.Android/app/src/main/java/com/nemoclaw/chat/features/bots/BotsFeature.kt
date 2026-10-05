@@ -48,6 +48,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -347,6 +348,44 @@ internal suspend fun openPersistentBotChat(
         .map { it.copy(localConversationId = stableBotConversationId(bot)) }
 }
 
+/**
+ * Risolve il BotChatContext per un bot: riusa l'ultima sessione nota
+ * (binding locale, niente POST, la chat resta sempre la stessa) oppure
+ * ne crea una nuova (fresh=true, o nessun binding) salvando il binding.
+ * Puro I/O (Dispatchers.IO), niente stato UI: usato dal funnel BotsScreen
+ * e dalla sidebar-bot. Result fallito = errore esplicito da mostrare.
+ */
+internal suspend fun resolveBotChat(
+    appContext: Context,
+    settings: AppSettings,
+    rosterMultiplexEnabled: Boolean,
+    bot: HermesBotItem,
+    fresh: Boolean = false,
+    session: BotSessionEntry? = null
+): Result<BotChatContext> = withContext(Dispatchers.IO) {
+    runCatching {
+        val stableId = stableBotConversationId(bot)
+        val explicit = session
+            ?: if (!fresh) loadBotSessionBinding(appContext, bot.identityKey).current else null
+        if (explicit != null) {
+            val connection = connectionForBot(appContext, settings, bot)
+            BotChatContext(
+                profile = bot.profile,
+                sessionId = explicit.sessionId,
+                displayName = bot.displayName,
+                localConversationId = stableId,
+                multiplexEnabled = explicit.multiplexEnabled || rosterMultiplexEnabled,
+                connectionId = connection.id,
+                endpoint = connection.endpoint
+            )
+        } else {
+            openPersistentBotChat(appContext, settings, bot).getOrThrow().also {
+                saveBotSessionBinding(appContext, bot.identityKey, it.sessionId, it.multiplexEnabled)
+            }
+        }
+    }
+}
+
 internal suspend fun openHermesBotChat(
     context: Context,
     settings: AppSettings,
@@ -515,7 +554,9 @@ internal fun BotsScreen(
     settings: AppSettings,
     onOpenBot: (BotChatContext) -> Unit,
     onOpenScreen: () -> Unit = {},
-    onOpenCron: () -> Unit = {}
+    onOpenCron: () -> Unit = {},
+    // Apre la sidebar in modalita bot (lista bot stile desktop).
+    onOpenSidebar: () -> Unit = {}
 ) {
     var roster by remember(settings.gatewayUrl) { mutableStateOf<HermesBotRoster?>(null) }
     var connections by remember(settings.gatewayUrl) {
@@ -643,34 +684,9 @@ internal fun BotsScreen(
         opening = bot.identityKey
         scope.launch {
             try {
-                val stableId = stableBotConversationId(bot)
-                val explicit = session
-                    ?: if (!fresh) {
-                        withContext(Dispatchers.IO) { loadBotSessionBinding(appContext, bot.identityKey).current }
-                    } else null
-                if (explicit != null) {
-                    val connection = withContext(Dispatchers.IO) { connectionForBot(appContext, settings, bot) }
-                    onOpenBot(
-                        BotChatContext(
-                            profile = bot.profile,
-                            sessionId = explicit.sessionId,
-                            displayName = bot.displayName,
-                            localConversationId = stableId,
-                            multiplexEnabled = explicit.multiplexEnabled || roster?.multiplexEnabled == true,
-                            connectionId = connection.id,
-                            endpoint = connection.endpoint
-                        )
-                    )
-                } else {
-                    openPersistentBotChat(context, settings, bot)
-                        .onSuccess {
-                            withContext(Dispatchers.IO) {
-                                saveBotSessionBinding(appContext, bot.identityKey, it.sessionId, it.multiplexEnabled)
-                            }
-                            onOpenBot(it)
-                        }
-                        .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
-                }
+                resolveBotChat(appContext, settings, roster?.multiplexEnabled == true, bot, fresh, session)
+                    .onSuccess { onOpenBot(it) }
+                    .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (e: Exception) {
@@ -875,6 +891,10 @@ internal fun BotsScreen(
                     Text("Profili reali con configurazione, memoria, skill e credenziali separate. Le routine bot richiedono multiplexing attivo.", color = AppColors.Muted, fontSize = 13.sp)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Sidebar in modalita bot (come Hermes desktop).
+                    IconButton(onClick = onOpenSidebar) {
+                        Icon(Icons.Rounded.Menu, contentDescription = "Apri lista bot", tint = Color.White)
+                    }
                     // Schermo dentro la sezione (non piu tab sidebar).
                     IconButton(onClick = { showSectionScreen = true }) {
                         Icon(

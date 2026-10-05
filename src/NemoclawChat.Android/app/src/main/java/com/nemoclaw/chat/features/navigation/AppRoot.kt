@@ -230,6 +230,8 @@ import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
 import com.nemoclaw.chat.features.bots.BotsScreen
 import com.nemoclaw.chat.features.bots.BotChatContext
+import com.nemoclaw.chat.features.bots.HermesBotItem
+import com.nemoclaw.chat.features.bots.resolveBotChat
 import com.nemoclaw.chat.features.screen.ScreenScreen
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
@@ -360,6 +362,11 @@ internal fun ChatApp() {
         }
         return true
     }
+    // Sidebar-bot stile desktop: apre la chat persistente del bot.
+    // (Dichiarata dopo chatScope: lo usa per il resolve.)
+    // Lato bot attivo = sezione roster visibile o bot chat aperta: la
+    // sidebar mostra i bot (desktop), non tab/chat normali.
+    val botSideActive = botSectionVisible || pendingBot != null
     val incoming = IncomingIntentBus.request
     LaunchedEffect(incoming.version) {
         if (incoming.version == 0L) return@LaunchedEffect
@@ -434,6 +441,31 @@ internal fun ChatApp() {
         }
     }
     val chatScope = rememberCoroutineScope()
+    // Sidebar-bot stile desktop: apre la chat persistente del bot.
+    var sidebarBotOpening by remember { mutableStateOf(false) }
+    fun openSidebarBot(bot: HermesBotItem) {
+        if (sidebarBotOpening) return
+        if (!canOpenBot()) return
+        sidebarBotOpening = true
+        chatScope.launch {
+            try {
+                resolveBotChat(context.applicationContext, settings, false, bot)
+                    .onSuccess {
+                        chatState.resetForNewChat()
+                        pendingBot = it
+                        pendingConversationId = it.localConversationId
+                        pendingPrompt = ""
+                        botSectionVisible = false
+                        sidebarOpen = false
+                    }
+                    .onFailure {
+                        Toast.makeText(context, it.message ?: "Apertura Bot Chat fallita.", Toast.LENGTH_LONG).show()
+                    }
+            } finally {
+                sidebarBotOpening = false
+            }
+        }
+    }
     val baseDensity = LocalDensity.current
     val rawFontScale = settings.fontScale
     val safeFontScale = if (rawFontScale.isFinite()) {
@@ -479,6 +511,10 @@ internal fun ChatApp() {
                 selectedTab = selectedTab,
                 settings = settings,
                 onClose = { sidebarOpen = false },
+                botMode = selectedTab == Tab.Chat && botSideActive,
+                activeBotKey = pendingBot?.let { "${it.connectionId}::${it.profile}" },
+                onOpenBotItem = { openSidebarBot(it) },
+                onManageBots = { sidebarOpen = false; botSectionVisible = true },
                 onNewChat = {
                 chatState.resetForNewChat()
                 pendingBot = null
@@ -558,7 +594,8 @@ internal fun ChatApp() {
                         setSelectedTab(Tab.Chat)
                     },
                     onOpenScreen = { setSelectedTab(Tab.Screen) },
-                    onOpenCron = { setSelectedTab(Tab.Cron) }
+                    onOpenCron = { setSelectedTab(Tab.Cron) },
+                    onOpenSidebar = { sidebarOpen = true }
                 )
                 }
                 }

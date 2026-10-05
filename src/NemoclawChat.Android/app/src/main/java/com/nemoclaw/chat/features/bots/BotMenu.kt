@@ -108,7 +108,7 @@ internal fun loadBotSections(context: Context): BotSections {
         }
         val assign = mutableMapOf<String, String>()
         root.optJSONObject("assign")?.let { obj ->
-            obj.keys().forEach { key -> obj.optString(key)?.takeIf { it.isNotBlank() }?.let { assign[key] = it } }
+            obj.keys().forEach { key -> obj.optString(key).takeIf { it.isNotBlank() }?.let { assign[key] = it } }
         }
         BotSections(order.distinct(), assign)
     }.getOrDefault(BotSections())
