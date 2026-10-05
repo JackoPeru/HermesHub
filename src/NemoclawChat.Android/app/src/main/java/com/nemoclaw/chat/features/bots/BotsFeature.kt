@@ -621,6 +621,7 @@ internal fun BotsScreen(
     var displayNameInput by remember { mutableStateOf("") }
     var descriptionInput by remember { mutableStateOf("") }
     var soulInput by remember { mutableStateOf("") }
+    var editorError by remember { mutableStateOf("") }
     var deleteBot by remember { mutableStateOf<HermesBotItem?>(null) }
     var deleteConfirmation by remember { mutableStateOf("") }
     var removeConnection by remember { mutableStateOf<HermesBotConnection?>(null) }
@@ -820,6 +821,7 @@ internal fun BotsScreen(
         descriptionInput = bot?.description.orEmpty()
         soulInput = ""
         selectedConnectionId = bot?.connectionId ?: "primary"
+        editorError = ""
         showEditor = true
     }
 
@@ -1256,10 +1258,17 @@ internal fun BotsScreen(
             title = { Text(if (editing == null) "Nuovo bot Hermes" else "Modifica ${editing.displayName}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(profileInput, { profileInput = it }, label = { Text("Nome profilo") }, enabled = editing == null, singleLine = true)
-                    OutlinedTextField(displayNameInput, { displayNameInput = it }, label = { Text("Nome visualizzato") }, singleLine = true)
-                    OutlinedTextField(descriptionInput, { descriptionInput = it }, label = { Text("Descrizione") }, minLines = 2)
-                    OutlinedTextField(soulInput, { soulInput = it }, label = { Text("SOUL.md (opzionale)") }, minLines = 4)
+                    OutlinedTextField(profileInput, { profileInput = it; editorError = "" }, label = { Text("Nome profilo") }, enabled = editing == null, singleLine = true)
+                    OutlinedTextField(displayNameInput, { displayNameInput = it; editorError = "" }, label = { Text("Nome visualizzato") }, singleLine = true)
+                    OutlinedTextField(descriptionInput, { descriptionInput = it; editorError = "" }, label = { Text("Descrizione (${descriptionInput.length}/$MAX_BOT_DESCRIPTION)") }, minLines = 2)
+                    OutlinedTextField(soulInput, { soulInput = it; editorError = "" }, label = { Text("SOUL.md (opzionale, ${soulInput.length}/$MAX_BOT_SOUL)") }, minLines = 4)
+                    val editorValidation = validateBotEditor(profileInput, displayNameInput, descriptionInput, soulInput, editing == null)
+                    if (editorValidation != null) {
+                        Text(editorValidation, color = Color(0xFFFF7B8E), fontSize = 12.sp)
+                    }
+                    if (editorError.isNotBlank()) {
+                        Text(editorError, color = Color(0xFFFF7B8E), fontSize = 12.sp)
+                    }
                     Text("Auto-approvazione run di questo bot (solo client, mai deny automatico)", color = AppColors.Muted, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         for ((label, value) in listOf("Chiedi" to WorkLimits.AUTO_APPROVE_OFF, "Sessione" to WorkLimits.AUTO_APPROVE_SESSION, "Sempre" to WorkLimits.AUTO_APPROVE_ALWAYS)) {
@@ -1290,10 +1299,13 @@ internal fun BotsScreen(
                 }
             },
             confirmButton = {
+                // Stessa validazione del server: mai un 400 criptico.
+                val editorValidation = validateBotEditor(profileInput, displayNameInput, descriptionInput, soulInput, editing == null)
                 IconButton(
-                    enabled = profileInput.isNotBlank() && !mutating && selectedConnection?.enabled == true,
+                    enabled = profileInput.isNotBlank() && !mutating && selectedConnection?.enabled == true && editorValidation == null,
                     onClick = {
                         mutating = true
+                        editorError = ""
                         scope.launch {
                             val connection = if (editing == null) {
                                 selectedConnection ?: error("Connessione Hermes non disponibile.")
@@ -1310,7 +1322,10 @@ internal fun BotsScreen(
                                 status = if (editing == null) "Bot creato." else "Bot aggiornato."
                                 showEditor = false
                                 refreshNonce++
-                            }.onFailure { status = it.message ?: "Operazione bot fallita." }
+                            }.onFailure {
+                                editorError = it.message ?: "Operazione bot fallita."
+                                status = editorError
+                            }
                             mutating = false
                         }
                     }

@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.edit
 import com.nemoclaw.chat.AppColors
 import com.nemoclaw.chat.isBotConversationId
+import com.nemoclaw.chat.normalizeHermesProfileName
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -262,6 +263,33 @@ internal fun isLinkedArchiveId(context: Context, id: String?): Boolean {
 }
 
 // ------------------------------------------------------- pure helpers ---
+
+/** Limiti server (bot_profiles: MAX_DESCRIPTION/MAX_SOUL): validati in
+ *  editor per non prendere mai un 400 criptico. */
+internal const val MAX_BOT_DESCRIPTION = 2_000
+internal const val MAX_BOT_SOUL = 100_000
+
+/** Null = valido, altrimenti messaggio da mostrare. Puro e testabile. */
+internal fun validateBotEditor(
+    profile: String,
+    displayName: String,
+    description: String,
+    soul: String,
+    isCreate: Boolean
+): String? {
+    if (isCreate) {
+        if (profile.isBlank()) return "Nome profilo obbligatorio."
+        // Stessa regola del server (minuscole, numeri, _ -): l'app
+        // normalizza prima di inviare, qui si avvisa e basta.
+        runCatching { normalizeHermesProfileName(profile) }.getOrNull()
+            ?: return "Nome profilo non valido (minuscole, numeri, _ -)."
+    }
+    if (!isCreate && displayName.isBlank()) return "Nome visualizzato obbligatorio."
+    if (displayName.length > MAX_BOT_DESCRIPTION) return "Nome visualizzato troppo lungo (max $MAX_BOT_DESCRIPTION)."
+    if (description.length > MAX_BOT_DESCRIPTION) return "Descrizione troppo lunga (max $MAX_BOT_DESCRIPTION)."
+    if (soul.length > MAX_BOT_SOUL) return "SOUL troppo grande (max $MAX_BOT_SOUL)."
+    return null
+}
 
 /** Fissati prima (ordine server), poi gli altri. Puro: testabile. */
 internal fun sortBotsForRoster(items: List<HermesBotItem>, pins: Set<String>): List<HermesBotItem> {

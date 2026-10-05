@@ -69,4 +69,25 @@ class BotMenuHelpersTest {
         assertEquals("remote1", item.connectionId)
         assertEquals("Helper", item.displayName)
     }
+
+    @Test
+    fun editorValidationMirrorsServerLimits() {
+        assertNull(validateBotEditor("helper", "Helper", "desc", "", true))
+        assertEquals("Nome profilo obbligatorio.", validateBotEditor("", "H", "", "", true))
+        assertEquals(
+            "Nome profilo non valido (minuscole, numeri, _ -).",
+            validateBotEditor("Helper Bot!", "H", "", "", true)
+        )
+        assertEquals(
+            "Descrizione troppo lunga (max 2000).",
+            validateBotEditor("helper", "H", "x".repeat(2001), "", true)
+        )
+        assertEquals(
+            "SOUL troppo grande (max 100000).",
+            validateBotEditor("helper", "H", "", "x".repeat(100001), true)
+        )
+        assertEquals("Nome visualizzato obbligatorio.", validateBotEditor("helper", "", "", "", false))
+        // Update senza soul: ok (non sovrascrive).
+        assertNull(validateBotEditor("helper", "Helper", "desc", "", false))
+    }
 }
