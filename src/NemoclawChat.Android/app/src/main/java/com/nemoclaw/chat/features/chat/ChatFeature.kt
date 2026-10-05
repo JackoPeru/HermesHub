@@ -325,6 +325,18 @@ internal fun ChatScreen(
     val botAllowCompatAuth = !remoteBot
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     var quickPrompt by remember { mutableStateOf<String?>(null) }
+
+    // Svuota la coda prompt quando libero: il prossimo parte da solo via
+    // quickPrompt (stesso percorso del tasto invio, niente duplicazioni).
+    fun drainQueuedPrompt() {
+        val cid = state.activeConversationId ?: return
+        if (state.sending || state.activeStreamJob != null) return
+        if (state.draft.isNotBlank()) return
+        val next = nextQueuedFor(state.queuedPrompts.toList(), cid) ?: return
+        state.queuedPrompts.remove(next)
+        state.pendingAttachments.addAll(next.attachments.filter { it !in state.pendingAttachments })
+        quickPrompt = next.text
+    }
     // Cronologia caricata da disco per cid: il reattach DONE aggiunge il
     // risultato solo qui dentro, mai su lista vuota/stale (evita duplicati
     // che poi crescono a ogni riapertura).
@@ -357,6 +369,8 @@ internal fun ChatScreen(
                 }
                 state.messages.addAll(loadedMessages)
                 historyLoadedCid = saved.id
+                // Rientro con coda pendente: se libero, il prossimo parte da solo.
+                drainQueuedPrompt()
             }
         }
 
@@ -907,6 +921,15 @@ internal fun ChatScreen(
                 else -> FALLBACK_REASONING_EFFORTS
             }
         }
+        val queuedHere = state.queuedPrompts.count { it.conversationId == state.activeConversationId }
+        if (queuedHere > 0) {
+            Text(
+                "$queuedHere prompt in coda: partiranno da soli a fine turno.",
+                color = AppColors.Muted,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+        }
         Composer(
             value = state.draft,
             attachments = state.pendingAttachments,
@@ -944,6 +967,35 @@ internal fun ChatScreen(
                             isAction = true
                         )
                     )
+                    return@Composer
+                }
+                val sendCid = state.activeConversationId
+                val sendBusy = state.sending || state.activeStreamJob != null
+                if ((text.isNotEmpty() || state.pendingAttachments.isNotEmpty()) && sendBusy && sendCid != null) {
+                    // Turno in corso: accoda invece di cancellarlo. Parte da solo alla fine.
+                    if (!canEnqueuePrompt(state.queuedPrompts.toList(), sendCid)) {
+                        state.messages.add(
+                            ChatMessage(
+                                "Hermes Hub",
+                                "Coda piena (5 prompt): aspetta la fine del turno.",
+                                fromUser = false,
+                                isAction = true
+                            )
+                        )
+                    } else {
+                        state.queuedPrompts.add(QueuedPrompt(sendCid, text, state.pendingAttachments.toList()))
+                        state.draft = ""
+                        state.pendingAttachments.clear()
+                        val n = state.queuedPrompts.count { it.conversationId == sendCid }
+                        state.messages.add(
+                            ChatMessage(
+                                "Hermes Hub",
+                                "Accodato ($n in coda): parte da solo a fine turno.",
+                                fromUser = false,
+                                isAction = true
+                            )
+                        )
+                    }
                     return@Composer
                 }
                 if ((text.isNotEmpty() || state.pendingAttachments.isNotEmpty()) && !state.sending && state.activeStreamJob == null) {
@@ -1421,6 +1473,8 @@ internal fun ChatScreen(
                                     }
                                 }
                             }
+                            // Turno finito senza stop: eventuale coda parte da sola.
+                            if (!interrupted) drainQueuedPrompt()
                         }
                     }
                     state.activeStreams[streamCid] = (state.activeStreams[streamCid] ?: ActiveStreamState(StreamingState(), null)).copy(job = job)
@@ -1433,6 +1487,8 @@ internal fun ChatScreen(
                 val cid = state.activeConversationId
                 state.activeStreams[cid]?.job?.cancel()
                 state.activeStreamJob?.cancel()
+                // Stop cancella anche la coda prompt (niente partenze a sorpresa).
+                state.queuedPrompts.removeAll { it.conversationId == cid }
                 // Aggiornamento UI immediato + vero POST /v1/runs/{id}/stop (non solo cancel locale).
                 state.streamingState = state.streamingState?.copy(
                     status = "Interruzione richiesta. Chiudo stream Hermes...",

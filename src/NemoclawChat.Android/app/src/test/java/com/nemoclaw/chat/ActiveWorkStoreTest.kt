@@ -202,8 +202,7 @@ class ActiveWorkStoreTest {
     }
 
     @Test
-    fun userLocalImagesSkipInfoCard() {
-        val localImage = VisualBlock(
+    fun userLocalImagesSkipInfoCard() {        val localImage = VisualBlock(
             id = "local-media-0",
             type = "media_file",
             title = "Screenshot_2026.jpg",
@@ -221,5 +220,26 @@ class ActiveWorkStoreTest {
         assertFalse(isUserLocalImage(localImage.copy(mediaKind = "document", mimeType = "application/pdf")))
         // Blocco non media: mai.
         assertFalse(isUserLocalImage(VisualBlock(id = "t", type = "markdown", text = "ciao", localDataUrl = "/x.jpg")))
+    }
+
+    @Test
+    fun queuedPromptsAreFifoPerConversation() {
+        val queue = listOf(
+            QueuedPrompt("a", "primo"),
+            QueuedPrompt("b", "altro"),
+            QueuedPrompt("a", "secondo")
+        )
+        assertEquals("primo", nextQueuedFor(queue, "a")?.text)
+        assertEquals("altro", nextQueuedFor(queue, "b")?.text)
+        assertNull(nextQueuedFor(queue, "c"))
+        assertNull(nextQueuedFor(emptyList(), "a"))
+    }
+
+    @Test
+    fun queuedPromptsCapAtFivePerChat() {
+        val full = (1..MAX_QUEUED_PROMPTS_PER_CHAT).map { QueuedPrompt("a", "p$it") }
+        assertFalse(canEnqueuePrompt(full, "a"))
+        assertTrue(canEnqueuePrompt(full.dropLast(1), "a"))
+        assertTrue(canEnqueuePrompt(full, "b"))
     }
 }

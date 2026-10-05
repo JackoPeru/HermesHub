@@ -67,9 +67,28 @@ internal data class BackgroundWorkUi(
     val approvalPending: Boolean = false
 )
 
+/** Prompt accodato mentre un turno e attivo: parte da solo alla fine. */
+internal data class QueuedPrompt(
+    val conversationId: String,
+    val text: String,
+    val attachments: List<ChatInputAttachment> = emptyList(),
+    val atMs: Long = System.currentTimeMillis()
+)
+
+internal const val MAX_QUEUED_PROMPTS_PER_CHAT = 5
+
+/** Prossimo prompt in coda per cid (FIFO), o null. Puro/testabile. */
+internal fun nextQueuedFor(queue: List<QueuedPrompt>, cid: String): QueuedPrompt? =
+    queue.firstOrNull { it.conversationId == cid }
+
+/** C'e posto in coda per cid? */
+internal fun canEnqueuePrompt(queue: List<QueuedPrompt>, cid: String): Boolean =
+    queue.count { it.conversationId == cid } < MAX_QUEUED_PROMPTS_PER_CHAT
+
 internal class ChatStateHolder {
     val messages: SnapshotStateList<ChatMessage> = mutableStateListOf()
     val pendingAttachments: SnapshotStateList<ChatInputAttachment> = mutableStateListOf()
+    val queuedPrompts: SnapshotStateList<QueuedPrompt> = mutableStateListOf()
     var draft: String by mutableStateOf("")
     var mode: String by mutableStateOf("Chat")
     var activeConversationId: String? by mutableStateOf(null)
