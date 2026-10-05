@@ -578,6 +578,77 @@ internal fun ChatScreen(
         }
         available
     }
+    // Live esterno del bot: lavora altrove (desktop) ma la chat e condivisa.
+    // Poll leggero della coda transcript: righe nuove o fresche = in esecuzione.
+    // Solo bot chat, mai durante un turno locale (quello ha gia il suo stato).
+    // Finestra freschezza 240s: i tool lunghi non producono righe per minuti;
+    // meglio un banner che resta che un flicker che fa reinviare duplicati.
+    var botLive by remember(botProfile, botSessionId) { mutableStateOf<BotLiveActivity?>(null) }
+    PollWhileStarted(botProfile, botSessionId, botMultiplexEnabled, botEndpoint, baseIntervalMs = 5_000L) {
+        val profile = botProfile
+        val session = botSessionId
+        if (profile.isNullOrBlank() || session.isNullOrBlank() || !gatewayAvailable) {
+            botLive = null
+            return@PollWhileStarted true
+        }
+        val cidBefore = state.activeConversationId
+        val tail = withContext(Dispatchers.IO) {
+            runCatching {
+                val client = HermesSessionClient(botSettings, botApiKey, profile, botMultiplexEnabled, null)
+                val (code, rows) = client.messages(id = session, limit = 5, order = "latest", includeCompacted = false)
+                if (code !in 200..299) null else rows
+            }.getOrNull()
+        }
+        if (tail == null) return@PollWhileStarted false
+        val maxId = tail.mapNotNull { (it.raw?.optInt("id") ?: 0).takeIf { id -> id > 0 } }.maxOrNull() ?: 0
+        if (state.sending) {
+            // Solo baseline: i turni locali non devono mai sembrare nuovi dopo.
+            botLive = BotLiveActivity(running = false, status = "", maxRowId = maxId)
+            return@PollWhileStarted true
+        }
+        val prev = botLive
+        fun latestTsMs(rows: List<HermesSessionMessage>): Long {
+            return rows.mapNotNull { (it.raw?.optDouble("timestamp") ?: 0.0).takeIf { ts -> ts > 0 } }
+                .maxOrNull()?.times(1000)?.toLong() ?: 0
+        }
+        if (prev == null) {
+            // Prima lettura: baseline, mai append (la storia completa e gia
+            // a video dal load). Running solo se coda fresca.
+            val freshTs = latestTsMs(tail)
+            val fresh = freshTs > 0 && System.currentTimeMillis() - freshTs < 240_000
+            val newest = tail.maxByOrNull { it.raw?.optDouble("timestamp") ?: 0.0 }
+            botLive = BotLiveActivity(
+                running = fresh && newest != null,
+                status = if (fresh && newest != null) botLiveStatusFor(newest) else "",
+                maxRowId = maxId
+            )
+            return@PollWhileStarted true
+        }
+        val newRows = tail.filter { (it.raw?.optInt("id") ?: 0) > prev.maxRowId }
+        val freshTs = latestTsMs(tail)
+        val fresh = freshTs > 0 && System.currentTimeMillis() - freshTs < 240_000
+        if (!fresh && newRows.isEmpty()) {
+            botLive = BotLiveActivity(running = false, status = "", maxRowId = maxId)
+            return@PollWhileStarted true
+        }
+        if (newRows.isNotEmpty()) {
+            // Solo se siamo ancora sulla stessa chat (navigazione nel mentre)
+            // e senza turno locale: le righe sono latest-first, il fold vuole
+            // cronologico.
+            if (cidBefore != null && state.activeConversationId == cidBefore && !state.sending) {
+                state.messages.addAll(foldTranscriptToChat(newRows.asReversed()))
+            }
+        }
+        // Tail latest-first: la piu nuova e la prima, non l'ultima.
+        val newest = newRows.firstOrNull()
+            ?: tail.maxByOrNull { it.raw?.optDouble("timestamp") ?: 0.0 }
+        botLive = BotLiveActivity(
+            running = true,
+            status = newest?.let { botLiveStatusFor(it) } ?: "Sta lavorando…",
+            maxRowId = maxId
+        )
+        true
+    }
     // Capabilities + model catalog in background (fonte capability-driven, mai version check).
     LaunchedEffect(botSettings.gatewayUrl, botApiKey) {
         if (botSettings.gatewayUrl.isBlank()) return@LaunchedEffect
@@ -1141,6 +1212,11 @@ internal fun ChatScreen(
             )
         }
         val busyChoice = pendingBusySend
+        // Live esterno bot: quadratino stop acceso + banner shimmer in fondo.
+        val botLiveNow = botLive
+        if (botLiveNow?.running == true && !state.sending) {
+            BotLiveBanner(botLiveNow.status)
+        }
         if (showSendChoiceDialog && busyChoice != null) {
             AlertDialog(
                 onDismissRequest = { showSendChoiceDialog = false; pendingBusySend = null },
@@ -1731,6 +1807,14 @@ internal fun ChatScreen(
                 }
             },
             onStop = {
+                // Solo live esterno, nessuno stream locale e nessun run
+                // posseduto: niente interrupt server possibile (il turno
+                // vive sul desktop), solo avviso onesto. Il quadrato resta
+                // perche segnala che il bot sta lavorando.
+                if (!state.sending) {
+                    Toast.makeText(context, "Turno avviato dal desktop: stop solo dal desktop.", Toast.LENGTH_SHORT).show()
+                    return@Composer
+                }
                 val activeRunId = state.streamingState?.activeRunId
                 // Stop VERO: cancella il collector locale (prima non lo faceva:
                 // la generazione continuava e il composer restava bloccato).
@@ -1785,7 +1869,7 @@ internal fun ChatScreen(
                 }
                 state.activeStreamJob?.cancel()
             },
-            isBusy = state.sending && state.streamingState?.status?.contains("Interruzione") != true,
+            isBusy = (state.sending || botLive?.running == true) && state.streamingState?.status?.contains("Interruzione") != true,
             isRecordingVoiceNote = state.isRecordingVoiceNote,
             onToggleVoiceNote = {
                 if (!state.isRecordingVoiceNote) {
@@ -1912,6 +1996,18 @@ internal fun executeSlashCommand(
     }
 }
 
+
+@Composable
+internal fun BotLiveBanner(statusText: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(modifier = Modifier.size(8.dp).background(AppColors.Accent, CircleShape))
+        ShimmerText(if (statusText.isBlank()) "Sta lavorando…" else statusText, enabled = true)
+    }
+}
 
 @Composable
 internal fun BotEmptyState(displayName: String?, opening: Boolean, unreachable: Boolean = false) {

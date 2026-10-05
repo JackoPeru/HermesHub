@@ -410,6 +410,17 @@ internal fun isBotConversationId(id: String?): Boolean {
 }
 
 /**
+ * Live esterno di una bot chat (il bot lavora altrove, es. desktop):
+ * running accende stop-button e banner shimmer; maxRowId e la baseline
+ * per appendere solo le righe nuove senza duplicati.
+ */
+internal data class BotLiveActivity(
+    val running: Boolean,
+    val status: String = "",
+    val maxRowId: Int = 0
+)
+
+/**
  * Unione anti-perdita per chat condivise (telefono+desktop sullo stesso id
  * Hub, merge LWW a entita intera): i messaggi remoti arrivati mentre il
  * turno era in corso non vengono sovrascritti. Ordine: remoto esistente,

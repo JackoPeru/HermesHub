@@ -114,8 +114,7 @@ class CanonicalBotChatTest {
     }
 
     @Test
-    fun transcriptSkipsNoise() {
-        val rows = listOf(
+    fun transcriptSkipsNoise() {        val rows = listOf(
             rowMsg("system", "x"),
             rowMsg("assistant", "   "),
             rowMsg("unknown", ""),
@@ -123,5 +122,21 @@ class CanonicalBotChatTest {
             rowMsg("user", "")
         )
         assertTrue(foldTranscriptToChat(rows).isEmpty())
+    }
+
+    @Test
+    fun botLiveStatusLabels() {
+        val toolRow = JSONObject().put("name", "exec")
+        assertEquals(
+            "Sta usando exec…",
+            botLiveStatusFor(rowMsg("assistant", "", mapOf("tool_calls" to org.json.JSONArray().put(toolRow))))
+        )
+        assertEquals(
+            "Sta ragionando…",
+            botLiveStatusFor(rowMsg("assistant", "", mapOf("reasoning_content" to "penso")))
+        )
+        assertEquals("Sta scrivendo…", botLiveStatusFor(rowMsg("assistant", "ciao")))
+        assertEquals("Nuovo messaggio…", botLiveStatusFor(rowMsg("user", "ciao")))
+        assertEquals("Sta lavorando…", botLiveStatusFor(rowMsg("system", "x")))
     }
 }

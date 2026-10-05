@@ -151,6 +151,30 @@ internal fun HermesSessionMessage.toBotChatMessage(): ChatMessage? =
     foldTranscriptToChat(listOf(this)).firstOrNull()
 
 /**
+ * Stato live di una riga transcript per il banner "sta lavorando":
+ * solo etichette brevi, mai contenuto (niente muri di testo). Puro.
+ */
+internal fun botLiveStatusFor(row: HermesSessionMessage): String {
+    val toolName = row.raw?.optString("tool_name").orEmpty().ifBlank {
+        row.raw?.optJSONArray("tool_calls")?.optJSONObject(0)?.optString("name").orEmpty().ifBlank {
+            row.raw?.optJSONArray("tool_calls")?.optJSONObject(0)?.optJSONObject("function")?.optString("name").orEmpty()
+        }
+    }
+    return when (row.role.lowercase()) {
+        "tool" -> if (toolName.isNotBlank()) "Sta usando $toolName…" else "Sta usando uno strumento…"
+        "assistant" -> {
+            val reasoning = row.raw?.optString("reasoning_content").orEmpty()
+                .ifBlank { row.raw?.optString("reasoning").orEmpty() }
+            if (toolName.isNotBlank()) "Sta usando $toolName…"
+            else if (reasoning.isNotBlank()) "Sta ragionando…"
+            else "Sta scrivendo…"
+        }
+        "user", "tu" -> "Nuovo messaggio…"
+        else -> "Sta lavorando…"
+    }
+}
+
+/**
  * Transcript canonico di una sessione bot (cronologia autorevole condivisa
  * col desktop). latest-first dal server, reso cronologico (ordina per
  * timestamp quando presenti, altrimenti ordine API). Null in caso di
