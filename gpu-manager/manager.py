@@ -555,6 +555,36 @@ def _proc_cmd(pid: int) -> str:
         return ""
 
 
+# Units whose CUDA processes are service-owned backends: NEVER strays, even
+# if their cmdline matches a runtime pattern. Checked via cgroup, so it also
+# covers forked workers (ExLlamaV3 tensor-parallel ranks) and --user units.
+_MANAGED_CUDA_UNITS = (
+    "hermes-tabby.service",
+    "hermes-comfyui.service",
+    "hermes-comfyui-direct.service",
+    "hermes-kokoro-tts.service",
+    "uninote-stt.service",
+    "hermes-laya.service",
+    "hermes-hub.service",
+)
+
+
+def _cgroup_service_owned(cgroup: str) -> bool:
+    """Pure matcher (unit-testable): True if the cgroup belongs to a managed unit."""
+    low = cgroup.lower()
+    if not low:
+        return False
+    return any(unit in low for unit in _MANAGED_CUDA_UNITS)
+
+
+def _pid_service_owned(pid: int) -> bool:
+    try:
+        cgroup = Path(f"/proc/{pid}/cgroup").read_text(errors="replace")[:500]
+    except Exception:  # noqa: BLE001 - racy /proc, treat as unknown
+        return False
+    return _cgroup_service_owned(cgroup)
+
+
 # --------------------------------------------------------------- backends ---
 
 def llm_base() -> str:
@@ -643,8 +673,19 @@ async def vram_free(threshold_mb: float) -> bool:
 
 
 async def cleanup_stray_cuda() -> int:
-    """Kill leftover CUDA processes from our runtimes only. Never touch others."""
+    """Kill leftover CUDA processes from our runtimes only. Never touch others.
+
+    Ownership guard (2026-10-05 incident): a previous version killed ANY
+    process whose cmdline matched exllamav3/comfy, INCLUDING the live
+    tabby backend mid-generation. During 100K+ token prefills the engine
+    is busy for minutes, llm_loaded() goes False, and the watchdog fired
+    restore -> kill -9 live tabby -> restart -> re-prefill from zero ->
+    watchdog again: zero forward progress forever. Service-owned PIDs
+    (unit cgroup, covers forked TP workers and --user units) are NEVER
+    strays; only truly orphaned runtime processes are killed.
+    """
     killed = 0
+    skipped_owned = 0
     for proc in await asyncio.to_thread(gpu_compute_procs):
         cmd = _proc_cmd(proc["pid"])
         low = cmd.lower()
@@ -653,10 +694,15 @@ async def cleanup_stray_cuda() -> int:
         if "comfy" in low or "exllamav3" in low or "tabbyapi" in low or "llama-mainline" in low:
             if "gpu-manager" in low:
                 continue
+            if _pid_service_owned(proc["pid"]):
+                skipped_owned += 1
+                continue
             code, _ = await _run_async(["sudo", "-n", "kill", "-9", str(proc["pid"])], timeout=15)
             if code == 0:
                 killed += 1
                 log.warning("killed stray CUDA pid=%d cmd=%s", proc["pid"], cmd[:120])
+    if skipped_owned:
+        log.info("stray cleanup skipped %d service-owned CUDA procs", skipped_owned)
     return killed
 
 
@@ -1392,15 +1438,55 @@ async def drive_auto_once() -> None:
 
 
 async def llm_watchdog() -> None:
-    """Throttled health check while the LLM should stay resident."""
+    """Throttled health check while the LLM should stay resident.
+
+    Restore gate (2026-10-05 incident): a 100K+ token prefill blocks the
+    engine for minutes, so /v1/models times out and llm_loaded() goes False
+    on a HEALTHY backend. Restoring on the first failure killed the live
+    tabby mid-generation in a loop. Now: skip while transitional, skip while
+    tabby is actually generating, and require 4 consecutive failures
+    (2 min, longer than any legit restart) before restoring.
+    """
     now = time.monotonic()
     if now - float(_state.get("llm_watch_ts") or 0.0) >= 30:
         _state["llm_watch_ts"] = now
+        if _state.get("current_state") in _WATCHDOG_TRANSITIONAL:
+            _state["llm_notloaded_fails"] = 0
+            return
         if not await llm_loaded():
+            fails = int(_state.get("llm_notloaded_fails") or 0) + 1
+            _state["llm_notloaded_fails"] = fails
+            if await _tabby_recent_progress():
+                log.info("watchdog: backend check failed but tabby is generating (fail %d); skipping restore", fails)
+                return
+            if fails < _WATCHDOG_RESTORE_FAILS:
+                log.warning("watchdog: backend check failed %d/%d, waiting before restore", fails, _WATCHDOG_RESTORE_FAILS)
+                return
+            _state["llm_notloaded_fails"] = 0
             log.warning("watchdog: LLM_READY but backend not loaded; restoring")
             await restore_llm_with_retries("watchdog")
         else:
+            _state["llm_notloaded_fails"] = 0
             await ensure_voice_up()
+
+
+_WATCHDOG_RESTORE_FAILS = 4
+_WATCHDOG_TRANSITIONAL = ("LLM_UNLOADING", "LLM_LOADING", "GPU_FREE", "MEDIA_STARTING", "MEDIA_STOPPING")
+
+
+async def _tabby_recent_progress(seconds: int = 180) -> bool:
+    """True if tabby logged generation progress recently (busy-healthy).
+
+    Cheap journalctl grep; needs journal read rights, else False (fail-closed
+    toward the old restore behavior, still gated by consecutive failures).
+    """
+    since = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(time.time() - seconds))
+    code, out = await _run_async(
+        ["journalctl", "-u", "hermes-tabby.service", "--since", since,
+         "--no-pager", "-g", "tokens generated"],
+        timeout=20,
+    )
+    return code == 0 and bool(out.strip())
 
 
 async def _drive() -> None:
