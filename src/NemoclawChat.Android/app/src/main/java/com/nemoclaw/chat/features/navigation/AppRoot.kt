@@ -231,7 +231,9 @@ import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
 import com.nemoclaw.chat.features.bots.BotsScreen
 import com.nemoclaw.chat.features.bots.BotChatContext
 import com.nemoclaw.chat.features.bots.HermesBotItem
+import com.nemoclaw.chat.features.bots.loadLastBot
 import com.nemoclaw.chat.features.bots.resolveBotChat
+import com.nemoclaw.chat.features.bots.saveLastBot
 import com.nemoclaw.chat.features.screen.ScreenScreen
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
@@ -350,9 +352,6 @@ internal fun ChatApp() {
         }
         botSectionVisible = false
     }
-    val selectBotSegment: () -> Unit = {
-        if (!botSectionVisible) botSectionVisible = true
-    }
     // Apertura bot: mai sopra un turno attivo (reset ammazzerebbe stream,
     // binding e coda senza pulizia). L'utente interrompe o aspetta.
     fun canOpenBot(): Boolean {
@@ -455,6 +454,7 @@ internal fun ChatApp() {
                         pendingBot = it
                         pendingConversationId = it.localConversationId
                         pendingPrompt = ""
+                        saveLastBot(context.applicationContext, it.connectionId, it.profile, it.displayName)
                         botSectionVisible = false
                         sidebarOpen = false
                     }
@@ -463,6 +463,47 @@ internal fun ChatApp() {
                     }
             } finally {
                 sidebarBotOpening = false
+            }
+        }
+    }
+    // Riapre l'ultimo bot usato (main page della sezione): riusa il binding
+    // di sessione, una sola POST se manca. Ritorna false se nessun ultimo
+    // bot (chiamante: mostra il roster).
+    fun openLastBot(): Boolean {
+        val ref = loadLastBot(context.applicationContext) ?: return false
+        if (sidebarBotOpening) {
+            Toast.makeText(context, "Apertura gia in corso.", Toast.LENGTH_SHORT).show()
+            return true
+        }
+        sidebarBotOpening = true
+        chatScope.launch {
+            try {
+                resolveBotChat(context.applicationContext, settings, false, ref.toItem())
+                    .onSuccess {
+                        chatState.resetForNewChat()
+                        pendingBot = it
+                        pendingConversationId = it.localConversationId
+                        pendingPrompt = ""
+                        botSectionVisible = false
+                    }
+                    .onFailure {
+                        botSectionVisible = true
+                        Toast.makeText(context, it.message ?: "Bot non piu disponibile, apro il roster.", Toast.LENGTH_LONG).show()
+                    }
+            } finally {
+                sidebarBotOpening = false
+            }
+        }
+        return true
+    }
+    val selectBotSegment: () -> Unit = {
+        // Main page della sezione = chat dell'ultimo bot usato (non roster).
+        // Da bot chat aperta: vai al roster tenendo il contesto.
+        if (!botSectionVisible) {
+            if (pendingBot != null) {
+                botSectionVisible = true
+            } else if (!openLastBot()) {
+                botSectionVisible = true
             }
         }
     }
@@ -591,6 +632,7 @@ internal fun ChatApp() {
                         pendingBot = bot
                         pendingConversationId = bot.localConversationId
                         pendingPrompt = ""
+                        saveLastBot(context.applicationContext, bot.connectionId, bot.profile, bot.displayName)
                         setSelectedTab(Tab.Chat)
                     },
                     onOpenScreen = { setSelectedTab(Tab.Screen) },

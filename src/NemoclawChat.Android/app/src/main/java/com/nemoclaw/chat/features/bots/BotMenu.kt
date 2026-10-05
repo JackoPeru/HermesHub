@@ -181,8 +181,7 @@ internal fun saveBotSessionBinding(
     prefs.edit { putString("sessions_json", all.toString()) }
 }
 
-/** Rimuove ogni traccia locale di un bot eliminato (niente orfani). */
-internal fun removeBotDisplayPrefs(context: Context, identityKey: String) {
+/** Rimuove ogni traccia locale di un bot eliminato (niente orfani). */internal fun removeBotDisplayPrefs(context: Context, identityKey: String) {
     setBotPinned(context, identityKey, false)
     setBotHiddenLocal(context, identityKey, false)
     setBotAutoScreen(context, identityKey, false)
@@ -217,6 +216,66 @@ internal fun pruneBotDisplayPrefs(context: Context, validKeys: Set<String>): Bot
     stale.forEach(all::remove)
     prefs.edit { putString("sessions_json", all.toString()) }
     return pruned
+}
+
+// -------------------------------------------------------- ultimo bot ---
+
+/**
+ * Ultimo bot usato: la "pagina principale" della sezione Bot e la sua
+ * chat persistente, non il roster. Solo riferimento leggero (connessione,
+ * profilo, nome): la chat si riapre riusando il binding di sessione,
+ * con una sola POST se il binding manca.
+ */
+internal data class SavedBotRef(
+    val connectionId: String,
+    val profile: String,
+    val displayName: String
+) {
+    fun toItem(): HermesBotItem {
+        val key = "$connectionId::$profile"
+        return HermesBotItem(
+            profile = profile,
+            displayName = displayName.ifBlank { profile },
+            description = "",
+            hidden = false,
+            chatId = null,
+            isDefault = false,
+            connectionId = connectionId,
+            connectionLabel = connectionId,
+            identityKey = key,
+            handle = displayName.ifBlank { profile }
+        )
+    }
+}
+
+internal fun saveLastBot(context: Context, connectionId: String, profile: String, displayName: String) {
+    if (profile.isBlank()) return
+    val root = JSONObject()
+    root.put("conn", connectionId.ifBlank { "primary" })
+    root.put("profile", profile)
+    root.put("name", displayName)
+    botDisplayPrefs(context).edit { putString("last_bot_json", root.toString()) }
+}
+
+internal fun loadLastBot(context: Context): SavedBotRef? {
+    val raw = botDisplayPrefs(context).getString("last_bot_json", null) ?: return null
+    return runCatching {
+        val root = JSONObject(raw)
+        val profile = root.optString("profile").trim()
+        if (profile.isEmpty()) return null
+        SavedBotRef(
+            connectionId = root.optString("conn", "primary").ifBlank { "primary" },
+            profile = profile,
+            displayName = root.optString("name")
+        )
+    }.getOrNull()
+}
+
+internal fun clearLastBotIf(context: Context, identityKey: String) {
+    val ref = loadLastBot(context) ?: return
+    if ("${ref.connectionId}::${ref.profile}" == identityKey) {
+        botDisplayPrefs(context).edit { remove("last_bot_json") }
+    }
 }
 
 // ------------------------------------------------------- pure helpers ---

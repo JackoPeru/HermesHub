@@ -1261,6 +1261,7 @@ internal fun BotsScreen(
                                     deleteBot = null
                                     // Pulisci pin/hide/sezioni/sessioni locali del bot.
                                     withContext(Dispatchers.IO) { removeBotDisplayPrefs(appContext, bot.identityKey) }
+                                    clearLastBotIf(appContext, bot.identityKey)
                                     reloadBotDisplayPrefs()
                                     refreshNonce++
                                 }

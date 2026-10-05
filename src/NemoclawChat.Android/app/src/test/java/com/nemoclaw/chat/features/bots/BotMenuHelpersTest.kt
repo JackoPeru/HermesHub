@@ -60,4 +60,13 @@ class BotMenuHelpersTest {
         assertEquals("", sanitizeSectionName("   "))
         assertEquals(40, sanitizeSectionName("x".repeat(100)).length)
     }
+
+    @Test
+    fun savedBotRefRebuildsOpenableItem() {
+        val item = SavedBotRef("remote1", "helper", "Helper").toItem()
+        assertEquals("remote1::helper", item.identityKey)
+        assertEquals("helper", item.profile)
+        assertEquals("remote1", item.connectionId)
+        assertEquals("Helper", item.displayName)
+    }
 }
