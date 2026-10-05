@@ -448,6 +448,9 @@ internal fun ChatApp() {
         sidebarBotOpening = true
         chatScope.launch {
             try {
+                // Storia condivisa col desktop: tira il pull prima di aprire
+                // (best-effort; il poll 120s copre il resto).
+                runCatching { ConversationArchiveAutoSync.pullFromHub(context.applicationContext) }
                 resolveBotChat(context.applicationContext, settings, false, bot)
                     .onSuccess {
                         chatState.resetForNewChat()
@@ -478,6 +481,7 @@ internal fun ChatApp() {
         sidebarBotOpening = true
         chatScope.launch {
             try {
+                runCatching { ConversationArchiveAutoSync.pullFromHub(context.applicationContext) }
                 resolveBotChat(context.applicationContext, settings, false, ref.toItem())
                     .onSuccess {
                         chatState.resetForNewChat()
@@ -667,6 +671,7 @@ internal fun ChatApp() {
                 onOpenSidebar = { sidebarOpen = true },
                 onSwitchTab = { tab -> setSelectedTab(tab) },
                 chatBotActive = pendingBot != null,
+                chatBotOpening = sidebarBotOpening,
                 onSelectChat = selectChatSegment,
                 onSelectBot = selectBotSegment,
                 onOpenBotSection = selectBotSegment

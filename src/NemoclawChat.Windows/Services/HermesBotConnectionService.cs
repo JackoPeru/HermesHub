@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -121,7 +122,9 @@ public static class HermesBotConnectionService
         var chat = connection.IsPrimary
             ? await GatewayService.OpenBotChatAsync(effective, bot, cancellationToken)
             : await GatewayService.OpenBotChatOnConnectionAsync(effective, token, bot, cancellationToken);
-        var localId = $"bot-{Sanitize(bot.ConnectionId)}-{Sanitize(bot.Profile)}-{Sanitize(chat.SessionId)}";
+        // Id stabile CONDIVISO con Android (stesso schema): la storia del bot
+        // si accumula sotto lo stesso id Hub su tutti i dispositivi.
+        var localId = StableBotConversationId(bot.ConnectionId, bot.ChatId, bot.Profile);
         return new HermesBotChatContext(chat, connection, localId);
     }
 
@@ -452,5 +455,35 @@ public static class HermesBotConnectionService
     {
         var normalized = Regex.Replace(value ?? string.Empty, "[^A-Za-z0-9_-]+", "-").Trim('-');
         return string.IsNullOrWhiteSpace(normalized) ? "bot" : normalized;
+    }
+
+    /// <summary>
+    /// Id conversazione CONDIVISO per bot (stesso schema dell'app Android
+    /// stableBotConversationId): una sola chat persistente per bot su Hub,
+    /// telefono e desktop (merge hub per id, vince updatedAt piu recente;
+    /// uso sequenziale, non concorrente). Preferisce il chat_id canonico
+    /// del server, fallback connessione+profilo. Solo [a-z0-9_-] minuscoli.
+    /// </summary>
+    public static string StableBotConversationId(string connectionId, string? chatId, string profile)
+    {
+        var conn = StableSegment(connectionId, 48, "primary");
+        var chat = StableSegment(chatId ?? string.Empty, 64, string.Empty);
+        if (!string.IsNullOrEmpty(chat))
+        {
+            return $"botchat-{conn}-{chat}";
+        }
+        return $"bot-{conn}-{StableSegment(profile, 64, "bot")}";
+    }
+
+    private static string StableSegment(string value, int maxLength, string fallback)
+    {
+        var kept = new string((value ?? string.Empty).ToLowerInvariant()
+            .Where(c => (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_')
+            .ToArray());
+        if (kept.Length > maxLength)
+        {
+            kept = kept.Substring(0, maxLength);
+        }
+        return kept.Length == 0 ? fallback : kept;
     }
 }

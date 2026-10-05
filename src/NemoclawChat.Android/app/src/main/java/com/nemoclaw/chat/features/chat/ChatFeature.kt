@@ -307,6 +307,9 @@ internal fun ChatScreen(
     onSwitchTab: (Tab) -> Unit = {},
     // Selettore [Chat | Bot] in alto alla chat (stato issato in AppRoot).
     chatBotActive: Boolean = false,
+    // True mentre la sezione sta aprendo la chat del bot (niente home
+    // generica nel mentre: si mostra l'attesa bot).
+    chatBotOpening: Boolean = false,
     onSelectChat: () -> Unit = {},
     onSelectBot: () -> Unit = {},
     onOpenBotSection: () -> Unit = {}
@@ -880,7 +883,14 @@ internal fun ChatScreen(
             }
             if (isEmptyChat) {
                 // Empty state must stay above the transparent LazyColumn or the list consumes taps.
-                EmptyState(onPrompt = { quickPrompt = it })
+                // Mai la home generica in contesto bot: attesa o header bot.
+                if (chatBotOpening) {
+                    BotEmptyState(displayName = null, opening = true)
+                } else if (!botProfile.isNullOrBlank()) {
+                    BotEmptyState(displayName = botDisplayName?.takeIf { it.isNotBlank() } ?: botProfile, opening = false)
+                } else {
+                    EmptyState(onPrompt = { quickPrompt = it })
+                }
             }
             val showJumpToBottom by remember {
                 derivedStateOf {
@@ -1797,6 +1807,33 @@ internal fun executeSlashCommand(
     }
 }
 
+
+@Composable
+internal fun BotEmptyState(displayName: String?, opening: Boolean) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 22.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.Start
+    ) {
+        Text(
+            text = if (opening) "Apro la chat…" else displayName ?: "Bot",
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 27.sp,
+            lineHeight = 32.sp
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = if (opening) "Recupero la storia condivisa con Hermes desktop."
+            else "Questa e la chat persistente del bot: la stessa su telefono e desktop. Scrivi per iniziare.",
+            color = AppColors.Muted,
+            fontSize = 14.sp,
+            lineHeight = 20.sp
+        )
+    }
+}
 
 @Composable
 internal fun EmptyState(onPrompt: (String) -> Unit) {
