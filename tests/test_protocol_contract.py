@@ -385,7 +385,24 @@ class ProtocolContractTests(unittest.TestCase):
         self.assertIn("Chat bot archiviata: riaprila da Bot Hermes", windows_home)
         self.assertIn('Click="OpenBotHermes_Click"', windows_home_xaml)
         self.assertIn("chatState.resetForNewChat()", android_root)
-        self.assertIn('startsWith("bot-", ignoreCase = true)', android_chat)
+        # Id bot persistenti: helper condiviso (bot- e botchat-), non solo bot-.
+        self.assertIn("isBotConversationId(conversationId", android_chat)
+        android_models = (
+            ROOT
+            / "src"
+            / "NemoclawChat.Android"
+            / "app"
+            / "src"
+            / "main"
+            / "java"
+            / "com"
+            / "nemoclaw"
+            / "chat"
+            / "features"
+            / "chat"
+            / "ChatModels.kt"
+        ).read_text(encoding="utf-8")
+        self.assertIn('id.startsWith("bot-") || id.startsWith("botchat-")', android_models)
         self.assertIn("return@Composer", android_chat)
         self.assertIn("Chat bot archiviata: riaprila da Bot Hermes", android_chat)
 

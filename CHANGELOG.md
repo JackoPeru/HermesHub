@@ -2,6 +2,20 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.215 - 2026-10-05
+
+- Sezione Bot: toggle [Chat|Bot] in alto alla chat con slide da destra;
+  bot fuori dalla sidebar, schermo dentro la sezione; ogni bot ha
+  un'unica chat persistente (stesso id su Hub e desktop via autosync).
+- Menu bot stile desktop (long-press/⋮): apri chat/schermo, auto-screen,
+  fissa/nascondi, modifica, gruppi, duplica, nuova chat, sessioni
+  recenti, sezioni locali; fix doppio POST all'apertura.
+- Manager: il watchdog non uccide piu i backend gestiti (cgroup) e non
+  ripristina sopra motori in generazione (gate 4 fallimenti + progress
+  tabby); risolto loop kill/restart durante i prefill lunghi.
+- Audit: trim memoria, banner conversazione eliminata, catalogo modelli
+  cliccabile, curl via file, ufw e wait-nvidia versionati.
+
 ## 0.6.214 - 2026-10-05
 
 - Fast path media: 5 casi in Impostazioni (crea/modifica/video con prompt

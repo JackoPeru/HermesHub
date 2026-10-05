@@ -1,16 +1,19 @@
-Hermes Hub 0.6.214 (5 casi fast path + audit)
+Hermes Hub 0.6.215 (sezione Bot + fix watchdog)
 
-- App Impostazioni: sezione Fast path media con 5 casi (crea immagine,
-  modifica foto, video da foto con on/off + prompt incollato; analisi
-  foto sempre chat; foto senza istruzioni chat/video). Prompt con
-  {testo} = template, senza placeholder = fisso a zero token LLM.
-- App: verdetto triage prima dell'upload (niente doppio upload),
-  has_image reale dal mime, preset ignoti mai fail-open.
-- Manager: preset forzato, prompt incollato (salta gate e chiamata LLM),
-  triage forzato off-loop, guard manual-mode prima del verdetto,
-  {{...}} nei prompt neutralizzati.
-- Versioni: Windows/AdminBridge `0.6.214`; Android `versionName 0.6.214`, `versionCode 218`.
-- Asset: `HermesHub-0.6.214-android.apk` (binario Windows invariato).
-- SHA-256 Android: `ea093b73fe4aa1209f079a0118e605be27f469ec08bac5f8bce133c87d635938`.
-- Asset: `HermesHub-0.6.214-linux-gateway.tar.gz`.
-- SHA-256 gateway: `685ba5995ead20fdb2775887fa699373887fdfa0085543aafbe1237e45c5c69b`.
+- App: toggle [Chat|Bot] in alto alla chat con slide da destra; bot fuori
+  dalla sidebar, schermo dentro la sezione Bot con back e auto-open
+  quando il bot lo usa. Ogni bot ha un'unica chat persistente.
+- App: menu bot stile desktop (long-press/⋮) con 11 voci: chat, schermo,
+  auto-screen, fissa/nascondi, modifica, gruppi, duplica, nuova chat,
+  sessioni recenti, sezioni. Preferenze locali, fix doppio POST.
+- Manager: watchdog non uccide piu backend gestiti (guard cgroup) e non
+  ripristina sopra motori in generazione (gate 4 fallimenti consecutivi
+  + check progressi tabby). Risolto il loop kill/restart sui prefill lunghi.
+- Audit: trim memoria su pressione, banner conversazione eliminata,
+  catalogo modelli cliccabile, curl con chiave via file, regole ufw e
+  wait-nvidia versionati come script.
+- Versioni: Windows/AdminBridge `0.6.215`; Android `versionName 0.6.215`, `versionCode 219`.
+- Asset: `HermesHub-0.6.215-android.apk` (binario Windows invariato).
+- SHA-256 Android: `a7bd8c7e7345fc8f12add3a9cd5f04a1060fdfa5ead2ce5185993345b12a7a72`.
+- Asset: `HermesHub-0.6.215-linux-gateway.tar.gz`.
+- SHA-256 gateway: `80daacc850c5cc6beac376b54daefb1a0a013a0b63d5c17beffc4dc018045ff1`.
