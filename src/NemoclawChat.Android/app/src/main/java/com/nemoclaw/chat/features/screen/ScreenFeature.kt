@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Button
@@ -241,7 +242,9 @@ internal fun ScreenPreviewImage(
 internal fun ScreenScreen(
     context: Context,
     settings: AppSettings,
-    onOpenBot: () -> Unit = {}
+    onOpenBot: () -> Unit = {},
+    // Se fornito (uso dentro la sezione Bot), mostra freccia indietro.
+    onBack: (() -> Unit)? = null
 ) {
     // applicationContext: il polling trattiene solo il contesto app, mai l'Activity.
     val appContext = context.applicationContext
@@ -309,6 +312,11 @@ internal fun ScreenScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            if (onBack != null) {
+                IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Torna ai bot", tint = Color.White)
+                }
+            }
             Icon(Icons.Rounded.Computer, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(26.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text("Schermo bot", color = Color.White, fontSize = 20.sp)

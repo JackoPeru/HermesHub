@@ -2,12 +2,14 @@ package com.nemoclaw.chat.features.bots
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.widget.Toast
 import android.os.Parcel
 import android.os.Parcelable
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,7 +26,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
@@ -40,10 +43,12 @@ import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
@@ -544,9 +549,30 @@ internal fun BotsScreen(
     var groupJob by remember { mutableStateOf<Job?>(null) }
     var detailBot by remember { mutableStateOf<HermesBotItem?>(null) }
     val scope = rememberCoroutineScope()
+    val botListState = rememberLazyListState()
+    // Menu contestuale stile desktop: preferenze locali (il server non ha
+    // pin/hide/sezioni/sessioni/auto-screen). Ricaricate col roster.
+    var botPins by remember { mutableStateOf(setOf<String>()) }
+    var botHiddenLocal by remember { mutableStateOf(setOf<String>()) }
+    var botAutoScreen by remember { mutableStateOf(setOf<String>()) }
+    var botSections by remember { mutableStateOf(BotSections()) }
+    var showHiddenBots by remember { mutableStateOf(false) }
+    var showSectionScreen by rememberSaveable { mutableStateOf(false) }
+    var menuFor by remember { mutableStateOf<String?>(null) }
+    var menuPage by remember { mutableStateOf(0) }
+    var recentFor by remember { mutableStateOf<HermesBotItem?>(null) }
+    var newSectionFor by remember { mutableStateOf<HermesBotItem?>(null) }
+    var lastScreenHolder by remember { mutableStateOf("human") }
 
     // applicationContext: i polling screen non trattengono mai l'Activity.
     val appContext = context.applicationContext
+
+    fun reloadBotDisplayPrefs() {
+        botPins = loadBotPins(appContext)
+        botHiddenLocal = loadBotHiddenLocal(appContext)
+        botAutoScreen = loadBotAutoScreen(appContext)
+        botSections = loadBotSections(appContext)
+    }
     // Stato schermo condiviso per roster e dettaglio (poll leggero, anteprima solo se acceso).
     var screenStatus by remember(settings.gatewayUrl) { mutableStateOf<ScreenStatusInfo?>(null) }
     var screenPreview by remember { mutableStateOf<Bitmap?>(null) }
@@ -555,6 +581,18 @@ internal fun BotsScreen(
         val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
         val next = runCatching { withContext(Dispatchers.IO) { getScreenStatus(settings, key) } }.getOrNull()
         screenStatus = next
+        // "Apri schermo quando il bot lo usa": fronte di un bot che prende
+        // lo schermo (holder: human -> altro) con almeno un bot flaggato.
+        // Mai mentre l'utente compila dialoghi. Solo segnale disponibile:
+        // holder e generico ("bot"), non attribuibile al singolo profilo.
+        val holderNow = next?.holder ?: "human"
+        if (next?.running == true && holderNow != "human" && lastScreenHolder == "human" &&
+            !showEditor && deleteBot == null && openGroup == null && recentFor == null &&
+            roster?.items.orEmpty().any { it.identityKey in botAutoScreen }) {
+            showSectionScreen = true
+            status = "Un bot sta usando lo schermo: aperto automaticamente."
+        }
+        lastScreenHolder = holderNow
         next != null
     }
     PollWhileStarted(screenStatus?.running, baseIntervalMs = 6_000L) {
@@ -584,19 +622,52 @@ internal fun BotsScreen(
     // write e immediato, la ricomposizione che disabilita i bottoni no) +
     // finally (mai opening appeso su cancel) + una sola POST per tap.
     // Serializza anche A-poi-B: il secondo tap aspetta il primo.
-    fun openPersistent(bot: HermesBotItem) {
+    //
+    // Sessioni: "Apri Bot Chat" riusa l'ultima sessione nota (binding locale,
+    // niente POST, la chat resta sempre la stessa); "Nuova chat" (fresh=true)
+    // o "sessione recente" forzano/riusano esplicitamente e aggiornano il
+    // binding. Se la sessione riusata e scaduta, lo stream fallisce con
+    // errore esplicito: basta "Nuova chat con questo bot".
+    fun openBotSession(bot: HermesBotItem, fresh: Boolean = false, session: BotSessionEntry? = null) {
         if (opening != null) return
         opening = bot.identityKey
         scope.launch {
             try {
-                openPersistentBotChat(context, settings, bot)
-                    .onSuccess { onOpenBot(it) }
-                    .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
+                val stableId = stableBotConversationId(bot)
+                val explicit = session
+                    ?: if (!fresh) {
+                        withContext(Dispatchers.IO) { loadBotSessionBinding(appContext, bot.identityKey).current }
+                    } else null
+                if (explicit != null) {
+                    val connection = withContext(Dispatchers.IO) { connectionForBot(appContext, settings, bot) }
+                    onOpenBot(
+                        BotChatContext(
+                            profile = bot.profile,
+                            sessionId = explicit.sessionId,
+                            displayName = bot.displayName,
+                            localConversationId = stableId,
+                            multiplexEnabled = explicit.multiplexEnabled || roster?.multiplexEnabled == true,
+                            connectionId = connection.id,
+                            endpoint = connection.endpoint
+                        )
+                    )
+                } else {
+                    openPersistentBotChat(context, settings, bot)
+                        .onSuccess {
+                            withContext(Dispatchers.IO) {
+                                saveBotSessionBinding(appContext, bot.identityKey, it.sessionId, it.multiplexEnabled)
+                            }
+                            onOpenBot(it)
+                        }
+                        .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
+                }
             } finally {
                 opening = null
             }
         }
     }
+
+    fun openPersistent(bot: HermesBotItem) = openBotSession(bot)
 
     val detail = detailBot
     if (detail != null) {
@@ -630,13 +701,133 @@ internal fun BotsScreen(
     LaunchedEffect(settings.gatewayUrl, refreshNonce) {
         connections = loadHermesBotConnections(context, settings)
         groups = loadHermesBotGroups(context)
+        reloadBotDisplayPrefs()
         val result = loadAllHermesBotRosters(context, settings)
         roster = result
         status = result.status
         if (!result.chatSupported) status += " Apri Bot Chat richiede multiplexing profili attivo."
     }
 
+    // Roster da mostrare: via i nascosti (server o locali) salvo toggle,
+    // fissati in alto, resto in ordine server raggruppato per sezione.
+    val displayBots = remember(roster, botPins, botHiddenLocal, showHiddenBots) {
+        val items = roster?.items.orEmpty()
+        val filtered = if (showHiddenBots) items
+        else items.filter { !it.hidden && it.identityKey !in botHiddenLocal }
+        sortBotsForRoster(filtered, botPins)
+    }
+    val hiddenCount = remember(roster, botHiddenLocal) {
+        roster?.items.orEmpty().count { it.hidden || it.identityKey in botHiddenLocal }
+    }
+    val pinnedBots = remember(displayBots, botPins) {
+        displayBots.filter { it.identityKey in botPins }
+    }
+    val groupedBots = remember(displayBots, botPins, botSections) {
+        groupBotsBySection(displayBots.filter { it.identityKey !in botPins }, botSections)
+    }
+
+    // Schermo dentro la sezione Bot (non piu tab sidebar): copre roster e
+    // dettaglio, back torna al roster.
+    @Composable
+    fun BotCardWithMenu(bot: HermesBotItem) {
+        val isPinned = bot.identityKey in botPins
+        val isHidden = bot.hidden || bot.identityKey in botHiddenLocal
+        val currentSection = botSections.assign[bot.identityKey]?.takeIf { it in botSections.order }
+        BotRosterCard(
+            bot = bot,
+            screenRunning = screenStatus?.running == true,
+            screenPreview = screenPreview,
+            chatSupported = roster?.chatSupported == true,
+            busy = opening != null,
+            pinned = isPinned,
+            hiddenBadge = showHiddenBots && isHidden,
+            menu = BotMenuHost(
+                expanded = menuFor == bot.identityKey,
+                page = if (menuFor == bot.identityKey) menuPage else 0,
+                pinned = isPinned,
+                hidden = bot.identityKey in botHiddenLocal,
+                autoScreen = bot.identityKey in botAutoScreen,
+                sections = botSections.order,
+                currentSection = currentSection,
+                onDismiss = { menuFor = null },
+                onPage = { menuPage = it },
+                onOpenChat = { menuFor = null; openPersistent(bot) },
+                onOpenScreen = { menuFor = null; showSectionScreen = true },
+                onToggleAutoScreen = {
+                    val next = botAutoScreen.toMutableSet()
+                    if (bot.identityKey in next) next.remove(bot.identityKey) else next.add(bot.identityKey)
+                    botAutoScreen = next
+                    setBotAutoScreen(appContext, bot.identityKey, bot.identityKey in next)
+                },
+                onTogglePin = {
+                    menuFor = null
+                    val next = botPins.toMutableSet()
+                    if (bot.identityKey in next) next.remove(bot.identityKey) else next.add(bot.identityKey)
+                    botPins = next
+                    setBotPinned(appContext, bot.identityKey, bot.identityKey in next)
+                },
+                onToggleHide = {
+                    menuFor = null
+                    val next = botHiddenLocal.toMutableSet()
+                    if (bot.identityKey in next) next.remove(bot.identityKey) else next.add(bot.identityKey)
+                    botHiddenLocal = next
+                    setBotHiddenLocal(appContext, bot.identityKey, bot.identityKey in next)
+                },
+                onEdit = { menuFor = null; openEditor(bot) },
+                onManageGroups = {
+                    menuFor = null
+                    scope.launch { botListState.animateScrollToItem(2) }
+                },
+                onDuplicate = {
+                    menuFor = null
+                    // Il server non espone la soul in lettura: copia
+                    // profilo/nome/descrizione, soul da ricompilare.
+                    editorBot = null
+                    profileInput = (bot.profile + "-copy").take(64)
+                    displayNameInput = "${bot.displayName} (copia)"
+                    descriptionInput = bot.description
+                    soulInput = ""
+                    selectedConnectionId = bot.connectionId
+                    showEditor = true
+                    Toast.makeText(context, "Soul non copiata: il server non la espone, ricompilala.", Toast.LENGTH_LONG).show()
+                },
+                onNewChat = { menuFor = null; openBotSession(bot, fresh = true) },
+                onRecentSessions = { menuFor = null; recentFor = bot },
+                onMoveToSection = { name ->
+                    menuFor = null
+                    val assign = botSections.assign.toMutableMap()
+                    if (name == null) assign.remove(bot.identityKey) else assign[bot.identityKey] = name
+                    val next = botSections.copy(assign = assign)
+                    botSections = next
+                    saveBotSections(appContext, next)
+                },
+                onNewSection = { menuFor = null; newSectionFor = bot }
+            ),
+            onOpenDetail = { detailBot = bot },
+            onOpenChat = { openPersistent(bot) },
+            onOpenScreen = { showSectionScreen = true },
+            onEdit = { openEditor(bot) },
+            onDelete = {
+                deleteBot = bot
+                deleteConfirmation = ""
+            },
+            onMenuRequest = { menuFor = bot.identityKey; menuPage = 0 },
+            canDelete = !bot.isDefault && !bot.profile.equals("default", true) && mutating == false
+        )
+    }
+
+    if (showSectionScreen) {
+        BackHandler(enabled = true) { showSectionScreen = false }
+        ScreenScreen(
+            context = context,
+            settings = settings,
+            onBack = { showSectionScreen = false }
+        )
+        return
+    }
+
     LazyColumn(
+        state = botListState,
         modifier = Modifier.fillMaxSize().padding(20.dp),
         contentPadding = PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -648,6 +839,14 @@ internal fun BotsScreen(
                     Text("Profili reali con configurazione, memoria, skill e credenziali separate. Le routine bot richiedono multiplexing attivo.", color = AppColors.Muted, fontSize = 13.sp)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Schermo dentro la sezione (non piu tab sidebar).
+                    IconButton(onClick = { showSectionScreen = true }) {
+                        Icon(
+                            Icons.Rounded.Computer,
+                            contentDescription = "Apri schermo bot",
+                            tint = if (screenStatus?.running == true) Color(0xFF4CAF50) else Color.White
+                        )
+                    }
                     IconButton(onClick = { openEditor(null) }) { Icon(Icons.Rounded.Add, contentDescription = "Nuovo bot", tint = Color.White) }
                     IconButton(onClick = {
                         connectionLabelInput = ""
@@ -784,24 +983,62 @@ internal fun BotsScreen(
                 }
             }
         }
-        items(roster?.items.orEmpty(), key = { it.identityKey }) { bot ->
-            BotRosterCard(
-                bot = bot,
-                screenRunning = screenStatus?.running == true,
-                screenPreview = screenPreview,
-                chatSupported = roster?.chatSupported == true,
-                busy = opening != null,
-                onOpenDetail = { detailBot = bot },
-                onOpenChat = { openPersistent(bot) },
-                onOpenScreen = onOpenScreen,
-                onEdit = { openEditor(bot) },
-                onDelete = {
-                    deleteBot = bot
-                    deleteConfirmation = ""
-                },
-                canDelete = !bot.isDefault && !bot.profile.equals("default", true) && mutating == false
-            )
+        if (hiddenCount > 0) {
+            item {
+                BotHiddenRow(
+                    hiddenCount = hiddenCount,
+                    showing = showHiddenBots,
+                    onToggle = { showHiddenBots = !showHiddenBots }
+                )
+            }
         }
+        // Fissati sempre in alto, poi sezioni utente, poi non assegnati.
+        if (pinnedBots.isNotEmpty()) {
+            item { BotSectionHeader("Fissati") }
+            items(pinnedBots, key = { "pin-${it.identityKey}" }) { bot ->
+                BotCardWithMenu(bot = bot)
+            }
+        }
+        groupedBots.forEach { (section, bots) ->
+            if (section != null) {
+                item(key = "sec-$section") { BotSectionHeader(section) }
+            }
+            items(bots, key = { it.identityKey }) { bot ->
+                BotCardWithMenu(bot = bot)
+            }
+        }
+    }
+
+    recentFor?.let { bot ->
+        val binding = remember(bot.identityKey) {
+            loadBotSessionBinding(appContext, bot.identityKey)
+        }
+        BotRecentSessionsDialog(
+            bot = bot,
+            entries = binding.recent,
+            onPick = { entry ->
+                recentFor = null
+                openBotSession(bot, session = entry)
+            },
+            onDismiss = { recentFor = null }
+        )
+    }
+
+    newSectionFor?.let { bot ->
+        BotSectionNameDialog(
+            onConfirm = { name ->
+                if (name.isNotEmpty()) {
+                    val order = (botSections.order + name).distinct()
+                    val assign = botSections.assign.toMutableMap()
+                    assign[bot.identityKey] = name
+                    val next = BotSections(order, assign)
+                    botSections = next
+                    saveBotSections(appContext, next)
+                }
+                newSectionFor = null
+            },
+            onDismiss = { newSectionFor = null }
+        )
     }
 
     openGroup?.let { group ->
@@ -1089,12 +1326,22 @@ internal fun BotRosterCard(
     onOpenScreen: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
-    canDelete: Boolean
+    canDelete: Boolean,
+    // Menu contestuale stile desktop (long-press / ⋮).
+    pinned: Boolean = false,
+    hiddenBadge: Boolean = false,
+    menu: BotMenuHost? = null,
+    onMenuRequest: () -> Unit = {}
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth().clickable(onClickLabel = "Apri dettaglio bot", onClick = onOpenDetail),
+                modifier = Modifier.fillMaxWidth().combinedClickable(
+                    onClickLabel = "Apri dettaglio bot",
+                    onLongClickLabel = "Opzioni bot",
+                    onClick = onOpenDetail,
+                    onLongClick = onMenuRequest
+                ),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1107,13 +1354,25 @@ internal fun BotRosterCard(
                     )
                 }
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(bot.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(bot.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, modifier = Modifier.weight(1f, fill = false))
+                        if (pinned) Text("FISSATO", color = AppColors.Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        if (hiddenBadge) Text("NASCOSTO", color = AppColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
                         Text("@${bot.handle} · ${bot.connectionLabel}", color = AppColors.Muted, fontSize = 12.sp)
                     Text(
                         if (screenRunning) "Schermo live" else if (bot.isDefault) "Profilo predefinito" else bot.profile,
                         color = if (screenRunning) Color(0xFF4CAF50) else AppColors.Faint,
                         fontSize = 11.sp
                     )
+                }
+                Box {
+                    IconButton(onClick = onMenuRequest) {
+                        Icon(Icons.Rounded.MoreVert, contentDescription = "Opzioni bot", tint = Color.White)
+                    }
+                    if (menu != null) {
+                        BotCardMenu(bot = bot, host = menu)
+                    }
                 }
                 IconButton(onClick = onOpenChat, enabled = !busy && chatSupported) {
                     Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Apri Bot Chat", tint = Color.White)

@@ -302,10 +302,10 @@ internal fun ChatApp() {
     // alla chat. true = roster/dettaglio bot visibile con slide da destra.
     var botSectionVisible by rememberSaveable { mutableStateOf(false) }
     val setSelectedTab: (Tab) -> Unit = { tab ->
-        // I bot vivono nella sezione interna alla Chat: navigare pulisce
-        // sempre il flag (coerce anche Tab.Bots da vecchi stati salvati).
+        // Bot e schermo vivono nella sezione interna alla Chat: navigare
+        // pulisce sempre il flag (coerce anche da vecchi stati salvati).
         botSectionVisible = false
-        tabNavController.navigateToTab(if (tab == Tab.Bots) Tab.Chat else tab)
+        tabNavController.navigateToTab(if (tab == Tab.Bots || tab == Tab.Screen) Tab.Chat else tab)
     }
     val voiceProfileRevision = VoiceProfileEvents.revision
     val loadedWakeVoiceProfile by produceState<VoiceProfile?>(
@@ -626,7 +626,16 @@ internal fun ChatApp() {
                 botSectionVisible = true
                 }
                 }
-                composable(Tab.Screen.navRoute) { ScreenScreen(context = context, settings = settings) }
+                // Rotta legacy: lo schermo non e piu un tab. Tenuta per vecchi
+                // backstack salvati: redirect a Chat con sezione Bot attiva
+                // (lo schermo si apre da li col pulsante dedicato).
+                composable(Tab.Screen.navRoute) {
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                // setSelectedTab azzera il flag: ordine obbligato.
+                setSelectedTab(Tab.Chat)
+                botSectionVisible = true
+                }
+                }
                 composable(Tab.Artifacts.navRoute) { ArtifactLibraryScreen(
                 context = context,
                 settings = settings,

@@ -400,9 +400,8 @@ internal fun HermesSidebar(
                 }
                 // Niente riga Bot: i bot vivono nel selettore [Chat | Bot]
                 // in alto alla chat, non come sezione sidebar.
-                item {
-                    SidebarTabRow(Tab.Screen, selectedTab == Tab.Screen, onOpenTab)
-                }
+                // Niente righe Bot/Schermo: vivono nel selettore [Chat | Bot]
+                // in alto alla chat, sezione Bot con schermo integrato.
                 item {
                     SidebarTabRow(Tab.Artifacts, selectedTab == Tab.Artifacts, onOpenTab)
                 }
