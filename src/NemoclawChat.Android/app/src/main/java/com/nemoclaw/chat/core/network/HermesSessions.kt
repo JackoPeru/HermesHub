@@ -206,12 +206,15 @@ class HermesSessionClient(
         if (capabilities != null && !ok) throw UnsupportedOperationException("Funzione non supportata dal server: $name")
     }
 
-    suspend fun list(limit: Int = 50, offset: Int = 0, source: String? = null, title: String? = null): Pair<Int, List<HermesSession>> = withContext(Dispatchers.IO) {
+    suspend fun list(limit: Int = 50, offset: Int = 0, source: String? = null, title: String? = null, includeHidden: Boolean = false): Pair<Int, List<HermesSession>> = withContext(Dispatchers.IO) {
         requireCapability(capabilities?.sessionList ?: true, "session_list")
         var url = sessionUrl("/api/sessions?limit=$limit&offset=$offset")
         if (!source.isNullOrBlank()) url += "&source=${java.net.URLEncoder.encode(source, "UTF-8")}"
         // Filtro titolo esatto indicizzato (registro canonical bot: title="Bot Chat").
         if (!title.isNullOrBlank()) url += "&title=${java.net.URLEncoder.encode(title, "UTF-8")}"
+        // Le Bot Chat canoniche sono sempre hidden: senza questo la scan
+        // torna vuota e si finisce a mintare duplicati (HTTP 400).
+        if (includeHidden) url += "&include_hidden=true"
         val res = httpGetResponse(url, apiKey)
         if (res.first !in 200..299) return@withContext res.first to emptyList()
         res.first to parseHermesSessionList(res.second)

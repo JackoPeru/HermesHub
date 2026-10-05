@@ -414,7 +414,7 @@ internal suspend fun resolveCanonicalBotChat(
         val effective = settingsForBotConnection(settings, connection)
         val secret = secretForBotConnection(context, connection)
         val client = HermesSessionClient(effective, secret, bot.profile, rosterMultiplex, null)
-        val (listCode, rows) = client.list(limit = CANONICAL_SESSION_LIST_LIMIT, title = CANONICAL_BOT_CHAT_TITLE)
+        val (listCode, rows) = client.list(limit = CANONICAL_SESSION_LIST_LIMIT, title = CANONICAL_BOT_CHAT_TITLE, includeHidden = true)
         if (listCode !in 200..299) {
             return@withContext CanonicalBotResolve.Failed(
                 "Registro Bot Chat non leggibile (HTTP $listCode): riprova."
