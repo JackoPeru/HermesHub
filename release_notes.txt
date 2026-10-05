@@ -1,13 +1,10 @@
-Hermes Hub 0.6.219 (bot canoniche desktop-parity)
+Hermes Hub 0.6.220 (editor bot validato)
 
-- App: ogni bot ha UNA forever-chat condivisa col desktop (sessione
-  titled "Bot Chat" sul profilo, come Hermes desktop): storia, invii e
-  roster con anteprima ultimo messaggio sono gli stessi. Niente
-  collegamenti manuali, niente fork, lookup fail-closed.
-- App: invii bot nella sessione canonica via Sessions API; mai rename
-  della "Bot Chat"; singleflight anti doppio-mint.
-- Versioni: Windows/AdminBridge `0.6.219`; Android `versionName 0.6.219`, `versionCode 223`.
-- Asset: `HermesHub-0.6.219-android.apk` (binario Windows invariato).
-- SHA-256 Android: `77d82e90186aeae15190f4a718a27e5a269a846d31dfba6497c0ff56d5a0d444`.
-- Asset: `HermesHub-0.6.219-linux-gateway.tar.gz`.
-- SHA-256 gateway: `0424af263f61f5383805baad9a8e12ee4cbc6c0fe1006c0b342a722d14290550`.
+- App: editor bot con validazione limiti server e contatori live
+  (profilo, nome, descrizione max 2000, soul max 100000); errori
+  espliciti nel dialog, salvataggio bloccato se non valido.
+- Versioni: Windows/AdminBridge `0.6.220`; Android `versionName 0.6.220`, `versionCode 224`.
+- Asset: `HermesHub-0.6.220-android.apk` (binario Windows invariato).
+- SHA-256 Android: `67304ecdf3c8a80fa82b4d1afa551505c4418f1b4283712726dd432b25529eff`.
+- Asset: `HermesHub-0.6.220-linux-gateway.tar.gz`.
+- SHA-256 gateway: `ccbe626be36eb87d8ace0b514295d1858fd99c393551cab44bcb74289d89fb7b`.

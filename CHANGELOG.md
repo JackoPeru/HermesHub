@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.220 - 2026-10-05
+
+- Editor bot: validazione limiti server (profilo, nomi, descrizione,
+  soul) con contatori ed errori espliciti; niente piu 400 criptico.
+
 ## 0.6.219 - 2026-10-05
 
 - Bot canoniche desktop-parity: un bot = una forever-chat (sessione
