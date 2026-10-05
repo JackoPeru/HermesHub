@@ -300,6 +300,44 @@ internal fun assignStableBotHandles(items: List<HermesBotItem>): List<HermesBotI
     return items.map { item -> item.copy(handle = handles[item.identityKey] ?: slug(item.displayName, item.profile)) }
 }
 
+/**
+ * Id conversazione STABILE per bot: ogni bot ha un'unica chat persistente,
+ * la stessa su HermesHub e Hermes desktop (l'autosync archivia sotto lo
+ * stesso id). Preferisce il chat_id canonico del server; fallback
+ * connessione+profilo normalizzati. Sanitizzato [A-Za-z0-9-_].
+ */
+internal fun stableBotConversationId(bot: HermesBotItem): String {
+    bot.chatId?.trim()?.takeIf { it.isNotEmpty() }?.let { raw ->
+        val safe = raw.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(96)
+        if (safe.isNotEmpty()) return "botchat-$safe"
+    }
+    val profile = (
+        runCatching { normalizeHermesProfileName(bot.profile) }.getOrNull()
+            // Profili non slug dal server: mai crashare l'id, sanitizza grezzo.
+            ?: bot.profile.lowercase().filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+        )
+        .take(64).ifBlank { "bot" }
+    val conn = bot.connectionId
+        .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+        .take(48).ifBlank { "primary" }
+    return "bot-$conn-$profile"
+}
+
+/**
+ * Apertura persistente: una sola sessione server per tap (mai doppia POST)
+ * e localConversationId stabile, cosi la storia del bot si accumula sotto
+ * lo stesso id invece di creare un contenitore nuovo a ogni apertura.
+ */
+internal suspend fun openPersistentBotChat(
+    context: Context,
+    settings: AppSettings,
+    bot: HermesBotItem,
+    apiKey: String? = null
+): Result<BotChatContext> {
+    return openHermesBotChat(context, settings, bot, apiKey)
+        .map { it.copy(localConversationId = stableBotConversationId(bot)) }
+}
+
 internal suspend fun openHermesBotChat(
     context: Context,
     settings: AppSettings,
@@ -546,14 +584,16 @@ internal fun BotsScreen(
             onOpenChat = { bot ->
                 opening = bot.identityKey
                 scope.launch {
-                    openHermesBotChat(context, settings, bot)
+                    // Singola POST: il dettaglio delega, mai doppio open.
+                    openPersistentBotChat(context, settings, bot)
                         .onSuccess { onOpenBot(it) }
                         .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
                     opening = null
                 }
             },
             onOpenScreen = onOpenScreen,
-            onOpenCron = onOpenCron
+            onOpenCron = onOpenCron,
+            busy = opening != null
         )
         return
     }
@@ -736,7 +776,7 @@ internal fun BotsScreen(
                 onOpenChat = {
                     opening = bot.identityKey
                     scope.launch {
-                        openHermesBotChat(context, settings, bot)
+                        openPersistentBotChat(context, settings, bot)
                             .onSuccess { onOpenBot(it) }
                             .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
                         opening = null
@@ -1107,7 +1147,9 @@ internal fun BotDetailScreen(
     onBack: () -> Unit,
     onOpenChat: (HermesBotItem) -> Unit,
     onOpenScreen: () -> Unit,
-    onOpenCron: () -> Unit
+    onOpenCron: () -> Unit,
+    // Disabilita "Apri" mentre l'open esterno e in corso (anti doppio tap).
+    busy: Boolean = false
 ) {
     // applicationContext: remember/static non trattengono mai l'Activity.
     val appContext = context.applicationContext
@@ -1115,9 +1157,6 @@ internal fun BotDetailScreen(
     var autoMode by remember(bot.identityKey) {
         mutableStateOf(loadBotAutoApproveMap(appContext)[bot.profile] ?: "off")
     }
-    val scope = rememberCoroutineScope()
-    var opening by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf("") }
     Column(modifier = Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
@@ -1148,19 +1187,12 @@ internal fun BotDetailScreen(
             BotDetailTab.Chat -> {
                 if (bot.description.isNotBlank()) Text(bot.description, color = Color.White, fontSize = 14.sp)
                 Button(
-                    onClick = {
-                        opening = true
-                        scope.launch {
-                            openHermesBotChat(appContext, settings, bot)
-                                .onSuccess { onOpenChat(bot) }
-                                .onFailure { status = it.message ?: "Apertura Bot Chat fallita." }
-                            opening = false
-                        }
-                    },
-                    enabled = !opening,
+                    // Delega all'handler esterno (singola POST persistente):
+                    // prima faceva POST qui + POST fuori (doppia sessione).
+                    onClick = { onOpenChat(bot) },
+                    enabled = !busy,
                     colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
-                ) { Text(if (opening) "Apertura…" else "Apri Bot Chat", color = Color(0xFF171009)) }
-                if (status.isNotBlank()) Text(status, color = AppColors.Muted, fontSize = 12.sp)
+                ) { Text("Apri Bot Chat", color = Color(0xFF171009)) }
                 Text("Auto-approvazione run di ${bot.displayName}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     for ((label, value) in listOf("Chiedi" to WorkLimits.AUTO_APPROVE_OFF, "Sessione" to WorkLimits.AUTO_APPROVE_SESSION, "Sempre" to WorkLimits.AUTO_APPROVE_ALWAYS)) {

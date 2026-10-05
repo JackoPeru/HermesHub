@@ -304,7 +304,12 @@ internal fun ChatScreen(
     initialPrompt: String = "",
     onInitialPromptConsumed: () -> Unit = {},
     onOpenSidebar: () -> Unit = {},
-    onSwitchTab: (Tab) -> Unit = {}
+    onSwitchTab: (Tab) -> Unit = {},
+    // Selettore [Chat | Bot] in alto alla chat (stato issato in AppRoot).
+    chatBotActive: Boolean = false,
+    onSelectChat: () -> Unit = {},
+    onSelectBot: () -> Unit = {},
+    onOpenBotSection: () -> Unit = {}
 ) {
     val remoteBot = !botConnectionId.isNullOrBlank() && !botConnectionId.equals("primary", true)
     val botSettings = if (remoteBot && !botEndpoint.isNullOrBlank()) {
@@ -771,6 +776,11 @@ internal fun ChatScreen(
             onOpenSidebar = onOpenSidebar,
             onOpenArchive = { onSwitchTab(Tab.Archive) }
         )
+        ChatBotToggle(
+            botActive = chatBotActive,
+            onSelectChat = onSelectChat,
+            onSelectBot = onSelectBot
+        )
         if (!botProfile.isNullOrBlank()) {
             Surface(color = AppColors.NavIndicator, modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -795,7 +805,7 @@ internal fun ChatScreen(
                         fontSize = 12.sp,
                         modifier = Modifier.weight(1f)
                     )
-                    IconButton(onClick = { onSwitchTab(Tab.Bots) }) { Icon(Icons.Rounded.SmartToy, contentDescription = "Apri Bot Hermes", tint = Color.White) }
+                    IconButton(onClick = onOpenBotSection) { Icon(Icons.Rounded.SmartToy, contentDescription = "Apri Bot Hermes", tint = Color.White) }
                 }
             }
         }

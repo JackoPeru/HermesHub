@@ -398,9 +398,8 @@ internal fun HermesSidebar(
                 item {
                     SidebarTabRow(Tab.Projects, selectedTab == Tab.Projects, onOpenTab)
                 }
-                item {
-                    SidebarTabRow(Tab.Bots, selectedTab == Tab.Bots, onOpenTab)
-                }
+                // Niente riga Bot: i bot vivono nel selettore [Chat | Bot]
+                // in alto alla chat, non come sezione sidebar.
                 item {
                     SidebarTabRow(Tab.Screen, selectedTab == Tab.Screen, onOpenTab)
                 }

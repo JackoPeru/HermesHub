@@ -44,8 +44,12 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -294,8 +298,14 @@ internal fun ChatApp() {
     // frame e il fallback a Chat flashe rebbe la chrome. Resta sull'ultimo tab.
     var selectedTab by rememberSaveable { mutableStateOf(Tab.Chat) }
     tabNavBackStackEntry?.destination?.route?.let { selectedTab = tabForNavRoute(it) }
+    // Sezione Bot: i bot non sono piu un tab sidebar ma [Chat | Bot] in alto
+    // alla chat. true = roster/dettaglio bot visibile con slide da destra.
+    var botSectionVisible by rememberSaveable { mutableStateOf(false) }
     val setSelectedTab: (Tab) -> Unit = { tab ->
-        tabNavController.navigateToTab(tab)
+        // I bot vivono nella sezione interna alla Chat: navigare pulisce
+        // sempre il flag (coerce anche Tab.Bots da vecchi stati salvati).
+        botSectionVisible = false
+        tabNavController.navigateToTab(if (tab == Tab.Bots) Tab.Chat else tab)
     }
     val voiceProfileRevision = VoiceProfileEvents.revision
     val loadedWakeVoiceProfile by produceState<VoiceProfile?>(
@@ -323,6 +333,20 @@ internal fun ChatApp() {
     val chatState = remember(chatViewModel) {
         chatViewModel.chatState.apply { if (draft.isBlank()) draft = savedDraft }
     }
+    // Chat <- [Chat | Bot]: esci da bot chat verso chat nuova; dalla
+    // sezione roster torni alla chat sottostante senza resettarla.
+    val selectChatSegment: () -> Unit = {
+        if (pendingBot != null) {
+            pendingBot = null
+            pendingConversationId = null
+            pendingPrompt = ""
+            chatState.resetForNewChat()
+        }
+        botSectionVisible = false
+    }
+    val selectBotSegment: () -> Unit = {
+        if (!botSectionVisible) botSectionVisible = true
+    }
     val incoming = IncomingIntentBus.request
     LaunchedEffect(incoming.version) {
         if (incoming.version == 0L) return@LaunchedEffect
@@ -333,6 +357,8 @@ internal fun ChatApp() {
             createAttachmentFromUri(context, incoming.uri.toUri(), settings.maxAttachmentMb)?.let { attachment -> chatState.pendingAttachments.add(attachment) }
         }
         setSelectedTab(tabForIncomingRoute(incoming.tab))
+        // Deeplink "bots": Chat con sezione Bot attiva (non piu un tab).
+        if (incoming.tab.equals("bots", ignoreCase = true)) botSectionVisible = true
     }
     LaunchedEffect(
         selectedTab,
@@ -412,6 +438,10 @@ internal fun ChatApp() {
     BackHandler(enabled = sidebarOpen) {
         sidebarOpen = false
     }
+    // Dalla sezione Bot il back torna alla chat (la sidebar ha priorita).
+    BackHandler(enabled = botSectionVisible && !sidebarOpen && selectedTab == Tab.Chat) {
+        selectChatSegment()
+    }
 
     CompositionLocalProvider(LocalDensity provides appDensity) {
         AppNavigation(
@@ -477,7 +507,49 @@ internal fun ChatApp() {
                     popEnterTransition = { androidx.compose.animation.EnterTransition.None },
                     popExitTransition = { androidx.compose.animation.ExitTransition.None }
                 ) {
-                composable(Tab.Chat.navRoute) { ChatScreen(
+                composable(Tab.Chat.navRoute) { Column(modifier = Modifier.fillMaxSize()) {
+                AnimatedContent(
+                targetState = botSectionVisible,
+                // Sezione Bot entra da destra (qualcosa di diverso), esce a
+                // sinistra; ritorno speculare. Niente slide NavHost (None).
+                transitionSpec = {
+                    if (targetState) {
+                        (slideInHorizontally { it } + fadeIn()) togetherWith
+                            (slideOutHorizontally { -it / 3 } + fadeOut())
+                    } else {
+                        (slideInHorizontally { -it / 3 } + fadeIn()) togetherWith
+                            (slideOutHorizontally { it } + fadeOut())
+                    }
+                },
+                label = "chat-bot-section"
+                ) { botSection ->
+                if (botSection) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                ChatBotToggle(
+                botActive = true,
+                onSelectChat = selectChatSegment,
+                onSelectBot = selectBotSegment
+                )
+                androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f)) {
+                BotsScreen(
+                    context = context,
+                    settings = settings,
+                onOpenBot = { bot ->
+                        // Never carry normal-chat messages, attachments or
+                        // previous-response state into a bot archive.
+                        chatState.resetForNewChat()
+                        pendingBot = bot
+                        pendingConversationId = bot.localConversationId
+                        pendingPrompt = ""
+                        setSelectedTab(Tab.Chat)
+                    },
+                    onOpenScreen = { setSelectedTab(Tab.Screen) },
+                    onOpenCron = { setSelectedTab(Tab.Cron) }
+                )
+                }
+                }
+                } else {
+                ChatScreen(
                 context = context,
                 settings = settings,
                 state = chatState,
@@ -500,8 +572,15 @@ internal fun ChatApp() {
                 pendingConversationId = null
                 },
                 onOpenSidebar = { sidebarOpen = true },
-                onSwitchTab = { tab -> setSelectedTab(tab) }
-                ) }
+                onSwitchTab = { tab -> setSelectedTab(tab) },
+                chatBotActive = pendingBot != null,
+                onSelectChat = selectChatSegment,
+                onSelectBot = selectBotSegment,
+                onOpenBotSection = selectBotSegment
+                )
+                }
+                }
+                } }
                 composable(Tab.Voice.navRoute) { VoiceModeScreen(settings, initialGatewaySecret.value, voiceAutoStartToken) }
                 composable(Tab.Jarvis.navRoute) { JarvisModeScreen(settings, initialGatewaySecret.value) }
                 composable(Tab.Projects.navRoute) { ProjectsScreen(
