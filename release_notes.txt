@@ -1,11 +1,12 @@
-Hermes Hub 0.6.216 (toggle slim + sidebar bot)
+Hermes Hub 0.6.217 (main page ultima chat bot)
 
-- App: toggle [Chat|Bot] ridisegnato come pill sottile (~20dp) elegante.
-- App: con il lato bot attivo la sidebar mostra tutti i bot (stile Hermes
-  desktop) invece di tab e chat normali, con bot attivo evidenziato e
-  apertura diretta della chat persistente.
-- Versioni: Windows/AdminBridge `0.6.216`; Android `versionName 0.6.216`, `versionCode 220`.
-- Asset: `HermesHub-0.6.216-android.apk` (binario Windows invariato).
-- SHA-256 Android: `df7918e54b31ee02ce9ffa920ad273543b9878b160ba5d75e07dec0f9b478644`.
-- Asset: `HermesHub-0.6.216-linux-gateway.tar.gz`.
-- SHA-256 gateway: `6defc69d9bc84a7ef335cc3849063efa97f1ec736c38f36454dc5bf34fe22adc`.
+- App: la pagina principale della sezione Bot e la chat dell'ultimo bot
+  usato (riuso sessione senza POST se c'e binding); roster solo al primo
+  uso, da bot chat o da "Gestisci bot".
+- Server: roster `/v1/hub/bots` ripristinato (mancavano ruamel.yaml e
+  pyyaml al python dell'hub): 7 bot come Hermes desktop.
+- Versioni: Windows/AdminBridge `0.6.217`; Android `versionName 0.6.217`, `versionCode 221`.
+- Asset: `HermesHub-0.6.217-android.apk` (binario Windows invariato).
+- SHA-256 Android: `df6e444b72fa8b78a38794d06aa13152cd888be62d840f7b74888d62c815a673`.
+- Asset: `HermesHub-0.6.217-linux-gateway.tar.gz`.
+- SHA-256 gateway: `fb95f608de394d72ff9767da15b499f5a6bfe7f9eb7fba75d364f7d0f68b945d`.

@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.217 - 2026-10-05
+
+- Sezione Bot: la pagina principale e la chat dell'ultimo bot usato
+  (riuso sessione, roster solo al primo uso); roster server ripristinato
+  (7 bot come desktop).
+
 ## 0.6.216 - 2026-10-05
 
 - Toggle [Chat|Bot] ridisegnato: pill sottile (~20dp) elegante al posto
