@@ -316,6 +316,11 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
         upper = str(key).upper()
         if upper in RESERVED_PLACEHOLDERS or upper in mapping:
             continue
+        if upper == "PROMPT" and isinstance(value, str):
+            # Il prompt e testo libero (utente o LLM): sequenze {{...}} al suo
+            # interno non sono placeholder (verrebbero riscritte dai replace
+            # successivi o causerebbero 400 spuri).
+            value = value.replace("{{", "{ {").replace("}}", "} }")
         mapping[upper] = _text(value) if isinstance(value, str) else _num(value, 0, -10**12, 10**12)
     workflow_text = template
     staged: list[str] = []
@@ -1994,7 +1999,9 @@ async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSON
         spec = PRESETS.get(forced)
         if not spec or spec.get("disabled"):
             return JSONResponse({"media": False, "reason": "forced-preset-invalid"})
-        decision = _triage_mod.triage(text, has_image, backend=backend)
+        # Stesso off-loop del ramo normale: il triage sync bloccherebbe tutto.
+        decision = await asyncio.to_thread(_triage_mod.triage, text, has_image,
+                                           (), backend)
         decision = type(decision)(media=True, preset=forced,
                                   prompt_hint=decision.prompt_hint or text,
                                   reason=f"forced:{forced}",
@@ -2004,6 +2011,10 @@ async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSON
                                            (), backend)
     if not decision.media or not decision.preset:
         return JSONResponse({"media": False, "reason": decision.reason})
+    if _state["desired_mode"] in ("LLM", "DIRECT"):
+        # Nessuno drenerebbe la coda: vale anche per triage_only (niente
+        # upload sprecati prima del fallback chat).
+        return JSONResponse({"media": False, "reason": "manual-mode"})
     if body.get("triage_only"):
         # Verdetto secco senza submit: il chiamante carica i file solo se serve.
         spec = PRESETS.get(decision.preset) or {}
@@ -2011,9 +2022,6 @@ async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSON
             return JSONResponse({"media": False, "reason": "preset-disabled"})
         return JSONResponse({"media": True, "preset": decision.preset,
                              "reason": decision.reason})
-    if _state["desired_mode"] in ("LLM", "DIRECT"):
-        # Nessuno drenerebbe la coda: niente 202 orfani, torna al chat flow.
-        return JSONResponse({"media": False, "reason": "manual-mode"})
     given = str(body.get("prompt", "") or "").strip()
     if given:
         # Prompt incollato dal chiamante (impostazioni app): zero chiamate LLM,

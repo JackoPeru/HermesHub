@@ -74,9 +74,10 @@ internal suspend fun trySmartMediaSend(
     val managerBase = gpuManagerBase(settings.gatewayUrl)
     // Fase 0: verdetto senza file. Se non e media (o caso disattivato), il
     // flusso normale carica una volta sola dentro streamChatRequest.
+    val hasImage = attachments.any { it.mimeType.startsWith("image/", ignoreCase = true) }
     val verdictPayload = JSONObject()
         .put("text", text)
-        .put("has_image", true)
+        .put("has_image", hasImage)
         .put("triage_only", true)
     val (verdictCode, verdictBody) = postJson(
         "$managerBase/jobs/smart", verdictPayload, managerKey, allowCompatAuth = false
@@ -86,9 +87,9 @@ internal suspend fun trySmartMediaSend(
     var preset = if (verdict.optBoolean("media", false)) verdict.optString("preset") else ""
     if (preset.isBlank()) {
         // Foto senza istruzioni con modalita video: preset forzato dalle impostazioni.
-        preset = blankPhotoForcedPreset(settings, text, true) ?: return null
+        preset = blankPhotoForcedPreset(settings, text, hasImage) ?: return null
     }
-    val caseConfig = smartCaseConfig(settings, preset) ?: (true to "")
+    val caseConfig = smartCaseConfig(settings, preset) ?: return null // preset ignoto: mai fail-open con upload
     val resolvedPrompt = resolveSmartPrompt(caseConfig.second, caseConfig.first, text) ?: return null
     // 1. Upload esplicito (stessa fn del flusso normale). Al primo errore si
     // abortisce e il flusso normale riprova da zero: niente subset silenziosi.

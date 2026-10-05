@@ -1,17 +1,16 @@
-Hermes Hub 0.6.213 (fast path media end-to-end)
+Hermes Hub 0.6.214 (5 casi fast path + audit)
 
-- App: con allegati tenta prima /jobs/smart (triage Laya + prompt-only
-  LLM + submit interno) con poll ogni 10 s, progressi, viewer risultato
-  e titolo; fallback automatico al flusso normale su rifiuto/errore;
-  stop ripristina allegati e cancella il job sul server.
-- Manager: endpoint /jobs/smart con backpressure, triage off-loop,
-  gate LLM residente, publish idempotente in hub_uploads con media_urls.
-- Audit: input confinati a root fidate, node id sanitizzati, running
-  marcati failed al restart processo, deadline 15 min sul direct muto,
-  UI vincolata alla conversazione attiva, niente chiamate senza chiave,
-  job_id encodato, restore allegati senza duplicati.
-- Versioni: Windows/AdminBridge `0.6.213`; Android `versionName 0.6.213`, `versionCode 217`.
-- Asset: `HermesHub-0.6.213-android.apk` (binario Windows invariato).
-- SHA-256 Android: `7a88c8d5e445c396bd1488202eec267d8e72a0add0a678b3ed96751295bbc3e4`.
-- Asset: `HermesHub-0.6.213-linux-gateway.tar.gz`.
-- SHA-256 gateway: `293ab64dae71675273bb5e9f5f49b5c056d18fc3bbbf4cad7f7e7ea0ab22fc8b`.
+- App Impostazioni: sezione Fast path media con 5 casi (crea immagine,
+  modifica foto, video da foto con on/off + prompt incollato; analisi
+  foto sempre chat; foto senza istruzioni chat/video). Prompt con
+  {testo} = template, senza placeholder = fisso a zero token LLM.
+- App: verdetto triage prima dell'upload (niente doppio upload),
+  has_image reale dal mime, preset ignoti mai fail-open.
+- Manager: preset forzato, prompt incollato (salta gate e chiamata LLM),
+  triage forzato off-loop, guard manual-mode prima del verdetto,
+  {{...}} nei prompt neutralizzati.
+- Versioni: Windows/AdminBridge `0.6.214`; Android `versionName 0.6.214`, `versionCode 218`.
+- Asset: `HermesHub-0.6.214-android.apk` (binario Windows invariato).
+- SHA-256 Android: `ea093b73fe4aa1209f079a0118e605be27f469ec08bac5f8bce133c87d635938`.
+- Asset: `HermesHub-0.6.214-linux-gateway.tar.gz`.
+- SHA-256 gateway: `685ba5995ead20fdb2775887fa699373887fdfa0085543aafbe1237e45c5c69b`.

@@ -2,6 +2,15 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.214 - 2026-10-05
+
+- Fast path media: 5 casi in Impostazioni (crea/modifica/video con prompt
+  incollato, analisi sempre chat, foto senza istruzioni chat/video);
+  prompt canned saltano gate LLM e chiamata (zero token); preset forzato.
+- Audit: triage off-loop anche forzato, guard manual-mode prima del
+  verdetto, prompt con {{...}} neutralizzati, has_image reale, preset
+  ignoti mai fail-open.
+
 ## 0.6.213 - 2026-10-04
 
 - Fast path media: con allegati l'app tenta /jobs/smart (triage Laya,
