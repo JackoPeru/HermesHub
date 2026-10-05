@@ -74,47 +74,54 @@ class CanonicalBotChatTest {
     }
 
     @Test
-    fun transcriptMapping() {
-        val user = rowMsg("user", "ciao").toBotChatMessages()
-        assertEquals(1, user.size)
-        assertEquals("Tu", user[0].author)
-        assertTrue(user[0].fromUser)
+    fun transcriptFoldsLikeNormalChat() {
+        val toolRow = JSONObject().put("name", "exec").put("tool_call_id", "c1")
+        val calls = org.json.JSONArray().put(toolRow)
+        val rows = listOf(
+            rowMsg("user", "ciao"),
+            rowMsg("assistant", "ecco", mapOf("reasoning_content" to "penso")),
+            rowMsg("assistant", "", mapOf("tool_calls" to calls)),
+            rowMsg("tool", "<untrusted>muro di testo che non deve mai essere retained</untrusted>", mapOf("tool_call_id" to "c1")),
+            rowMsg("assistant", "fatto")
+        )
+        val folded = foldTranscriptToChat(rows)
+        // Tu + "ecco" (col tool piegato dentro) + "fatto"; il muro tool
+        // non e mai retained come testo.
+        assertEquals(3, folded.size)
+        assertEquals("Tu", folded[0].author)
+        assertEquals("Hermes", folded[1].author)
+        assertEquals("ecco", folded[1].text)
+        val tools = folded[1].activityTimeline.filter { it.kind == AssistantActivity.Kind.Tool }
+        assertEquals(1, tools.size)
+        assertEquals("exec", tools[0].tool?.name)
+        assertTrue(folded.none { it.text.contains("untrusted") })
+        assertEquals("fatto", folded[2].text)
+    }
 
-        val assistant = rowMsg("assistant", "ecco", mapOf("reasoning_content" to "penso")).toBotChatMessages()
-        assertEquals(1, assistant.size)
-        assertEquals("Hermes", assistant[0].author)
-        assertEquals("penso", assistant[0].thinking)
+    @Test
+    fun transcriptMarksFailedTools() {
+        val toolRow = JSONObject().put("name", "exec").put("tool_call_id", "c9")
+        val rows = listOf(
+            rowMsg("assistant", "", mapOf("tool_calls" to org.json.JSONArray().put(toolRow))),
+            rowMsg("tool", "err", mapOf("tool_call_id" to "c9", "display_kind" to "failed_turn"))
+        )
+        val folded = foldTranscriptToChat(rows)
+        assertEquals(1, folded.size)
+        assertEquals("", folded[0].text)
+        val tools = folded[0].activityTimeline.filter { it.kind == AssistantActivity.Kind.Tool }
+        assertEquals(1, tools.size)
+        assertEquals("fallito", tools[0].tool?.status)
+    }
 
-        // Assistant con testo + tool: due righe (testo + azione).
-        val toolRow = JSONObject().put("name", "exec")
-        val both = rowMsg("assistant", "fatto", mapOf("tool_calls" to org.json.JSONArray().put(toolRow))).toBotChatMessages()
-        assertEquals(2, both.size)
-        assertTrue(both[1].isAction)
-        assertTrue(both[1].text.contains("exec"))
-
-        val toolOnly = rowMsg("assistant", "", mapOf("tool_calls" to org.json.JSONArray().put(toolRow))).toBotChatMessages()
-        assertEquals(1, toolOnly.size)
-        assertTrue(toolOnly[0].isAction)
-
-        val tool = rowMsg("tool", "output", mapOf("tool_name" to "exec")).toBotChatMessages()
-        assertEquals(1, tool.size)
-        assertTrue(tool[0].isAction)
-        assertTrue(tool[0].text.contains("output"))
-
-        // Troncamento lungo marcato.
-        val long = rowMsg("tool", "x".repeat(400), mapOf("tool_name" to "exec")).toBotChatMessages()
-        assertEquals(1, long.size)
-        assertTrue(long[0].text.contains("…"))
-
-        // Turno fallito marcato.
-        val failed = rowMsg("assistant", "boom", mapOf("display_kind" to "failed_turn")).toBotChatMessages()
-        assertEquals(1, failed.size)
-        assertTrue(failed[0].text.startsWith("(fallito) "))
-
-        assertTrue(rowMsg("system", "x").toBotChatMessages().isEmpty())
-        assertTrue(rowMsg("assistant", "   ").toBotChatMessages().isEmpty())
-        assertTrue(rowMsg("unknown", "").toBotChatMessages().isEmpty())
-        // Compattazione con testo: azione visibile, non buco.
-        assertEquals(1, rowMsg("summary", "riepilogo", emptyMap()).toBotChatMessages().size)
+    @Test
+    fun transcriptSkipsNoise() {
+        val rows = listOf(
+            rowMsg("system", "x"),
+            rowMsg("assistant", "   "),
+            rowMsg("unknown", ""),
+            rowMsg("summary", "riepilogo", emptyMap()),
+            rowMsg("user", "")
+        )
+        assertTrue(foldTranscriptToChat(rows).isEmpty())
     }
 }
