@@ -385,9 +385,9 @@ internal object CanonicalBotOpenLocks {
 
     internal fun pruneIdleLocks() {
         if (locks.size <= MAX_LOCKS) return
-        // Solo lucchetti liberi: mai rimuovere uno in uso (nel dubbio
-        // resta in mappa, la potatura riprova al prossimo uso).
-        locks.entries.removeIf { (_, mutex) -> !mutex.isLocked }
+        // Solo lucchetti liberi e ancora gli stessi in mappa: mai rimuovere
+        // uno in uso o appena ricreato (nel dubbio resta, riprova dopo).
+        locks.entries.removeIf { (key, mutex) -> !mutex.isLocked && locks[key] === mutex && locks.size > MAX_LOCKS }
     }
 
     internal fun lockCountForTest(): Int = locks.size

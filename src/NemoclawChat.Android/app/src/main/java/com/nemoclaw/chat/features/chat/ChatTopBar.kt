@@ -194,6 +194,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -431,23 +433,38 @@ internal fun TopBar(
             )
             Column(modifier = Modifier.padding(start = 11.dp).weight(1f)) {
                 Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                // Testo troncato con ellipsis (niente scroll orizzontale: rubava
+                // lo swipe chat/bot); versione integrale al TalkBack.
+                val statusText = if (probingGateway) {
+                    "Verifica gateway…"
+                } else {
+                    gatewayRuntimeLabel(connected, gatewayRuntime) +
+                        if (!connected && !probeDetail.isNullOrBlank()) " · $probeDetail" else ""
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier.semantics {
+                        contentDescription = if (probingGateway) {
+                            "Gateway in verifica"
+                        } else if (connected) {
+                            "Gateway online. $statusText"
+                        } else {
+                            "Gateway offline. $statusText"
+                        }
+                    }
+                ) {
                     Box(
                         modifier = Modifier
                             .size(6.dp)
                             .background(if (probingGateway) AppColors.Muted else if (connected) AppColors.Success else AppColors.Error, CircleShape)
                     )
                     Text(
-                        if (probingGateway) {
-                            "Verifica gateway…"
-                        } else {
-                            gatewayRuntimeLabel(connected, gatewayRuntime) +
-                                if (!connected && !probeDetail.isNullOrBlank()) " · $probeDetail" else ""
-                        },
+                        statusText,
                         color = AppColors.Faint,
                         fontSize = 12.sp,
                         maxLines = 1,
-                        modifier = Modifier.horizontalScroll(rememberScrollState())
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

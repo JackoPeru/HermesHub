@@ -147,7 +147,7 @@ fun streamHermesSessionChat(
     if (effProvider != null) payload.put("provider", effProvider)
     val effOptions = modelOptions ?: buildHermesModelOptions(settings.reasoningEffort, settings.serviceTier, null)
     if (effOptions != null) payload.put("model_options", effOptions)
-    val url = sessionProfileUrl(settings, profile, "/api/sessions/$serverSessionId/chat/stream", multiplexEnabled)
+    val url = sessionProfileUrl(settings, profile, "/api/sessions/${java.net.URLEncoder.encode(serverSessionId, "UTF-8")}/chat/stream", multiplexEnabled)
     val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
     val authCandidates = if (!profile.isNullOrBlank()) hermesProfileAuthCandidates(apiKey, profile)
     else hermesAuthCandidates(apiKey, allowCompatAuth)

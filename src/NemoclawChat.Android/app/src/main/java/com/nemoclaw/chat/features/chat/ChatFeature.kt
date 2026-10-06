@@ -92,6 +92,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -485,7 +486,11 @@ internal fun ChatScreen(
         else isLinkedArchiveId(context, effective)
     }
 
-    LaunchedEffect(conversationId, initialPrompt, botSettings.gatewayUrl, botSessionId, botEndpoint) {
+    // Contatore ricaricamento manuale (pulsante Riprova dello stato vuoto):
+    // incluso nelle chiavi del load sotto, forza transcript+cache da zero.
+    var botLoadNonce by remember(botProfile, botSessionId) { mutableIntStateOf(0) }
+
+    LaunchedEffect(conversationId, initialPrompt, botSettings.gatewayUrl, botSessionId, botEndpoint, botLoadNonce) {
         // Flag solo con id non-blank: al ritorno dalla sezione Bot (o da tab)
         // l'effect rigira con (null, "") e NON deve azzerarlo, altrimenti il
         // gate reattach DONE sopprimerebbe output background legittimi.
@@ -611,7 +616,11 @@ internal fun ChatScreen(
     }
     PollWhileStarted(networkOnline, botSettings.gatewayUrl, botSettings.inferenceEndpoint, botApiKey, baseIntervalMs = 5_000L) {
         if (!networkOnline) {
+            // Telefono offline: responso negativo vero, non attesa infinita.
             gatewayAvailable = false
+            gatewayProbeDetail = "Rete non disponibile"
+            gatewayProbed = true
+            gatewayRuntime = null
             return@PollWhileStarted true
         }
         val (available, detail) = withContext(Dispatchers.IO) {
@@ -1081,7 +1090,8 @@ internal fun ChatScreen(
                         displayName = botDisplayName?.takeIf { it.isNotBlank() } ?: botProfile,
                         opening = false,
                         unreachable = !gatewayAvailable && gatewayProbed,
-                        detail = gatewayProbeDetail
+                        detail = gatewayProbeDetail,
+                        onRetry = { botLoadNonce++ }
                     )
                 } else {
                     EmptyState(onPrompt = { quickPrompt = it })
@@ -1219,9 +1229,10 @@ internal fun ChatScreen(
             lifecycle?.addObserver(observer)
             onDispose { lifecycle?.removeObserver(observer) }
         }
-        // Cambio gateway/endpoint: gli stream puntano al vecchio backend,
-        // cancellali (niente job orfani che scrivono snapshot fuori schermo).
-        DisposableEffect(botSettings.gatewayUrl) {
+        // Cambio gateway/endpoint/profilo/sessione/chiave: gli stream puntano
+        // al vecchio backend, cancellali (niente job orfani che scrivono
+        // snapshot fuori schermo). Vale anche tra bot sulla stessa gateway.
+        DisposableEffect(botSettings.gatewayUrl, botProfile, botSessionId, botEndpoint, botApiKey) {
             onDispose {
                 state.activeStreams.values.forEach { it.job?.cancel() }
                 state.activeStreams.clear()
@@ -2098,11 +2109,19 @@ internal fun BotLiveBanner(statusText: String) {
 }
 
 @Composable
-internal fun BotEmptyState(displayName: String?, opening: Boolean, unreachable: Boolean = false, detail: String? = null) {
+internal fun BotEmptyState(
+    displayName: String?,
+    opening: Boolean,
+    unreachable: Boolean = false,
+    detail: String? = null,
+    onRetry: (() -> Unit)? = null
+) {
+    val scroll = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 22.dp),
+            .verticalScroll(scroll)
+            .padding(horizontal = 22.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.Start
     ) {
@@ -2115,16 +2134,19 @@ internal fun BotEmptyState(displayName: String?, opening: Boolean, unreachable: 
             color = Color.White,
             fontWeight = FontWeight.SemiBold,
             fontSize = 27.sp,
-            lineHeight = 32.sp
+            lineHeight = 32.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
         )
         Spacer(modifier = Modifier.height(10.dp))
+        val detailCapped = detail?.takeIf { it.isNotBlank() }?.take(80)
         Text(
             text = when {
                 opening -> "Recupero la storia condivisa con Hermes desktop."
-                unreachable -> if (detail.isNullOrBlank()) {
+                unreachable -> if (detailCapped == null) {
                     "Il gateway non risponde: controlla la connessione e riprova dal roster."
                 } else {
-                    "Il gateway non risponde ($detail): controlla la connessione e riprova dal roster."
+                    "Il gateway non risponde ($detailCapped): controlla la connessione e riprova dal roster."
                 }
                 else -> "Questa e la chat persistente del bot: la stessa su telefono e desktop. Scrivi per iniziare."
             },
@@ -2132,6 +2154,12 @@ internal fun BotEmptyState(displayName: String?, opening: Boolean, unreachable: 
             fontSize = 14.sp,
             lineHeight = 20.sp
         )
+        if (unreachable && onRetry != null) {
+            Spacer(modifier = Modifier.height(14.dp))
+            Button(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text("Riprova")
+            }
+        }
     }
 }
 
@@ -2140,7 +2168,8 @@ internal fun EmptyState(onPrompt: (String) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 22.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 22.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.Start
     ) {

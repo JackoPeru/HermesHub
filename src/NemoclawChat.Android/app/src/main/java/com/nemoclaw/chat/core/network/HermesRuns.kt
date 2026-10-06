@@ -217,7 +217,7 @@ class HermesRunClient(
         var attempt = 0
         for (candidateUrl in plugAndPlayUrlCandidates(runUrl("/v1/runs"))) {
             for (token in hermesAuthCandidates(apiKey)) {
-                if (candidateUrl.contains("/p/", ignoreCase = true) && token == null) continue
+                if (candidateUrl.contains("/p/", ignoreCase = true) && token.isNullOrBlank()) continue
                 val res = runCatching {
                     val builder = okhttp3.Request.Builder()
                         .url(candidateUrl)
@@ -341,7 +341,7 @@ internal suspend fun collectRunSseEvents(
 ) {
     for (candidateUrl in plugAndPlayUrlCandidates(url)) {
         for (token in hermesAuthCandidates(apiKey)) {
-            if (candidateUrl.contains("/p/", ignoreCase = true) && token == null) continue
+            if (candidateUrl.contains("/p/", ignoreCase = true) && token.isNullOrBlank()) continue
             // Stesso pattern cancellabile di streamSseAttempt: stop abbatte la connessione.
             val builder = okhttp3.Request.Builder()
                 .url(candidateUrl)

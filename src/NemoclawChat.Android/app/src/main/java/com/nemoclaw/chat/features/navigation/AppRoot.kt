@@ -183,6 +183,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -280,30 +282,37 @@ import kotlin.math.roundToInt
 import kotlin.random.Random
 
 /**
- * Swipe orizzontale per cambiare modalita [Chat | Bot]: trascina oltre
- * ~96dp o fling veloce. Usa draggable (nested-scroll aware): lo scroll
- * verticale della lista resta vivo e gli scroller orizzontali interni
- * (sottotitolo, codice) vincono sul proprio tratto; scatta solo il gesto
- * ampio su area libera.
+ * Swipe orizzontale per cambiare modalita [Chat | Bot]. Scatta solo su
+ * gesto ampio E deciso (distanza + fling) oppure trascinamento molto
+ * lungo: un fling veloce su codice/sottotitolo non cambia modo da solo.
+ * Usa draggable (nested-scroll aware): verticale e scroller interni vivi.
+ * Disabilitato durante invio/streaming (lo swipe non deve mai ammazzare
+ * un turno senza conferma) e con TalkBack espone azioni equivalenti.
  */
 @Composable
 private fun Modifier.modeSwipe(
     enabled: Boolean = true,
+    sendingActive: Boolean = false,
     onSwipeLeft: () -> Unit,
     onSwipeRight: () -> Unit
 ): Modifier {
-    if (!enabled) return this
+    if (!enabled || sendingActive) return this
     val density = LocalDensity.current
     val thresholdPx = remember(density) { with(density) { 96.dp.toPx() } }
     val total = remember { mutableStateOf(0f) }
-    return draggable(
+    return semantics {
+        customActions = listOf(
+            androidx.compose.ui.semantics.CustomAccessibilityAction("Vai ai Bot", { onSwipeLeft(); true }),
+            androidx.compose.ui.semantics.CustomAccessibilityAction("Torna alla Chat", { onSwipeRight(); true })
+        )
+    }.draggable(
         state = rememberDraggableState { total.value += it },
         orientation = Orientation.Horizontal,
         onDragStopped = { velocity ->
             val dx = total.value
             total.value = 0f
-            if (dx <= -thresholdPx || velocity <= -900f) onSwipeLeft()
-            else if (dx >= thresholdPx || velocity >= 900f) onSwipeRight()
+            if ((dx <= -thresholdPx && velocity <= -200f) || dx <= -thresholdPx * 1.5f) onSwipeLeft()
+            else if ((dx >= thresholdPx && velocity >= 200f) || dx >= thresholdPx * 1.5f) onSwipeRight()
         }
     )
 }
@@ -586,10 +595,11 @@ internal fun ChatApp() {
     BackHandler(enabled = sidebarOpen) {
         sidebarOpen = false
     }
-    // Dalla sezione Bot il back torna alla chat (la sidebar ha priorita).
+    // Dalla sezione Bot il back torna indietro senza perdere contesto:
+    // se c'era una bot chat aperta ci ritorna, altrimenti va alla chat.
     // Mai durante apertura in corso: la coroutine sovrascriverebbe.
     BackHandler(enabled = botSectionVisible && !sidebarOpen && !sidebarBotOpening && selectedTab == Tab.Chat) {
-        selectChatSegment()
+        if (pendingBot != null) botSectionVisible = false else selectChatSegment()
     }
     // Da bot chat aperta (sezione chiusa) il back chiude il bot e torna
     // alla chat sottostante senza resettarla (stesso selectChatSegment).
@@ -690,6 +700,7 @@ internal fun ChatApp() {
                 )
                 androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f).modeSwipe(
                     enabled = !sidebarOpen,
+                    sendingActive = chatState.sending || chatState.streamingState != null,
                     onSwipeLeft = {},
                     onSwipeRight = selectChatSegment
                 )) {
@@ -735,6 +746,7 @@ internal fun ChatApp() {
                 ) { bot ->
                 Box(modifier = Modifier.fillMaxSize().modeSwipe(
                     enabled = !sidebarOpen,
+                    sendingActive = chatState.sending || chatState.streamingState != null,
                     onSwipeLeft = selectBotSegment,
                     onSwipeRight = selectChatSegment
                 )) {

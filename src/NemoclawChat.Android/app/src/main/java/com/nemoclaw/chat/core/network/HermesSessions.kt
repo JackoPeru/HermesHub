@@ -217,7 +217,9 @@ internal suspend fun loadCanonicalBotTranscript(
 ): List<ChatMessage>? = withContext(Dispatchers.IO) {
     runCatching {
         val client = HermesSessionClient(settings, apiKey, profile, multiplexEnabled, null)
-        val pageSize = 500
+        // Il limit del chiamante vale davvero: pagine da max 500, stop al
+        // raggiungimento (niente fetch da 2500 righe quando ne bastano 5).
+        val pageSize = limit.coerceAtLeast(1).coerceAtMost(500)
         val allRows = mutableListOf<HermesSessionMessage>()
         var offset = 0
         var lastCode = 200
@@ -230,7 +232,7 @@ internal suspend fun loadCanonicalBotTranscript(
             }
             if (rows.isEmpty()) break
             allRows.addAll(rows)
-            if (rows.size < pageSize) break
+            if (rows.size < pageSize || allRows.size >= limit) break
             offset += pageSize
         }
         if (lastCode !in 200..299 || allRows.isEmpty()) return@runCatching null
@@ -445,7 +447,11 @@ class HermesSessionClient(
                         .header("User-Agent", "HermesHub-Android")
                     HermesHubProtocol.addCorrelationHeaders(builder, HermesHubProtocol.newCorrelationContext())
                     token?.let { builder.header("Authorization", "Bearer $it") }
-                    builder.header("X-Hermes-Session-Key", sessionKey.trim())
+                    // Chiave sessione validata come altrove: header con \r\n
+                    // farebbe lanciare OkHttp invece di un drop pulito.
+                    sessionKey.takeIf { isValidHermesSessionKey(it) }?.let {
+                        builder.header("X-Hermes-Session-Key", it.trim())
+                    }
                     val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
                     val request = builder.post(body).build()
                     apiHttpClient.newCall(request).execute().use { resp ->

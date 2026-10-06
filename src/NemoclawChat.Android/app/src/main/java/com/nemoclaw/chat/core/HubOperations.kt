@@ -436,9 +436,9 @@ internal suspend fun updateTaskRequest(settings: AppSettings, task: AgentTask, a
         // Contratto moderno Jobs API: POST .../run, .../pause, .../resume, PATCH ..., DELETE ...
         // Mantiene fallback legacy esplicito (run/pause/delete gia' supportati).
         val url = when (normalized) {
-            "delete", "remove" -> "${hermesRoot(settings)}/api/jobs/${task.remoteId}"
-            "patch" -> "${hermesRoot(settings)}/api/jobs/${task.remoteId}"
-            else -> "${hermesRoot(settings)}/api/jobs/${task.remoteId}/$normalized"
+            "delete", "remove" -> "${hermesRoot(settings)}/api/jobs/${URLEncoder.encode(task.remoteId ?: "", "UTF-8")}"
+            "patch" -> "${hermesRoot(settings)}/api/jobs/${URLEncoder.encode(task.remoteId ?: "", "UTF-8")}"
+            else -> "${hermesRoot(settings)}/api/jobs/${URLEncoder.encode(task.remoteId ?: "", "UTF-8")}/${URLEncoder.encode(normalized, "UTF-8")}"
         }
         val method = when (normalized) {
             "delete", "remove" -> "DELETE"
@@ -724,7 +724,7 @@ internal suspend fun sendWorkspaceRunRequest(
         if (job.first in 200..299) {
             val remoteId = extractTaskId(job.second)
             if (!remoteId.isNullOrBlank()) {
-                runCatching { postJson("${hermesRoot(settings)}/api/jobs/$remoteId/run", JSONObject(), apiKey) }
+                runCatching { postJson("${hermesRoot(settings)}/api/jobs/${URLEncoder.encode(remoteId, "UTF-8")}/run", JSONObject(), apiKey) }
             }
             val artifact = parseWorkspaceArtifact(kind, job.second)
             return@withContext WorkspaceRunResult(
@@ -3212,7 +3212,7 @@ internal suspend fun sendWorkspaceFeedback(settings: AppSettings, item: Workspac
         )
         if (item.remoteId != null) {
             val response = postJson(
-                "${hermesRoot(settings)}/api/jobs/${item.remoteId}",
+                "${hermesRoot(settings)}/api/jobs/${URLEncoder.encode(item.remoteId, "UTF-8")}",
                 JSONObject().put("feedback", feedback).put("instructions", instructions),
                 apiKey,
                 "PATCH"
@@ -3343,7 +3343,7 @@ internal suspend fun sendVideoLibraryFeedback(settings: AppSettings, item: Video
 internal suspend fun runWorkspaceJobAction(settings: AppSettings, item: WorkspaceRequest, action: String, apiKey: String?): String = withContext(Dispatchers.IO) {
     val id = item.remoteId ?: return@withContext "Nessun job Hermes collegato."
     return@withContext try {
-        val response = postJson("${hermesRoot(settings)}/api/jobs/$id/$action", JSONObject(), apiKey)
+        val response = postJson("${hermesRoot(settings)}/api/jobs/${URLEncoder.encode(id, "UTF-8")}/${URLEncoder.encode(action, "UTF-8")}", JSONObject(), apiKey)
         if (response.first in 200..299) "Job Hermes aggiornato." else "Hermes HTTP ${response.first}: ${extractHumanError(response.second)}"
     } catch (ex: Exception) {
         "Azione job fallita: ${ex.message ?: ex.javaClass.simpleName}"

@@ -1776,7 +1776,7 @@ private fun runDetachedAgent(
             return@flow
         }
         kotlinx.coroutines.delay((2_000L * (consecutiveFailures + 1)).coerceAtMost(10_000L))
-        val statusUrl = if (botProfile.isNullOrBlank()) resolveHermesUrl(settings, "/v1/runs/$runId") else resolveHermesProfileUrl(settings, botProfile, "/v1/runs/$runId", botMultiplexEnabled)
+        val statusUrl = if (botProfile.isNullOrBlank()) resolveHermesUrl(settings, "/v1/runs/${java.net.URLEncoder.encode(runId, "UTF-8")}") else resolveHermesProfileUrl(settings, botProfile, "/v1/runs/${java.net.URLEncoder.encode(runId, "UTF-8")}", botMultiplexEnabled)
         val statusResponse = executeRunJsonRequest(statusUrl, null, apiKey, "GET", allowCompatAuth)
         if (statusResponse.first == 404) {
             consecutiveFailures++
