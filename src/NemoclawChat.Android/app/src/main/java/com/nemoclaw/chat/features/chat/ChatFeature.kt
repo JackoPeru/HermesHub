@@ -1447,7 +1447,10 @@ internal fun ChatScreen(
                         val useSessions = capsSnapshot?.supportsModernSessions() == true &&
                             (botSessionId.isNullOrBlank() || canonicalBotSession != null)
                         var sessionIdForTurn: String? = null
-                        if (smartJob == null && useSessions) {
+                        // La forever-chat canonica esiste di certo (aperta e con
+                        // transcript letta): non serve il gate capabilities per
+                        // inviarci — eventuali errori arrivano veri dal server.
+                        if (smartJob == null && (useSessions || canonicalBotSession != null)) {
                             if (canonicalBotSession != null) {
                                 state.sessionRoute = "sessions"
                                 sessionIdForTurn = canonicalBotSession
@@ -1629,13 +1632,29 @@ internal fun ChatScreen(
                                     )
                                 )
                             } else if (canonicalBotSession != null && localState.error == null) {
-                                // Forever-chat senza Sessions API: niente fallback
-                                // legacy silenzioso (scriverebbe fuori dalla chat
-                                // condivisa). Errore esplicito, riprova dopo.
-                                localState = localState.applyEvent(
-                                    ChatStreamEvent.Error("Bot Chat richiede Sessions API non disponibili: riprova tra poco.")
+                                // Ultima spiaggia (es. smart declinato): la
+                                // forever-chat esiste di certo, si prova l'invio
+                                // diretto. Niente fallback legacy silenzioso
+                                // (scriverebbe fuori dalla chat condivisa);
+                                // eventuali errori arrivano veri dal server.
+                                sessionIdForTurn = canonicalBotSession
+                                state.sessionRoute = "sessions"
+                                state.hermesSessionId = canonicalBotSession
+                                collectFlow(
+                                    streamHermesSessionChat(
+                                        botSettings.copy(model = effModel, provider = effProvider, reasoningEffort = effReasoning),
+                                        canonicalBotSession,
+                                        text,
+                                        botApiKey,
+                                        botProfile,
+                                        botMultiplexEnabled,
+                                        model = effModel,
+                                        provider = effProvider.takeIf { it.isNotBlank() && !it.equals("hermes-agent", true) },
+                                        modelOptions = buildHermesModelOptions(effReasoning, botSettings.serviceTier, capsSnapshot),
+                                        sessionKey = botSettings.hermesSessionKey.takeIf { isValidHermesSessionKey(it) },
+                                        allowCompatAuth = botAllowCompatAuth
+                                    )
                                 )
-                                if (state.activeConversationId == activeStreamCid) state.streamingState = localState
                             } else if (localState.error == null) {
                                 collectFlow(
                                     streamChatRequest(
