@@ -636,7 +636,7 @@ internal fun ChatScreen(
     var gatewayRuntime by remember(settings.gatewayUrl, settings.inferenceEndpoint, botConnectionId, botEndpoint) {
         mutableStateOf<GatewayRuntimeStatus?>(null)
     }
-    PollWhileStarted(networkOnline, botSettings.gatewayUrl, botSettings.inferenceEndpoint, botApiKey, baseIntervalMs = 5_000L) {
+    PollWhileStarted(networkOnline, botSettings.gatewayUrl, botSettings.inferenceEndpoint, botApiKey, settings.localGatewayUrl, baseIntervalMs = 5_000L) {
         if (!networkOnline) {
             // Telefono offline: responso negativo vero, non attesa infinita.
             gatewayAvailable = false
@@ -645,14 +645,22 @@ internal fun ChatScreen(
             gatewayRuntime = null
             return@PollWhileStarted true
         }
+        // Percorso più veloce solo per probe dot + bot primario: mai hot path chat/invii.
+        val isPrimary = botSettings.gatewayUrl == settings.gatewayUrl
+        val probeSettings = if (!settings.localGatewayUrl.isBlank() && isPrimary) {
+            val probeRoot = fastestGatewayRoot(settings)
+            if (probeRoot.isBlank()) botSettings else botSettings.copy(gatewayUrl = probeRoot)
+        } else {
+            botSettings
+        }
         val (available, detail) = withContext(Dispatchers.IO) {
-            probeHermesGatewayDetailed(botSettings, botApiKey)
+            probeHermesGatewayDetailed(probeSettings, botApiKey)
         }
         gatewayAvailable = available
         gatewayProbeDetail = detail
         gatewayProbed = true
         gatewayRuntime = if (available) {
-            runCatching { withContext(Dispatchers.IO) { loadGatewayRuntimeStatus(botSettings, botApiKey) } }.getOrNull()
+            runCatching { withContext(Dispatchers.IO) { loadGatewayRuntimeStatus(probeSettings, botApiKey) } }.getOrNull()
         } else {
             null
         }

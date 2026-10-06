@@ -353,7 +353,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
 
     def test_android_network_badge_requires_real_gateway_probe(self) -> None:
         main = read_android_sources()
-        self.assertIn("probeHermesGatewayDetailed(botSettings, botApiKey)", main)
+        self.assertIn("probeHermesGatewayDetailed(probeSettings, botApiKey)", main)
         self.assertIn("val botAllowCompatAuth = !remoteBot", main)
         self.assertIn('resolveHermesUrl(settings, "/v1/capabilities")', main)
         self.assertIn('if (!isValidGatewayProbeUrl(url)) return false to "', main)

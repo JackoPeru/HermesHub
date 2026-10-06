@@ -297,6 +297,7 @@ internal fun SettingsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var gatewayUrl by remember(settings.gatewayUrl) { mutableStateOf(settings.gatewayUrl) }
+    var localGatewayUrl by remember(settings.localGatewayUrl) { mutableStateOf(settings.localGatewayUrl) }
     var gatewayWsUrl by remember(settings.gatewayWsUrl) { mutableStateOf(settings.gatewayWsUrl) }
     var adminBridgeUrl by remember(settings.adminBridgeUrl) { mutableStateOf(settings.adminBridgeUrl) }
     var provider by remember(settings.provider) { mutableStateOf(settings.provider) }
@@ -377,6 +378,7 @@ internal fun SettingsScreen(
     fun currentSettings(scale: Float = fontScale): AppSettings {
         return AppSettings(
             gatewayUrl = gatewayUrl.trim(),
+            localGatewayUrl = localGatewayUrl.trim(),
             gatewayWsUrl = "",
             adminBridgeUrl = hermesRoot(AppSettings(gatewayUrl = gatewayUrl.trim())),
             provider = provider.trim(),
@@ -634,6 +636,12 @@ internal fun SettingsScreen(
                             fontSize = 12.sp
                         )
                         SettingsField("Indirizzo server Hermes", gatewayUrl, { gatewayUrl = it })
+                        SettingsField("URL locale casa (opzionale)", localGatewayUrl, { localGatewayUrl = it })
+                        Text(
+                            "Se a casa: accesso diretto veloce senza relay",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp
+                        )
                         SettingsPasswordField("API key Hermes", apiKey, { apiKey = it })
                         SettingsField("Cartella video Hermes (dal server)", videoLibraryPath, { }, readOnly = true)
                         SettingsField("Cartella news Hermes", newsLibraryPath, { newsLibraryPath = it })

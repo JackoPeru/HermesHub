@@ -86,6 +86,34 @@ internal val apiHttpClient: OkHttpClient by lazy {
         .build()
 }
 
+internal val managerProbeHttpClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .writeTimeout(8, TimeUnit.SECONDS)
+        .callTimeout(12, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(false)
+        .build()
+}
+
+/**
+ * Lettura stato/manager veloce: singolo tentativo, niente loop plugAndPlay,
+ * niente backoff/retry. Timeout brevi via [managerProbeHttpClient].
+ * Mai eccezioni oltre Cancellation: trasporto fallito -> (0, messaggio).
+ */
+internal suspend fun httpGetResponseQuick(
+    url: String,
+    apiKey: String? = null,
+    requestContext: HermesRequestContext = HermesHubProtocol.newCorrelationContext()
+): Pair<Int, String> = withContext(Dispatchers.IO) {
+    try {
+        executeHttpGetQuick(url, apiKey?.trim()?.takeIf { it.isNotEmpty() }, requestContext)
+    } catch (ex: Exception) {
+        if (ex is kotlinx.coroutines.CancellationException) throw ex
+        0 to (ex.message ?: ex.javaClass.simpleName)
+    }
+}
+
 internal suspend fun postJson(
     url: String,
     payload: JSONObject,
@@ -143,6 +171,24 @@ internal fun executeHttpGet(
             MAX_JSON_RESPONSE_BYTES
         }
         response.code to response.body.byteStream().readUtf8Bounded(limit)
+    }
+}
+
+internal fun executeHttpGetQuick(
+    url: String,
+    bearerToken: String?,
+    requestContext: HermesRequestContext = HermesHubProtocol.newCorrelationContext()
+): Pair<Int, String> {
+    val builder = Request.Builder()
+        .url(url)
+        .header("Accept", "application/json")
+        .header("User-Agent", "HermesHub-Android")
+    HermesHubProtocol.addCorrelationHeaders(builder, requestContext)
+    bearerToken?.let { builder.header("Authorization", "Bearer $it") }
+    val request = builder.get().build()
+
+    return managerProbeHttpClient.newCall(request).execute().use { response ->
+        response.code to response.body.byteStream().readUtf8Bounded()
     }
 }
 

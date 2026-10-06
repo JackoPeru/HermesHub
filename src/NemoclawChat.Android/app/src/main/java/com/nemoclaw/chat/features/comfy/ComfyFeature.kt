@@ -43,9 +43,10 @@ import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.AppColors
 import com.nemoclaw.chat.AppSettings
 import com.nemoclaw.chat.PollWhileStarted
+import com.nemoclaw.chat.fastestGatewayRoot
 import com.nemoclaw.chat.gatewayProbeHttpClient
 import com.nemoclaw.chat.gpuManagerBase
-import com.nemoclaw.chat.httpGetResponse
+import com.nemoclaw.chat.httpGetResponseQuick
 import com.nemoclaw.chat.loadGatewaySecret
 import com.nemoclaw.chat.managerStatusErrorMessage
 import com.nemoclaw.chat.readUtf8Bounded
@@ -134,7 +135,7 @@ internal suspend fun loadComfyStatus(gatewayUrl: String, managerKey: String?): C
         runCatching {
             val base = gpuManagerBase(gatewayUrl)
             if (base.isBlank()) return@runCatching ComfyStatus(false, error = "Gateway non configurato")
-            val (code, body) = httpGetResponse("$base/status", managerKey)
+            val (code, body) = httpGetResponseQuick("$base/status", managerKey)
             if (code !in 200..299) {
                 return@runCatching ComfyStatus(false, error = managerStatusErrorMessage(code, body).take(160))
             }
@@ -230,7 +231,7 @@ internal fun ComfyScreen(
     BackHandler(enabled = true) { onBack() }
     val appContext = context.applicationContext
     val scope = rememberCoroutineScope()
-    var status by remember(settings.gatewayUrl) { mutableStateOf<ComfyStatus?>(null) }
+    var status by remember(settings.gatewayUrl, settings.localGatewayUrl) { mutableStateOf<ComfyStatus?>(null) }
     var refreshNonce by remember { mutableIntStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
 
@@ -240,16 +241,18 @@ internal fun ComfyScreen(
         scope.launch {
             try {
                 val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
-                status = loadComfyStatus(settings.gatewayUrl, key)
+                val root = fastestGatewayRoot(settings)
+                status = loadComfyStatus(root.ifBlank { settings.gatewayUrl }, key)
             } finally {
                 refreshing = false
             }
         }
     }
 
-    PollWhileStarted(settings.gatewayUrl, refreshNonce, baseIntervalMs = 5_000L) {
+    PollWhileStarted(settings.gatewayUrl, settings.localGatewayUrl, refreshNonce, baseIntervalMs = 5_000L) {
         val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
-        status = loadComfyStatus(settings.gatewayUrl, key)
+        val root = fastestGatewayRoot(settings)
+        status = loadComfyStatus(root.ifBlank { settings.gatewayUrl }, key)
         true
     }
 

@@ -16,6 +16,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 import urllib.request
 import uuid
@@ -1952,6 +1953,29 @@ def require_key(request: Request) -> None:
         raise HTTPException(401, "invalid manager api key")
 
 
+def _is_local_request(request) -> bool:
+    try:
+        host = request.client.host if request.client else ""
+    except Exception:  # noqa: BLE001 - mai bloccare su client mancante
+        return False
+    return host in ("127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost")
+
+
+def _require_user_control(request) -> None:
+    if _is_local_request(request):
+        raise HTTPException(403, "solo l'utente gestisce il manager (locale: solo coda media e letture)")
+
+
+def _ensure_log_handler() -> None:
+    logger = logging.getLogger(APP_NAME)
+    if logger.handlers:
+        return
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(logging.INFO)
+    logger.addHandler(handler)
+    logger.propagate = False
+
+
 @app.get("/")
 async def root() -> dict:
     return {"service": APP_NAME, "status": "/status"}
@@ -2071,12 +2095,14 @@ def _require_manual_allowed(mode: str) -> None:
 
 @app.post("/mode/llm")
 async def mode_llm(request: Request, _: None = Depends(require_key)) -> dict:
+    _require_user_control(request)
     _log_mode_request(request, "LLM")
     return _set_desired("LLM")
 
 
 @app.post("/mode/media")
 async def mode_media(request: Request, _: None = Depends(require_key)) -> dict:
+    _require_user_control(request)
     _log_mode_request(request, "MEDIA")
     _require_manual_allowed("MEDIA")
     return _set_desired("MEDIA")
@@ -2084,21 +2110,24 @@ async def mode_media(request: Request, _: None = Depends(require_key)) -> dict:
 
 @app.post("/mode/auto")
 async def mode_auto(request: Request, _: None = Depends(require_key)) -> dict:
+    _require_user_control(request)
     _log_mode_request(request, "AUTO")
     return _set_desired("AUTO")
 
 
 @app.post("/mode/direct")
 async def mode_direct(request: Request, _: None = Depends(require_key)) -> dict:
+    _require_user_control(request)
     _log_mode_request(request, "DIRECT")
     _require_manual_allowed("DIRECT")
     return _set_desired("DIRECT")
 
 
 @app.post("/system/reboot")
-async def system_reboot(_: None = Depends(require_key)) -> dict:
+async def system_reboot(request: Request, _: None = Depends(require_key)) -> dict:
     """Reboot the whole server. Fire-and-forget: the response is returned
     before the reboot is issued so the caller sees the acknowledgement."""
+    _require_user_control(request)
     log.warning("remote full-server reboot requested via API")
     try:
         subprocess.Popen(
@@ -2281,6 +2310,7 @@ _worker_task: "asyncio.Task[None] | None" = None
 @app.on_event("startup")
 async def on_startup() -> None:
     global _worker_task
+    _ensure_log_handler()
     if not str(CONFIG.get("api_key") or ""):
         # Fail-fast visibile: senza chiave le rotte protette rispondono
         # 500 (vedi require_key). Impostare api_key o HERMES_GPU_MANAGER_KEY.

@@ -6,6 +6,7 @@ import com.nemoclaw.chat.core.WorkLimits
 
 data class AppSettings(
     val gatewayUrl: String = AppDefaults.gatewayUrl,
+    val localGatewayUrl: String = AppDefaults.localGatewayUrl,
     val gatewayWsUrl: String = AppDefaults.gatewayWsUrl,
     val adminBridgeUrl: String = AppDefaults.adminBridgeUrl,
     val provider: String = AppDefaults.provider,
@@ -81,6 +82,7 @@ internal fun loadSettings(context: Context): AppSettings {
     val prefs = migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
     val settings = AppSettings(
         gatewayUrl = prefs.getString("gatewayUrl", AppDefaults.gatewayUrl) ?: AppDefaults.gatewayUrl,
+        localGatewayUrl = prefs.getString("localGatewayUrl", AppDefaults.localGatewayUrl) ?: AppDefaults.localGatewayUrl,
         gatewayWsUrl = prefs.getString("gatewayWsUrl", AppDefaults.gatewayWsUrl) ?: AppDefaults.gatewayWsUrl,
         adminBridgeUrl = prefs.getString("adminBridgeUrl", AppDefaults.adminBridgeUrl) ?: AppDefaults.adminBridgeUrl,
         provider = prefs.getString("provider", AppDefaults.provider) ?: AppDefaults.provider,
@@ -152,6 +154,12 @@ private fun normalizePlugAndPlaySettings(context: Context, settings: AppSettings
         changed = true
     }
 
+    val localGateway = normalizeUrl(next.localGatewayUrl)
+    if (localGateway != next.localGatewayUrl) {
+        next = next.copy(localGatewayUrl = localGateway)
+        changed = true
+    }
+
     if (next.model.isBlank()) {
         next = next.copy(model = AppDefaults.model)
         changed = true
@@ -189,6 +197,7 @@ private fun normalizePlugAndPlaySettings(context: Context, settings: AppSettings
 internal fun saveSettings(context: Context, settings: AppSettings) {
     context.getSharedPreferences(CURRENT_SETTINGS_PREFS, Context.MODE_PRIVATE).edit {
         putString("gatewayUrl", normalizeUrl(settings.gatewayUrl))
+        putString("localGatewayUrl", normalizeUrl(settings.localGatewayUrl))
         putString("gatewayWsUrl", normalizeUrl(settings.gatewayWsUrl))
         putString("adminBridgeUrl", normalizeUrl(settings.adminBridgeUrl))
         putString("provider", settings.provider.trim())
@@ -252,6 +261,7 @@ internal const val MAX_FONT_SCALE = 1.25f
 
 internal object AppDefaults {
     const val gatewayUrl = ""
+    const val localGatewayUrl = ""
     const val gatewayWsUrl = ""
     const val adminBridgeUrl = ""
     const val provider = "hermes-agent"

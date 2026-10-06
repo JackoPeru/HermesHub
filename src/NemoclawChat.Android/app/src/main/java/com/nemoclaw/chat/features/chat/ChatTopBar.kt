@@ -319,8 +319,12 @@ internal fun TopBar(
     var llmError by remember { mutableStateOf("") }
 
     suspend fun readManagerStatus() {
+        // Lettura stato veloce: percorso più rapido (locale vs relay) + timeout brevi.
+        // Solo letture: le scritture mode/* restano sulla base configurata.
+        val fastRoot = fastestGatewayRoot(settings)
+        val fastBase = gpuManagerBase(fastRoot.ifBlank { settings.gatewayUrl })
         // Errori HTTP espliciti: un 401/500 non deve mai sembrare "tutto spento".
-        val (code, body) = httpGetResponse("$managerBase/status", managerApiKey)
+        val (code, body) = httpGetResponseQuick("$fastBase/status", managerApiKey)
         if (code !in 200..299) {
             throw IllegalStateException(managerStatusErrorMessage(code, body))
         }
@@ -356,7 +360,7 @@ internal fun TopBar(
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
-    LaunchedEffect(managerBase, menuOpen, lifecycleStarted) {
+    LaunchedEffect(managerBase, settings.localGatewayUrl, menuOpen, lifecycleStarted) {
         if (!lifecycleStarted) return@LaunchedEffect
         llmError = runCatching { readManagerStatus() }.exceptionOrNull()?.message ?: ""
         var failures = 0
@@ -497,6 +501,7 @@ internal fun TopBar(
                     HorizontalDivider()
                     val loaded = llmLoaded
                     val subtitle = when {
+                        llmError.isNotBlank() && loaded != null -> if (loaded) "Caricato sulle GPU (non aggiornato)" else "Scaricato (non aggiornato)"
                         llmError.isNotBlank() -> "Non raggiungibile"
                         loaded == null -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
                         llmBusy -> "Applicazione in corso..."

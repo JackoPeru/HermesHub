@@ -228,5 +228,57 @@ class TestManualModesPolicy(unittest.TestCase):
         self.assertIn("409", src)
 
 
+class TestManagerRoles(unittest.TestCase):
+    """Solo l'UTENTE (telefono via rete) gestisce il manager; l'agent in
+    localhost usa solo coda media + letture. Stile statico via AST/stringhe:
+    nessun import di manager.py (fastapi non serve)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
+        cls.tree = ast.parse(cls.src)
+        cls.funcs = {
+            n.name: n
+            for n in cls.tree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+
+    def _func_calls(self, name: str) -> str:
+        node = self.funcs.get(name)
+        self.assertIsNotNone(node, f"funzione {name} non trovata in manager.py")
+        seg = ast.get_source_segment(self.src, node)
+        self.assertIsNotNone(seg, f"sorgente {name} non estraibile")
+        return seg or ""
+
+    def test_helpers_exist(self):
+        self.assertIn("def _is_local_request(request)", self.src)
+        self.assertIn("def _require_user_control(request)", self.src)
+        self.assertIn("def _ensure_log_handler()", self.src)
+        for host in ('"127.0.0.1"', '"::1"', '"::ffff:127.0.0.1"', '"localhost"'):
+            self.assertIn(host, self.src)
+        self.assertIn("request.client.host", self.src)
+
+    def test_user_control_on_five_endpoints(self):
+        for name in ("mode_llm", "mode_media", "mode_auto", "mode_direct", "system_reboot"):
+            with self.subTest(endpoint=name):
+                self.assertIn("_require_user_control", self._func_calls(name))
+
+    def test_user_control_not_on_queue_and_reads(self):
+        for name in ("submit_job", "status", "root"):
+            with self.subTest(endpoint=name):
+                self.assertNotIn("_require_user_control", self._func_calls(name))
+
+    def test_forbidden_code_present(self):
+        self.assertIn("403", self.src)
+        self.assertIn("solo l'utente gestisce il manager", self.src)
+
+    def test_ensure_log_handler_in_on_startup(self):
+        self.assertIn("_ensure_log_handler()", self._func_calls("on_startup"))
+        seg = self._func_calls("_ensure_log_handler")
+        self.assertIn("StreamHandler", seg)
+        self.assertIn("propagate", seg)
+        self.assertIn("handlers", seg)
+
+
 if __name__ == "__main__":
     unittest.main()
