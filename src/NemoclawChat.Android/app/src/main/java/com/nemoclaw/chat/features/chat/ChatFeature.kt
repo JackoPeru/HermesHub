@@ -571,6 +571,17 @@ internal fun ChatScreen(
             }
         }
 
+        // Apertura chat bot: parti in fondo all'ultima risposta (le chat
+        // bot sono lunghe, l'inizio non serve). Solo se la lista e ancora
+        // in cima: rispetta la posizione se l'utente ha gia scrollato, e
+        // mai durante streaming (quello scrolla da se).
+        if (!botProfile.isNullOrBlank() && state.messages.isNotEmpty() &&
+            state.streamingState == null &&
+            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+        ) {
+            listState.scrollToItem((state.messages.size - 1).coerceAtLeast(0))
+        }
+
         if (initialPrompt.isNotBlank()) {
             state.draft = initialPrompt
         }

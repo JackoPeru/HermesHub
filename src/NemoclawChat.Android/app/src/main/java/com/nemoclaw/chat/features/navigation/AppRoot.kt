@@ -178,7 +178,10 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -275,6 +278,35 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.roundToInt
 import kotlin.random.Random
+
+/**
+ * Swipe orizzontale per cambiare modalita [Chat | Bot]: trascina oltre
+ * ~96dp o fling veloce. Usa draggable (nested-scroll aware): lo scroll
+ * verticale della lista resta vivo e gli scroller orizzontali interni
+ * (sottotitolo, codice) vincono sul proprio tratto; scatta solo il gesto
+ * ampio su area libera.
+ */
+@Composable
+private fun Modifier.modeSwipe(
+    enabled: Boolean = true,
+    onSwipeLeft: () -> Unit,
+    onSwipeRight: () -> Unit
+): Modifier {
+    if (!enabled) return this
+    val density = LocalDensity.current
+    val thresholdPx = remember(density) { with(density) { 96.dp.toPx() } }
+    val total = remember { mutableStateOf(0f) }
+    return draggable(
+        state = rememberDraggableState { total.value += it },
+        orientation = Orientation.Horizontal,
+        onDragStopped = { velocity ->
+            val dx = total.value
+            total.value = 0f
+            if (dx <= -thresholdPx || velocity <= -900f) onSwipeLeft()
+            else if (dx >= thresholdPx || velocity >= 900f) onSwipeRight()
+        }
+    )
+}
 
 @Composable
 internal fun ChatApp() {
@@ -656,7 +688,11 @@ internal fun ChatApp() {
                 onSelectChat = selectChatSegment,
                 onSelectBot = selectBotSegment
                 )
-                androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f)) {
+                androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f).modeSwipe(
+                    enabled = !sidebarOpen,
+                    onSwipeLeft = {},
+                    onSwipeRight = selectChatSegment
+                )) {
                 BotsScreen(
                     context = context,
                     settings = settings,
@@ -680,18 +716,40 @@ internal fun ChatApp() {
                 }
                 }
                 } else {
+                // Transizione chat <-> bot chat: stesso slide della sezione
+                // (bot da destra). Chiave = contesto bot: lo switch anima,
+                // lo stesso bot riusato no. Niente doppi effetti: il ramo
+                // entrante carica cio che serve comunque.
+                AnimatedContent(
+                targetState = pendingBot,
+                transitionSpec = {
+                    if (targetState != null) {
+                        (slideInHorizontally { it } + fadeIn()) togetherWith
+                            (slideOutHorizontally { -it / 3 } + fadeOut())
+                    } else {
+                        (slideInHorizontally { -it / 3 } + fadeIn()) togetherWith
+                            (slideOutHorizontally { it } + fadeOut())
+                    }
+                },
+                label = "chat-bot-chat"
+                ) { bot ->
+                Box(modifier = Modifier.fillMaxSize().modeSwipe(
+                    enabled = !sidebarOpen,
+                    onSwipeLeft = selectBotSegment,
+                    onSwipeRight = selectChatSegment
+                )) {
                 ChatScreen(
                 context = context,
                 settings = settings,
                 state = chatState,
                 scope = chatScope,
-                conversationId = pendingConversationId,
-                botProfile = pendingBot?.profile,
-                botSessionId = pendingBot?.sessionId,
-                botDisplayName = pendingBot?.displayName,
-                botMultiplexEnabled = pendingBot?.multiplexEnabled == true,
-                botConnectionId = pendingBot?.connectionId,
-                botEndpoint = pendingBot?.endpoint,
+                conversationId = bot?.localConversationId ?: pendingConversationId,
+                botProfile = bot?.profile,
+                botSessionId = bot?.sessionId,
+                botDisplayName = bot?.displayName,
+                botMultiplexEnabled = bot?.multiplexEnabled == true,
+                botConnectionId = bot?.connectionId,
+                botEndpoint = bot?.endpoint,
                 onNewChat = {
                     pendingBot = null
                     pendingConversationId = null
@@ -704,12 +762,14 @@ internal fun ChatApp() {
                 },
                 onOpenSidebar = { sidebarOpen = true },
                 onSwitchTab = { tab -> setSelectedTab(tab) },
-                chatBotActive = pendingBot != null,
+                chatBotActive = bot != null,
                 chatBotOpening = sidebarBotOpening,
                 onSelectChat = selectChatSegment,
                 onSelectBot = selectBotSegment,
                 onOpenBotSection = selectBotSegment
                 )
+                }
+                }
                 }
                 }
                 } }
