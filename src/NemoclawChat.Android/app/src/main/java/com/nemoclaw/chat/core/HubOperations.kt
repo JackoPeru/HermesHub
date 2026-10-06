@@ -4057,6 +4057,9 @@ class HermesNotificationWorker(context: Context, params: WorkerParameters) : Cor
     override suspend fun doWork(): Result {
         return try {
             if (applicationContext.getSharedPreferences("notification_settings", Context.MODE_PRIVATE).getBoolean("dnd", false)) return Result.success()
+            // App aperta: l'utente vede tutto dal vivo in chat; notificare
+            // ora significa solo l'eco dei propri prompt appena inviati.
+            if (isAppForeground()) return Result.success()
             ensureHermesNotificationChannel(applicationContext)
             val settings = loadSettings(applicationContext)
             val apiKey = loadGatewaySecret(applicationContext)

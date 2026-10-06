@@ -7,6 +7,7 @@ import com.nemoclaw.chat.features.bots.pickCanonicalRow
 import com.nemoclaw.chat.features.bots.relativeTimeLabel
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -272,5 +273,21 @@ class CanonicalBotChatTest {
         }
         // La mappa non cresce all'infinito: resta sotto il tetto.
         assertTrue(CanonicalBotOpenLocks.lockCountForTest() <= CanonicalBotOpenLocks.MAX_LOCKS)
+    }
+
+    @Test
+    fun ecoTurnoLocaleNonELavoroEsterno() {
+        val now = 1_800_000_000_000L
+        val turnEnd = now - 10_000L
+        // Riga nostra appena arrivata: fresca ma non esterna.
+        assertFalse(isExternalBotWork(now - 5_000L, now, turnEnd))
+        // Riga esterna arrivata dopo con margine: lavoro vero.
+        assertTrue(isExternalBotWork(turnEnd + 60_000L, turnEnd + 70_000L, turnEnd))
+        // Stantia: mai lavoro.
+        assertFalse(isExternalBotWork(now - 300_000L, now, turnEnd))
+        assertFalse(isExternalBotWork(0L, now, turnEnd))
+        // Senza turno locale: comportamento di prima (solo freschezza).
+        assertTrue(isExternalBotWork(now - 5_000L, now, 0L))
+        assertFalse(isExternalBotWork(now - 300_000L, now, 0L))
     }
 }

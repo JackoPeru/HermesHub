@@ -322,6 +322,24 @@ internal fun stableMessageId(raw: JSONObject?, fallbackIndex: Int): Int {
     return 1_000_000 + fallbackIndex.coerceAtLeast(0)
 }
 
+/** Finestra freschezza live bot: righe nuove o fresche = in esecuzione. */
+internal const val BOT_LIVE_FRESH_WINDOW_MS = 240_000L
+/** Tolleranza skew orologi telefono/server nel confronto eco. */
+internal const val BOT_LIVE_ECHO_TOLERANCE_MS = 30_000L
+
+/**
+ * La riga piu nuova indica VERO lavoro esterno solo se e fresca E piu
+ * nuova della fine del nostro ultimo turno locale (tolleranza skew).
+ * Senza questo, la nostra risposta appena arrivata (freschissima) tiene
+ * banner e stop accesi per minuti dopo ogni turno. Puro e testabile.
+ */
+internal fun isExternalBotWork(freshTsMs: Long, nowMs: Long, localTurnEndMs: Long): Boolean {
+    if (freshTsMs <= 0L) return false
+    if (nowMs - freshTsMs >= BOT_LIVE_FRESH_WINDOW_MS) return false
+    if (localTurnEndMs > 0L && freshTsMs <= localTurnEndMs + BOT_LIVE_ECHO_TOLERANCE_MS) return false
+    return true
+}
+
 @Composable
 internal fun ChatScreen(
     context: Context,
@@ -649,6 +667,10 @@ internal fun ChatScreen(
     // Solo bot chat, mai durante un turno locale (quello ha gia il suo stato).
     // Finestra freschezza 240s: i tool lunghi non producono righe per minuti;
     // meglio un banner che resta che un flicker che fa reinviare duplicati.
+    // Fine dell'ultimo turno LOCALE: le righe fino a qui sono (anche) nostre,
+    // mai segnale di lavoro esterno. Senza, ogni risposta appena arrivata
+    // tiene banner+stop accesi fino a scadenza finestra (240s).
+    var localTurnEndMs by remember { mutableLongStateOf(0L) }
     var botLive by remember(botProfile, botSessionId, botLoadNonce) { mutableStateOf<BotLiveActivity?>(null) }
     PollWhileStarted(botProfile, botSessionId, botMultiplexEnabled, botEndpoint, botApiKey, botSettings.gatewayUrl, baseIntervalMs = 5_000L) {
         val profile = botProfile
@@ -686,9 +708,11 @@ internal fun ChatScreen(
         }
         if (prev == null) {
             // Prima lettura: baseline, mai append (la storia completa e gia
-            // a video dal load). Running solo se coda fresca.
+            // a video dal load). Running solo se lavoro esterno vero
+            // (non la nostra risposta appena arrivata).
             val freshTs = latestTsMs(orderedTail)
-            val fresh = freshTs > 0 && System.currentTimeMillis() - freshTs < 240_000
+            val nowMs = System.currentTimeMillis()
+            val fresh = isExternalBotWork(freshTs, nowMs, localTurnEndMs)
             val newest = orderedTail.asReversed().firstOrNull()
             botLive = BotLiveActivity(
                 running = fresh && newest != null,
@@ -700,7 +724,7 @@ internal fun ChatScreen(
         val newRowsDesc = orderedWithIds.asReversed().filter { it.second > prev.maxRowId }
         val newRows = newRowsDesc.asReversed().map { it.first }
         val freshTs = latestTsMs(orderedTail)
-        val fresh = freshTs > 0 && System.currentTimeMillis() - freshTs < 240_000
+        val fresh = isExternalBotWork(freshTs, System.currentTimeMillis(), localTurnEndMs)
         if (!fresh && newRows.isEmpty()) {
             botLive = BotLiveActivity(running = false, status = "", maxRowId = maxId)
             return@PollWhileStarted true
@@ -929,7 +953,13 @@ internal fun ChatScreen(
             }
         }
     }
+    var wasStreaming by remember { mutableStateOf(false) }
     LaunchedEffect(isStreaming) {
+        if (wasStreaming && !isStreaming) {
+            // Turno locale finito: da qui le righe sono (anche) nostre.
+            localTurnEndMs = System.currentTimeMillis()
+        }
+        wasStreaming = isStreaming
         if (!isStreaming && state.messages.isNotEmpty()) {
             runCatching { haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
         }
@@ -1935,12 +1965,20 @@ internal fun ChatScreen(
                 }
             },
             onStop = {
-                // Solo live esterno, nessuno stream locale e nessun run
-                // posseduto: niente interrupt server possibile (il turno
-                // vive sul desktop), solo avviso onesto. Il quadrato resta
-                // perche segnala che il bot sta lavorando.
+                // Nessuno stream locale in corso: o e eco del turno appena
+                // finito (bandiera stale) o lavoro esterno vero. Nel primo
+                // caso si azzera e il poll riconferma entro 5s se lavora
+                // davvero (mai bugie sul desktop); nel secondo resta l'avviso.
                 if (!state.sending) {
-                    Toast.makeText(context, "Turno avviato dal desktop: stop solo dal desktop.", Toast.LENGTH_SHORT).show()
+                    val echoWindow = localTurnEndMs > 0L &&
+                        System.currentTimeMillis() - localTurnEndMs <
+                            BOT_LIVE_FRESH_WINDOW_MS + BOT_LIVE_ECHO_TOLERANCE_MS
+                    if (echoWindow) {
+                        botLive = botLive?.copy(running = false, status = "")
+                        Toast.makeText(context, "Risposta arrivata, stato aggiornato.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Turno avviato dal desktop: stop solo dal desktop.", Toast.LENGTH_SHORT).show()
+                    }
                     return@Composer
                 }
                 val activeRunId = state.streamingState?.activeRunId
