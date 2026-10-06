@@ -1,12 +1,13 @@
-Hermes Hub 0.6.224 (fix apertura bot)
+Hermes Hub 0.6.225 (stato rete + titolo bot)
 
-- App: risolto il blocco all'apertura delle chat bot (la rotella
-  girava all'infinito senza errori per un lock annidato); ora le
-  chat si aprono subito come prima.
-- App: mappe dei lucchetti potate oltre 64 voci e creazione atomica
-  anti-race; 2 nuovi test (serializzazione + potatura), 18/18 verdi.
-- Versioni: Windows/AdminBridge `0.6.224`; Android `versionName 0.6.224`, `versionCode 228`.
-- Asset: `HermesHub-0.6.224-android.apk` (binario Windows invariato).
-- SHA-256 Android: `c52ae9bddf21774f4d80b2b19a28cfbab2e1efdf923a55db04714182538e9271`.
-- Asset: `HermesHub-0.6.224-linux-gateway.tar.gz`.
-- SHA-256 gateway: `d7aed6b22f612baa87094f32c66438626ed1a2a7c69e0a63aa71d42d7c7fefce`.
+- App: lo stato gateway ora distingue "sto verificando" (grigio) da
+  "giu davvero" (rosso col motivo: HTTP/timeout/URL), in topbar e in
+  chat bot. Include anche il fix deadlock apertura bot della 0.6.224
+  non ancora installata sul telefono.
+- App: nome del bot nel titolo in alto, banda "Bot attivo" rimossa,
+  toggle [Chat|Bot] compatto.
+- Versioni: Windows/AdminBridge `0.6.225`; Android `versionName 0.6.225`, `versionCode 229`.
+- Asset: `HermesHub-0.6.225-android.apk` (binario Windows invariato).
+- SHA-256 Android: `2863d43b67d5e21c74b5435e44d8c1a94006f8abaac1e8cea8302ddf04bd6ef6`.
+- Asset: `HermesHub-0.6.225-linux-gateway.tar.gz`.
+- SHA-256 gateway: `832a7e2bc01a0c9d2928c9bd3fbb58b00d1ef917eaad84d9928290b7b72be552`.

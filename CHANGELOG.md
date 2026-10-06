@@ -2,6 +2,14 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.225 - 2026-10-06
+
+- Stato gateway diagnosticabile: grigio "Verifica gateway…" prima del
+  primo responso (mai piu rosso prematuro), motivo del fallimento
+  visibile (HTTP/timeout/URL) in topbar e in chat bot.
+- Chat bot: nome del bot nel titolo in alto al posto di "Hermes Hub",
+  banda "Bot attivo" rimossa, toggle [Chat|Bot] compatto.
+
 ## 0.6.224 - 2026-10-06
 
 - Fix critico: deadlock all'apertura bot (lock annidato sullo stesso
