@@ -1,6 +1,7 @@
 package com.nemoclaw.chat
 
 import com.nemoclaw.chat.features.bots.canonicalPreviewOf
+import com.nemoclaw.chat.features.bots.CanonicalBotOpenLocks
 import com.nemoclaw.chat.features.bots.isCanonicalBotRow
 import com.nemoclaw.chat.features.bots.pickCanonicalRow
 import com.nemoclaw.chat.features.bots.relativeTimeLabel
@@ -10,6 +11,10 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
 
 class CanonicalBotChatTest {
     private fun session(id: String, title: String, extra: Map<String, Any?> = emptyMap()): HermesSession {
@@ -237,5 +242,35 @@ class CanonicalBotChatTest {
         assertEquals(0, empty.messageCount)
         assertEquals("", empty.preview)
         assertEquals(0L, empty.lastActiveMs)
+    }
+
+    @Test
+    fun botLockSerializzaStessaChiave() = runBlocking {
+        val counter = AtomicInteger(0)
+        val dentro = AtomicInteger(0)
+        val maxDentro = AtomicInteger(0)
+        (1..20).map {
+            async {
+                CanonicalBotOpenLocks.withBotLock("test-serial") {
+                    val n = dentro.incrementAndGet()
+                    maxDentro.getAndUpdate { prev -> maxOf(prev, n) }
+                    kotlinx.coroutines.delay(1)
+                    dentro.decrementAndGet()
+                    counter.incrementAndGet()
+                }
+            }
+        }.awaitAll()
+        // Tutti passano una volta sola e mai in due dentro insieme.
+        assertEquals(20, counter.get())
+        assertEquals(1, maxDentro.get())
+    }
+
+    @Test
+    fun botLockPotaturaLimitaMappa() = runBlocking {
+        for (i in 1..120) {
+            CanonicalBotOpenLocks.withBotLock("test-potatura-$i") { }
+        }
+        // La mappa non cresce all'infinito: resta sotto il tetto.
+        assertTrue(CanonicalBotOpenLocks.lockCountForTest() <= CanonicalBotOpenLocks.MAX_LOCKS)
     }
 }

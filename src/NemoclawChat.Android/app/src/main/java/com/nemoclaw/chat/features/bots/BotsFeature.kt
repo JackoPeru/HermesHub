@@ -368,14 +368,29 @@ internal sealed interface CanonicalBotResolve {
 /** Singleflight cross-path: un solo resolve/create per bot alla volta
  *  (funnel roster/detail + sidebar + last-bot condividono la guard UI
  *  locale, ma corse tra path diversi mintavano due forever-chat).
- *  Rientrante: se la stessa coroutine detiene gia il lock (preview nested
- *  dentro resolve) riesegue senza riacquisire (Mutex non rientrante). */
+ *  MAI annidare: il lock vive solo dentro resolveCanonicalBotChat, i
+ *  chiamanti non lo prendono (Mutex non rientrante = deadlock).
+ *  La mappa e limitata: a fine uso pota i lucchetti liberi. */
 internal object CanonicalBotOpenLocks {
+    internal const val MAX_LOCKS = 64
     private val locks = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
     suspend fun <T> withBotLock(key: String, block: suspend () -> T): T {
         val mutex = locks.computeIfAbsent(key) { kotlinx.coroutines.sync.Mutex() }
-        return mutex.withLock { block() }
+        try {
+            return mutex.withLock { block() }
+        } finally {
+            pruneIdleLocks()
+        }
     }
+
+    internal fun pruneIdleLocks() {
+        if (locks.size <= MAX_LOCKS) return
+        // Solo lucchetti liberi: mai rimuovere uno in uso (nel dubbio
+        // resta in mappa, la potatura riprova al prossimo uso).
+        locks.entries.removeIf { (_, mutex) -> !mutex.isLocked }
+    }
+
+    internal fun lockCountForTest(): Int = locks.size
 }
 
 /** Match normalizzato canonico: trim().lowercase() == "bot chat".

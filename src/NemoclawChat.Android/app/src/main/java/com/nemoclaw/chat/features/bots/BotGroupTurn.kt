@@ -31,6 +31,7 @@ internal data class HermesBotGroupTurnResult(
 
 private const val MAX_GROUP_ROUNDS = 3
 private const val MAX_GROUP_MESSAGES = 10
+private const val MAX_MEMBER_LOCKS = 64
 private val groupMentionPattern = Pattern.compile("(?<![\\w])@([A-Za-z0-9][A-Za-z0-9_.-]{0,63})(?![\\w])")
 private val memberLocks = ConcurrentHashMap<String, Mutex>()
 private val activeTurns = ConcurrentHashMap<String, Job>()
@@ -85,7 +86,9 @@ internal suspend fun runHermesBotGroupTurn(
                 if (member.identityKey.lowercase() in failedIdentities) continue
                 ensureCurrentGroupTurn(key, epoch)
                 if (botMessages >= MAX_GROUP_MESSAGES) break
-                val lock = memberLocks.getOrPut(member.identityKey.lowercase()) { Mutex() }
+                // computeIfAbsent atomico: mai due Mutex per la stessa chiave
+                // (getOrPut in race ne creava due e il singleflight saltava).
+                val lock = memberLocks.computeIfAbsent(member.identityKey.lowercase()) { Mutex() }
                 try {
                     val result = lock.withLock {
                         ensureCurrentGroupTurn(key, epoch)
@@ -132,6 +135,11 @@ internal suspend fun runHermesBotGroupTurn(
     } finally {
         synchronized(turnRegistryLock) {
             activeTurns.remove(key, currentJob)
+        }
+        // La mappa lucchetti non cresce all'infinito: a fine turno pota
+        // quelli liberi (mai rimuovere uno in uso).
+        if (memberLocks.size > MAX_MEMBER_LOCKS) {
+            memberLocks.entries.removeIf { (_, mutex) -> !mutex.isLocked }
         }
     }
 }
