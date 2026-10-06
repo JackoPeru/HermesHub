@@ -141,13 +141,16 @@ try {
 
     if (-not $SkipSigning) {
         $subject = "CN=AppPublisher"
+        # Pin thumbprint storico: il solo Subject non basta, qualsiasi
+        # self-signed con lo stesso CN passerebbe il filtro.
+        $historicThumbprint = "6A01C529DDC5C2E32390A24E312426604537F7A1"
         $cert = Get-ChildItem Cert:\CurrentUser\My |
-            Where-Object { $_.Subject -eq $subject -and $_.NotAfter -gt (Get-Date).AddMonths(1) } |
+            Where-Object { $_.Subject -eq $subject -and $_.Thumbprint -eq $historicThumbprint -and $_.NotAfter -gt (Get-Date).AddMonths(1) } |
             Sort-Object NotAfter -Descending |
             Select-Object -First 1
 
         if (-not $cert) {
-            throw "Certificato storico assente per $subject (validita residua >1 mese richiesta). Importare quello storico, non autocrearne uno."
+            throw "Certificato storico $subject con thumbprint $historicThumbprint assente o in scadenza (validita residua >1 mese richiesta). Importare quello storico, non autocrearne uno."
         }
 
         $certPath = Join-Path $releaseDir "HermesHub-AppPublisher.cer"
@@ -185,7 +188,13 @@ try {
     # Signing changes the file size after Get-ChildItem created $msix. Re-read it
     # instead of comparing the copied asset with the stale FileInfo.Length value.
     $sourceLength = (Get-Item -LiteralPath $msix.FullName).Length
-    $target = Join-Path $releaseDir $msix.Name
+    $assetName = $msix.Name
+    if ($SkipSigning) {
+        # Mai un unsigned col nome release: non deve essere pubblicabile.
+        $assetName = [System.IO.Path]::GetFileNameWithoutExtension($msix.Name) + "-unsigned" + [System.IO.Path]::GetExtension($msix.Name)
+        Write-Warning "MSIX senza firma (SkipSigning): asset $assetName NON pubblicabile in release."
+    }
+    $target = Join-Path $releaseDir $assetName
     if (Test-Path -LiteralPath $target) {
         Remove-Item -LiteralPath $target -Force
     }

@@ -342,7 +342,8 @@ if _FASTAPI:
     def _require_key(request: Request) -> None:
         expected = str(_manager_config().get("api_key") or "")
         if not expected:
-            return
+            # Fail-closed come manager.require_key.
+            raise HTTPException(500, "manager api_key non configurata")
         auth = request.headers.get("authorization", "")
         if not hmac.compare_digest(auth, f"Bearer {expected}"):
             raise HTTPException(401, "invalid manager api key")

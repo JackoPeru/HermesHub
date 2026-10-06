@@ -1907,7 +1907,9 @@ except Exception as exc:
 def require_key(request: Request) -> None:
     expected = str(CONFIG.get("api_key") or "")
     if not expected:
-        return
+        # Fail-closed: senza chiave configurata NESSUNA rotta protetta
+        # risponde (prima: passava tutto, anche /system/reboot).
+        raise HTTPException(500, "manager api_key non configurata")
     auth = request.headers.get("authorization", "")
     if not hmac.compare_digest(auth, f"Bearer {expected}"):
         raise HTTPException(401, "invalid manager api key")
@@ -2212,6 +2214,11 @@ _worker_task: "asyncio.Task[None] | None" = None
 @app.on_event("startup")
 async def on_startup() -> None:
     global _worker_task
+    if not str(CONFIG.get("api_key") or ""):
+        # Fail-fast visibile: senza chiave le rotte protette rispondono
+        # 500 (vedi require_key). Impostare api_key o HERMES_GPU_MANAGER_KEY.
+        log.error("api_key non configurata: rotte protette disabilitate (500). "
+                  "Impostare api_key in gpu-manager.yaml o HERMES_GPU_MANAGER_KEY.")
     _db_conn()
     cleanup_old_artifacts()
     _worker_task = asyncio.create_task(worker_loop())
