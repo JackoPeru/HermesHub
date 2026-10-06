@@ -292,6 +292,9 @@ internal fun TopBar(
     contextUsage: ContextUsage,
     connected: Boolean,
     gatewayRuntime: GatewayRuntimeStatus?,
+    probingGateway: Boolean = false,
+    probeDetail: String? = null,
+    title: String = "Hermes Hub",
     managerApiKey: String? = null,
     onNewChat: () -> Unit = {},
     onOpenSidebar: () -> Unit = {},
@@ -427,15 +430,20 @@ internal fun TopBar(
                     .clickable(onClick = onOpenSidebar)
             )
             Column(modifier = Modifier.padding(start = 11.dp).weight(1f)) {
-                Text("Hermes Hub", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     Box(
                         modifier = Modifier
                             .size(6.dp)
-                            .background(if (connected) AppColors.Success else AppColors.Error, CircleShape)
+                            .background(if (probingGateway) AppColors.Muted else if (connected) AppColors.Success else AppColors.Error, CircleShape)
                     )
                     Text(
-                        gatewayRuntimeLabel(connected, gatewayRuntime),
+                        if (probingGateway) {
+                            "Verifica gateway…"
+                        } else {
+                            gatewayRuntimeLabel(connected, gatewayRuntime) +
+                                if (!connected && !probeDetail.isNullOrBlank()) " · $probeDetail" else ""
+                        },
                         color = AppColors.Faint,
                         fontSize = 12.sp,
                         maxLines = 1,

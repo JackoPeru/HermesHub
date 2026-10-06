@@ -585,6 +585,16 @@ internal fun ChatScreen(
     var gatewayAvailable by remember(settings.gatewayUrl, settings.inferenceEndpoint, botConnectionId, botEndpoint) {
         mutableStateOf(false)
     }
+    // Tri-stato reale: finche la prima probe non risponde, il pallino e
+    // grigio ("Verifica gateway…") e NON rosso. Solo dopo un responso
+    // negativo si mostra "Rete non disponibile" col motivo (HTTP/timeout),
+    // cosi si capisce se e solo UI o davvero giu.
+    var gatewayProbed by remember(settings.gatewayUrl, settings.inferenceEndpoint, botConnectionId, botEndpoint) {
+        mutableStateOf(false)
+    }
+    var gatewayProbeDetail by remember(settings.gatewayUrl, settings.inferenceEndpoint, botConnectionId, botEndpoint) {
+        mutableStateOf<String?>(null)
+    }
     var gatewayRuntime by remember(settings.gatewayUrl, settings.inferenceEndpoint, botConnectionId, botEndpoint) {
         mutableStateOf<GatewayRuntimeStatus?>(null)
     }
@@ -593,10 +603,12 @@ internal fun ChatScreen(
             gatewayAvailable = false
             return@PollWhileStarted true
         }
-        val available = withContext(Dispatchers.IO) {
-            probeHermesGateway(botSettings, botApiKey)
+        val (available, detail) = withContext(Dispatchers.IO) {
+            probeHermesGatewayDetailed(botSettings, botApiKey)
         }
         gatewayAvailable = available
+        gatewayProbeDetail = detail
+        gatewayProbed = true
         gatewayRuntime = if (available) {
             withContext(Dispatchers.IO) { loadGatewayRuntimeStatus(botSettings, botApiKey) }
         } else {
@@ -937,10 +949,19 @@ internal fun ChatScreen(
             .fillMaxSize()
             .background(if (isEmptyChat) emptyChatBrush else solidBrush)
     ) {
+        // In chat bot il titolo e il nome del bot (niente banda separata).
+        val topTitle = if (!botProfile.isNullOrBlank()) {
+            botDisplayName?.takeIf { it.isNotBlank() } ?: botProfile
+        } else {
+            "Hermes Hub"
+        }
         TopBar(
             settings = settings,
             contextUsage = contextUsage,
             connected = gatewayAvailable,
+            probingGateway = !gatewayProbed,
+            probeDetail = gatewayProbeDetail,
+            title = topTitle,
             gatewayRuntime = gatewayRuntime,
             managerApiKey = managerKey,
             onNewChat = onNewChat,
@@ -952,16 +973,6 @@ internal fun ChatScreen(
             onSelectChat = onSelectChat,
             onSelectBot = onSelectBot
         )
-        if (!botProfile.isNullOrBlank()) {
-            Surface(color = AppColors.NavIndicator, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = "Bot attivo · ${botDisplayName ?: botProfile} · Bot Chat",
-                    color = AppColors.Accent,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp)
-                )
-            }
-        }
         if (archivedBotWithoutContext) {
             Surface(color = Color(0xFF7A3E00), modifier = Modifier.fillMaxWidth()) {
                 Row(
@@ -1058,7 +1069,8 @@ internal fun ChatScreen(
                     BotEmptyState(
                         displayName = botDisplayName?.takeIf { it.isNotBlank() } ?: botProfile,
                         opening = false,
-                        unreachable = !gatewayAvailable
+                        unreachable = !gatewayAvailable && gatewayProbed,
+                        detail = gatewayProbeDetail
                     )
                 } else {
                     EmptyState(onPrompt = { quickPrompt = it })
@@ -2056,7 +2068,7 @@ internal fun BotLiveBanner(statusText: String) {
 }
 
 @Composable
-internal fun BotEmptyState(displayName: String?, opening: Boolean, unreachable: Boolean = false) {
+internal fun BotEmptyState(displayName: String?, opening: Boolean, unreachable: Boolean = false, detail: String? = null) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -2079,7 +2091,11 @@ internal fun BotEmptyState(displayName: String?, opening: Boolean, unreachable: 
         Text(
             text = when {
                 opening -> "Recupero la storia condivisa con Hermes desktop."
-                unreachable -> "Il gateway non risponde: controlla la connessione e riprova dal roster."
+                unreachable -> if (detail.isNullOrBlank()) {
+                    "Il gateway non risponde: controlla la connessione e riprova dal roster."
+                } else {
+                    "Il gateway non risponde ($detail): controlla la connessione e riprova dal roster."
+                }
                 else -> "Questa e la chat persistente del bot: la stessa su telefono e desktop. Scrivi per iniziare."
             },
             color = AppColors.Muted,

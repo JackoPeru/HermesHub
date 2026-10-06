@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Selettore [Chat | Bot] in alto alla chat: pill sottile (~20dp) ed elegante.
+ * Selettore [Chat | Bot] in alto alla chat: pill compatta (~36dp).
  * Il segmento illuminato dice in che sezione si e: Chat = conversazioni
  * proprie, Bot = sezione bot con la forever-chat canonica condivisa col
  * desktop. Lo stato e issato in AppRoot; il contenuto sotto scorre con
@@ -46,7 +46,7 @@ internal fun ChatBotToggle(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(horizontal = 16.dp, vertical = 2.dp)
             .selectableGroup(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
@@ -86,7 +86,7 @@ private fun ChatBotSegment(
     val interactionSource = remember { MutableInteractionSource() }
     Surface(
         modifier = Modifier
-            .heightIn(min = 48.dp)
+            .heightIn(min = 36.dp)
             .clip(CircleShape)
             .selectable(
                 selected = selected,
@@ -102,24 +102,24 @@ private fun ChatBotSegment(
         shape = CircleShape
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 1.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (selected) {
                 Box(
                     modifier = Modifier
-                        .padding(end = 5.dp)
-                        .size(8.dp)
+                        .padding(end = 4.dp)
+                        .size(6.dp)
                         .background(Color(0xFF171009), CircleShape)
                 )
             }
             Text(
                 text = label,
                 color = if (selected) Color(0xFF171009) else AppColors.Muted,
-                fontSize = 13.sp,
+                fontSize = 12.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                lineHeight = 16.sp,
+                lineHeight = 14.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

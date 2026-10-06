@@ -1396,9 +1396,17 @@ internal fun isValidGatewayProbeUrl(url: String): Boolean {
     }
 }
 
-internal fun probeHermesGateway(settings: AppSettings, apiKey: String?): Boolean {
+internal fun probeHermesGateway(settings: AppSettings, apiKey: String?): Boolean =
+    probeHermesGatewayDetailed(settings, apiKey).first
+
+/**
+ * Come probeHermesGateway ma con motivo del fallimento (mai eccezioni):
+ * null = raggiunto, altrimenti "URL non valido", "timeout di rete" o
+ * "HTTP {code}". Serve a distinguere "sto verificando" da "giù davvero".
+ */
+internal fun probeHermesGatewayDetailed(settings: AppSettings, apiKey: String?): Pair<Boolean, String?> {
     val url = resolveHermesUrl(settings, "/v1/capabilities")
-    if (!isValidGatewayProbeUrl(url)) return false
+    if (!isValidGatewayProbeUrl(url)) return false to "URL non valido"
     val requestContext = HermesHubProtocol.newCorrelationContext()
     for (token in hermesAuthCandidates(apiKey)) {
         val request = try {
@@ -1413,17 +1421,17 @@ internal fun probeHermesGateway(settings: AppSettings, apiKey: String?): Boolean
                 .get()
                 .build()
         } catch (_: Exception) {
-            return false
+            return false to "URL non valido"
         }
         val statusCode = try {
             gatewayProbeHttpClient.newCall(request).execute().use { it.code }
         } catch (_: Exception) {
-            return false
+            return false to "timeout di rete"
         }
-        if (isSuccessfulGatewayProbe(statusCode)) return true
-        if (statusCode != 401) return false
+        if (isSuccessfulGatewayProbe(statusCode)) return true to null
+        if (statusCode != 401) return false to "HTTP $statusCode"
     }
-    return false
+    return false to "HTTP 401"
 }
 
 internal fun loadGatewayRuntimeStatus(settings: AppSettings, apiKey: String?): GatewayRuntimeStatus? {
