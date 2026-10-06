@@ -1,15 +1,10 @@
-Hermes Hub 0.6.228 (audit: invio, rete, swipe, rotazione)
+Hermes Hub 0.6.229 (sezione Comfy)
 
-- App: invio bot col retry canonico prima del legacy (niente piu
-  scritture fuori chat); ogni errore HTTP visibile; bozza
-  ripristinata se l'invio fallisce.
-- App: swipe solo su gesto deciso e mai durante invio; back dal
-  roster senza perdere la bot chat; Riprova ricarica davvero;
-  registrazione e schermo salvi alla rotazione.
-- App: rete con backoff, URL encodati, trascrizione vuota segnalata.
-- Server: script deploy ufficiale con rollback automatico (uso interno).
-- Versioni: Windows/AdminBridge `0.6.228`; Android `versionName 0.6.228`, `versionCode 232`.
-- Asset: `HermesHub-0.6.228-android.apk` (binario Windows invariato).
-- SHA-256 Android: `4646ca6a14939e6821cb9b600b19df3d09803216563322f162aa95fe95ef432b`.
-- Asset: `HermesHub-0.6.228-linux-gateway.tar.gz`.
-- SHA-256 gateway: `7a99011c1405cb82790135a0074e5dc2d3b330eab0c579ccadf9c68348a3fbe0`.
+- App: nuova sezione Comfy dal menu (tre puntini) con stato GPU,
+  lavoro in corso, avanzamento live ogni 5s, coda ed errori ComfyUI;
+  riassunto live anche nella voce menu.
+- Versioni: Windows/AdminBridge `0.6.229`; Android `versionName 0.6.229`, `versionCode 233`.
+- Asset: `HermesHub-0.6.229-android.apk` (binario Windows invariato).
+- SHA-256 Android: `67633b28816ddb6a7a32e7805b8e900e2a590a0755f3ce66476a41fd2321a35c`.
+- Asset: `HermesHub-0.6.229-linux-gateway.tar.gz`.
+- SHA-256 gateway: `55dd8c846ff666a66c4785d815f9f8d5b2408fc39c687cdcfa337fb322da0d51`.

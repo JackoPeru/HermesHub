@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.229 - 2026-10-06
+
+- Nuova sezione Comfy: stato GPU, lavoro in corso con avanzamento
+  live, coda ed errori ComfyUI; voce "Comfy: cosa sta facendo" nel
+  menu con riassunto live.
+
 ## 0.6.228 - 2026-10-06
 
 - Invio bot: il retry canonico tenta prima del fallback legacy (mai
