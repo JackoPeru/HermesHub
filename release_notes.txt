@@ -1,21 +1,12 @@
-Hermes Hub 0.6.223 (audit completo)
+Hermes Hub 0.6.224 (fix apertura bot)
 
-- App: Bot Chat canoniche paginate (niente piu miss oltre 200
-  sessioni), lock singleflight anche sulle anteprime, create
-  idempotente con re-list su 400/409; live bot con dedup stabile e
-  ordinamento deterministico.
-- App: timeout di rete finiti (stream 60s/90s, archive 60s/10min),
-  URL encodati, auth fail-closed sui profili /p/ (mai fallback
-  anonimo), retry con backoff+jitter; roster 8s + preview 8s.
-- App: backstack bot corretto, niente stream orfani al cambio gateway,
-  rotate che conserva dettaglio/schermo/avvisi; toggle e sidebar con
-  target 48dp, loading/error/empty distinti con riprova.
-- Server: watchdog anti-prefill (VRAM+util oltre al journal, fails
-  resettati, --since locale), stray-CUDA fail-closed su /proc,
-  busy_timeout DB, backup symlink e digest sha256 obbligatorio,
-  MSIX fail-closed senza self-signed, ufw con backup.
-- Versioni: Windows/AdminBridge `0.6.223`; Android `versionName 0.6.223`, `versionCode 227`.
-- Asset: `HermesHub-0.6.223-android.apk` (binario Windows invariato).
-- SHA-256 Android: `1a3d82eaaec9a248f2130ef0e92419e1a007e864cfce71295c62152f737f421e`.
-- Asset: `HermesHub-0.6.223-linux-gateway.tar.gz`.
-- SHA-256 gateway: `68875f02fedbbd1164340bd6c7f8043e674215d2692fcdac6cffede75ce278a0`.
+- App: risolto il blocco all'apertura delle chat bot (la rotella
+  girava all'infinito senza errori per un lock annidato); ora le
+  chat si aprono subito come prima.
+- App: mappe dei lucchetti potate oltre 64 voci e creazione atomica
+  anti-race; 2 nuovi test (serializzazione + potatura), 18/18 verdi.
+- Versioni: Windows/AdminBridge `0.6.224`; Android `versionName 0.6.224`, `versionCode 228`.
+- Asset: `HermesHub-0.6.224-android.apk` (binario Windows invariato).
+- SHA-256 Android: `c52ae9bddf21774f4d80b2b19a28cfbab2e1efdf923a55db04714182538e9271`.
+- Asset: `HermesHub-0.6.224-linux-gateway.tar.gz`.
+- SHA-256 gateway: `d7aed6b22f612baa87094f32c66438626ed1a2a7c69e0a63aa71d42d7c7fefce`.

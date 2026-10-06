@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.224 - 2026-10-06
+
+- Fix critico: deadlock all'apertura bot (lock annidato sullo stesso
+  Mutex bloccava la chat per sempre senza errori); ora il lock vive
+  solo dentro il resolve. Potatura mappe lucchetti e creazione
+  atomica anti-race, con 2 nuovi test di serializzazione.
+
 ## 0.6.223 - 2026-10-06
 
 - Audit completo: Bot Chat canoniche paginate con lock e retry
