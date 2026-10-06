@@ -2,6 +2,17 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.228 - 2026-10-06
+
+- Invio bot: il retry canonico tenta prima del fallback legacy (mai
+  piu scritture fuori dalla chat condivisa); errori HTTP sempre
+  visibili, mai drop silenziosi; bozza ripristinata se fallisce.
+- Rete: cancellazioni rispettate, backoff nei retry, URL encode
+  completi, trascrizione vuota segnalata, testi senza host.
+- Swipe deciso (ampio+veloce, mai durante invio), back dal roster che
+  tiene la bot chat, retry che ricarica davvero, rotazione sicura per
+  voce e schermo, topbar accessibile.
+
 ## 0.6.227 - 2026-10-06
 
 - Invio bot: la chat esistente invia sempre diretto via Sessions

@@ -1,10 +1,15 @@
-Hermes Hub 0.6.227 (fix invio bot)
+Hermes Hub 0.6.228 (audit: invio, rete, swipe, rotazione)
 
-- App: inviando a un bot con chat aperta non compare piu il blocco
-  "Sessions API non disponibili": l'invio parte diretto, eventuali
-  problemi veri mostrati con l'errore reale del server.
-- Versioni: Windows/AdminBridge `0.6.227`; Android `versionName 0.6.227`, `versionCode 231`.
-- Asset: `HermesHub-0.6.227-android.apk` (binario Windows invariato).
-- SHA-256 Android: `56767c9f915355155b710a9f6240c385638cd802fceecc8ec46abac147520632`.
-- Asset: `HermesHub-0.6.227-linux-gateway.tar.gz`.
-- SHA-256 gateway: `b1311aa93c154b2fea0a2c1ec1b208c5afee04c60c1811e495e978a9c96a418c`.
+- App: invio bot col retry canonico prima del legacy (niente piu
+  scritture fuori chat); ogni errore HTTP visibile; bozza
+  ripristinata se l'invio fallisce.
+- App: swipe solo su gesto deciso e mai durante invio; back dal
+  roster senza perdere la bot chat; Riprova ricarica davvero;
+  registrazione e schermo salvi alla rotazione.
+- App: rete con backoff, URL encodati, trascrizione vuota segnalata.
+- Server: script deploy ufficiale con rollback automatico (uso interno).
+- Versioni: Windows/AdminBridge `0.6.228`; Android `versionName 0.6.228`, `versionCode 232`.
+- Asset: `HermesHub-0.6.228-android.apk` (binario Windows invariato).
+- SHA-256 Android: `4646ca6a14939e6821cb9b600b19df3d09803216563322f162aa95fe95ef432b`.
+- Asset: `HermesHub-0.6.228-linux-gateway.tar.gz`.
+- SHA-256 gateway: `7a99011c1405cb82790135a0074e5dc2d3b330eab0c579ccadf9c68348a3fbe0`.
