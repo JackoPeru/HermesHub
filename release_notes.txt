@@ -1,12 +1,12 @@
-Hermes Hub 0.6.230 (live bot onesto + media nei bot)
+Hermes Hub 0.6.231 (lavori in background affidabili)
 
-- App: lo stato "sta generando" non resta piu incastrato dopo le tue
-  risposte; stop onesto che si autocorregge; niente notifiche coi tuoi
-  stessi prompt ad app aperta.
-- App: foto/file inviabili anche nelle chat bot; immagini e card che
-  restano nella cronologia riaperta.
-- Versioni: Windows/AdminBridge `0.6.230`; Android `versionName 0.6.230`, `versionCode 234`.
-- Asset: `HermesHub-0.6.230-android.apk` (binario Windows invariato).
-- SHA-256 Android: `937b3e653877e34147075e67f5fd7c5cc5c45b8e6be32a6aea7a866f9072ddb3`.
-- Asset: `HermesHub-0.6.230-linux-gateway.tar.gz`.
-- SHA-256 gateway: `985745601546f90692f61ebb77aff39d2cfe3fe8e076e8c3c307caeb91fca606`.
+- App: rientrando in chat dopo un lavoro lungo vedi subito lo stato
+  vero (avanza, finito, fallito) invece del fermo immagine; il
+  risultato viene aggiunto sempre.
+- App: notifica "Risposta pronta" anche se Android aveva chiuso
+  l'app nel mentre (una sola volta, niente doppioni).
+- Versioni: Windows/AdminBridge `0.6.231`; Android `versionName 0.6.231`, `versionCode 235`.
+- Asset: `HermesHub-0.6.231-android.apk` (binario Windows invariato).
+- SHA-256 Android: `057102a761ae5570cbd7420f5ff98c5f3ba02d37caa89e6d879d4a0a7d74067e`.
+- Asset: `HermesHub-0.6.231-linux-gateway.tar.gz`.
+- SHA-256 gateway: `26f333e92cecd0209b6f75985971dbc5d4636fbaad8bc84faac546c876cdc0b2`.

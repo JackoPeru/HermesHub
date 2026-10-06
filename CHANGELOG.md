@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.231 - 2026-10-06
+
+- Lavori in background: la chat ricontrolla lo stato da sola al
+  rientro (niente piu fermo immagine); risultato aggiunto sempre;
+  notifica "Risposta pronta" anche se l'app era stata chiusa.
+
 ## 0.6.230 - 2026-10-06
 
 - Chat bot: lo stato live ignora l'eco del turno appena finito
