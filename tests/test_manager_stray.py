@@ -191,5 +191,42 @@ class TestManagerKeys(unittest.TestCase):
         self.assertIn("trusted_keys", bridge)
 
 
+def load_manual_allowed_fn():
+    """Carica _manual_modes_allowed pura via AST (CONFIG iniettato a runtime)."""
+    src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    wanted = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_manual_modes_allowed"]
+    assert len(wanted) == 1, "_manual_modes_allowed non trovata in manager.py"
+    mod = ast.Module(body=wanted, type_ignores=[])
+    ns: dict = {"CONFIG": {}}
+    exec(compile(mod, "manager_manual", "exec"), ns)  # noqa: S102 - test locale
+    return ns
+
+
+class TestManualModesPolicy(unittest.TestCase):
+    """Policy modi manuali: default aperto, false blocca (testato via AST)."""
+
+    def allowed_for(self, config: dict) -> bool:
+        ns = load_manual_allowed_fn()
+        ns["CONFIG"] = config
+        return ns["_manual_modes_allowed"]()
+
+    def test_default_open(self):
+        self.assertTrue(self.allowed_for({}))
+
+    def test_explicit_false_blocks(self):
+        self.assertFalse(self.allowed_for({"allow_manual_modes": False}))
+
+    def test_explicit_true_allows(self):
+        self.assertTrue(self.allowed_for({"allow_manual_modes": True}))
+
+    def test_endpoints_enforce_and_log(self):
+        src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
+        self.assertIn("_require_manual_allowed(\"MEDIA\")", src)
+        self.assertIn("_require_manual_allowed(\"DIRECT\")", src)
+        self.assertIn("_log_mode_request(request", src)
+        self.assertIn("409", src)
+
+
 if __name__ == "__main__":
     unittest.main()

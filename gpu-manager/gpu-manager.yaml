@@ -8,6 +8,10 @@ api_key: ""
 # Chiavi secondarie fidate (stessa trust-zone, es. master key hub sullo
 # stesso host): accettate oltre alla primaria. Mai committare valori veri.
 trusted_keys: []
+# False = /mode/media e /mode/direct rifiutati con 409 (i video vanno in coda
+# in AUTO). /mode/llm e /mode/auto restano liberi. Mettere false sul server
+# se non si vuole mai uscire da AUTO.
+allow_manual_modes: true
 db_path: /var/lib/hermes-gpu-manager/state.db
 output_dir: /opt/hermes/gpu-manager/outputs
 

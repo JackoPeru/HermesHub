@@ -39,6 +39,9 @@ DEFAULT_CONFIG = {
     "host": "0.0.0.0",
     "port": 8643,
     "api_key": "",
+    # False = /mode/media e /mode/direct rifiutati con 409 (i video vanno in
+    # coda in AUTO, il manuale non serve). /mode/llm e /mode/auto restano liberi.
+    "allow_manual_modes": True,
     "db_path": "/var/lib/hermes-gpu-manager/state.db",
     "output_dir": "/opt/hermes/gpu-manager/outputs",
     "default_mode": "auto",
@@ -2042,23 +2045,53 @@ def _set_desired(mode: str) -> dict:
     return {"desired_mode": mode}
 
 
+def _manual_modes_allowed() -> bool:
+    """False quando l'operatore vuole restare in AUTO (video in coda)."""
+    return bool(CONFIG.get("allow_manual_modes", True))
+
+
+def _log_mode_request(request: Request, mode: str) -> None:
+    try:
+        peer = request.client.host if request.client else "?"
+    except Exception:  # noqa: BLE001 - logging mai bloccante
+        peer = "?"
+    ua = str(request.headers.get("user-agent", ""))[:80]
+    log.info("mode %s requested from %s ua=%s", mode, peer, ua)
+
+
+def _require_manual_allowed(mode: str) -> None:
+    if _manual_modes_allowed():
+        return
+    raise HTTPException(
+        409,
+        f"Modalita manuale {mode} disabilitata (allow_manual_modes=false): "
+        "i video vanno in coda in AUTO.",
+    )
+
+
 @app.post("/mode/llm")
-async def mode_llm(_: None = Depends(require_key)) -> dict:
+async def mode_llm(request: Request, _: None = Depends(require_key)) -> dict:
+    _log_mode_request(request, "LLM")
     return _set_desired("LLM")
 
 
 @app.post("/mode/media")
-async def mode_media(_: None = Depends(require_key)) -> dict:
+async def mode_media(request: Request, _: None = Depends(require_key)) -> dict:
+    _log_mode_request(request, "MEDIA")
+    _require_manual_allowed("MEDIA")
     return _set_desired("MEDIA")
 
 
 @app.post("/mode/auto")
-async def mode_auto(_: None = Depends(require_key)) -> dict:
+async def mode_auto(request: Request, _: None = Depends(require_key)) -> dict:
+    _log_mode_request(request, "AUTO")
     return _set_desired("AUTO")
 
 
 @app.post("/mode/direct")
-async def mode_direct(_: None = Depends(require_key)) -> dict:
+async def mode_direct(request: Request, _: None = Depends(require_key)) -> dict:
+    _log_mode_request(request, "DIRECT")
+    _require_manual_allowed("DIRECT")
     return _set_desired("DIRECT")
 
 
