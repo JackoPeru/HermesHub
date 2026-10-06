@@ -1276,13 +1276,19 @@ internal fun BotsScreen(
             }
         }
         // Empty distinta da loading/error: roster caricato ma zero bot visibili.
+        // Nascosta quando ci sono sourceFailures (mostra solo errore sopra).
         val emptyRoster = roster
-        if (emptyRoster != null && emptyRoster.items.isEmpty()) {
+        if (emptyRoster != null && emptyRoster.items.isEmpty() && emptyRoster.sourceFailures.isEmpty()) {
             item(key = "empty") {
                 Card(colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble), shape = RoundedCornerShape(18.dp)) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Nessun bot disponibile.", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text("Crea il primo bot oppure collega un altro endpoint Hermes.", color = AppColors.Muted, fontSize = 13.sp)
+                        Text(
+                            "Crea il primo bot oppure collega un altro endpoint Hermes.",
+                            color = AppColors.Muted,
+                            fontSize = 13.sp,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                        )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             IconButton(onClick = { openEditor(null) }) { Icon(Icons.Rounded.Add, contentDescription = "Crea bot", tint = Color.White) }
                             IconButton(onClick = {
@@ -1292,6 +1298,10 @@ internal fun BotsScreen(
                                 showConnectionEditor = true
                             }) { Icon(Icons.Rounded.Link, contentDescription = "Verifica connessioni", tint = Color.White) }
                         }
+                        TextButton(
+                            onClick = { openEditor(null) },
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) { Text("Crea primo bot", color = AppColors.Accent) }
                     }
                 }
             }

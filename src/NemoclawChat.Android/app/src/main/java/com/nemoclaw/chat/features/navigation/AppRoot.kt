@@ -293,17 +293,17 @@ import kotlin.random.Random
 private fun Modifier.modeSwipe(
     enabled: Boolean = true,
     sendingActive: Boolean = false,
-    onSwipeLeft: () -> Unit,
-    onSwipeRight: () -> Unit
+    onSwipeLeft: (() -> Unit)? = null,
+    onSwipeRight: (() -> Unit)? = null
 ): Modifier {
     if (!enabled || sendingActive) return this
     val density = LocalDensity.current
     val thresholdPx = remember(density) { with(density) { 96.dp.toPx() } }
     val total = remember { mutableStateOf(0f) }
     return semantics {
-        customActions = listOf(
-            androidx.compose.ui.semantics.CustomAccessibilityAction("Vai ai Bot", { onSwipeLeft(); true }),
-            androidx.compose.ui.semantics.CustomAccessibilityAction("Torna alla Chat", { onSwipeRight(); true })
+        customActions = listOfNotNull(
+            onSwipeLeft?.let { action -> androidx.compose.ui.semantics.CustomAccessibilityAction("Vai ai Bot", { action(); true }) },
+            onSwipeRight?.let { action -> androidx.compose.ui.semantics.CustomAccessibilityAction("Torna alla Chat", { action(); true }) }
         )
     }.draggable(
         state = rememberDraggableState { total.value += it },
@@ -311,8 +311,8 @@ private fun Modifier.modeSwipe(
         onDragStopped = { velocity ->
             val dx = total.value
             total.value = 0f
-            if ((dx <= -thresholdPx && velocity <= -200f) || dx <= -thresholdPx * 1.5f) onSwipeLeft()
-            else if ((dx >= thresholdPx && velocity >= 200f) || dx >= thresholdPx * 1.5f) onSwipeRight()
+            if ((dx <= -thresholdPx && velocity <= -200f) || dx <= -thresholdPx * 1.5f) onSwipeLeft?.invoke()
+            else if ((dx >= thresholdPx && velocity >= 200f) || dx >= thresholdPx * 1.5f) onSwipeRight?.invoke()
         }
     )
 }
@@ -701,7 +701,7 @@ internal fun ChatApp() {
                 androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f).modeSwipe(
                     enabled = !sidebarOpen,
                     sendingActive = chatState.sending || chatState.streamingState != null,
-                    onSwipeLeft = {},
+                    onSwipeLeft = null,
                     onSwipeRight = selectChatSegment
                 )) {
                 BotsScreen(

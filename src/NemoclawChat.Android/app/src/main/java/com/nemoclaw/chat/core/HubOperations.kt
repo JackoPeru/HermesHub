@@ -1420,12 +1420,14 @@ internal fun probeHermesGatewayDetailed(settings: AppSettings, apiKey: String?):
                 }
                 .get()
                 .build()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
             return false to "URL non valido"
         }
         val statusCode = try {
             gatewayProbeHttpClient.newCall(request).execute().use { it.code }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
             return false to "timeout di rete"
         }
         if (isSuccessfulGatewayProbe(statusCode)) return true to null
@@ -1450,12 +1452,14 @@ internal fun loadGatewayRuntimeStatus(settings: AppSettings, apiKey: String?): G
                 }
                 .get()
                 .build()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
             return null
         }
         val response = try {
             gatewayProbeHttpClient.newCall(request).execute()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
             return null
         }
         response.use {

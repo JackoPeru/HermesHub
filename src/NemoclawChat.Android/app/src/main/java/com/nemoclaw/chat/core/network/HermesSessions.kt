@@ -436,6 +436,7 @@ class HermesSessionClient(
         // X-Hermes-Session-Key e' thread-safe via header dedicato; mai riusare Session-Id come memory scope.
         if (sessionKey.isNullOrBlank()) return postJson(url, payload, apiKey)
         var last: Pair<Int, String> = 0 to "Rete non disponibile"
+        var attempt = 0
         for (candidateUrl in plugAndPlayUrlCandidates(url)) {
             for (token in hermesAuthCandidates(apiKey)) {
                 // Fail-closed profilo: mai fallback anonimo su /p/<profile>/.
@@ -464,7 +465,10 @@ class HermesSessionClient(
                 last = res
                 if (!shouldRetryHermesWithBearerAuth(res.first, res.second)) {
                     if (res.first != 0) return res
+                    hermesRetryBackoffDelay(attempt++)
+                    continue
                 }
+                hermesRetryBackoffDelay(attempt++)
             }
         }
         return last

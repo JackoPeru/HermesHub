@@ -1024,9 +1024,9 @@ internal fun OperatorScreen(context: Context, settings: AppSettings) {
                     Text("Cron", color = Color.White, fontWeight = FontWeight.SemiBold)
                     SettingsField("Cron ID", approvalId, { approvalId = it })
                     OperatorActionButton("Lista") { runOperatorRpc(scope, context, settings, "GET /api/jobs", "", { status = it }, { summary = it }, { raw = it }) }
-                    OperatorActionButton("Run") { runOperatorRpc(scope, context, settings, "POST /api/jobs/${approvalId.jsonEscaped()}/run", "{}", { status = it }, { summary = it }, { raw = it }) }
-                    OperatorActionButton("Pausa") { runOperatorRpc(scope, context, settings, "POST /api/jobs/${approvalId.jsonEscaped()}/pause", "{}", { status = it }, { summary = it }, { raw = it }) }
-                    OperatorActionButton("Elimina") { runOperatorRpc(scope, context, settings, "DELETE /api/jobs/${approvalId.jsonEscaped()}", "", { status = it }, { summary = it }, { raw = it }) }
+                    OperatorActionButton("Run") { runOperatorRpc(scope, context, settings, "POST /api/jobs/${URLEncoder.encode(approvalId.trim(), "UTF-8")}/run", "{}", { status = it }, { summary = it }, { raw = it }) }
+                    OperatorActionButton("Pausa") { runOperatorRpc(scope, context, settings, "POST /api/jobs/${URLEncoder.encode(approvalId.trim(), "UTF-8")}/pause", "{}", { status = it }, { summary = it }, { raw = it }) }
+                    OperatorActionButton("Elimina") { runOperatorRpc(scope, context, settings, "DELETE /api/jobs/${URLEncoder.encode(approvalId.trim(), "UTF-8")}", "", { status = it }, { summary = it }, { raw = it }) }
                 }
             }
         }

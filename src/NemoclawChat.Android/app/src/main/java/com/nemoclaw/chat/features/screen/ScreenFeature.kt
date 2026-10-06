@@ -43,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -253,8 +254,8 @@ internal fun ScreenScreen(
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<ScreenStatusInfo?>(null) }
     var statusError by remember { mutableStateOf("") }
-    var holding by remember { mutableStateOf(false) }
-    var viewerId by remember { mutableStateOf("") }
+    var holding by rememberSaveable { mutableStateOf(false) }
+    var viewerId by rememberSaveable { mutableStateOf("") }
     var viewerState by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var reloadNonce by remember { mutableStateOf(0) }

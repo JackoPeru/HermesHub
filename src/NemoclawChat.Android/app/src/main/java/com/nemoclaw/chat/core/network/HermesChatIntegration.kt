@@ -210,6 +210,7 @@ fun streamHermesSessionChat(
                     return@flow
                 }
                 lastError = "Sessione Hermes HTTP $code: ${hbody.take(200)}"
+                emit(ChatStreamEvent.Error(lastError))
                 return@flow
             }
             lastError = networkFailure ?: "Sessione non raggiungibile"

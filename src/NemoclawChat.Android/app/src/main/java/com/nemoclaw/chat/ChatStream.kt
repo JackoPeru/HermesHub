@@ -1311,7 +1311,7 @@ private suspend fun openSseStream(
                 when (signal) {
                     SseAttemptSignal.Accepted -> {
                         accepted = true
-                        onEvent(ChatStreamEvent.Status("$label connesso: $candidateUrl"))
+                        onEvent(ChatStreamEvent.Status("$label connesso."))
                         onEvent(ChatStreamEvent.Status("Prompt inviato. Attendo primo token..."))
                     }
                     is SseAttemptSignal.Event -> onEvent(signal.event)
@@ -1772,7 +1772,7 @@ private fun runDetachedAgent(
     val pollDeadline = System.currentTimeMillis() + RUN_POLL_TIMEOUT_MS
     while (true) {
         if (System.currentTimeMillis() >= pollDeadline) {
-            emit(ChatStreamEvent.Error("Run $runId ancora attiva dopo 30 minuti: polling locale terminato, controlla lo stato sul gateway."))
+            emit(ChatStreamEvent.Error("Run $runId ancora attiva dopo 60 minuti: polling locale terminato, controlla lo stato sul gateway."))
             return@flow
         }
         kotlinx.coroutines.delay((2_000L * (consecutiveFailures + 1)).coerceAtMost(10_000L))
@@ -1843,6 +1843,7 @@ private suspend fun executeRunJsonRequest(
     allowCompatAuth: Boolean = true
 ): Pair<Int, String> {
     var last: Pair<Int, String>? = null
+    var attempt = 0
     val authCandidates = hermesAuthCandidates(apiKey, allowCompatAuth)
     val requestContext = HermesHubProtocol.newCorrelationContext()
     for (candidateUrl in plugAndPlayStreamUrlCandidates(url)) {
@@ -1870,6 +1871,7 @@ private suspend fun executeRunJsonRequest(
                 throw ex
             } catch (ex: Exception) {
                 last = 0 to (ex.message ?: ex.javaClass.simpleName)
+                hermesRetryBackoffDelay(attempt++)
             }
         }
     }

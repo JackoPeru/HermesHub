@@ -138,9 +138,7 @@ internal suspend fun runHermesBotGroupTurn(
         }
         // La mappa lucchetti non cresce all'infinito: a fine turno pota
         // quelli liberi (mai rimuovere uno in uso).
-        if (memberLocks.size > MAX_MEMBER_LOCKS) {
-            memberLocks.entries.removeIf { (_, mutex) -> !mutex.isLocked }
-        }
+        memberLocks.entries.removeIf { (k, m) -> !m.isLocked && memberLocks[k] === m && memberLocks.size > MAX_MEMBER_LOCKS }
     }
 }
 

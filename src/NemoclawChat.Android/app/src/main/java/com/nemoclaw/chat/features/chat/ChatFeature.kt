@@ -199,6 +199,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -364,7 +367,7 @@ internal fun ChatScreen(
     }
     val botAllowCompatAuth = !remoteBot
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    var quickPrompt by remember { mutableStateOf<String?>(null) }
+    var quickPrompt by rememberSaveable { mutableStateOf<String?>(null) }
     // Invio mentre Hermes lavora: scelta Accoda/Correggi per ogni invio.
     var pendingBusySend by remember { mutableStateOf<PendingBusySend?>(null) }
     var showSendChoiceDialog by remember { mutableStateOf(false) }
@@ -630,7 +633,7 @@ internal fun ChatScreen(
         gatewayProbeDetail = detail
         gatewayProbed = true
         gatewayRuntime = if (available) {
-            withContext(Dispatchers.IO) { loadGatewayRuntimeStatus(botSettings, botApiKey) }
+            runCatching { withContext(Dispatchers.IO) { loadGatewayRuntimeStatus(botSettings, botApiKey) } }.getOrNull()
         } else {
             null
         }
@@ -645,7 +648,7 @@ internal fun ChatScreen(
     // Solo bot chat, mai durante un turno locale (quello ha gia il suo stato).
     // Finestra freschezza 240s: i tool lunghi non producono righe per minuti;
     // meglio un banner che resta che un flicker che fa reinviare duplicati.
-    var botLive by remember(botProfile, botSessionId) { mutableStateOf<BotLiveActivity?>(null) }
+    var botLive by remember(botProfile, botSessionId, botLoadNonce) { mutableStateOf<BotLiveActivity?>(null) }
     PollWhileStarted(botProfile, botSessionId, botMultiplexEnabled, botEndpoint, botApiKey, botSettings.gatewayUrl, baseIntervalMs = 5_000L) {
         val profile = botProfile
         val session = botSessionId
@@ -706,7 +709,23 @@ internal fun ChatScreen(
             // e senza turno locale: le righe sono latest-first, il fold vuole
             // cronologico (newRows e gia ordinato stabile).
             if (cidBefore != null && state.activeConversationId == cidBefore && !state.sending) {
+                // Live-follow: solo se si era gia in fondo (stessa logica di
+                // showJumpToBottom), mai strappare chi legge sopra.
+                val wasAtBottom = run {
+                    val info = listState.layoutInfo
+                    val total = info.totalItemsCount
+                    if (total <= 1) {
+                        true
+                    } else {
+                        val last = info.visibleItemsInfo.lastOrNull() ?: return@run true
+                        !((total - 1 - last.index) >= 1 ||
+                            (last.index == total - 1 && last.offset + last.size > info.viewportEndOffset + 150))
+                    }
+                }
                 state.messages.addAll(foldTranscriptToChat(newRows))
+                if (wasAtBottom) {
+                    listState.scrollToItem((state.messages.size - 1).coerceAtLeast(0))
+                }
             }
         }
         // La piu nuova e la prima della coda latest-first ordinata.
@@ -994,7 +1013,7 @@ internal fun ChatScreen(
             onSelectBot = onSelectBot
         )
         if (archivedBotWithoutContext) {
-            Surface(color = Color(0xFF7A3E00), modifier = Modifier.fillMaxWidth()) {
+            Surface(color = Color(0xFF7A3E00), modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Assertive }) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1012,7 +1031,7 @@ internal fun ChatScreen(
             }
         }
         if (conversationDeletedNotice) {
-            Surface(color = Color(0xFF5A1A1A), modifier = Modifier.fillMaxWidth()) {
+            Surface(color = Color(0xFF5A1A1A), modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Assertive }) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1091,7 +1110,7 @@ internal fun ChatScreen(
                         opening = false,
                         unreachable = !gatewayAvailable && gatewayProbed,
                         detail = gatewayProbeDetail,
-                        onRetry = { botLoadNonce++ }
+                        onRetry = { botLoadNonce++; gatewayProbed = false }
                     )
                 } else {
                     EmptyState(onPrompt = { quickPrompt = it })
@@ -1105,7 +1124,7 @@ internal fun ChatScreen(
                         false
                     } else {
                         val last = info.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf true
-                        (total - 1 - last.index) >= 2 ||
+                        (total - 1 - last.index) >= 1 ||
                             (last.index == total - 1 && last.offset + last.size > info.viewportEndOffset + 150)
                     }
                 }
@@ -1151,7 +1170,7 @@ internal fun ChatScreen(
             }
         }
         if (!networkOnline) {
-            Surface(color = Color(0xFF7A3E00), modifier = Modifier.fillMaxWidth()) {
+            Surface(color = Color(0xFF7A3E00), modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Assertive }) {
                 Text(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                     text = "Rete Internet non validata. Provo comunque Hermes via LAN/Tailnet.",
@@ -1211,7 +1230,12 @@ internal fun ChatScreen(
             }
         )
         DisposableEffect(Unit) {
-            onDispose { releaseVoiceRecorder(deleteTempFile = true) }
+            onDispose {
+                // Rotazione: l'effect si ri-registra, non buttare la registrazione in corso.
+                if ((context as? Activity)?.isChangingConfigurations != true) {
+                    releaseVoiceRecorder(deleteTempFile = true)
+                }
+            }
         }
         // Uscendo davvero dalla chat (non per rotazione), cancella gli
         // stream attivi: niente job orfani che scrivono snapshot fuori schermo.
@@ -1233,9 +1257,12 @@ internal fun ChatScreen(
         // al vecchio backend, cancellali (niente job orfani che scrivono
         // snapshot fuori schermo). Vale anche tra bot sulla stessa gateway.
         DisposableEffect(botSettings.gatewayUrl, botProfile, botSessionId, botEndpoint, botApiKey) {
+            // Solo la propria conversazione: le altre chat tengono i loro stream.
             onDispose {
-                state.activeStreams.values.forEach { it.job?.cancel() }
-                state.activeStreams.clear()
+                conversationId?.let { cid ->
+                    state.activeStreams[cid]?.job?.cancel()
+                    state.activeStreams.remove(cid)
+                }
             }
         }
 
@@ -1618,6 +1645,30 @@ internal fun ChatScreen(
                                         allowCompatAuth = botAllowCompatAuth
                                     )
                                 )
+                            } else if (canonicalBotSession != null && localState.error == null) {
+                                // Forever-chat canonica prima del fallback legacy (es. smart
+                                // declinato dopo aver saltato l'ensure): esiste di certo,
+                                // si prova l'invio diretto. Niente fallback legacy silenzioso
+                                // (scriverebbe fuori dalla chat condivisa);
+                                // eventuali errori arrivano veri dal server.
+                                sessionIdForTurn = canonicalBotSession
+                                state.sessionRoute = "sessions"
+                                state.hermesSessionId = canonicalBotSession
+                                collectFlow(
+                                    streamHermesSessionChat(
+                                        botSettings.copy(model = effModel, provider = effProvider, reasoningEffort = effReasoning),
+                                        canonicalBotSession,
+                                        text,
+                                        botApiKey,
+                                        botProfile,
+                                        botMultiplexEnabled,
+                                        model = effModel,
+                                        provider = effProvider.takeIf { it.isNotBlank() && !it.equals("hermes-agent", true) },
+                                        modelOptions = buildHermesModelOptions(effReasoning, botSettings.serviceTier, capsSnapshot),
+                                        sessionKey = botSettings.hermesSessionKey.takeIf { isValidHermesSessionKey(it) },
+                                        allowCompatAuth = botAllowCompatAuth
+                                    )
+                                )
                             } else if (useSessions && localState.error == null) {
                                 // Sessions dichiarate ma creazione fallita: errore esplicito, un solo fallback legacy
                                 // solo se non è un problema auth/profile.
@@ -1640,30 +1691,6 @@ internal fun ChatScreen(
                                         botSessionId,
                                         botMultiplexEnabled,
                                         botAllowCompatAuth
-                                    )
-                                )
-                            } else if (canonicalBotSession != null && localState.error == null) {
-                                // Ultima spiaggia (es. smart declinato): la
-                                // forever-chat esiste di certo, si prova l'invio
-                                // diretto. Niente fallback legacy silenzioso
-                                // (scriverebbe fuori dalla chat condivisa);
-                                // eventuali errori arrivano veri dal server.
-                                sessionIdForTurn = canonicalBotSession
-                                state.sessionRoute = "sessions"
-                                state.hermesSessionId = canonicalBotSession
-                                collectFlow(
-                                    streamHermesSessionChat(
-                                        botSettings.copy(model = effModel, provider = effProvider, reasoningEffort = effReasoning),
-                                        canonicalBotSession,
-                                        text,
-                                        botApiKey,
-                                        botProfile,
-                                        botMultiplexEnabled,
-                                        model = effModel,
-                                        provider = effProvider.takeIf { it.isNotBlank() && !it.equals("hermes-agent", true) },
-                                        modelOptions = buildHermesModelOptions(effReasoning, botSettings.serviceTier, capsSnapshot),
-                                        sessionKey = botSettings.hermesSessionKey.takeIf { isValidHermesSessionKey(it) },
-                                        allowCompatAuth = botAllowCompatAuth
                                     )
                                 )
                             } else if (localState.error == null) {

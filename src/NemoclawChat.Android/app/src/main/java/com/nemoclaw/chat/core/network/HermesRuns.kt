@@ -339,6 +339,7 @@ internal suspend fun collectRunSseEvents(
     apiKey: String?,
     onEvent: suspend (String?, String) -> Unit
 ) {
+    var attempt = 0
     for (candidateUrl in plugAndPlayUrlCandidates(url)) {
         for (token in hermesAuthCandidates(apiKey)) {
             if (candidateUrl.contains("/p/", ignoreCase = true) && token.isNullOrBlank()) continue
@@ -460,6 +461,7 @@ internal suspend fun collectRunSseEvents(
                 failed = true
             }
             if (accepted && !failed) return
+            hermesRetryBackoffDelay(attempt++)
         }
     }
 }

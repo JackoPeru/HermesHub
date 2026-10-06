@@ -253,6 +253,8 @@ internal suspend fun runSmartCompletion(
         // Allegati ripristinati senza duplicati: i file sono ancora in cache.
         val fresh = attachments.filter { it !in state.pendingAttachments }
         state.pendingAttachments.addAll(fresh)
+        // Testo ripristinato in bozza: l'utente reinvia con la via normale.
+        state.draft = displayText
         val error = ChatMessage("Hermes Hub", message, fromUser = false, isAction = true)
         done.add(error)
         if (state.activeConversationId == streamCid) state.messages.add(error)

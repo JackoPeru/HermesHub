@@ -1145,7 +1145,11 @@ internal suspend fun transcribeVoiceFile(
             }
             response.use {
                 val responseBody = it.body.byteStream().readUtf8Bounded()
-                if (it.isSuccessful) return@withContext JSONObject(responseBody).optString("text").trim()
+                if (it.isSuccessful) {
+                    val text = JSONObject(responseBody).optString("text").trim()
+                    if (text.isBlank()) throw java.io.IOException("Trascrizione vuota.")
+                    return@withContext text
+                }
                 lastError = "HTTP ${it.code}: ${responseBody.take(180)}"
                 if (it.code != 401) break
             }

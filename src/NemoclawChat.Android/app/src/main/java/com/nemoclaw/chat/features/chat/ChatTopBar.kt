@@ -195,6 +195,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -418,7 +419,7 @@ internal fun TopBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .height(68.dp)
+                .heightIn(min = 68.dp)
                 .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -429,7 +430,7 @@ internal fun TopBar(
                 modifier = Modifier
                     .size(42.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .clickable(onClick = onOpenSidebar)
+                    .clickable(role = Role.Button, onClick = onOpenSidebar)
             )
             Column(modifier = Modifier.padding(start = 11.dp).weight(1f)) {
                 Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -439,12 +440,12 @@ internal fun TopBar(
                     "Verifica gateway…"
                 } else {
                     gatewayRuntimeLabel(connected, gatewayRuntime) +
-                        if (!connected && !probeDetail.isNullOrBlank()) " · $probeDetail" else ""
+                        if (!connected && !probeDetail.isNullOrBlank()) " · ${probeDetail?.take(80)}" else ""
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    modifier = Modifier.semantics {
+                    modifier = Modifier.semantics(mergeDescendants = true) {
                         contentDescription = if (probingGateway) {
                             "Gateway in verifica"
                         } else if (connected) {
