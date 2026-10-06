@@ -361,7 +361,10 @@ internal class HermesWorkService : Service() {
     }
 
     private fun notifyFinished(runId: String, conversationId: String?, title: String, text: String) {
+        // Una sola volta per runId (il worker fallback controlla lo stesso marker).
+        if (wasRunNotified(this, runId)) return
         notifyPerRun(runId, conversationId, title, text, ongoing = false)
+        markRunNotified(this, runId)
     }
 
     /**

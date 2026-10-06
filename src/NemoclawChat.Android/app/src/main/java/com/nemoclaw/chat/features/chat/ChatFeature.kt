@@ -874,28 +874,33 @@ internal fun ChatScreen(
     // Re-attach lavoro background: se per questa conversazione esiste un binding
     // e nessuno stream locale lo sta gia' seguendo, interroga il server e agisci.
     // Il server e' fonte di verita': solo il terminale reale pulisce il binding.
-    LaunchedEffect(state.activeConversationId) {
-        val cid = state.activeConversationId ?: return@LaunchedEffect
+    // Estratto per riuso: al cambio chat, al rientro in foreground (poll) e
+    // dopo il ritorno da background (senza questo, la UI restava inchiodata
+    // sul checkpoint "sta lavorando" mentre la run era finita da minuti).
+    suspend fun recheckActiveWork() {
+        val cid = state.activeConversationId ?: return
         val binding = withContext(Dispatchers.IO) { loadActiveWorkBinding(context, cid) }
-            ?: return@LaunchedEffect
-        if (state.streamingState?.activeRunId == binding.runId && state.sending) return@LaunchedEffect
+            ?: return
+        if (state.streamingState?.activeRunId == binding.runId && state.sending) return
         val client = HermesRunClient(botSettings, botApiKey, botProfile, botMultiplexEnabled)
         val (code, info) = runCatching { client.status(binding.runId) }.getOrElse { 0 to null }
         if (code == 404) {
             withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
-            return@LaunchedEffect
+            return
         }
-        if (code !in 200..299 || info == null) return@LaunchedEffect
+        if (code !in 200..299 || info == null) return
         val approval = parseRunApprovalPayload(info.raw, binding.runId)
         when (backgroundWorkStateFromRun(info, approval != null)) {
             BackgroundWorkState.ACTIVE -> {
-                state.backgroundWork = BackgroundWorkUi(
-                    runId = binding.runId,
-                    goal = binding.goal,
-                    statusText = "Hermes continua il lavoro sul gateway…"
-                )
-                maybeStartBackgroundWork(context, settings, binding, botProfile, botMultiplexEnabled) {
-                    notificationsPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                if (state.backgroundWork?.runId != binding.runId) {
+                    state.backgroundWork = BackgroundWorkUi(
+                        runId = binding.runId,
+                        goal = binding.goal,
+                        statusText = "Hermes continua il lavoro sul gateway…"
+                    )
+                    maybeStartBackgroundWork(context, settings, binding, botProfile, botMultiplexEnabled) {
+                        notificationsPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
                 }
             }
             BackgroundWorkState.WAITING_FOR_APPROVAL -> {
@@ -918,19 +923,24 @@ internal fun ChatScreen(
                         status = "In attesa di approvazione."
                     )
                 }
-                state.backgroundWork = BackgroundWorkUi(
-                    runId = binding.runId,
-                    goal = binding.goal,
-                    statusText = "Approvazione richiesta.",
-                    approvalPending = true
-                )
-                maybeStartBackgroundWork(context, settings, binding, botProfile, botMultiplexEnabled) {
-                    notificationsPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                if (state.backgroundWork?.runId != binding.runId || state.backgroundWork?.approvalPending != true) {
+                    state.backgroundWork = BackgroundWorkUi(
+                        runId = binding.runId,
+                        goal = binding.goal,
+                        statusText = "Approvazione richiesta.",
+                        approvalPending = true
+                    )
+                    maybeStartBackgroundWork(context, settings, binding, botProfile, botMultiplexEnabled) {
+                        notificationsPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
                 }
             }
             BackgroundWorkState.DONE_COMPLETED -> {
                 val output = info.output.orEmpty()
-                if (output.isNotBlank() && historyLoadedCid == cid &&
+                // Niente gate su historyLoadedCid: dopo kill/ritorno la storia
+                // puo non essere marcata ma il dedup qui sotto basta (il
+                // binding e per-cid, non puo finire in un'altra chat).
+                if (output.isNotBlank() &&
                     state.messages.none { !it.fromUser && it.text.contains(output.take(WorkLimits.TRUNC_60)) }
                 ) {
                     state.messages.add(ChatMessage("Hermes", output, fromUser = false))
@@ -945,13 +955,29 @@ internal fun ChatScreen(
                 if (state.backgroundWork?.runId == binding.runId) state.backgroundWork = null
             }
             BackgroundWorkState.GONE, BackgroundWorkState.UNKNOWN -> {
-                state.backgroundWork = BackgroundWorkUi(
-                    runId = binding.runId,
-                    goal = binding.goal,
-                    statusText = "Stato lavoro incerto, ricontrollo…"
-                )
+                if (state.backgroundWork?.runId != binding.runId) {
+                    state.backgroundWork = BackgroundWorkUi(
+                        runId = binding.runId,
+                        goal = binding.goal,
+                        statusText = "Stato lavoro incerto, ricontrollo…"
+                    )
+                }
             }
         }
+    }
+    LaunchedEffect(state.activeConversationId) {
+        recheckActiveWork()
+    }
+    // Ripresa: ricontrolla il binding mentre la chat e aperta (rientro da
+    // background, poll STARTED-only). Solo se esiste un binding: una lettura
+    // prefs, niente rete altrimenti.
+    PollWhileStarted(state.activeConversationId, baseIntervalMs = 15_000L) {
+        val cid = state.activeConversationId
+        if (cid.isNullOrBlank()) return@PollWhileStarted true
+        val hasBinding = withContext(Dispatchers.IO) { loadActiveWorkBinding(context, cid) } != null
+        if (!hasBinding) return@PollWhileStarted true
+        recheckActiveWork()
+        true
     }
     var wasStreaming by remember { mutableStateOf(false) }
     LaunchedEffect(isStreaming) {

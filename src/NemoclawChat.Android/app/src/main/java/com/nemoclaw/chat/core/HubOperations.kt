@@ -4077,12 +4077,64 @@ class HermesNotificationWorker(context: Context, params: WorkerParameters) : Cor
             if (changed) {
                 prefs.edit { putStringSet("seenHubNotifications", seen.toList().takeLast(300).toSet()) }
             }
+            // Check run indipendente dal service: se il processo e morto in Doze,
+            // questo e l'unico a poter avvisare del completamento. Il service fa
+            // lo stesso quando e vivo; il marker evita il doppio avviso.
+            runCatching { notifyCompletedRuns(applicationContext, settings, apiKey) }
             Result.success()
         } catch (_: Exception) {
             Result.retry()
         }
     }
 }
+
+/** Run terminali gia notificate (service o worker): una sola volta per runId. */
+internal fun wasRunNotified(context: Context, runId: String): Boolean {
+    val prefs = context.applicationContext.getSharedPreferences(CURRENT_SETTINGS_PREFS, Context.MODE_PRIVATE)
+    return prefs.getStringSet("notifiedRunIds", emptySet())?.contains(runId) == true
+}
+
+internal fun markRunNotified(context: Context, runId: String) {
+    runCatching {
+        val prefs = context.applicationContext.getSharedPreferences(CURRENT_SETTINGS_PREFS, Context.MODE_PRIVATE)
+        val seen = prefs.getStringSet("notifiedRunIds", emptySet())?.toMutableSet() ?: mutableSetOf()
+        seen.add(runId)
+        while (seen.size > 100) seen.remove(seen.first())
+        prefs.edit { putStringSet("notifiedRunIds", seen) }
+    }
+}
+
+internal suspend fun notifyCompletedRuns(context: Context, settings: AppSettings, apiKey: String?) =
+    withContext(Dispatchers.IO) {
+        val bindings = runCatching { loadActiveWorkBindings(context) }.getOrDefault(emptyMap())
+        for ((_, binding) in bindings) {
+            if (binding.runId.isBlank()) continue
+            if (wasRunNotified(context, binding.runId)) continue
+            val client = HermesRunClient(settings, apiKey, null, false)
+            val (code, info) = runCatching { client.status(binding.runId) }.getOrElse { 0 to null }
+            if (code !in 200..299 || info == null) continue
+            val state = backgroundWorkStateFromRun(info, false)
+            if (state != BackgroundWorkState.DONE_COMPLETED && state != BackgroundWorkState.DONE_FAILED) continue
+            val done = state == BackgroundWorkState.DONE_COMPLETED
+            val text = (if (done) info.output else info.error)?.take(220)?.ifBlank {
+                if (done) "Risultato pronto in chat." else "Vedi dettagli in chat."
+            } ?: if (done) "Risultato pronto in chat." else "Vedi dettagli in chat."
+            val item = HubNotification(
+                id = "run:${binding.runId}",
+                title = if (done) "Risposta pronta" else "Lavoro fallito",
+                message = text,
+                kind = "run",
+                severity = if (done) "info" else "high",
+                source = "hermes-run",
+                conversationPrompt = "",
+                createdAt = System.currentTimeMillis(),
+                readAt = 0L,
+                category = "Run",
+                priority = if (done) "Normale" else "Alta"
+            )
+            if (showHermesSystemNotification(context, item)) markRunNotified(context, binding.runId)
+        }
+    }
 
 internal fun showHermesSystemNotification(context: Context, item: HubNotification): Boolean {
     if (Build.VERSION.SDK_INT >= 33 &&
