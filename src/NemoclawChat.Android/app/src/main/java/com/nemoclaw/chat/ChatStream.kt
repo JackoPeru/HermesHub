@@ -1235,7 +1235,7 @@ private data class SseOpenResult(
     val error: String?
 )
 
-private data class AttachmentPreparation(
+internal data class AttachmentPreparation(
     val prompt: String,
     val inlineAttachments: List<ChatInputAttachment>,
     val uploadedCount: Int,
@@ -1565,7 +1565,7 @@ private fun ChatInputAttachment.inlineDataUrl(): String {
     return "data:$mimeType;base64,$encoded"
 }
 
-private suspend fun buildPromptWithAttachmentToolRefs(
+internal suspend fun buildPromptWithAttachmentToolRefs(
     settings: AppSettings,
     prompt: String,
     attachments: List<ChatInputAttachment>,

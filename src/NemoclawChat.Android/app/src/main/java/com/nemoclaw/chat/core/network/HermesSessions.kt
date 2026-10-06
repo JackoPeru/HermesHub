@@ -37,23 +37,37 @@ data class HermesSessionMessage(
  * nome/stato), reasoning nel canvas "ragionamento" via timeline, tool e
  *Compattazioni scartati. Puro e testabile.
  */
+/**
+ * Blocchi media/visual da una riga transcript (visual_blocks incorporati
+ * nel raw). Senza, la cronologia bot riaperta perde immagini e card che
+ * invece si vedevano durante il turno live. Puro e testabile.
+ */
+internal fun visualBlocksOfRow(row: HermesSessionMessage): List<VisualBlock> {
+    val raw = row.raw ?: return emptyList()
+    return runCatching { extractVisualBlocks(raw.toString()) }.getOrElse { emptyList() }
+}
+
 internal fun foldTranscriptToChat(rows: List<HermesSessionMessage>): List<ChatMessage> {
     var currentText: String? = null
     var currentTimeline = mutableListOf<AssistantActivity>()
+    var currentBlocks = mutableListOf<VisualBlock>()
     val out = mutableListOf<ChatMessage>()
     fun flush() {
-        if (currentText != null || currentTimeline.isNotEmpty()) {
+        if (currentText != null || currentTimeline.isNotEmpty() || currentBlocks.isNotEmpty()) {
             out.add(
                 ChatMessage(
                     "Hermes",
                     currentText.orEmpty(),
                     fromUser = false,
-                    activityTimeline = currentTimeline.toList()
+                    activityTimeline = currentTimeline.toList(),
+                    visualBlocksVersion = VISUAL_BLOCKS_VERSION.takeIf { currentBlocks.isNotEmpty() },
+                    visualBlocks = currentBlocks.toList()
                 )
             )
         }
         currentText = null
         currentTimeline = mutableListOf()
+        currentBlocks = mutableListOf()
     }
     fun toolCallEntries(row: HermesSessionMessage): List<Pair<String, String>> {
         val calls = row.raw?.optJSONArray("tool_calls") ?: return emptyList()
@@ -89,14 +103,25 @@ internal fun foldTranscriptToChat(rows: List<HermesSessionMessage>): List<ChatMe
         when (row.role.lowercase()) {
             "user", "tu" -> {
                 flush()
-                if (row.content.isNotBlank()) out.add(ChatMessage("Tu", row.content, fromUser = true))
+                if (row.content.isNotBlank()) {
+                    val blocks = visualBlocksOfRow(row)
+                    out.add(
+                        ChatMessage(
+                            "Tu", row.content, fromUser = true,
+                            visualBlocksVersion = VISUAL_BLOCKS_VERSION.takeIf { blocks.isNotEmpty() },
+                            visualBlocks = blocks
+                        )
+                    )
+                }
             }
             "assistant" -> {
                 val reasoning = reasoningOf(row)
                 val calls = toolCallEntries(row)
+                val blocks = visualBlocksOfRow(row)
                 if (row.content.isNotBlank()) {
                     flush()
                     currentText = (if (failed) "(fallito) " else "") + row.content
+                    currentBlocks.addAll(blocks)
                     if (reasoning.isNotBlank()) {
                         currentTimeline.add(AssistantActivity(AssistantActivity.Kind.Reasoning, text = reasoning))
                     }
@@ -110,11 +135,12 @@ internal fun foldTranscriptToChat(rows: List<HermesSessionMessage>): List<ChatMe
                         )
                     }
                 } else {
-                    // Riga senza testo: contribuisce solo se ha reasoning o
-                    // tool (altrimenti scartata, niente bubble vuote).
-                    val hasContent = reasoning.isNotBlank() || calls.isNotEmpty()
+                    // Riga senza testo: contribuisce solo se ha reasoning,
+                    // tool o blocchi media (altrimenti scartata, niente bubble vuote).
+                    val hasContent = reasoning.isNotBlank() || calls.isNotEmpty() || blocks.isNotEmpty()
                     if (hasContent) {
-                        if (currentText == null && currentTimeline.isEmpty()) currentText = ""
+                        if (currentText == null && currentTimeline.isEmpty() && currentBlocks.isEmpty()) currentText = ""
+                        currentBlocks.addAll(blocks)
                         if (reasoning.isNotBlank()) {
                             currentTimeline.add(AssistantActivity(AssistantActivity.Kind.Reasoning, text = reasoning))
                         }
@@ -132,9 +158,14 @@ internal fun foldTranscriptToChat(rows: List<HermesSessionMessage>): List<ChatMe
             }
             "tool" -> {
                 // Risultato: MAI retained come testo (policy untrusted). Serve
-                // solo a marcare fallito il chip corrispondente.
+                // solo a marcare fallito il chip corrispondente; i blocchi
+                // visual strutturati passano come nel live.
                 val callId = row.raw?.optString("tool_call_id").orEmpty()
                 if (failed) markToolFailed(callId)
+                currentBlocks.addAll(visualBlocksOfRow(row))
+                if (currentText == null && currentTimeline.isEmpty() && currentBlocks.isNotEmpty()) {
+                    currentText = ""
+                }
             }
             else -> {
                 // system/developer/compaction/summary/ignoti: scartati (niente

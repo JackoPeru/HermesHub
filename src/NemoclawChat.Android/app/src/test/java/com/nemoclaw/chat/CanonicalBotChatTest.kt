@@ -82,6 +82,27 @@ class CanonicalBotChatTest {
     }
 
     @Test
+    fun transcriptFoldsMediaBlocks() {
+        val block = JSONObject()
+            .put("id", "m1")
+            .put("type", "media_file")
+            .put("mediaKind", "image")
+            .put("media_kind", "image")
+            .put("mediaUrl", "/v1/media/abc")
+            .put("media_url", "/v1/media/abc")
+            .put("alt", "foto")
+        val blocks = org.json.JSONArray().put(block)
+        val rows = listOf(
+            rowMsg("assistant", "ecco la foto", mapOf("visual_blocks" to blocks))
+        )
+        val folded = foldTranscriptToChat(rows)
+        assertEquals(1, folded.size)
+        assertEquals("ecco la foto", folded[0].text)
+        assertTrue(folded[0].visualBlocks.isNotEmpty())
+        assertEquals("/v1/media/abc", folded[0].visualBlocks[0].mediaUrl)
+    }
+
+    @Test
     fun transcriptFoldsLikeNormalChat() {
         val toolRow = JSONObject().put("name", "exec").put("tool_call_id", "c1")
         val calls = org.json.JSONArray().put(toolRow)

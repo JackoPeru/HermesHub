@@ -1560,6 +1560,34 @@ internal fun ChatScreen(
                             // esplicito, altrimenti omettiamo (default server).
                             if (capsSnapshot?.reasoningEfforts?.any { it.equals("auto", ignoreCase = true) } == true) "auto" else ""
                         }
+                        // Allegati in chat bot canonica: l'endpoint sessione accetta
+                        // solo testo, quindi si caricano prima e si citano nel prompt
+                        // (stesso pattern del percorso nativo). Upload parziale =
+                        // errore visibile e stop, mai invio monco silenzioso.
+                        val sessionInput = if (canonicalBotSession != null && attachments.isNotEmpty()) {
+                            val prep = buildPromptWithAttachmentToolRefs(
+                                botSettings, text, attachments, botApiKey,
+                                botProfile, botMultiplexEnabled, botAllowCompatAuth
+                            )
+                            if (isPartialUploadBlocked(attachments.size, prep.uploadedCount, prep.uploadErrors)) {
+                                localState = localState.applyEvent(
+                                    ChatStreamEvent.Error(
+                                        partialUploadBlockMessage(attachments.size, prep.uploadedCount, prep.uploadErrors)
+                                    )
+                                )
+                                if (state.activeConversationId == activeStreamCid) state.streamingState = localState
+                                return@launch
+                            }
+                            if (prep.uploadedCount > 0) {
+                                localState = localState.applyEvent(
+                                    ChatStreamEvent.Status("Allegati caricati sul gateway: ${prep.uploadedCount}.")
+                                )
+                                if (state.activeConversationId == activeStreamCid) state.streamingState = localState
+                            }
+                            prep.prompt
+                        } else {
+                            text
+                        }
 
                         suspend fun collectFlow(flow: kotlinx.coroutines.flow.Flow<ChatStreamEvent>) {
                             flow.collect { event ->
@@ -1666,7 +1694,7 @@ internal fun ChatScreen(
                                     streamHermesSessionChat(
                                         sessionSettings,
                                         sessionIdForTurn,
-                                        text,
+                                        sessionInput,
                                         botApiKey,
                                         botProfile,
                                         botMultiplexEnabled,
@@ -1690,7 +1718,7 @@ internal fun ChatScreen(
                                     streamHermesSessionChat(
                                         botSettings.copy(model = effModel, provider = effProvider, reasoningEffort = effReasoning),
                                         canonicalBotSession,
-                                        text,
+                                        sessionInput,
                                         botApiKey,
                                         botProfile,
                                         botMultiplexEnabled,
