@@ -1485,10 +1485,10 @@ internal val updateHttpClient: OkHttpClient by lazy {
 internal val archiveEventsHttpClient: OkHttpClient by lazy {
     OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
-        .callTimeout(0, TimeUnit.MILLISECONDS)
-        .retryOnConnectionFailure(true)
+        .callTimeout(10, TimeUnit.MINUTES)
+        .retryOnConnectionFailure(false)
         .build()
 }
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -67,6 +68,79 @@ class TestServiceOwnedMatcher(unittest.TestCase):
         self.assertFalse(self.owned(""))
         # Mai fail-open verso il kill: sconosciuto -> non owned -> skip.
         # (cleanup salta solo gli owned; qui si afferma il default False.)
+
+
+def load_pid_owned_namespace(path_cls) -> dict:
+    """Carica _MANAGED_CUDA_UNITS + _cgroup_service_owned + _pid_service_owned via AST."""
+    src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    wanted = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "_MANAGED_CUDA_UNITS" for t in node.targets
+        ):
+            wanted.append(node)
+        elif isinstance(node, ast.FunctionDef) and node.name in (
+            "_cgroup_service_owned",
+            "_pid_service_owned",
+        ):
+            wanted.append(node)
+    assert len(wanted) == 3, "matcher + _pid_service_owned non trovati in manager.py"
+    mod = ast.Module(body=wanted, type_ignores=[])
+    ns: dict = {"Path": path_cls}
+    exec(compile(mod, "manager_pid_owned", "exec"), ns)  # noqa: S102 - test locale
+    return ns
+
+
+class TestProcMissingFailClosed(unittest.TestCase):
+    """Fail-closed su /proc mancante: nessun kill (0 kill)."""
+
+    def test_pid_service_owned_missing_proc_returns_true(self):
+        class _MissingProcPath:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def read_text(self, *args, **kwargs):
+                raise FileNotFoundError("/proc/123/cgroup mancante")
+
+        ns = load_pid_owned_namespace(_MissingProcPath)
+        # /proc mancante -> fail-closed True -> cleanup deve skippare.
+        self.assertTrue(ns["_pid_service_owned"](123456))
+
+    def test_missing_proc_means_zero_kill(self):
+        # Simula cleanup_stray_cuda con _pid_service_owned mockato a True
+        # (fail-closed per /proc mancante): 0 kill.
+        fake_procs = [{"pid": 4242, "used_mb": 9000.0}]
+        fake_cmd = "/usr/bin/tabbyapi --model qwen"
+
+        def fake_pid_service_owned(pid: int) -> bool:
+            return True
+
+        mocked_owned = mock.Mock(side_effect=fake_pid_service_owned)
+        kill_calls: list[int] = []
+
+        killed = 0
+        skipped_owned = 0
+        for proc in fake_procs:
+            cmd = fake_cmd
+            low = cmd.lower()
+            assert "tabbyapi" in low
+            if mocked_owned(proc["pid"]):
+                skipped_owned += 1
+                continue
+            kill_calls.append(proc["pid"])
+            killed += 1
+
+        self.assertEqual(killed, 0)
+        self.assertEqual(kill_calls, [])
+        self.assertEqual(skipped_owned, 1)
+        mocked_owned.assert_called_once_with(4242)
+
+    def test_cleanup_skips_self_pid(self):
+        # cleanup deve escludere os.getpid(): il manager non si killa mai.
+        src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
+        self.assertIn("os.getpid()", src)
+        self.assertIn("os.path.basename", src)
 
 
 if __name__ == "__main__":

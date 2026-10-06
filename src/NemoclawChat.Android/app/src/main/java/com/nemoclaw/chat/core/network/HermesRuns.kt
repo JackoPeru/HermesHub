@@ -214,8 +214,10 @@ class HermesRunClient(
         val key = idempotencyKey?.trim()?.takeIf { it.isNotEmpty() }
             ?: "hub-${UUID.randomUUID()}"
         var last: Pair<Int, String> = 0 to "Rete non disponibile"
+        var attempt = 0
         for (candidateUrl in plugAndPlayUrlCandidates(runUrl("/v1/runs"))) {
             for (token in hermesAuthCandidates(apiKey)) {
+                if (candidateUrl.contains("/p/", ignoreCase = true) && token == null) continue
                 val res = runCatching {
                     val builder = okhttp3.Request.Builder()
                         .url(candidateUrl)
@@ -225,7 +227,7 @@ class HermesRunClient(
                     HermesHubProtocol.addCorrelationHeaders(builder, HermesHubProtocol.newCorrelationContext())
                     token?.let { builder.header("Authorization", "Bearer $it") }
                     if (!sessionId.isNullOrBlank()) builder.header("X-Hermes-Session-Id", sessionId)
-                    if (!sessionKey.isNullOrBlank()) builder.header("X-Hermes-Session-Key", sessionKey.trim())
+                    if (isValidHermesSessionKey(sessionKey)) builder.header("X-Hermes-Session-Key", sessionKey!!.trim())
                     val request = builder.post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())).build()
                     apiHttpClient.newCall(request).execute().use { resp ->
                         val replayed = resp.header("Idempotency-Replayed") == "true"
@@ -239,12 +241,13 @@ class HermesRunClient(
                     0 to (it.message ?: it.javaClass.simpleName)
                 }
                 last = res
-                if (!shouldRetryHermesWithBearerAuth(res.first, res.second)) {
+                if (!shouldRetryHermesWithBearerAuth(res.first, res.second, token)) {
                     if (res.first != 0) {
                         if (res.first !in 200..299 && res.first != 202) return@withContext res.first to null
                         return@withContext res.first to parseHermesRunInfo(res.second)
                     }
                 }
+                hermesRetryBackoffDelay(attempt++)
             }
         }
         last.first to null
@@ -252,14 +255,14 @@ class HermesRunClient(
 
     suspend fun status(runId: String): Pair<Int, HermesRunInfo?> = withContext(Dispatchers.IO) {
         requireCapability(capabilities?.runStatus ?: true, "run_status")
-        val res = httpGetResponse(runUrl("/v1/runs/$runId"), apiKey)
+        val res = httpGetResponse(runUrl("/v1/runs/${java.net.URLEncoder.encode(runId, "UTF-8")}"), apiKey)
         if (res.first !in 200..299) return@withContext res.first to null
         res.first to parseHermesRunInfo(res.second)
     }
 
     suspend fun stop(runId: String): Pair<Int, String> = withContext(Dispatchers.IO) {
         requireCapability(capabilities?.runStop ?: true, "run_stop")
-        postJson(runUrl("/v1/runs/$runId/stop"), JSONObject(), apiKey)
+        postJson(runUrl("/v1/runs/${java.net.URLEncoder.encode(runId, "UTF-8")}/stop"), JSONObject(), apiKey)
     }
 
     /**
@@ -270,7 +273,7 @@ class HermesRunClient(
         requireCapability(capabilities?.runSteer ?: true, "run_steer")
         val clean = text.trim()
         require(clean.isNotEmpty()) { "Testo steer obbligatorio." }
-        postJson(runUrl("/v1/runs/$runId/steer"), JSONObject().put("text", clean), apiKey)
+        postJson(runUrl("/v1/runs/${java.net.URLEncoder.encode(runId, "UTF-8")}/steer"), JSONObject().put("text", clean), apiKey)
     }
 
     /**
@@ -284,7 +287,7 @@ class HermesRunClient(
             ?: throw IllegalArgumentException("Scelta approval non valida.")
         val payload = JSONObject().put("choice", normalized)
         if (!requestId.isNullOrBlank()) payload.put("request_id", requestId.trim())
-        postJson(runUrl("/v1/runs/$runId/approval"), payload, apiKey)
+        postJson(runUrl("/v1/runs/${java.net.URLEncoder.encode(runId, "UTF-8")}/approval"), payload, apiKey)
     }
 
     /**
@@ -293,7 +296,7 @@ class HermesRunClient(
      */
     fun events(runId: String): Flow<Pair<String?, String>> = flow {
         requireCapability(capabilities?.runEventsSse ?: true, "run_events_sse")
-        val url = runUrl("/v1/runs/$runId/events")
+        val url = runUrl("/v1/runs/${java.net.URLEncoder.encode(runId, "UTF-8")}/events")
         // Riutilizza il trasporto SSE di ChatStream tramite callback pubblica.
         collectRunSseEvents(url, apiKey) { name, data -> emit(name to data) }
     }
@@ -338,6 +341,7 @@ internal suspend fun collectRunSseEvents(
 ) {
     for (candidateUrl in plugAndPlayUrlCandidates(url)) {
         for (token in hermesAuthCandidates(apiKey)) {
+            if (candidateUrl.contains("/p/", ignoreCase = true) && token == null) continue
             // Stesso pattern cancellabile di streamSseAttempt: stop abbatte la connessione.
             val builder = okhttp3.Request.Builder()
                 .url(candidateUrl)

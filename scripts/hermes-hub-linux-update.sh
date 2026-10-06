@@ -300,7 +300,7 @@ else:
         state = str(st.get("current_state") or "")
         if state == "" :
             print("manager status unreadable")
-        elif state == "LLM_READY" or state == "ERROR":
+        elif state == "LLM_READY":
             print("")
         else:
             print("manager state %s" % state)
@@ -376,9 +376,22 @@ restore_units() {
   local name
   for name in hermes-hub.service hermes-hub-linux-update.service hermes-hub-linux-update.timer hermes-hub-agent-update.service hermes-hub-agent-update.timer hermes-power-monitor.service; do
     if [ -f "$TMP_DIR/unit-backup/$name" ]; then
-      atomic_install "$TMP_DIR/unit-backup/$name" "$SERVICE_DIR/$name" 0644 || true
+      atomic_install "$TMP_DIR/unit-backup/$name" "$SERVICE_DIR/$name" 0644
     elif [ -f "$TMP_DIR/unit-backup/$name.missing" ]; then
       rm -f "$SERVICE_DIR/$name"
+    fi
+  done
+  local link_file link_path safe target_file
+  for link_file in "$TMP_DIR/link-backup/"*.link; do
+    [ -e "$link_file" ] || continue
+    link_path="$(cat "$link_file")"
+    [ -n "$link_path" ] || continue
+    safe="$(basename "$link_file" .link)"
+    target_file="$TMP_DIR/link-backup/$safe.target"
+    if [ -f "$target_file" ]; then
+      ln -sfn "$(cat "$target_file")" "$link_path"
+    elif [ -f "$TMP_DIR/link-backup/$safe.missing" ]; then
+      rm -f "$link_path"
     fi
   done
 }
@@ -605,7 +618,7 @@ if [ -n "$LOCAL_VERSION" ] && [[ "$LOCAL_VERSION" =~ ^[0-9]+(\.[0-9]+){2,3}$ ]];
   comparison="$(version_compare "$LOCAL_VERSION" "$LATEST_VERSION")"
   if [ "$comparison" -gt 0 ] && [ "$ALLOW_DOWNGRADE" != "true" ]; then
     echo "Local version $LOCAL_VERSION is newer; downgrade refused. Use --allow-downgrade explicitly." >&2
-    exit 0
+    exit 42
   fi
 fi
 
@@ -649,14 +662,25 @@ if [ "$ASSET_SIZE" -gt 0 ] && [ "$(wc -c < "$ARCHIVE" | tr -d '[:space:]')" != "
   echo "ERROR: downloaded archive size does not match GitHub metadata" >&2
   exit 1
 fi
+if [ -z "${ASSET_DIGEST:-}" ]; then
+  echo "ERROR: missing sha256 digest for $ASSET_NAME" >&2
+  exit 1
+fi
 if [[ "$ASSET_DIGEST" == sha256:* ]]; then
   need_cmd sha256sum
   EXPECTED_SHA256="${ASSET_DIGEST#sha256:}"
+  if [ -z "$EXPECTED_SHA256" ]; then
+    echo "ERROR: empty sha256 digest for $ASSET_NAME" >&2
+    exit 1
+  fi
   ACTUAL_SHA256="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
   if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
     echo "ERROR: downloaded archive SHA-256 mismatch" >&2
     exit 1
   fi
+else
+  echo "ERROR: unsupported digest format (require sha256:...) for $ASSET_NAME" >&2
+  exit 1
 fi
 
 EXTRACT_DIR="$TMP_DIR/extract"
@@ -760,6 +784,16 @@ for name in hermes-hub.service hermes-hub-linux-update.service hermes-hub-linux-
     cp -p "$SERVICE_DIR/$name" "$TMP_DIR/unit-backup/$name"
   else
     : > "$TMP_DIR/unit-backup/$name.missing"
+  fi
+done
+mkdir -p "$TMP_DIR/link-backup"
+for _link in "$HOME/hermes-hub-linux.sh" "$HOME/patch-hermes-gateway-native.py" "$BIN_DIR/hermes-hub-linux-update" "$BIN_DIR/hermes-hub-agent-update" "$BIN_DIR/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-llama.sh" "$BIN_DIR/hermes-wait-tailscale" "$BIN_DIR/hermes-wait-llama" "$BIN_DIR/hermes-power-monitor.sh" "$BIN_DIR/hermes-power-monitor"; do
+  _safe="$(printf '%s' "$_link" | tr -c 'A-Za-z0-9' '_')"
+  printf '%s' "$_link" > "$TMP_DIR/link-backup/$_safe.link"
+  if [ -L "$_link" ]; then
+    readlink "$_link" > "$TMP_DIR/link-backup/$_safe.target"
+  else
+    : > "$TMP_DIR/link-backup/$_safe.missing"
   fi
 done
 

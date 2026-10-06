@@ -4,6 +4,11 @@
 set -euo pipefail
 if [ "$(id -u)" -ne 0 ]; then echo "Esegui come root (sudo)." >&2; exit 1; fi
 
+BACKUP="/var/backups/ufw-status-$(date +%Y%m%d%H%M%S).bak"
+mkdir -p "$(dirname "$BACKUP")"
+ufw status numbered > "$BACKUP" 2>/dev/null || ufw status > "$BACKUP" 2>/dev/null || true
+echo "Backup ufw status in $BACKUP"
+
 ufw --force reset
 ufw default deny incoming
 ufw default allow outgoing

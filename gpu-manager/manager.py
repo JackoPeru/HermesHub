@@ -417,6 +417,7 @@ def _db_conn() -> sqlite3.Connection:
         Path(str(CONFIG["db_path"])).parent.mkdir(parents=True, exist_ok=True)
         _db = sqlite3.connect(str(CONFIG["db_path"]), check_same_thread=False)
         _db.execute("PRAGMA journal_mode=WAL")
+        _db.execute("PRAGMA busy_timeout=5000")
         _db.execute(
             "CREATE TABLE IF NOT EXISTS jobs ("
             "id TEXT PRIMARY KEY, kind TEXT, status TEXT, workflow TEXT, "
@@ -580,8 +581,8 @@ def _cgroup_service_owned(cgroup: str) -> bool:
 def _pid_service_owned(pid: int) -> bool:
     try:
         cgroup = Path(f"/proc/{pid}/cgroup").read_text(errors="replace")[:500]
-    except Exception:  # noqa: BLE001 - racy /proc, treat as unknown
-        return False
+    except Exception:  # noqa: BLE001 - racy /proc, fail-closed: skip kill
+        return True
     return _cgroup_service_owned(cgroup)
 
 
@@ -686,21 +687,29 @@ async def cleanup_stray_cuda() -> int:
     """
     killed = 0
     skipped_owned = 0
+    me = os.getpid()
     for proc in await asyncio.to_thread(gpu_compute_procs):
-        cmd = _proc_cmd(proc["pid"])
+        pid = int(proc.get("pid", 0) or 0)
+        if not pid or pid == me:
+            continue
+        cmd = _proc_cmd(pid)
         low = cmd.lower()
         if not cmd:
             continue
-        if "comfy" in low or "exllamav3" in low or "tabbyapi" in low or "llama-mainline" in low:
-            if "gpu-manager" in low:
-                continue
-            if _pid_service_owned(proc["pid"]):
-                skipped_owned += 1
-                continue
-            code, _ = await _run_async(["sudo", "-n", "kill", "-9", str(proc["pid"])], timeout=15)
-            if code == 0:
-                killed += 1
-                log.warning("killed stray CUDA pid=%d cmd=%s", proc["pid"], cmd[:120])
+        exe = os.path.basename(low.split()[0]) if low.split() else ""
+        if exe == "gpu-manager" or "gpu-manager" in low:
+            continue
+        is_tabby = exe in ("tabbyapi", "tabbyapi.exe", "llama-mainline", "llama-mainline.exe") or "tabbyapi" in low or "llama-mainline" in low
+        is_comfy = exe in ("comfy", "main", "exllamav3") or "comfy" in low or "exllamav3" in low
+        if not (is_tabby or is_comfy):
+            continue
+        if _pid_service_owned(pid):
+            skipped_owned += 1
+            continue
+        code, _ = await _run_async(["sudo", "-n", "kill", "-9", str(pid)], timeout=15)
+        if code == 0:
+            killed += 1
+            log.warning("killed stray CUDA pid=%d cmd=%s", pid, cmd[:120])
     if skipped_owned:
         log.info("stray cleanup skipped %d service-owned CUDA procs", skipped_owned)
     return killed
@@ -934,6 +943,13 @@ async def transition_to_llm() -> bool:
 
 
 async def restore_llm_with_retries(context: str) -> bool:
+    try:
+        if await _tabby_recent_progress():
+            log.info("restore %s skipped: tabby is generating (recent progress)", context)
+            _state["llm_notloaded_fails"] = 0
+            return True
+    except Exception:  # noqa: BLE001 - gate best effort, never block restore on error
+        pass
     max_retries = int(CONFIG["recovery"].get("max_retries", 3))
     backoffs: list = CONFIG["recovery"].get("retry_backoff", [10, 30, 60])
     for attempt in range(max_retries + 1):
@@ -1437,6 +1453,10 @@ async def drive_auto_once() -> None:
         await asyncio.sleep(5)
 
 
+_WATCHDOG_RESTORE_FAILS = 4
+_WATCHDOG_TRANSITIONAL = ("LLM_UNLOADING", "LLM_LOADING", "GPU_FREE", "MEDIA_STARTING", "MEDIA_STOPPING")
+
+
 async def llm_watchdog() -> None:
     """Throttled health check while the LLM should stay resident.
 
@@ -1457,6 +1477,7 @@ async def llm_watchdog() -> None:
             fails = int(_state.get("llm_notloaded_fails") or 0) + 1
             _state["llm_notloaded_fails"] = fails
             if await _tabby_recent_progress():
+                _state["llm_notloaded_fails"] = 0
                 log.info("watchdog: backend check failed but tabby is generating (fail %d); skipping restore", fails)
                 return
             if fails < _WATCHDOG_RESTORE_FAILS:
@@ -1470,23 +1491,29 @@ async def llm_watchdog() -> None:
             await ensure_voice_up()
 
 
-_WATCHDOG_RESTORE_FAILS = 4
-_WATCHDOG_TRANSITIONAL = ("LLM_UNLOADING", "LLM_LOADING", "GPU_FREE", "MEDIA_STARTING", "MEDIA_STOPPING")
-
-
 async def _tabby_recent_progress(seconds: int = 180) -> bool:
     """True if tabby logged generation progress recently (busy-healthy).
 
     Cheap journalctl grep; needs journal read rights, else False (fail-closed
     toward the old restore behavior, still gated by consecutive failures).
+    Also True when VRAM is actively used (>8000MB and util>0): a long
+    prefill holds VRAM without fresh journal lines.
     """
-    since = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(time.time() - seconds))
+    since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - seconds))
     code, out = await _run_async(
         ["journalctl", "-u", "hermes-tabby.service", "--since", since,
          "--no-pager", "-g", "tokens generated"],
         timeout=20,
     )
-    return code == 0 and bool(out.strip())
+    if code == 0 and bool(out.strip()):
+        return True
+    try:
+        for g in await asyncio.to_thread(gpu_snapshot):
+            if float(g.get("memory_used_mb", 0)) > 8000 and float(g.get("utilization_gpu", 0)) > 0:
+                return True
+    except Exception:  # noqa: BLE001 - best effort, never break watchdog
+        pass
+    return False
 
 
 async def _drive() -> None:

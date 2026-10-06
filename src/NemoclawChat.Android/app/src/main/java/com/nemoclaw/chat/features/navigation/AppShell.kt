@@ -63,6 +63,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -146,6 +149,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -179,6 +183,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -558,21 +563,21 @@ internal fun HermesBotSidebar(
                     fontSize = 16.sp,
                     modifier = Modifier.weight(1f)
                 )
-                Text(
-                    "Aggiorna",
-                    color = AppColors.Muted,
-                    fontSize = 12.sp,
-                    modifier = Modifier.clickable { botRefreshNonce++ }
-                )
-                Text(
-                    "Chiudi",
-                    color = AppColors.Muted,
-                    fontSize = 12.sp,
-                    modifier = Modifier.clickable(onClick = onClose)
-                )
+                TextButton(
+                    onClick = { botRefreshNonce++ },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("Aggiorna", color = AppColors.Muted, fontSize = 12.sp)
+                }
+                TextButton(
+                    onClick = onClose,
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("Chiudi", color = AppColors.Muted, fontSize = 12.sp)
+                }
             }
             Text(
-                if (bots.isEmpty()) status else "${bots.size} bot · tocca per parlare",
+                if (bots.isEmpty()) status else if (bots.size == 1) "1 bot · tocca per parlare" else "${bots.size} bot · tocca per parlare",
                 color = AppColors.Muted,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
@@ -580,12 +585,19 @@ internal fun HermesBotSidebar(
         }
         items(bots, key = { it.identityKey }) { bot ->
             val selected = activeBotKey != null && bot.identityKey == activeBotKey
+            val rowInteraction = remember(bot.identityKey) { MutableInteractionSource() }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .background(if (selected) AppColors.NavIndicator else Color.Transparent)
-                    .clickable { onOpenBotItem(bot) }
+                    .selectable(
+                        selected = selected,
+                        onClick = { onOpenBotItem(bot) },
+                        role = Role.Button,
+                        interactionSource = rowInteraction,
+                        indication = LocalIndication.current
+                    )
                     .padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)

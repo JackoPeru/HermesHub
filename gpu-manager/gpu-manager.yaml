@@ -2,8 +2,8 @@
 default_mode: auto
 host: 0.0.0.0
 port: 8643
-# Optional bearer token for the manager API itself. Empty = LAN trust
-# (same posture as TabbyAPI disable_auth on loopback).
+# Bearer token OBBLIGATORIA per la manager API. Non lasciare vuoto in produzione:
+# impostare api_key oppure HERMES_GPU_MANAGER_KEY.
 api_key: ""
 db_path: /var/lib/hermes-gpu-manager/state.db
 output_dir: /opt/hermes/gpu-manager/outputs
@@ -59,7 +59,7 @@ direct:
   startup_timeout: 600
 
 switching:
-  media_idle_timeout: 10
+  media_idle_timeout: 30
   llm_drain_timeout: 10
   llm_shutdown_timeout: 60
   vram_free_mb: 2500

@@ -147,11 +147,7 @@ try {
             Select-Object -First 1
 
         if (-not $cert) {
-            $cert = New-SelfSignedCertificate `
-                -Type CodeSigningCert `
-                -Subject $subject `
-                -CertStoreLocation Cert:\CurrentUser\My `
-                -NotAfter (Get-Date).AddYears(5)
+            throw "Certificato storico assente per $subject (validita residua >1 mese richiesta). Importare quello storico, non autocrearne uno."
         }
 
         $certPath = Join-Path $releaseDir "HermesHub-AppPublisher.cer"
@@ -173,9 +169,9 @@ try {
         }
 
         $signTool = Get-SignTool
-        & $signTool sign /fd SHA256 /sha1 $cert.Thumbprint /tr http://timestamp.digicert.com /td SHA256 $msix.FullName
+        & $signTool sign /fd SHA256 /sha1 $cert.Thumbprint /tr https://timestamp.digicert.com /td SHA256 $msix.FullName
         if ($LASTEXITCODE -ne 0) {
-            & $signTool sign /fd SHA256 /sha1 $cert.Thumbprint /tr http://timestamp.sectigo.com /td SHA256 $msix.FullName
+            & $signTool sign /fd SHA256 /sha1 $cert.Thumbprint /tr https://timestamp.sectigo.com /td SHA256 $msix.FullName
             if ($LASTEXITCODE -ne 0) {
                 throw "Firma MSIX con timestamp fallita."
             }

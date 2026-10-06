@@ -47,6 +47,26 @@ internal fun shouldRetryHermesWithBearerAuth(code: Int, body: String): Boolean {
     return code == 401
 }
 
+/**
+ * Fail-closed stretto: non ritentare con null dopo 401 con key.
+ * - token nullo -> false (nessun altro candidato dopo il fallback anonimo).
+ * - body con invalid_api_key/unauthorized e token presente -> false
+ *   (chiave esplicitamente rifiutata: il fallback null e' inutile/dannoso).
+ * Solo 401 generico con token valido consente il retry verso il candidato
+ * successivo (compat anonimo su endpoint non-/p/).
+ */
+internal fun shouldRetryHermesWithBearerAuth(code: Int, body: String, token: String?): Boolean {
+    if (code != 401) return false
+    if (token.isNullOrBlank()) return false
+    val lower = body.lowercase()
+    if (lower.contains("invalid_api_key") ||
+        lower.contains("invalid api key") ||
+        lower.contains("invalidapikey") ||
+        lower.contains("unauthorized")
+    ) return false
+    return true
+}
+
 internal fun isHermesAuthError(message: String?): Boolean {
     val normalized = message?.lowercase().orEmpty()
     return normalized.contains("401") ||

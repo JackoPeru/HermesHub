@@ -10,6 +10,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,6 +64,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -78,6 +80,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
@@ -125,7 +130,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
 
-private const val CONNECTION_ROSTER_TIMEOUT_MILLIS = 15_000L
+private const val CONNECTION_ROSTER_TIMEOUT_MILLIS = 8_000L
 
 internal data class HermesBotItem(
     val profile: String,
@@ -362,7 +367,9 @@ internal sealed interface CanonicalBotResolve {
 
 /** Singleflight cross-path: un solo resolve/create per bot alla volta
  *  (funnel roster/detail + sidebar + last-bot condividono la guard UI
- *  locale, ma corse tra path diversi mintavano due forever-chat). */
+ *  locale, ma corse tra path diversi mintavano due forever-chat).
+ *  Rientrante: se la stessa coroutine detiene gia il lock (preview nested
+ *  dentro resolve) riesegue senza riacquisire (Mutex non rientrante). */
 internal object CanonicalBotOpenLocks {
     private val locks = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
     suspend fun <T> withBotLock(key: String, block: suspend () -> T): T {
@@ -371,14 +378,28 @@ internal object CanonicalBotOpenLocks {
     }
 }
 
-/** Registry lookup: prima riga con titolo esattamente "Bot Chat"
- *  (root_title vince come sul desktop). Puro e testabile. */
+/** Match normalizzato canonico: trim().lowercase() == "bot chat".
+ *  root_title vince se non-blank (come desktop), altrimenti title. */
+internal fun isCanonicalBotRow(row: HermesSession): Boolean {
+    val rootTitle = row.raw?.optString("root_title").orEmpty()
+    val effective = if (rootTitle.trim().isNotEmpty()) rootTitle else row.title
+    return effective.trim().lowercase() == CANONICAL_BOT_CHAT_TITLE.lowercase()
+}
+
+private fun canonicalRowSortKey(row: HermesSession): String = row.createdAt
+
+/** Registry lookup: righe con titolo normalizzato "bot chat",
+ *  deterministico ordinando per created_at/last_active/id. Puro e testabile. */
 internal fun pickCanonicalRow(rows: List<HermesSession>): HermesSession? {
-    return rows.firstOrNull { row ->
-        val rootTitle = row.raw?.optString("root_title").orEmpty().trim()
-        rootTitle == CANONICAL_BOT_CHAT_TITLE ||
-            (rootTitle.isEmpty() && row.title.trim() == CANONICAL_BOT_CHAT_TITLE)
-    }
+    return rows.filter { isCanonicalBotRow(it) }
+        .sortedWith(
+            compareBy(
+                { canonicalRowSortKey(it) },
+                { it.raw?.optDouble("last_active", 0.0) ?: 0.0 },
+                { it.id }
+            )
+        )
+        .firstOrNull()
 }
 
 internal fun canonicalPreviewOf(row: HermesSession): CanonicalBotChat {
@@ -408,38 +429,68 @@ internal suspend fun resolveCanonicalBotChat(
     bot: HermesBotItem,
     rosterMultiplex: Boolean,
     createIfMissing: Boolean = true
-): CanonicalBotResolve = withContext(Dispatchers.IO) {
-    try {
-        val connection = connectionForBot(context, settings, bot)
-        val effective = settingsForBotConnection(settings, connection)
-        val secret = secretForBotConnection(context, connection)
-        val client = HermesSessionClient(effective, secret, bot.profile, rosterMultiplex, null)
-        val (listCode, rows) = client.list(limit = CANONICAL_SESSION_LIST_LIMIT, title = CANONICAL_BOT_CHAT_TITLE, includeHidden = true)
-        if (listCode !in 200..299) {
-            return@withContext CanonicalBotResolve.Failed(
-                "Registro Bot Chat non leggibile (HTTP $listCode): riprova."
-            )
+): CanonicalBotResolve = CanonicalBotOpenLocks.withBotLock(bot.identityKey) {
+    withContext(Dispatchers.IO) {
+        try {
+            val connection = connectionForBot(context, settings, bot)
+            val effective = settingsForBotConnection(settings, connection)
+            val secret = secretForBotConnection(context, connection)
+            val client = HermesSessionClient(effective, secret, bot.profile, rosterMultiplex, null)
+            suspend fun listAllCanonical(): Pair<Int, List<HermesSession>> {
+                val all = mutableListOf<HermesSession>()
+                var offset = 0
+                var code = 200
+                for (page in 0 until 5) {
+                    val (pageCode, pageRows) = client.list(
+                        limit = CANONICAL_SESSION_LIST_LIMIT,
+                        offset = offset,
+                        title = CANONICAL_BOT_CHAT_TITLE,
+                        includeHidden = true
+                    )
+                    code = pageCode
+                    if (code !in 200..299) return code to all
+                    if (pageRows.isEmpty()) break
+                    all.addAll(pageRows)
+                    if (pageRows.size < CANONICAL_SESSION_LIST_LIMIT) break
+                    offset += CANONICAL_SESSION_LIST_LIMIT
+                }
+                return code to all
+            }
+            val (listCode, rows) = listAllCanonical()
+            if (listCode !in 200..299) {
+                return@withContext CanonicalBotResolve.Failed(
+                    "Registro Bot Chat non leggibile (HTTP $listCode): riprova."
+                )
+            }
+            pickCanonicalRow(rows)?.let { row ->
+                // Fork pregressi: piu righe "Bot Chat" = chat sdoppiata in
+                // passato. Si usa la prima deterministica, ma si avvisa
+                // (niente repair auto). Conteggio con stesso match normalizzato.
+                val dups = rows.count { isCanonicalBotRow(it) } - 1
+                return@withContext CanonicalBotResolve.Found(canonicalPreviewOf(row), dups.coerceAtLeast(0))
+            }
+            if (!createIfMissing) return@withContext CanonicalBotResolve.Empty
+            val (createCode, created) = client.create(title = CANONICAL_BOT_CHAT_TITLE, source = "hermes-hub-android")
+            if (createCode !in 200..299 || created == null) {
+                // Race/create fallito o 400/409 (canonica mintata altrove nel mentre):
+                // rifai list e riusa Found se ora presente.
+                if (createCode == 400 || createCode == 409 || created == null) {
+                    val (reCode, reRows) = listAllCanonical()
+                    if (reCode in 200..299) {
+                        pickCanonicalRow(reRows)?.let { row ->
+                            val dups = reRows.count { isCanonicalBotRow(it) } - 1
+                            return@withContext CanonicalBotResolve.Found(canonicalPreviewOf(row), dups.coerceAtLeast(0))
+                        }
+                    }
+                }
+                return@withContext CanonicalBotResolve.Failed("Creazione Bot Chat fallita (HTTP $createCode).")
+            }
+            CanonicalBotResolve.Found(CanonicalBotChat(created.id, 0, "", System.currentTimeMillis()))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (e: Exception) {
+            CanonicalBotResolve.Failed(e.message ?: "Bot non raggiungibile.")
         }
-        pickCanonicalRow(rows)?.let { row ->
-            // Fork pregressi: piu righe "Bot Chat" = chat sdoppiata in
-            // passato. Si usa la prima, ma si avvisa (niente repair auto).
-            val dups = rows.count { candidate ->
-                val rootTitle = candidate.raw?.optString("root_title").orEmpty().trim()
-                rootTitle == CANONICAL_BOT_CHAT_TITLE ||
-                    (rootTitle.isEmpty() && candidate.title.trim() == CANONICAL_BOT_CHAT_TITLE)
-            } - 1
-            return@withContext CanonicalBotResolve.Found(canonicalPreviewOf(row), dups.coerceAtLeast(0))
-        }
-        if (!createIfMissing) return@withContext CanonicalBotResolve.Empty
-        val (createCode, created) = client.create(title = CANONICAL_BOT_CHAT_TITLE, source = "hermes-hub-android")
-        if (createCode !in 200..299 || created == null) {
-            return@withContext CanonicalBotResolve.Failed("Creazione Bot Chat fallita (HTTP $createCode).")
-        }
-        CanonicalBotResolve.Found(CanonicalBotChat(created.id, 0, "", System.currentTimeMillis()))
-    } catch (cancelled: kotlinx.coroutines.CancellationException) {
-        throw cancelled
-    } catch (e: Exception) {
-        CanonicalBotResolve.Failed(e.message ?: "Bot non raggiungibile.")
     }
 }
 
@@ -639,7 +690,8 @@ internal fun BotsScreen(
     var groupResult by remember { mutableStateOf<HermesBotGroupTurnResult?>(null) }
     var groupRunning by remember { mutableStateOf(false) }
     var groupJob by remember { mutableStateOf<Job?>(null) }
-    var detailBot by remember { mutableStateOf<HermesBotItem?>(null) }
+    var detailKey by rememberSaveable { mutableStateOf<String?>(null) }
+    val detailBot = remember(roster, detailKey) { roster?.items?.firstOrNull { it.identityKey == detailKey } }
     val scope = rememberCoroutineScope()
     val botListState = rememberLazyListState()
     // Menu contestuale stile desktop: preferenze locali (il server non ha
@@ -649,7 +701,7 @@ internal fun BotsScreen(
     var botAutoScreen by remember { mutableStateOf(setOf<String>()) }
     var botSections by remember { mutableStateOf(BotSections()) }
     var showHiddenBots by remember { mutableStateOf(false) }
-    var showSectionScreen by remember { mutableStateOf(false) }
+    var showSectionScreen by rememberSaveable { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<String?>(null) }
     var menuPage by remember { mutableStateOf(0) }
     var newSectionFor by remember { mutableStateOf<HermesBotItem?>(null) }
@@ -668,10 +720,10 @@ internal fun BotsScreen(
     var screenStatus by remember(settings.gatewayUrl) { mutableStateOf<ScreenStatusInfo?>(null) }
     var screenPreview by remember { mutableStateOf<Bitmap?>(null) }
     var lastScreenSignature by remember { mutableStateOf<BitmapImageLoader.FrameSignature?>(null) }
-    PollWhileStarted(settings.gatewayUrl, showSectionScreen, baseIntervalMs = 8_000L) {
-        // Schermo gia aperto in sezione: niente doppio polling (ScreenScreen
-        // polla da se). True = successo, nessun backoff.
-        if (showSectionScreen) return@PollWhileStarted true
+    // Schermo gia aperto in sezione: niente doppio polling (ScreenScreen
+    // polla da se): invocazione condizionale, non early-return.
+    if (!showSectionScreen) {
+    PollWhileStarted(settings.gatewayUrl, baseIntervalMs = 8_000L) {
         val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
         val next = runCatching { withContext(Dispatchers.IO) { getScreenStatus(settings, key) } }.getOrNull()
         screenStatus = next
@@ -691,8 +743,9 @@ internal fun BotsScreen(
         lastScreenHolder = holderNow
         next != null
     }
-    PollWhileStarted(screenStatus?.running, showSectionScreen, baseIntervalMs = 6_000L) {
-        if (showSectionScreen) return@PollWhileStarted true
+    }
+    if (!showSectionScreen) {
+    PollWhileStarted(screenStatus?.running, baseIntervalMs = 6_000L) {
         if (screenStatus?.running != true) {
             screenPreview = null
             lastScreenSignature = null
@@ -710,10 +763,11 @@ internal fun BotsScreen(
         screenPreview = withContext(Dispatchers.IO) { decodeScreenFrame(bytes, 480) }
         bytes != null
     }
+    }
 
     // Back dal dettaglio torna al roster, non fuori dalla sezione
     // (l'handler AppRoot consumerebbe il back altrimenti).
-    BackHandler(enabled = detailBot != null) { detailBot = null }
+    BackHandler(enabled = detailBot != null) { detailKey = null }
 
     // Funnel unico di apertura canonica: guard SINCRONA anti doppio-tap
     // (lo state write e immediato, la ricomposizione che disabilita i
@@ -722,7 +776,7 @@ internal fun BotsScreen(
     // Ritorna false se non acquisisce la guard (chiamante: non chiudere menu).
     fun openBotSession(bot: HermesBotItem): Boolean {
         if (opening != null) {
-            Toast.makeText(context, "Apertura gia in corso.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Apertura già in corso.", Toast.LENGTH_SHORT).show()
             return false
         }
         if (!canOpenBotChat()) return false
@@ -775,21 +829,35 @@ internal fun BotsScreen(
             botPreviews = emptyMap()
             return@LaunchedEffect
         }
-        botPreviews = try {
-            withTimeoutOrNull(20_000) {
-                items.map { bot ->
+        fun markStale() {
+            botPreviews = emptyMap()
+            if (!status.contains("anteprime non aggiornate")) status += " (anteprime non aggiornate)"
+        }
+        try {
+            val result = withTimeoutOrNull(8_000) {
+                items.take(20).map { bot ->
                     async(Dispatchers.IO) {
-                        bot.identityKey to runCatching {
-                            when (val resolved = resolveCanonicalBotChat(appContext, settings, bot, roster?.multiplexEnabled == true, createIfMissing = false)) {
-                                is CanonicalBotResolve.Found -> resolved.chat
-                                else -> null
-                            }
-                        }.getOrNull()
+                        val chat: CanonicalBotChat? = withTimeoutOrNull(8_000) {
+                            runCatching {
+                                // Il lock e dentro resolveCanonicalBotChat: qui niente
+                                // lock esterno (stessa chiave = deadlock, Mutex non rientrante).
+                                when (val resolved = resolveCanonicalBotChat(appContext, settings, bot, roster?.multiplexEnabled == true, createIfMissing = false)) {
+                                    is CanonicalBotResolve.Found -> resolved.chat
+                                    else -> null
+                                }
+                            }.getOrNull()
+                        }
+                        bot.identityKey to chat
                     }
                 }.awaitAll().mapNotNull { (key, chat) -> chat?.let { key to it } }.toMap()
-            } ?: botPreviews
+            }
+            if (result == null) {
+                markStale()
+            } else {
+                botPreviews = result
+            }
         } catch (_: Exception) {
-            botPreviews
+            markStale()
         }
     }
 
@@ -801,13 +869,13 @@ internal fun BotsScreen(
             settings = settings,
             screenStatus = screenStatus,
             screenPreview = screenPreview,
-            onBack = { detailBot = null },
+            onBack = { detailKey = null },
             // Singola POST via funnel (guard + finally): il dettaglio non
             // posta mai da solo, delega sempre qui.
             onOpenChat = { bot -> openPersistent(bot) },
             // Schermo sempre interno alla sezione (il tab Screen non esiste
             // piu): "Apri schermo live" torna al roster con schermo aperto.
-            onOpenScreen = { showSectionScreen = true; detailBot = null },
+            onOpenScreen = { showSectionScreen = true; detailKey = null },
             onOpenCron = onOpenCron,
             busy = opening != null
         )
@@ -861,38 +929,54 @@ internal fun BotsScreen(
     val groupedBots = remember(displayBots, botPins, botSections) {
         groupBotsBySection(displayBots.filter { it.identityKey !in botPins }, botSections)
     }
+    // Anteprime stale: scan best-effort fallito per alcuni bot ma con cache
+    // precedente (il LaunchedEffect con timeout conserva la mappa vecchia).
+    // UI-only: non tocca timeout/resolve, aggiunge solo etichetta.
+    val previewsStale = remember(roster?.items, botPreviews) {
+        val current = roster?.items.orEmpty()
+        current.isNotEmpty() && botPreviews.isNotEmpty() &&
+            current.any { it.identityKey !in botPreviews }
+    }
+    // Limite bitmap: anteprima schermo live solo ai primi 2 in roster
+    // (il dettaglio la riceve sempre). Evita N decode/view contemporanei.
+    val botOrderIndex = remember(displayBots) {
+        displayBots.mapIndexed { index, bot -> bot.identityKey to index }.toMap()
+    }
 
     // Schermo dentro la sezione Bot (non piu tab sidebar): copre roster e
     // dettaglio, back torna al roster.
     @Composable
-    fun BotCardWithMenu(bot: HermesBotItem) {
+    fun BotCardWithMenu(bot: HermesBotItem, cardIndex: Int = Int.MAX_VALUE) {
         val isPinned = bot.identityKey in botPins
         val isHidden = bot.hidden || bot.identityKey in botHiddenLocal
         val currentSection = botSections.assign[bot.identityKey]?.takeIf { it in botSections.order }
         val preview = botPreviews[bot.identityKey]
         // Anteprima testo o conteggio (chat vuota e scan fallito restano
-        // distinti: solo la prima mostra riga).
-        val previewLine = preview?.preview?.takeIf { it.isNotBlank() }
-            ?: preview?.takeIf { it.messageCount > 0 }?.let { "${it.messageCount} messaggi" }
-        BotRosterCard(
-            bot = bot,
-            screenRunning = screenStatus?.running == true,
-            screenPreview = screenPreview,
-            chatSupported = roster?.chatSupported == true,
+        // distinti: solo la prima mostra riga). Plurale + stale label.
+        val basePreviewLine = preview?.preview?.takeIf { it.isNotBlank() }
+            ?: preview?.takeIf { it.messageCount > 0 }?.let {
+                if (it.messageCount == 1) "1 messaggio" else "${it.messageCount} messaggi"
+            }
+        val previewLine = when {
+            basePreviewLine != null && previewsStale -> "$basePreviewLine (anteprime non aggiornate)"
+            basePreviewLine != null -> basePreviewLine
+            // Stale senza dato per questo bot: riga esplicita invece di vuoto.
+            previewsStale && roster != null -> "(anteprime non aggiornate)"
+            else -> null
+        }
+        // Bitmap limit: solo primi 2 in roster condividono la preview live.
+        val limitedPreview = if (cardIndex < 2) screenPreview else null
+        // Dropdown hoist: host costruito solo per la card con menu aperto,
+        // la card chiusa non compone alcun DropdownMenu.
+        val menuHost = if (menuFor == bot.identityKey) BotMenuHost(
+            expanded = true,
+            page = menuPage,
             busy = opening != null,
             pinned = isPinned,
-            hiddenBadge = showHiddenBots && isHidden,
-            previewText = previewLine,
-            previewTime = preview?.let { relativeTimeLabel(System.currentTimeMillis(), it.lastActiveMs) }?.takeIf { it.isNotBlank() },
-            menu = BotMenuHost(
-                expanded = menuFor == bot.identityKey,
-                page = if (menuFor == bot.identityKey) menuPage else 0,
-                busy = opening != null,
-                pinned = isPinned,
-                hidden = bot.identityKey in botHiddenLocal,
-                autoScreen = bot.identityKey in botAutoScreen,
-                sections = botSections.order,
-                currentSection = currentSection,
+            hidden = bot.identityKey in botHiddenLocal,
+            autoScreen = bot.identityKey in botAutoScreen,
+            sections = botSections.order,
+            currentSection = currentSection,
                 onDismiss = { menuFor = null; menuPage = 0 },
                 onPage = { menuPage = it },
                 onOpenChat = { if (openPersistent(bot)) menuFor = null },
@@ -951,8 +1035,19 @@ internal fun BotsScreen(
                     saveBotSections(appContext, next)
                 },
                 onNewSection = { menuFor = null; newSectionFor = bot }
-            ),
-            onOpenDetail = { detailBot = bot },
+            ) else null
+        BotRosterCard(
+            bot = bot,
+            screenRunning = screenStatus?.running == true,
+            screenPreview = limitedPreview,
+            chatSupported = roster?.chatSupported == true,
+            busy = opening != null,
+            pinned = isPinned,
+            hiddenBadge = showHiddenBots && isHidden,
+            previewText = previewLine,
+            previewTime = preview?.let { relativeTimeLabel(System.currentTimeMillis(), it.lastActiveMs) }?.takeIf { it.isNotBlank() },
+            menu = menuHost,
+            onOpenDetail = { detailKey = bot.identityKey },
             onOpenChat = { openPersistent(bot) },
             onOpenScreen = { showSectionScreen = true },
             onEdit = { openEditor(bot) },
@@ -966,7 +1061,7 @@ internal fun BotsScreen(
     }
 
     if (showSectionScreen) {
-        BackHandler(enabled = true) { showSectionScreen = false }
+        BackHandler(enabled = showSectionScreen) { showSectionScreen = false }
         ScreenScreen(
             context = context,
             settings = settings,
@@ -981,13 +1076,17 @@ internal fun BotsScreen(
         contentPadding = PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        item(key = "header") {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Bot Hermes", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
                     Text("Profili reali con configurazione, memoria, skill e credenziali separate. Le routine bot richiedono multiplexing attivo.", color = AppColors.Muted, fontSize = 13.sp)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     // Sidebar in modalita bot (come Hermes desktop).
                     IconButton(onClick = onOpenSidebar) {
                         Icon(Icons.Rounded.Menu, contentDescription = "Apri lista bot", tint = Color.White)
@@ -1011,6 +1110,44 @@ internal fun BotsScreen(
                 }
             }
             Text(status, color = AppColors.Muted, modifier = Modifier.padding(top = 12.dp))
+        }
+        // Loading: roster null = primo fetch in corso (skeleton/progress +
+        // liveRegion per screen reader). Distinto da empty/error.
+        if (roster == null) {
+            item(key = "loading") {
+                Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text(
+                            "Carico il roster reale Hermes…",
+                            color = AppColors.Muted,
+                            fontSize = 13.sp,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                        )
+                    }
+                }
+            }
+        }
+        // Errori sorgente: retry esplicito con refreshNonce++ (mai auto-prune).
+        val sourceFailures = roster?.sourceFailures.orEmpty()
+        if (sourceFailures.isNotEmpty()) {
+            item(key = "sources-error") {
+                Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Alcune fonti Hermes non rispondono.", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Fonti con errore: ${sourceFailures.joinToString(", ")}.",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
+                        )
+                        TextButton(
+                            onClick = { refreshNonce++ },
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) { Text("Riprova", color = AppColors.Accent) }
+                    }
+                }
+            }
         }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
@@ -1098,7 +1235,11 @@ internal fun BotsScreen(
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(group.name, color = Color.White, fontWeight = FontWeight.SemiBold)
-                                Text("${group.members.size} membri · sessioni Group persistenti", color = AppColors.Muted, fontSize = 11.sp)
+                                Text(
+                                    if (group.members.size == 1) "1 membro · sessioni Group persistenti" else "${group.members.size} membri · sessioni Group persistenti",
+                                    color = AppColors.Muted,
+                                    fontSize = 11.sp
+                                )
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 IconButton(onClick = {
@@ -1117,11 +1258,13 @@ internal fun BotsScreen(
                 }
             }
         }
-        if (roster?.items.isNullOrEmpty()) {
-            item {
+        // Empty distinta da loading/error: roster caricato ma zero bot visibili.
+        val emptyRoster = roster
+        if (emptyRoster != null && emptyRoster.items.isEmpty()) {
+            item(key = "empty") {
                 Card(colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble), shape = RoundedCornerShape(18.dp)) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Nessun profilo restituito dal gateway.", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Nessun bot disponibile.", color = Color.White, fontWeight = FontWeight.SemiBold)
                         Text("Crea il primo bot oppure collega un altro endpoint Hermes.", color = AppColors.Muted, fontSize = 13.sp)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             IconButton(onClick = { openEditor(null) }) { Icon(Icons.Rounded.Add, contentDescription = "Crea bot", tint = Color.White) }
@@ -1149,7 +1292,7 @@ internal fun BotsScreen(
         if (pinnedBots.isNotEmpty()) {
             item(key = "header-pinned") { BotSectionHeader("Fissati") }
             items(pinnedBots, key = { "pin-${it.identityKey}" }) { bot ->
-                BotCardWithMenu(bot = bot)
+                BotCardWithMenu(bot = bot, cardIndex = botOrderIndex[bot.identityKey] ?: Int.MAX_VALUE)
             }
         }
         groupedBots.forEach { (section, bots) ->
@@ -1157,7 +1300,7 @@ internal fun BotsScreen(
                 item(key = "sec-$section") { BotSectionHeader(section) }
             }
             items(bots, key = { it.identityKey }) { bot ->
-                BotCardWithMenu(bot = bot)
+                BotCardWithMenu(bot = bot, cardIndex = botOrderIndex[bot.identityKey] ?: Int.MAX_VALUE)
             }
         }
     }
@@ -1190,7 +1333,11 @@ internal fun BotsScreen(
                     modifier = Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("${group.members.size} membri · ogni sessione è persistente.", color = AppColors.Muted, fontSize = 12.sp)
+                    Text(
+                        if (group.members.size == 1) "1 membro · ogni sessione è persistente." else "${group.members.size} membri · ogni sessione è persistente.",
+                        color = AppColors.Muted,
+                        fontSize = 12.sp
+                    )
                     OutlinedTextField(
                         value = groupPrompt,
                         onValueChange = { groupPrompt = it.take(20_000) },
@@ -1253,6 +1400,8 @@ internal fun BotsScreen(
     if (showEditor) {
         val editing = editorBot
         val selectedConnection = connections.items.firstOrNull { it.id.equals(selectedConnectionId, true) }
+        // remember map: niente I/O SharedPreferences a ogni ricomposizione.
+        val autoApproveMap = remember(editing?.profile, showEditor) { loadBotAutoApproveMap(appContext) }
         AlertDialog(
             onDismissRequest = { if (!mutating) showEditor = false },
             title = { Text(if (editing == null) "Nuovo bot Hermes" else "Modifica ${editing.displayName}") },
@@ -1272,7 +1421,7 @@ internal fun BotsScreen(
                     Text("Auto-approvazione run di questo bot (solo client, mai deny automatico)", color = AppColors.Muted, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         for ((label, value) in listOf("Chiedi" to WorkLimits.AUTO_APPROVE_OFF, "Sessione" to WorkLimits.AUTO_APPROVE_SESSION, "Sempre" to WorkLimits.AUTO_APPROVE_ALWAYS)) {
-                            val selected = loadBotAutoApproveMap(context)[editing?.profile.orEmpty()]?.let { it == value }
+                            val selected = autoApproveMap[editing?.profile.orEmpty()]?.let { it == value }
                                 ?: (value == WorkLimits.AUTO_APPROVE_OFF)
                             TextButton(
                                 onClick = {
@@ -1377,7 +1526,7 @@ internal fun BotsScreen(
         AlertDialog(
             onDismissRequest = { removeConnection = null },
             title = { Text("Rimuovi ${connection.label}") },
-            text = { Text("La connessione endpoint verr├á eliminata dal dispositivo. I bot su questa connessione smetteranno di funzionare.") },
+            text = { Text("La connessione endpoint verrà eliminata dal dispositivo. I bot su questa connessione smetteranno di funzionare.") },
             confirmButton = {
                 IconButton(
                     onClick = {
@@ -1541,7 +1690,9 @@ internal fun BotRosterCard(
                     IconButton(onClick = onMenuRequest) {
                         Icon(Icons.Rounded.MoreVert, contentDescription = "Opzioni bot", tint = Color.White)
                     }
-                    if (menu != null) {
+                    // Solo la card con menuFor == key compone il DropdownMenu
+                    // (hoist in BotsScreen: le altre passano menu = null).
+                    if (menu != null && menu.expanded) {
                         BotCardMenu(bot = bot, host = menu)
                     }
                 }

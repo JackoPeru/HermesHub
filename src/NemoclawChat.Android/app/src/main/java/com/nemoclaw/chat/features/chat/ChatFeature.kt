@@ -288,6 +288,36 @@ import kotlin.math.sin
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
+/**
+ * Id stabile riga transcript per dedup live: prova id/message_id/seq nel raw
+ * (int diretto o stringa numerica), poi created_at + hash del contenuto,
+ * infine fallback deterministico positivo da indice. Mai 0.
+ */
+internal fun stableMessageId(raw: JSONObject?, fallbackIndex: Int): Int {
+    if (raw != null) {
+        for (key in arrayOf("id", "message_id", "seq")) {
+            if (raw.isNull(key)) continue
+            val value = raw.opt(key) ?: continue
+            val asInt: Int? = when (value) {
+                is Number -> value.toInt().takeIf { it != 0 }
+                is String -> value.trim().takeIf { it.isNotEmpty() }?.toIntOrNull()?.takeIf { it != 0 }
+                else -> null
+            }
+            if (asInt != null) return asInt
+        }
+        val created = raw.optString("created_at", "").orEmpty().trim()
+        if (created.isNotEmpty()) {
+            val hash = (created + "|" + raw.optString("role", "") + "|" + raw.optString("content", "").take(256)).hashCode()
+            if (hash != 0) {
+                if (hash == Int.MIN_VALUE) return Int.MAX_VALUE
+                val abs = abs(hash)
+                if (abs != 0) return abs
+            }
+        }
+    }
+    return 1_000_000 + fallbackIndex.coerceAtLeast(0)
+}
+
 @Composable
 internal fun ChatScreen(
     context: Context,
@@ -434,7 +464,7 @@ internal fun ChatScreen(
     // Cronologia caricata da disco per cid: il reattach DONE aggiunge il
     // risultato solo qui dentro, mai su lista vuota/stale (evita duplicati
     // che poi crescono a ogni riapertura).
-    var historyLoadedCid by remember { mutableStateOf<String?>(null) }
+    var historyLoadedCid by rememberSaveable { mutableStateOf<String?>(null) }
     // True se l'id aperto risulta eliminato (tombstone): evita di mostrare
     // un contenitore vuoto senza spiegazione. Le chat nuove non salvate
     // (es. primo open di un bot) NON alzano il flag.
@@ -455,7 +485,7 @@ internal fun ChatScreen(
         else isLinkedArchiveId(context, effective)
     }
 
-    LaunchedEffect(conversationId, initialPrompt) {
+    LaunchedEffect(conversationId, initialPrompt, botSettings.gatewayUrl, botSessionId, botEndpoint) {
         // Flag solo con id non-blank: al ritorno dalla sezione Bot (o da tab)
         // l'effect rigira con (null, "") e NON deve azzerarlo, altrimenti il
         // gate reattach DONE sopprimerebbe output background legittimi.
@@ -584,7 +614,7 @@ internal fun ChatScreen(
     // Finestra freschezza 240s: i tool lunghi non producono righe per minuti;
     // meglio un banner che resta che un flicker che fa reinviare duplicati.
     var botLive by remember(botProfile, botSessionId) { mutableStateOf<BotLiveActivity?>(null) }
-    PollWhileStarted(botProfile, botSessionId, botMultiplexEnabled, botEndpoint, baseIntervalMs = 5_000L) {
+    PollWhileStarted(botProfile, botSessionId, botMultiplexEnabled, botEndpoint, botApiKey, botSettings.gatewayUrl, baseIntervalMs = 5_000L) {
         val profile = botProfile
         val session = botSessionId
         if (profile.isNullOrBlank() || session.isNullOrBlank() || !gatewayAvailable) {
@@ -600,7 +630,14 @@ internal fun ChatScreen(
             }.getOrNull()
         }
         if (tail == null) return@PollWhileStarted false
-        val maxId = tail.mapNotNull { (it.raw?.optInt("id") ?: 0).takeIf { id -> id > 0 } }.maxOrNull() ?: 0
+        // Dedup stabile: id/message_id/seq, poi created_at+hash, poi fallback indice.
+        val tailWithIds = tail.mapIndexed { index, msg -> msg to stableMessageId(msg.raw, index) }
+        // Ordine deterministico per (timestamp, id) prima di asReversed/firstOrNull.
+        val orderedWithIds = tailWithIds.sortedWith(
+            compareBy({ it.first.raw?.optDouble("timestamp", 0.0) ?: 0.0 }, { it.second })
+        )
+        val orderedTail = orderedWithIds.map { it.first }
+        val maxId = tailWithIds.maxOfOrNull { it.second } ?: 0
         if (state.sending) {
             // Solo baseline: i turni locali non devono mai sembrare nuovi dopo.
             botLive = BotLiveActivity(running = false, status = "", maxRowId = maxId)
@@ -614,9 +651,9 @@ internal fun ChatScreen(
         if (prev == null) {
             // Prima lettura: baseline, mai append (la storia completa e gia
             // a video dal load). Running solo se coda fresca.
-            val freshTs = latestTsMs(tail)
+            val freshTs = latestTsMs(orderedTail)
             val fresh = freshTs > 0 && System.currentTimeMillis() - freshTs < 240_000
-            val newest = tail.maxByOrNull { it.raw?.optDouble("timestamp") ?: 0.0 }
+            val newest = orderedTail.asReversed().firstOrNull()
             botLive = BotLiveActivity(
                 running = fresh && newest != null,
                 status = if (fresh && newest != null) botLiveStatusFor(newest) else "",
@@ -624,8 +661,9 @@ internal fun ChatScreen(
             )
             return@PollWhileStarted true
         }
-        val newRows = tail.filter { (it.raw?.optInt("id") ?: 0) > prev.maxRowId }
-        val freshTs = latestTsMs(tail)
+        val newRowsDesc = orderedWithIds.asReversed().filter { it.second > prev.maxRowId }
+        val newRows = newRowsDesc.asReversed().map { it.first }
+        val freshTs = latestTsMs(orderedTail)
         val fresh = freshTs > 0 && System.currentTimeMillis() - freshTs < 240_000
         if (!fresh && newRows.isEmpty()) {
             botLive = BotLiveActivity(running = false, status = "", maxRowId = maxId)
@@ -634,14 +672,14 @@ internal fun ChatScreen(
         if (newRows.isNotEmpty()) {
             // Solo se siamo ancora sulla stessa chat (navigazione nel mentre)
             // e senza turno locale: le righe sono latest-first, il fold vuole
-            // cronologico.
+            // cronologico (newRows e gia ordinato stabile).
             if (cidBefore != null && state.activeConversationId == cidBefore && !state.sending) {
-                state.messages.addAll(foldTranscriptToChat(newRows.asReversed()))
+                state.messages.addAll(foldTranscriptToChat(newRows))
             }
         }
-        // Tail latest-first: la piu nuova e la prima, non l'ultima.
-        val newest = newRows.firstOrNull()
-            ?: tail.maxByOrNull { it.raw?.optDouble("timestamp") ?: 0.0 }
+        // La piu nuova e la prima della coda latest-first ordinata.
+        val newest = newRowsDesc.firstOrNull()?.first
+            ?: orderedTail.asReversed().firstOrNull()
         botLive = BotLiveActivity(
             running = true,
             status = newest?.let { botLiveStatusFor(it) } ?: "Sta lavorando…",
@@ -715,7 +753,7 @@ internal fun ChatScreen(
     // pronto quando invii. Silenzioso, una sola volta per apertura.
     // Il manager richiede Bearer (chiave master gateway), mai anonimo.
     val managerKey = remember { loadGatewaySecret(context) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(settings.gatewayUrl) {
         runCatching {
             val base = gpuManagerBase(settings.gatewayUrl)
             val status = JSONObject(httpGet("$base/status", managerKey))
@@ -1157,6 +1195,14 @@ internal fun ChatScreen(
             val lifecycle = (context as? ComponentActivity)?.lifecycle
             lifecycle?.addObserver(observer)
             onDispose { lifecycle?.removeObserver(observer) }
+        }
+        // Cambio gateway/endpoint: gli stream puntano al vecchio backend,
+        // cancellali (niente job orfani che scrivono snapshot fuori schermo).
+        DisposableEffect(botSettings.gatewayUrl) {
+            onDispose {
+                state.activeStreams.values.forEach { it.job?.cancel() }
+                state.activeStreams.clear()
+            }
         }
 
         ChatModelSessionBar(

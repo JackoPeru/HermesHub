@@ -1,6 +1,7 @@
 package com.nemoclaw.chat.features.screen
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
 import android.view.ViewGroup
@@ -208,7 +209,8 @@ internal fun ScreenPreviewImage(
     LaunchedEffect(settings.gatewayUrl, width) {
         lastSignature = null
     }
-    PollWhileStarted(settings.gatewayUrl, width, baseIntervalMs = refreshMs) {
+    val previewApiKeyHash = remember(settings.gatewayUrl) { (loadGatewaySecret(appContext) ?: "").hashCode() }
+    PollWhileStarted(settings.gatewayUrl, width, previewApiKeyHash, baseIntervalMs = refreshMs) {
         val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
         val bytes = withContext(Dispatchers.IO) { fetchScreenFrameBytes(settings, key, width) }
         // Skip re-decode se i byte sono identici ai precedenti (hash+lunghezza).
@@ -262,7 +264,8 @@ internal fun ScreenScreen(
         return withContext(Dispatchers.IO) { getScreenStatus(settings, key) }
     }
 
-    PollWhileStarted(settings.gatewayUrl, reloadNonce, baseIntervalMs = 5_000L) {
+    val screenApiKeyHash = remember(settings.gatewayUrl) { (loadGatewaySecret(appContext) ?: "").hashCode() }
+    PollWhileStarted(settings.gatewayUrl, reloadNonce, screenApiKeyHash, baseIntervalMs = 5_000L) {
         val next = runCatching { refreshStatus() }.getOrNull()
         if (next != null) {
             status = next
@@ -309,9 +312,12 @@ internal fun ScreenScreen(
     // Uscita dalla vista in takeover (toggle sezione, cambio tab): il
     // controllo va restituito, altrimenti resta appeso. Best-effort: scope
     // dedicato (quello della composition muore nel dispose), niente UI.
+    // Rotazione (isChangingConfigurations): niente release, la vista si
+    // ricrea subito e il controllo resta a noi.
     DisposableEffect(Unit) {
         onDispose {
-            if (holding) {
+            val changing = (context as? Activity)?.isChangingConfigurations == true
+            if (holding && !changing) {
                 runCatching {
                     kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                         val key = loadGatewaySecret(appContext)

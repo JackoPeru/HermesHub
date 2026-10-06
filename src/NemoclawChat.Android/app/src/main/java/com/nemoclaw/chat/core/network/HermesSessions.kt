@@ -174,6 +174,33 @@ internal fun botLiveStatusFor(row: HermesSessionMessage): String {
     }
 }
 
+internal fun transcriptTimestampOf(row: HermesSessionMessage): Double =
+    row.raw?.optDouble("timestamp", 0.0) ?: 0.0
+
+internal fun transcriptCreatedAtOf(row: HermesSessionMessage): String =
+    row.raw?.optString("created_at").orEmpty().ifBlank { row.createdAt }
+
+internal fun transcriptRowIdOf(row: HermesSessionMessage): String =
+    row.raw?.optString("id").orEmpty()
+        .ifBlank { row.raw?.optString("message_id").orEmpty() }
+        .ifBlank { row.raw?.optString("seq").orEmpty() }
+        .ifBlank { row.raw?.optString("created_at").orEmpty() + "|" + row.createdAt }
+
+/**
+ * Ordinamento stabile transcript: compareBy(timestamp).thenBy(createdAt).thenBy(id),
+ * fallback asReversed solo se tutti timestamp == 0 (ordine API). Puro e testabile.
+ */
+internal fun sortTranscriptRows(rows: List<HermesSessionMessage>): List<HermesSessionMessage> {
+    if (rows.isEmpty()) return rows
+    val allZero = rows.all { transcriptTimestampOf(it) == 0.0 }
+    if (allZero) return rows.asReversed()
+    return rows.sortedWith(
+        compareBy<HermesSessionMessage> { transcriptTimestampOf(it) }
+            .thenBy { transcriptCreatedAtOf(it) }
+            .thenBy { transcriptRowIdOf(it) }
+    )
+}
+
 /**
  * Transcript canonico di una sessione bot (cronologia autorevole condivisa
  * col desktop). latest-first dal server, reso cronologico (ordina per
@@ -190,13 +217,24 @@ internal suspend fun loadCanonicalBotTranscript(
 ): List<ChatMessage>? = withContext(Dispatchers.IO) {
     runCatching {
         val client = HermesSessionClient(settings, apiKey, profile, multiplexEnabled, null)
-        val (code, rows) = client.messages(id = sessionId, limit = limit, order = "latest", includeCompacted = true)
-        if (code !in 200..299 || rows.isEmpty()) return@runCatching null
-        val chronological = if (rows.all { (it.raw?.optDouble("timestamp", 0.0) ?: 0.0) > 0 }) {
-            rows.sortedBy { it.raw?.optDouble("timestamp", 0.0) }
-        } else {
-            rows.asReversed()
+        val pageSize = 500
+        val allRows = mutableListOf<HermesSessionMessage>()
+        var offset = 0
+        var lastCode = 200
+        for (page in 0 until 5) {
+            val (code, rows) = client.messages(id = sessionId, limit = pageSize, offset = offset, order = "latest", includeCompacted = true)
+            lastCode = code
+            if (code !in 200..299) {
+                if (allRows.isEmpty()) return@runCatching null
+                break
+            }
+            if (rows.isEmpty()) break
+            allRows.addAll(rows)
+            if (rows.size < pageSize) break
+            offset += pageSize
         }
+        if (lastCode !in 200..299 || allRows.isEmpty()) return@runCatching null
+        val chronological = sortTranscriptRows(allRows)
         foldTranscriptToChat(chronological).takeIf { it.isNotEmpty() }
     }.getOrNull()
 }
@@ -325,7 +363,7 @@ class HermesSessionClient(
 
     suspend fun get(id: String): Pair<Int, HermesSession?> = withContext(Dispatchers.IO) {
         requireCapability(capabilities?.sessionRead ?: true, "session_read")
-        val res = httpGetResponse(sessionUrl("/api/sessions/$id"), apiKey)
+        val res = httpGetResponse(sessionUrl("/api/sessions/${java.net.URLEncoder.encode(id, "UTF-8")}"), apiKey)
         if (res.first !in 200..299) return@withContext res.first to null
         res.first to parseHermesSession(res.second)
     }
@@ -335,20 +373,20 @@ class HermesSessionClient(
         val payload = JSONObject()
         if (title != null) payload.put("title", title)
         if (endReason != null) payload.put("end_reason", endReason)
-        val res = postJson(sessionUrl("/api/sessions/$id"), payload, apiKey, method = "PATCH")
+        val res = postJson(sessionUrl("/api/sessions/${java.net.URLEncoder.encode(id, "UTF-8")}"), payload, apiKey, method = "PATCH")
         if (res.first !in 200..299) return@withContext res.first to null
         res.first to parseHermesSession(res.second)
     }
 
     suspend fun delete(id: String): Int = withContext(Dispatchers.IO) {
         requireCapability(capabilities?.sessionDelete ?: true, "session_delete")
-        postJson(sessionUrl("/api/sessions/$id"), JSONObject(), apiKey, method = "DELETE").first
+        postJson(sessionUrl("/api/sessions/${java.net.URLEncoder.encode(id, "UTF-8")}"), JSONObject(), apiKey, method = "DELETE").first
     }
 
-    suspend fun messages(id: String, limit: Int = 200, order: String? = null, includeCompacted: Boolean = false): Pair<Int, List<HermesSessionMessage>> = withContext(Dispatchers.IO) {
+    suspend fun messages(id: String, limit: Int = 200, offset: Int = 0, order: String? = null, includeCompacted: Boolean = false): Pair<Int, List<HermesSessionMessage>> = withContext(Dispatchers.IO) {
         requireCapability(capabilities?.sessionMessages ?: true, "session_messages")
-        var url = sessionUrl("/api/sessions/$id/messages?limit=$limit")
-        if (!order.isNullOrBlank()) url += "&order=$order"
+        var url = sessionUrl("/api/sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/messages?limit=$limit&offset=$offset")
+        if (!order.isNullOrBlank()) url += "&order=${java.net.URLEncoder.encode(order, "UTF-8")}"
         if (includeCompacted) url += "&include_compacted=true"
         val res = httpGetResponse(url, apiKey)
         if (res.first !in 200..299) return@withContext res.first to emptyList()
@@ -359,7 +397,7 @@ class HermesSessionClient(
         requireCapability(capabilities?.sessionFork ?: true, "session_fork")
         val payload = JSONObject()
         if (!title.isNullOrBlank()) payload.put("title", title)
-        val res = postJson(sessionUrl("/api/sessions/$id/fork"), payload, apiKey)
+        val res = postJson(sessionUrl("/api/sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/fork"), payload, apiKey)
         if (res.first !in 200..299) return@withContext res.first to null
         res.first to parseHermesSession(res.second)
     }
@@ -373,7 +411,7 @@ class HermesSessionClient(
         val payload = JSONObject()
         if (!model.isNullOrBlank()) payload.put("model", model)
         if (!provider.isNullOrBlank()) payload.put("provider", provider)
-        postJson(sessionUrl("/api/sessions/$id/model"), payload, apiKey)
+        postJson(sessionUrl("/api/sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/model"), payload, apiKey)
     }
 
     suspend fun chat(
@@ -389,7 +427,7 @@ class HermesSessionClient(
         if (!model.isNullOrBlank()) payload.put("model", model)
         if (!provider.isNullOrBlank()) payload.put("provider", provider)
         if (modelOptions != null) payload.put("model_options", modelOptions)
-        postJsonWithSessionKey(sessionUrl("/api/sessions/$id/chat"), payload, sessionKey)
+        postJsonWithSessionKey(sessionUrl("/api/sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/chat"), payload, sessionKey)
     }
 
     private suspend fun postJsonWithSessionKey(url: String, payload: JSONObject, sessionKey: String?): Pair<Int, String> {

@@ -1,6 +1,7 @@
 package com.nemoclaw.chat
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -9,6 +10,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.net.URI
 import java.util.concurrent.TimeUnit
+import kotlin.random.Random
+
+internal suspend fun hermesRetryBackoffDelay(attempt: Int) {
+    val shift = attempt.coerceIn(0, 4)
+    delay((300L shl shift) + Random.nextLong(0, 251))
+}
 
 internal val plugAndPlayGatewayRoots = emptyList<String>()
 
@@ -47,6 +54,7 @@ internal suspend fun httpGetResponse(
     // Fail-closed profili: URL /p/<profile>/ richiede credenziale esplicita, mai fallback null.
     val isProfileUrl = url.contains("/p/", ignoreCase = true)
     var last: Pair<Int, String>? = null
+    var attempt = 0
     for (candidateUrl in plugAndPlayUrlCandidates(url)) {
         for (token in hermesAuthCandidates(apiKey, allowCompatAuth)) {
             // Su profilo nominato senza key: non inviare fallback anonimo.
@@ -55,12 +63,15 @@ internal suspend fun httpGetResponse(
                 executeHttpGet(candidateUrl, token, requestContext)
             } catch (ex: Exception) {
                 last = 0 to (ex.message ?: ex.javaClass.simpleName)
+                hermesRetryBackoffDelay(attempt++)
                 continue
             }
             last = response
-            if (!shouldRetryHermesWithBearerAuth(response.first, response.second)) {
+            if (!shouldRetryHermesWithBearerAuth(response.first, response.second, token)) {
                 if (response.first != 0) return@withContext response
             }
+            // Retry (401 verso candidato successivo o trasporto 0): backoff+jitter.
+            hermesRetryBackoffDelay(attempt++)
         }
     }
     last ?: (0 to "")
@@ -89,6 +100,7 @@ internal suspend fun postJson(
     val isProfileUrl = url.contains("/p/", ignoreCase = true)
     val effectiveAllowCompat = if (isProfileUrl) false else allowCompatAuth
     var last: Pair<Int, String>? = null
+    var attempt = 0
     for (candidateUrl in plugAndPlayUrlCandidates(url)) {
         for (token in hermesAuthCandidates(apiKey, effectiveAllowCompat)) {
             // Su profilo nominato senza key: non inviare fallback anonimo.
@@ -97,12 +109,15 @@ internal suspend fun postJson(
                 executeJsonRequest(candidateUrl, payload, method, token, sessionId, requestContext, sessionKey)
             } catch (ex: Exception) {
                 last = 0 to (ex.message ?: ex.javaClass.simpleName)
+                hermesRetryBackoffDelay(attempt++)
                 continue
             }
             last = response
-            if (!shouldRetryHermesWithBearerAuth(response.first, response.second)) {
+            if (!shouldRetryHermesWithBearerAuth(response.first, response.second, token)) {
                 if (response.first != 0) return@withContext response
             }
+            // Retry (401 verso candidato successivo o trasporto 0): backoff+jitter.
+            hermesRetryBackoffDelay(attempt++)
         }
     }
     last ?: (0 to "")

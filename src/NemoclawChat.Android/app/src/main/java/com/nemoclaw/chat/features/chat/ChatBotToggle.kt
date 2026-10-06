@@ -5,10 +5,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -21,6 +25,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -41,7 +46,7 @@ internal fun ChatBotToggle(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 2.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
             .selectableGroup(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
@@ -77,14 +82,18 @@ private fun ChatBotSegment(
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    val stateDesc = if (selected) "attiva" else "non attiva"
+    val stateDesc = if (selected) "Sezione $label attiva" else "Sezione $label non attiva"
+    val interactionSource = remember { MutableInteractionSource() }
     Surface(
         modifier = Modifier
+            .heightIn(min = 48.dp)
             .clip(CircleShape)
             .selectable(
                 selected = selected,
                 onClick = onClick,
-                role = Role.Tab
+                role = Role.Tab,
+                interactionSource = interactionSource,
+                indication = LocalIndication.current
             )
             .semantics(mergeDescendants = true) {
                 stateDescription = stateDesc
@@ -101,16 +110,18 @@ private fun ChatBotSegment(
                 Box(
                     modifier = Modifier
                         .padding(end = 5.dp)
-                        .size(5.dp)
+                        .size(8.dp)
                         .background(Color(0xFF171009), CircleShape)
                 )
             }
             Text(
                 text = label,
                 color = if (selected) Color(0xFF171009) else AppColors.Muted,
-                fontSize = 11.sp,
+                fontSize = 13.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                lineHeight = 13.sp
+                lineHeight = 16.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

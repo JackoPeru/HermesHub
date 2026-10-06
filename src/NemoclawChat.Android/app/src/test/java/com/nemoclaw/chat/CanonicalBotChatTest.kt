@@ -1,10 +1,12 @@
 package com.nemoclaw.chat
 
 import com.nemoclaw.chat.features.bots.canonicalPreviewOf
+import com.nemoclaw.chat.features.bots.isCanonicalBotRow
 import com.nemoclaw.chat.features.bots.pickCanonicalRow
 import com.nemoclaw.chat.features.bots.relativeTimeLabel
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -138,5 +140,102 @@ class CanonicalBotChatTest {
         assertEquals("Sta scrivendo…", botLiveStatusFor(rowMsg("assistant", "ciao")))
         assertEquals("Nuovo messaggio…", botLiveStatusFor(rowMsg("user", "ciao")))
         assertEquals("Sta lavorando…", botLiveStatusFor(rowMsg("system", "x")))
+    }
+
+    private fun sessionFull(
+        id: String,
+        title: String,
+        createdAt: String = "",
+        lastActive: Double = 0.0,
+        rootTitle: String? = null
+    ): HermesSession {
+        val raw = JSONObject()
+        if (lastActive != 0.0) raw.put("last_active", lastActive)
+        if (rootTitle != null) raw.put("root_title", rootTitle)
+        return HermesSession(id = id, title = title, createdAt = createdAt, raw = raw)
+    }
+
+    @Test
+    fun pickCaseInsensitiveTrimmed() {
+        val rows = listOf(
+            session("s1", "Lavoro"),
+            session("s2", "  BOT CHAT  "),
+            session("s3", "bot chat")
+        )
+        val picked = pickCanonicalRow(rows)!!
+        assertTrue(isCanonicalBotRow(picked))
+        // Deterministico: a parita di created_at/last_active vince id minore.
+        assertEquals("s2", picked.id)
+    }
+
+    @Test
+    fun pickDeterministicoDuplicati() {
+        val a = sessionFull("b", "Bot Chat", createdAt = "2026-02-02T00:00:00Z", lastActive = 200.0)
+        val b = sessionFull("a", "bot chat", createdAt = "2026-01-01T00:00:00Z", lastActive = 100.0)
+        val c = sessionFull("c", "  BOT CHAT ", createdAt = "2026-01-01T00:00:00Z", lastActive = 100.0)
+        // Ordine d'ingresso diverso, risultato identico (ordinato per created_at/last_active/id).
+        assertEquals("a", pickCanonicalRow(listOf(a, b, c))!!.id)
+        assertEquals("a", pickCanonicalRow(listOf(c, a, b))!!.id)
+        assertEquals("a", pickCanonicalRow(listOf(b, c, a))!!.id)
+    }
+
+    @Test
+    fun sortMistoTimestampCreatedAtId() {
+        val r1 = rowMsg("user", "t3", mapOf("timestamp" to 3.0, "created_at" to "2026-01-03", "id" to 30))
+        val r2 = rowMsg("user", "t1", mapOf("timestamp" to 1.0, "created_at" to "2026-01-01", "id" to 10))
+        val r3 = rowMsg("user", "t2a", mapOf("timestamp" to 2.0, "created_at" to "2026-01-02A", "id" to 21))
+        val r4 = rowMsg("user", "t2b", mapOf("timestamp" to 2.0, "created_at" to "2026-01-02A", "id" to 20))
+        val r5 = rowMsg("user", "t2c", mapOf("timestamp" to 2.0, "created_at" to "2026-01-02B", "id" to 1))
+        val sorted = sortTranscriptRows(listOf(r1, r2, r3, r4, r5))
+        // timestamp asc, poi created_at asc, poi id asc.
+        assertEquals(listOf("t1", "t2b", "t2a", "t2c", "t3"), sorted.map { it.content })
+    }
+
+    @Test
+    fun sortFallbackSoloSeTuttiTimestampZero() {
+        val r1 = rowMsg("user", "primo", mapOf("created_at" to "2026-01-01"))
+        val r2 = rowMsg("user", "secondo", mapOf("created_at" to "2026-01-02"))
+        // Tutti timestamp == 0 -> asReversed (ordine API invertito).
+        assertEquals(listOf("secondo", "primo"), sortTranscriptRows(listOf(r1, r2)).map { it.content })
+        // Un solo timestamp > 0 -> sort stabile, non fallback.
+        val r3 = rowMsg("user", "conTs", mapOf("timestamp" to 5.0, "created_at" to "2026-01-01"))
+        val mixed = sortTranscriptRows(listOf(r2, r3, r1))
+        assertEquals("conTs", mixed.last().content)
+    }
+
+    @Test
+    fun idAssenteUsaCreatedAtHash() {
+        val rawNoId = JSONObject().put("created_at", "2026-01-01T00:00:00Z").put("role", "user").put("content", "ciao")
+        val idA = stableMessageId(rawNoId, 0)
+        val idB = stableMessageId(rawNoId, 7)
+        // Stesso created_at+contenuto -> stesso id stabile anche con fallbackIndex diverso.
+        assertEquals(idA, idB)
+        assertTrue(idA != 0)
+        val rawOther = JSONObject().put("created_at", "2026-01-02T00:00:00Z").put("role", "user").put("content", "ciao")
+        assertNotEquals(idA, stableMessageId(rawOther, 0))
+        // id numerico diretto vince.
+        assertEquals(42, stableMessageId(JSONObject().put("id", 42), 0))
+        assertEquals(7, stableMessageId(JSONObject().put("message_id", "7"), 0))
+        assertEquals(9, stableMessageId(JSONObject().put("seq", 9), 3))
+        // Senza id e senza created_at -> fallback deterministico da indice.
+        assertEquals(1_000_000, stableMessageId(JSONObject(), 0))
+        assertEquals(1_000_005, stableMessageId(JSONObject(), 5))
+        assertEquals(1_000_005, stableMessageId(null, 5))
+    }
+
+    @Test
+    fun previewOfInvariato() {
+        val row = session("s9", "Bot Chat", mapOf("live_message_count" to 12, "preview" to "ciao", "last_active" to 1791226226.0))
+        val preview = canonicalPreviewOf(row)
+        assertEquals("s9", preview.sessionId)
+        assertEquals(12, preview.messageCount)
+        assertEquals("ciao", preview.preview)
+        assertEquals(1791226226000L, preview.lastActiveMs)
+        // Vuoto: zero messaggi, preview vuota, lastActive 0.
+        val empty = canonicalPreviewOf(session("e1", "Bot Chat"))
+        assertEquals("e1", empty.sessionId)
+        assertEquals(0, empty.messageCount)
+        assertEquals("", empty.preview)
+        assertEquals(0L, empty.lastActiveMs)
     }
 }

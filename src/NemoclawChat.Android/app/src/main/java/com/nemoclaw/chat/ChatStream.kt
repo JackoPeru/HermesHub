@@ -53,9 +53,9 @@ private val plugAndPlayStreamGatewayRoots = emptyList<String>()
 
 internal val streamHttpClient: OkHttpClient = OkHttpClient.Builder()
     .connectTimeout(10, TimeUnit.SECONDS)
-    .readTimeout(0, TimeUnit.SECONDS)
+    .readTimeout(60, TimeUnit.SECONDS)
     .writeTimeout(30, TimeUnit.SECONDS)
-    .callTimeout(0, TimeUnit.SECONDS)
+    .callTimeout(90, TimeUnit.SECONDS)
     .apply { debugHttpLoggingInterceptor()?.let { addInterceptor(it) } }
     .build()
 
@@ -1289,6 +1289,8 @@ private suspend fun openSseStream(
 
     candidateLoop@ for (candidateUrl in plugAndPlayStreamUrlCandidates(url)) {
         for ((index, bearerToken) in authCandidates.withIndex()) {
+            // Fail-closed profilo: mai fallback anonimo su /p/<profile>/.
+            if (candidateUrl.contains("/p/", ignoreCase = true) && bearerToken.isNullOrBlank()) continue
             currentCoroutineContext().ensureActive()
             onEvent(ChatStreamEvent.Status("$label: connessione stream..."))
             val builder = Request.Builder()
@@ -1333,7 +1335,9 @@ private suspend fun openSseStream(
                     accepted = false,
                     code = failure.code,
                     body = failure.body,
-                    hasMoreAuthCandidates = index < authCandidates.lastIndex
+                    hasMoreAuthCandidates = index < authCandidates.lastIndex,
+                    token = bearerToken,
+                    tokenProvided = true
                 )
                 if (canRetryAuth) {
                     onEvent(ChatStreamEvent.Status("API key Hermes non accettata. Riprovo automaticamente..."))
@@ -1463,8 +1467,16 @@ internal fun shouldRetrySseAuth(
     accepted: Boolean,
     code: Int,
     body: String,
-    hasMoreAuthCandidates: Boolean
-): Boolean = !accepted && hasMoreAuthCandidates && shouldRetryHermesWithBearerAuth(code, body)
+    hasMoreAuthCandidates: Boolean,
+    token: String? = null,
+    tokenProvided: Boolean = false
+): Boolean {
+    if (accepted || !hasMoreAuthCandidates) return false
+    // Path legacy (test): senza token esplicito, solo 401.
+    if (!tokenProvided) return shouldRetryHermesWithBearerAuth(code, body)
+    // Fail-closed: non ritentare con null dopo 401 con key rifiutata.
+    return shouldRetryHermesWithBearerAuth(code, body, token)
+}
 
 internal fun isTerminalSseEvent(eventName: String?, data: String): Boolean {
     if (data.trim() == "[DONE]") return true
@@ -1611,6 +1623,8 @@ internal suspend fun uploadAttachmentForTool(
     var lastError = "gateway non raggiungibile"
     candidateLoop@ for (candidateUrl in plugAndPlayStreamUrlCandidates(endpoint)) {
         for ((index, token) in authCandidates.withIndex()) {
+            // Fail-closed profilo: mai fallback anonimo su /p/<profile>/.
+            if (candidateUrl.contains("/p/", ignoreCase = true) && token.isNullOrBlank()) continue
             val builder = Request.Builder()
                 .url(candidateUrl)
                 .header("Accept", "application/json")
@@ -1624,7 +1638,7 @@ internal suspend fun uploadAttachmentForTool(
                 continue@candidateLoop
             }
             if (response.first !in 200..299) {
-                if (index < authCandidates.lastIndex && shouldRetryHermesWithBearerAuth(response.first, response.second)) {
+                if (index < authCandidates.lastIndex && shouldRetryHermesWithBearerAuth(response.first, response.second, token)) {
                     continue
                 }
                 lastError = "HTTP ${response.first}: ${response.second.take(120)}"
@@ -1833,6 +1847,8 @@ private suspend fun executeRunJsonRequest(
     val requestContext = HermesHubProtocol.newCorrelationContext()
     for (candidateUrl in plugAndPlayStreamUrlCandidates(url)) {
         for ((index, token) in authCandidates.withIndex()) {
+            // Fail-closed profilo: mai fallback anonimo su /p/<profile>/.
+            if (candidateUrl.contains("/p/", ignoreCase = true) && token.isNullOrBlank()) continue
             val builder = Request.Builder()
                 .url(candidateUrl)
                 .header("Accept", "application/json")
@@ -1846,7 +1862,7 @@ private suspend fun executeRunJsonRequest(
             try {
                 val response = executeCancellableRequest(request)
                 last = response
-                if (index < authCandidates.lastIndex && shouldRetryHermesWithBearerAuth(response.first, response.second)) {
+                if (index < authCandidates.lastIndex && shouldRetryHermesWithBearerAuth(response.first, response.second, token)) {
                     continue
                 }
                 return response

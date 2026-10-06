@@ -302,7 +302,10 @@ internal fun ChatApp() {
     // Mai null-transient: durante la navigate la route puo mancare per un
     // frame e il fallback a Chat flashe rebbe la chrome. Resta sull'ultimo tab.
     var selectedTab by rememberSaveable { mutableStateOf(Tab.Chat) }
-    tabNavBackStackEntry?.destination?.route?.let { selectedTab = tabForNavRoute(it) }
+    val currentRoute = tabNavBackStackEntry?.destination?.route
+    LaunchedEffect(currentRoute) {
+        currentRoute?.let { selectedTab = tabForNavRoute(it) }
+    }
     // Sezione Bot: i bot non sono piu un tab sidebar ma [Chat | Bot] in alto
     // alla chat. true = roster/dettaglio bot visibile con slide da destra.
     var botSectionVisible by rememberSaveable { mutableStateOf(false) }
@@ -387,7 +390,10 @@ internal fun ChatApp() {
         }
         setSelectedTab(tabForIncomingRoute(incoming.tab))
         // Deeplink "bots": Chat con sezione Bot attiva (non piu un tab).
+        // Deeplink "screen": AppRoot non possiede showSectionScreen (vive in
+        // BotsScreen): apri la sezione bot, da li lo schermo e a un tap.
         if (incoming.tab.equals("bots", ignoreCase = true)) botSectionVisible = true
+        if (incoming.tab.equals("screen", ignoreCase = true)) botSectionVisible = true
     }
     LaunchedEffect(
         selectedTab,
@@ -548,7 +554,13 @@ internal fun ChatApp() {
         sidebarOpen = false
     }
     // Dalla sezione Bot il back torna alla chat (la sidebar ha priorita).
-    BackHandler(enabled = botSectionVisible && !sidebarOpen && selectedTab == Tab.Chat) {
+    // Mai durante apertura in corso: la coroutine sovrascriverebbe.
+    BackHandler(enabled = botSectionVisible && !sidebarOpen && !sidebarBotOpening && selectedTab == Tab.Chat) {
+        selectChatSegment()
+    }
+    // Da bot chat aperta (sezione chiusa) il back chiude il bot e torna
+    // alla chat sottostante senza resettarla (stesso selectChatSegment).
+    BackHandler(enabled = pendingBot != null && !botSectionVisible && !sidebarOpen && !sidebarBotOpening && selectedTab == Tab.Chat) {
         selectChatSegment()
     }
 
