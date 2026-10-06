@@ -1,13 +1,10 @@
-Hermes Hub 0.6.226 (chat bot: fondo, animazione, swipe)
+Hermes Hub 0.6.227 (fix invio bot)
 
-- App: aprendo una chat bot parti in fondo all'ultima risposta (le
-  chat lunghe non iniziano piu dall'alto).
-- App: apertura/chiusura bot animate con scorrimento orizzontale.
-- App: swipe per passare tra Chat e Bot (sinistra = Bot, destra =
-  Chat), oltre al pulsante; soglia anti-cambi accidentali, scroll
-  verticale e campo testo invariati.
-- Versioni: Windows/AdminBridge `0.6.226`; Android `versionName 0.6.226`, `versionCode 230`.
-- Asset: `HermesHub-0.6.226-android.apk` (binario Windows invariato).
-- SHA-256 Android: `e90e6bc7259536dcb0105c63ba8a8d2a8ea59ccd6449f0abe403eff05d5a2109`.
-- Asset: `HermesHub-0.6.226-linux-gateway.tar.gz`.
-- SHA-256 gateway: `ffa934b3158b584d513b6f078a288929c24b8a539cbb92d7b63fcfcc9c5ae138`.
+- App: inviando a un bot con chat aperta non compare piu il blocco
+  "Sessions API non disponibili": l'invio parte diretto, eventuali
+  problemi veri mostrati con l'errore reale del server.
+- Versioni: Windows/AdminBridge `0.6.227`; Android `versionName 0.6.227`, `versionCode 231`.
+- Asset: `HermesHub-0.6.227-android.apk` (binario Windows invariato).
+- SHA-256 Android: `56767c9f915355155b710a9f6240c385638cd802fceecc8ec46abac147520632`.
+- Asset: `HermesHub-0.6.227-linux-gateway.tar.gz`.
+- SHA-256 gateway: `b1311aa93c154b2fea0a2c1ec1b208c5afee04c60c1811e495e978a9c96a418c`.

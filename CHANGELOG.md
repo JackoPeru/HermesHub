@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.227 - 2026-10-06
+
+- Invio bot: la chat esistente invia sempre diretto via Sessions
+  (niente piu blocco "Sessions API non disponibili" quando il controllo
+  capabilities fallisce); eventuali errori reali dal server.
+
 ## 0.6.226 - 2026-10-06
 
 - Chat bot: all'apertura parti in fondo all'ultima risposta; apertura
