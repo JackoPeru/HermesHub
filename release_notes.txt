@@ -1,13 +1,21 @@
-Hermes Hub 0.6.222 (bot live esterno)
+Hermes Hub 0.6.223 (audit completo)
 
-- App: le chat bot mostrano il lavoro in corso altrove (desktop) con
-  banner shimmer e stato ("Sta usando X…", "Sta ragionando…",
-  "Sta scrivendo…"); i nuovi messaggi arrivano in diretta.
-- App: stop attivo col quadrato anche senza turno locale (da li si
-  capisce se il bot e in esecuzione); stop dei turni altrui solo dal
-  desktop (nessuna API remota), con avviso onesto.
-- Versioni: Windows/AdminBridge `0.6.222`; Android `versionName 0.6.222`, `versionCode 226`.
-- Asset: `HermesHub-0.6.222-android.apk` (binario Windows invariato).
-- SHA-256 Android: `b26ba2d7a121799750c9c2a380bdbaacb5e30878f628cfc523fa71354bba1b30`.
-- Asset: `HermesHub-0.6.222-linux-gateway.tar.gz`.
-- SHA-256 gateway: `88dee8371b2277cff0c5add8721484e9fd87b7e35fa84948e9e049730dbff378`.
+- App: Bot Chat canoniche paginate (niente piu miss oltre 200
+  sessioni), lock singleflight anche sulle anteprime, create
+  idempotente con re-list su 400/409; live bot con dedup stabile e
+  ordinamento deterministico.
+- App: timeout di rete finiti (stream 60s/90s, archive 60s/10min),
+  URL encodati, auth fail-closed sui profili /p/ (mai fallback
+  anonimo), retry con backoff+jitter; roster 8s + preview 8s.
+- App: backstack bot corretto, niente stream orfani al cambio gateway,
+  rotate che conserva dettaglio/schermo/avvisi; toggle e sidebar con
+  target 48dp, loading/error/empty distinti con riprova.
+- Server: watchdog anti-prefill (VRAM+util oltre al journal, fails
+  resettati, --since locale), stray-CUDA fail-closed su /proc,
+  busy_timeout DB, backup symlink e digest sha256 obbligatorio,
+  MSIX fail-closed senza self-signed, ufw con backup.
+- Versioni: Windows/AdminBridge `0.6.223`; Android `versionName 0.6.223`, `versionCode 227`.
+- Asset: `HermesHub-0.6.223-android.apk` (binario Windows invariato).
+- SHA-256 Android: `1a3d82eaaec9a248f2130ef0e92419e1a007e864cfce71295c62152f737f421e`.
+- Asset: `HermesHub-0.6.223-linux-gateway.tar.gz`.
+- SHA-256 gateway: `68875f02fedbbd1164340bd6c7f8043e674215d2692fcdac6cffede75ce278a0`.

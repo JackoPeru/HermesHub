@@ -2,6 +2,14 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.223 - 2026-10-06
+
+- Audit completo: Bot Chat canoniche paginate con lock e retry
+  idempotente (niente piu fork/duplicati); timeout di rete finiti con
+  backoff e auth fail-closed sui profili; watchdog GPU che non uccide
+  i prefill lunghi e stray-CUDA fail-closed; toggle e sidebar con
+  target 48dp, stati loading/errore con riprova, stringhe corrette.
+
 ## 0.6.222 - 2026-10-05
 
 - Bot live esterno: la chat mostra quando il bot lavora altrove con
