@@ -2,6 +2,15 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.230 - 2026-10-06
+
+- Chat bot: lo stato live ignora l'eco del turno appena finito
+  (niente piu banner incastrato ne stop "dal desktop" sbagliato);
+  stop che si autocorregge; niente notifiche coi propri prompt ad
+  app aperta.
+- Chat bot: allegati inviati anche nelle sessioni, immagini e card
+  conservate nella cronologia riaperta.
+
 ## 0.6.229 - 2026-10-06
 
 - Nuova sezione Comfy: stato GPU, lavoro in corso con avanzamento
