@@ -783,30 +783,32 @@ internal fun BotsScreen(
         opening = bot.identityKey
         scope.launch {
             try {
-                CanonicalBotOpenLocks.withBotLock(bot.identityKey) {
-                    when (val resolved = resolveCanonicalBotChat(appContext, settings, bot, roster?.multiplexEnabled == true)) {
-                        is CanonicalBotResolve.Found -> {
-                            if (resolved.duplicates > 0) {
-                                status = "Attenzione: ${resolved.duplicates + 1} Bot Chat per ${bot.displayName}, uso la prima."
-                            }
-                            val connection = withContext(Dispatchers.IO) { connectionForBot(appContext, settings, bot) }
-                            onOpenBot(
-                                BotChatContext(
-                                    profile = bot.profile,
-                                    sessionId = resolved.chat.sessionId,
-                                    displayName = bot.displayName,
-                                    localConversationId = stableBotConversationId(bot),
-                                    multiplexEnabled = roster?.multiplexEnabled == true,
-                                    connectionId = connection.id,
-                                    endpoint = connection.endpoint
-                                )
-                            )
+                // Niente lock esterno qui: il lock e dentro
+                // resolveCanonicalBotChat (stessa chiave = deadlock,
+                // Mutex non rientrante). La guard `opening` sopra copre
+                // gia il doppio-tap.
+                when (val resolved = resolveCanonicalBotChat(appContext, settings, bot, roster?.multiplexEnabled == true)) {
+                    is CanonicalBotResolve.Found -> {
+                        if (resolved.duplicates > 0) {
+                            status = "Attenzione: ${resolved.duplicates + 1} Bot Chat per ${bot.displayName}, uso la prima."
                         }
-                        is CanonicalBotResolve.Empty ->
-                            status = "Nessuna Bot Chat per ${bot.displayName}: riprova."
-                        is CanonicalBotResolve.Failed ->
-                            status = resolved.message
+                        val connection = withContext(Dispatchers.IO) { connectionForBot(appContext, settings, bot) }
+                        onOpenBot(
+                            BotChatContext(
+                                profile = bot.profile,
+                                sessionId = resolved.chat.sessionId,
+                                displayName = bot.displayName,
+                                localConversationId = stableBotConversationId(bot),
+                                multiplexEnabled = roster?.multiplexEnabled == true,
+                                connectionId = connection.id,
+                                endpoint = connection.endpoint
+                            )
+                        )
                     }
+                    is CanonicalBotResolve.Empty ->
+                        status = "Nessuna Bot Chat per ${bot.displayName}: riprova."
+                    is CanonicalBotResolve.Failed ->
+                        status = resolved.message
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled

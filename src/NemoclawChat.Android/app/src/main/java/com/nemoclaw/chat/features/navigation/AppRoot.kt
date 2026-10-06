@@ -230,7 +230,6 @@ import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
 import com.nemoclaw.chat.features.bots.BotsScreen
 import com.nemoclaw.chat.features.bots.BotChatContext
-import com.nemoclaw.chat.features.bots.CanonicalBotOpenLocks
 import com.nemoclaw.chat.features.bots.HermesBotItem
 import com.nemoclaw.chat.features.bots.loadLastBot
 import com.nemoclaw.chat.features.bots.resolveCanonicalBotContext
@@ -470,8 +469,10 @@ internal fun ChatApp() {
         sidebarBotOpening = true
         chatScope.launch {
             try {
-                CanonicalBotOpenLocks.withBotLock(bot.identityKey) {
-                    resolveCanonicalBotContext(context.applicationContext, settings, bot, rosterMultiplex = true)
+                // Niente lock esterno: e dentro resolveCanonicalBotChat
+                // (stessa chiave = deadlock). La guard sidebarBotOpening
+                // copre il doppio-tap.
+                resolveCanonicalBotContext(context.applicationContext, settings, bot, rosterMultiplex = true)
                     .onSuccess {
                         chatState.resetForNewChat()
                         pendingBot = it
@@ -484,7 +485,6 @@ internal fun ChatApp() {
                     .onFailure {
                         Toast.makeText(context, it.message ?: "Apertura Bot Chat fallita.", Toast.LENGTH_LONG).show()
                     }
-                }
             } finally {
                 sidebarBotOpening = false
             }
@@ -502,8 +502,10 @@ internal fun ChatApp() {
         sidebarBotOpening = true
         chatScope.launch {
             try {
-                CanonicalBotOpenLocks.withBotLock("${ref.connectionId}::${ref.profile}") {
-                    resolveCanonicalBotContext(context.applicationContext, settings, ref.toItem(), rosterMultiplex = true)
+                // Niente lock esterno: e dentro resolveCanonicalBotChat
+                // (stessa chiave = deadlock). La guard sidebarBotOpening
+                // copre il doppio-tap.
+                resolveCanonicalBotContext(context.applicationContext, settings, ref.toItem(), rosterMultiplex = true)
                     .onSuccess {
                         chatState.resetForNewChat()
                         pendingBot = it
@@ -515,7 +517,6 @@ internal fun ChatApp() {
                         botSectionVisible = true
                         Toast.makeText(context, it.message ?: "Bot non disponibile, apro il roster.", Toast.LENGTH_LONG).show()
                     }
-                }
             } finally {
                 sidebarBotOpening = false
             }
