@@ -349,6 +349,9 @@ internal fun ChatApp() {
     // Sezione Bot: i bot non sono piu un tab sidebar ma [Chat | Bot] in alto
     // alla chat. true = roster/dettaglio bot visibile con slide da destra.
     var botSectionVisible by rememberSaveable { mutableStateOf(false) }
+    // Sezione Comfy: cosa sta facendo la GPU (stato, lavoro, avanzamento).
+    // Si apre dal menu ... della chat, back la chiude senza toccare il resto.
+    var showComfy by rememberSaveable { mutableStateOf(false) }
     // Guard condivisa dai 4 entry-point di apertura bot (sidebar, last-bot,
     // roster, menu link): un solo resolve alla volta. remember (non saveable):
     // a processo morto non deve restare true senza coroutine viva.
@@ -606,6 +609,10 @@ internal fun ChatApp() {
     BackHandler(enabled = pendingBot != null && !botSectionVisible && !sidebarOpen && !sidebarBotOpening && selectedTab == Tab.Chat) {
         selectChatSegment()
     }
+    // Dalla sezione Comfy il back torna alla chat.
+    BackHandler(enabled = showComfy && !sidebarOpen && selectedTab == Tab.Chat) {
+        showComfy = false
+    }
 
     CompositionLocalProvider(LocalDensity provides appDensity) {
         AppNavigation(
@@ -676,6 +683,13 @@ internal fun ChatApp() {
                     popExitTransition = { androidx.compose.animation.ExitTransition.None }
                 ) {
                 composable(Tab.Chat.navRoute) { Column(modifier = Modifier.fillMaxSize()) {
+                if (showComfy) {
+                com.nemoclaw.chat.features.comfy.ComfyScreen(
+                context = context,
+                settings = settings,
+                onBack = { showComfy = false }
+                )
+                } else {
                 AnimatedContent(
                 targetState = botSectionVisible,
                 // Sezione Bot entra da destra (qualcosa di diverso), esce a
@@ -778,8 +792,10 @@ internal fun ChatApp() {
                 chatBotOpening = sidebarBotOpening,
                 onSelectChat = selectChatSegment,
                 onSelectBot = selectBotSegment,
-                onOpenBotSection = selectBotSegment
+                onOpenBotSection = selectBotSegment,
+                onOpenComfy = { showComfy = true }
                 )
+                }
                 }
                 }
                 }

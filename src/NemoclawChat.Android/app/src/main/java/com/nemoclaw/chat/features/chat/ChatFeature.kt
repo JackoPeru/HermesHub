@@ -340,6 +340,7 @@ internal fun ChatScreen(
     onInitialPromptConsumed: () -> Unit = {},
     onOpenSidebar: () -> Unit = {},
     onSwitchTab: (Tab) -> Unit = {},
+    onOpenComfy: () -> Unit = {},
     // Selettore [Chat | Bot] in alto alla chat (stato issato in AppRoot).
     chatBotActive: Boolean = false,
     // True mentre la sezione sta aprendo la chat del bot (niente home
@@ -1005,7 +1006,8 @@ internal fun ChatScreen(
             managerApiKey = managerKey,
             onNewChat = onNewChat,
             onOpenSidebar = onOpenSidebar,
-            onOpenArchive = { onSwitchTab(Tab.Archive) }
+            onOpenArchive = { onSwitchTab(Tab.Archive) },
+            onOpenComfy = onOpenComfy
         )
         ChatBotToggle(
             botActive = chatBotActive,

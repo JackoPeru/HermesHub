@@ -301,7 +301,8 @@ internal fun TopBar(
     managerApiKey: String? = null,
     onNewChat: () -> Unit = {},
     onOpenSidebar: () -> Unit = {},
-    onOpenArchive: () -> Unit = {}
+    onOpenArchive: () -> Unit = {},
+    onOpenComfy: () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     val managerBase = remember(settings.gatewayUrl) { gpuManagerBase(settings.gatewayUrl) }
@@ -310,6 +311,8 @@ internal fun TopBar(
     var llmState by remember { mutableStateOf("") }
     var desiredMode by remember { mutableStateOf("") }
     var queueLength by remember { mutableStateOf(0) }
+    var mediaProgress by remember { mutableStateOf<Float?>(null) }
+    var mediaPreset by remember { mutableStateOf("") }
     var directUrl by remember { mutableStateOf("") }
     var directActive by remember { mutableStateOf(false) }
     var llmBusy by remember { mutableStateOf(false) }
@@ -326,6 +329,9 @@ internal fun TopBar(
         llmState = status.optString("current_state", "")
         desiredMode = status.optString("desired_mode", "")
         queueLength = status.optInt("queue_length", 0)
+        mediaProgress = status.optDouble("media_progress", Double.NaN)
+            .takeIf { !it.isNaN() }?.toFloat()?.coerceIn(0f, 1f)
+        mediaPreset = status.optString("active_preset", "")
         directUrl = status.optString("direct_url", "")
         directActive = status.optBoolean("direct_active", desiredMode == "DIRECT")
     }
@@ -566,6 +572,27 @@ internal fun TopBar(
                         },
                         enabled = !llmBusy && desiredMode.isNotBlank() && llmError.isBlank(),
                         onClick = { if (!llmBusy && desiredMode.isNotBlank()) setDirectWanted(!direct) }
+                    )
+                    val comfySubtitle = when {
+                        llmError.isNotBlank() -> "Non raggiungibile"
+                        llmState.isBlank() -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
+                        llmState == "MEDIA_BUSY" -> {
+                            val pct = mediaProgress?.let { "${(it * 100).roundToInt()}%" } ?: "…"
+                            val what = mediaPreset.takeIf { it.isNotBlank() } ?: "lavoro"
+                            "Sta generando · $pct · $what"
+                        }
+                        llmState == "LLM_READY" -> "LLM attivo · ${desiredMode.ifBlank { "AUTO" }}"
+                        else -> llmState + if (queueLength > 0) " · coda $queueLength" else ""
+                    }
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text("Comfy: cosa sta facendo")
+                                Text(comfySubtitle, color = AppColors.Muted, fontSize = 12.sp)
+                            }
+                        },
+                        leadingIcon = { Icon(Icons.Rounded.Image, contentDescription = null, tint = AppColors.Accent) },
+                        onClick = { menuOpen = false; onOpenComfy() }
                     )
                 }
             }
