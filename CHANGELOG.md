@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.226 - 2026-10-06
+
+- Chat bot: all'apertura parti in fondo all'ultima risposta; apertura
+  e chiusura animate con scorrimento; swipe orizzontale per passare
+  tra Chat e Bot (oltre al pulsante).
+
 ## 0.6.225 - 2026-10-06
 
 - Stato gateway diagnosticabile: grigio "Verifica gateway…" prima del

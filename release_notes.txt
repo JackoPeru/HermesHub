@@ -1,13 +1,13 @@
-Hermes Hub 0.6.225 (stato rete + titolo bot)
+Hermes Hub 0.6.226 (chat bot: fondo, animazione, swipe)
 
-- App: lo stato gateway ora distingue "sto verificando" (grigio) da
-  "giu davvero" (rosso col motivo: HTTP/timeout/URL), in topbar e in
-  chat bot. Include anche il fix deadlock apertura bot della 0.6.224
-  non ancora installata sul telefono.
-- App: nome del bot nel titolo in alto, banda "Bot attivo" rimossa,
-  toggle [Chat|Bot] compatto.
-- Versioni: Windows/AdminBridge `0.6.225`; Android `versionName 0.6.225`, `versionCode 229`.
-- Asset: `HermesHub-0.6.225-android.apk` (binario Windows invariato).
-- SHA-256 Android: `2863d43b67d5e21c74b5435e44d8c1a94006f8abaac1e8cea8302ddf04bd6ef6`.
-- Asset: `HermesHub-0.6.225-linux-gateway.tar.gz`.
-- SHA-256 gateway: `832a7e2bc01a0c9d2928c9bd3fbb58b00d1ef917eaad84d9928290b7b72be552`.
+- App: aprendo una chat bot parti in fondo all'ultima risposta (le
+  chat lunghe non iniziano piu dall'alto).
+- App: apertura/chiusura bot animate con scorrimento orizzontale.
+- App: swipe per passare tra Chat e Bot (sinistra = Bot, destra =
+  Chat), oltre al pulsante; soglia anti-cambi accidentali, scroll
+  verticale e campo testo invariati.
+- Versioni: Windows/AdminBridge `0.6.226`; Android `versionName 0.6.226`, `versionCode 230`.
+- Asset: `HermesHub-0.6.226-android.apk` (binario Windows invariato).
+- SHA-256 Android: `e90e6bc7259536dcb0105c63ba8a8d2a8ea59ccd6449f0abe403eff05d5a2109`.
+- Asset: `HermesHub-0.6.226-linux-gateway.tar.gz`.
+- SHA-256 gateway: `ffa934b3158b584d513b6f078a288929c24b8a539cbb92d7b63fcfcc9c5ae138`.
