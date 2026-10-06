@@ -1,7 +1,9 @@
 package com.nemoclaw.chat
 
+import com.nemoclaw.chat.features.comfy.comfyDirectBase
 import com.nemoclaw.chat.features.comfy.comfyMenuSubtitle
 import com.nemoclaw.chat.features.comfy.comfyStateLabel
+import com.nemoclaw.chat.features.comfy.parseComfyHistoryErrors
 import com.nemoclaw.chat.features.comfy.parseComfyStatus
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -77,5 +79,31 @@ class ComfyStatusTest {
             JSONObject().put("current_state", "LLM_READY").put("desired_mode", "AUTO").toString()
         )!!
         assertEquals("LLM attivo · AUTO", comfyMenuSubtitle(status))
+    }
+
+    @Test
+    fun historyErrorsExtractsFailed() {
+        val body = JSONObject()
+            .put("ok1", JSONObject().put("status", JSONObject().put("status_str", "success")))
+            .put("bad1", JSONObject().put("status", JSONObject()
+                .put("status_str", "error")
+                .put("messages", org.json.JSONArray().put("OOM: VRAM esaurita"))))
+            .toString()
+        assertEquals("OOM: VRAM esaurita", parseComfyHistoryErrors(body))
+    }
+
+    @Test
+    fun historyErrorsEmptyWhenClean() {
+        assertNull(parseComfyHistoryErrors(JSONObject().toString()))
+        assertNull(parseComfyHistoryErrors("non json"))
+        assertNull(parseComfyHistoryErrors(JSONObject()
+            .put("ok1", JSONObject().put("status", JSONObject().put("status_str", "success")))
+            .toString()))
+    }
+
+    @Test
+    fun directBaseSwapsPort() {
+        assertEquals("http://192.168.1.6:8188", comfyDirectBase("http://192.168.1.6:8642/v1"))
+        assertEquals("http://host:8188", comfyDirectBase("http://host"))
     }
 }

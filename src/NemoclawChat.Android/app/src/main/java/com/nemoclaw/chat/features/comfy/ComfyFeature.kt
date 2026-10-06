@@ -43,13 +43,16 @@ import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.AppColors
 import com.nemoclaw.chat.AppSettings
 import com.nemoclaw.chat.PollWhileStarted
+import com.nemoclaw.chat.gatewayProbeHttpClient
 import com.nemoclaw.chat.gpuManagerBase
 import com.nemoclaw.chat.httpGetResponse
 import com.nemoclaw.chat.loadGatewaySecret
 import com.nemoclaw.chat.managerStatusErrorMessage
+import com.nemoclaw.chat.readUtf8Bounded
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
@@ -68,7 +71,11 @@ internal data class ComfyStatus(
     val model: String = "",
     val error: String = "",
     val hint: String = "",
-    val llmLoaded: Boolean = false
+    val llmLoaded: Boolean = false,
+    // ComfyUI diretto (best-effort): coda e ultimi errori dei prompt.
+    val comfyQueue: Int? = null,
+    val comfyError: String? = null,
+    val comfyDirect: Boolean = false
 )
 
 internal fun parseComfyStatus(body: String): ComfyStatus? {
@@ -131,9 +138,88 @@ internal suspend fun loadComfyStatus(gatewayUrl: String, managerKey: String?): C
             if (code !in 200..299) {
                 return@runCatching ComfyStatus(false, error = managerStatusErrorMessage(code, body).take(160))
             }
-            parseComfyStatus(body) ?: ComfyStatus(false, error = "Risposta manager illeggibile")
+            val parsed = parseComfyStatus(body)
+                ?: return@runCatching ComfyStatus(false, error = "Risposta manager illeggibile")
+            // Dettaglio diretto solo quando Comfy dovrebbe essere su (altrimenti
+            // e spento per disegno e il "non raggiungibile" sarebbe rumore).
+            if (parsed.state.startsWith("MEDIA_") || parsed.state == "ERROR" || parsed.state == "DIRECT") {
+                val direct = loadComfyDirect(gatewayUrl)
+                parsed.copy(
+                    comfyQueue = direct.queue,
+                    comfyError = direct.error,
+                    comfyDirect = direct.reachable
+                )
+            } else {
+                parsed
+            }
         }.getOrElse { ComfyStatus(false, error = it.message ?: it.javaClass.simpleName) }
     }
+
+/** Base ComfyUI diretto: stesso host del gateway, porta 8188. Pura e testabile. */
+internal fun comfyDirectBase(gatewayUrl: String): String {
+    val trimmed = gatewayUrl.trim().trimEnd('/')
+    val noPath = trimmed.substringBefore("/v1").substringBefore("/api")
+    return if (Regex(":[0-9]+$").containsMatchIn(noPath)) {
+        noPath.replace(Regex(":[0-9]+$"), ":8188")
+    } else {
+        "$noPath:8188"
+    }
+}
+
+/**
+ * Errori ComfyUI da GET /history: prompt con status_str == "error".
+ * Ritorna gli ultimi (max 3) uniti, null se niente errori o body illeggibile.
+ * Pura e testabile.
+ */
+internal fun parseComfyHistoryErrors(body: String): String? {
+    val root = runCatching { JSONObject(body) }.getOrNull() ?: return null
+    val out = mutableListOf<String>()
+    val keys = root.keys()
+    while (keys.hasNext()) {
+        val entry = root.optJSONObject(keys.next()) ?: continue
+        val status = entry.optJSONObject("status") ?: continue
+        if (!status.optString("status_str", "").equals("error", ignoreCase = true)) continue
+        val messages = status.optJSONArray("messages")
+        val text = if (messages != null) {
+            (0 until messages.length()).mapNotNull { i ->
+                when (val m = messages.opt(i)) {
+                    is String -> m.takeIf { it.isNotBlank() }
+                    is JSONArray -> m.optString(0).takeIf { it.isNotBlank() } ?: m.toString().takeIf { it.isNotBlank() }
+                    else -> m?.toString()?.takeIf { it.isNotBlank() }
+                }
+            }.joinToString(" · ").trim()
+        } else {
+            status.optString("message", "").trim()
+        }
+        if (text.isNotBlank()) out += text
+    }
+    return out.takeLast(3).joinToString("\n\n").take(600).takeIf { it.isNotBlank() }
+}
+
+internal data class ComfyDirect(val queue: Int?, val error: String?, val reachable: Boolean)
+
+internal suspend fun loadComfyDirect(gatewayUrl: String): ComfyDirect = withContext(Dispatchers.IO) {
+    runCatching {
+        fun get(path: String): Pair<Int, String>? = runCatching {
+            val req = okhttp3.Request.Builder()
+                .url(comfyDirectBase(gatewayUrl) + path)
+                .header("Accept", "application/json")
+                .header("User-Agent", "HermesHub-Android-Comfy")
+                .get().build()
+            gatewayProbeHttpClient.newCall(req).execute().use { it.code to it.body.byteStream().readUtf8Bounded() }
+        }.getOrNull()
+        val (qCode, qBody) = get("/prompt") ?: return@runCatching ComfyDirect(null, null, false)
+        val queue = if (qCode in 200..299) {
+            runCatching { JSONObject(qBody).optJSONObject("exec_info")?.optInt("queue_remaining", -1) }
+                .getOrNull()?.takeIf { it >= 0 }
+        } else {
+            null
+        }
+        val (hCode, hBody) = get("/history?max_items=10") ?: return@runCatching ComfyDirect(queue, null, true)
+        val error = if (hCode in 200..299) parseComfyHistoryErrors(hBody) else null
+        ComfyDirect(queue, error, true)
+    }.getOrElse { ComfyDirect(null, null, false) }
+}
 
 @Composable
 internal fun ComfyScreen(
@@ -285,8 +371,37 @@ internal fun ComfyScreen(
                             "Coda",
                             if (current.queue > 0) "${current.queue} in attesa" else "vuota"
                         )
+                        if (current.comfyDirect && current.comfyQueue != null) {
+                            ComfyRow(
+                                "Coda Comfy",
+                                if (current.comfyQueue > 0) "${current.comfyQueue} in esecuzione/coda" else "libera"
+                            )
+                        }
                         if (current.hint.isNotBlank()) {
                             Text(current.hint, color = AppColors.Muted, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+            val comfyProblem = current.comfyError?.takeIf { it.isNotBlank() }
+                ?: if (!current.comfyDirect) {
+                    "Comfy diretto non raggiungibile: se doveva generare, qualcosa non va."
+                } else {
+                    null
+                }
+            if (comfyProblem != null) {
+                item {
+                    Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Errori Comfy", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                comfyProblem,
+                                color = Color(0xFFFF7B8E),
+                                fontSize = 13.sp,
+                                maxLines = 8,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
+                            )
                         }
                     }
                 }
