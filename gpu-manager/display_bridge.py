@@ -339,13 +339,22 @@ def rfb_geometry(sock_path: Optional[str] = None) -> Tuple[int, int]:
 if _FASTAPI:
     router = APIRouter()
 
+    def _bridge_keys() -> list:
+        keys = [str(_manager_config().get("api_key") or "")]
+        extra = _manager_config().get("trusted_keys") or []
+        if isinstance(extra, str):
+            extra = [extra]
+        if isinstance(extra, list):
+            keys.extend(str(k or "") for k in extra)
+        return [k for k in keys if k]
+
     def _require_key(request: Request) -> None:
-        expected = str(_manager_config().get("api_key") or "")
+        expected = _bridge_keys()
         if not expected:
             # Fail-closed come manager.require_key.
             raise HTTPException(500, "manager api_key non configurata")
         auth = request.headers.get("authorization", "")
-        if not hmac.compare_digest(auth, f"Bearer {expected}"):
+        if not any(hmac.compare_digest(auth, f"Bearer {key}") for key in expected):
             raise HTTPException(401, "invalid manager api key")
 
     @router.get("/display/status")

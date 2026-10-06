@@ -5,6 +5,9 @@ port: 8643
 # Bearer token OBBLIGATORIA per la manager API. Non lasciare vuoto in produzione:
 # impostare api_key oppure HERMES_GPU_MANAGER_KEY.
 api_key: ""
+# Chiavi secondarie fidate (stessa trust-zone, es. master key hub sullo
+# stesso host): accettate oltre alla primaria. Mai committare valori veri.
+trusted_keys: []
 db_path: /var/lib/hermes-gpu-manager/state.db
 output_dir: /opt/hermes/gpu-manager/outputs
 

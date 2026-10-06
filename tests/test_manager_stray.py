@@ -143,5 +143,53 @@ class TestProcMissingFailClosed(unittest.TestCase):
         self.assertIn("os.path.basename", src)
 
 
+def load_manager_keys_fn():
+    """Carica _manager_keys pura via AST (CONFIG iniettato a runtime)."""
+    src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    wanted = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_manager_keys"]
+    assert len(wanted) == 1, "_manager_keys non trovata in manager.py"
+    mod = ast.Module(body=wanted, type_ignores=[])
+    ns: dict = {"CONFIG": {}}
+    exec(compile(mod, "manager_keys", "exec"), ns)  # noqa: S102 - test locale
+    return ns
+
+
+class TestManagerKeys(unittest.TestCase):
+    """Chiavi accettate: primaria + trusted_keys, mai vuote."""
+
+    def keys_for(self, config: dict) -> list:
+        ns = load_manager_keys_fn()
+        ns["CONFIG"] = config
+        return ns["_manager_keys"]()
+
+    def test_primary_only(self):
+        self.assertEqual(self.keys_for({"api_key": "abc"}), ["abc"])
+
+    def test_primary_plus_trusted_list(self):
+        self.assertEqual(
+            self.keys_for({"api_key": "abc", "trusted_keys": ["hub1", "hub2"]}),
+            ["abc", "hub1", "hub2"],
+        )
+
+    def test_trusted_single_string(self):
+        self.assertEqual(
+            self.keys_for({"api_key": "abc", "trusted_keys": "hub1"}),
+            ["abc", "hub1"],
+        )
+
+    def test_empty_means_no_keys(self):
+        # Nessuna chiave -> require_key deve rispondere 500 (fail-closed).
+        self.assertEqual(self.keys_for({}), [])
+        self.assertEqual(self.keys_for({"api_key": "", "trusted_keys": ["", None]}), [])
+
+    def test_require_key_is_fail_closed(self):
+        src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
+        self.assertIn("raise HTTPException(500", src)
+        bridge = (REPO / "gpu-manager" / "display_bridge.py").read_text(encoding="utf-8")
+        self.assertIn("raise HTTPException(500", bridge)
+        self.assertIn("trusted_keys", bridge)
+
+
 if __name__ == "__main__":
     unittest.main()

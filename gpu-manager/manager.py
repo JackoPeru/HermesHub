@@ -1904,14 +1904,26 @@ except Exception as exc:
     log.warning("display bridge unavailable: %r", exc)
 
 
+def _manager_keys() -> list:
+    """Chiavi accettate: api_key primaria + trusted_keys secondarie
+    (es. master key hub, stessa trust-zone sullo stesso host)."""
+    keys = [str(CONFIG.get("api_key") or "")]
+    extra = CONFIG.get("trusted_keys") or []
+    if isinstance(extra, str):
+        extra = [extra]
+    if isinstance(extra, list):
+        keys.extend(str(k or "") for k in extra)
+    return [k for k in keys if k]
+
+
 def require_key(request: Request) -> None:
-    expected = str(CONFIG.get("api_key") or "")
+    expected = _manager_keys()
     if not expected:
         # Fail-closed: senza chiave configurata NESSUNA rotta protetta
         # risponde (prima: passava tutto, anche /system/reboot).
         raise HTTPException(500, "manager api_key non configurata")
     auth = request.headers.get("authorization", "")
-    if not hmac.compare_digest(auth, f"Bearer {expected}"):
+    if not any(hmac.compare_digest(auth, f"Bearer {key}") for key in expected):
         raise HTTPException(401, "invalid manager api key")
 
 
