@@ -2,6 +2,17 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.233 - 2026-10-07
+
+- Chat/bot: eco turno scopata per profilo, stop 60s onesto, swipe
+  deciso anti-fling, guard anti-reset a turno attivo, stream puliti al
+  cambio chat, foto senza caption conservate.
+- Rete/voce: VPN conta come locale, probe senza cancellazioni ingoiate,
+  backoff ovunque, trascrizione vuota che non uccide la chiamata.
+- Server: prova risposta vera con cache+lock, timeout watchdog 20s,
+  loopback via ipaddress fail-closed, clamp video ad area, rollback
+  che ferma anche direct/voce, deploy con verify 403/409/llm_serving.
+
 ## 0.6.232 - 2026-10-07
 
 - Manager: solo l'utente puo cambiare modo/riavviare (l'agente in

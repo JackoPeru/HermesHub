@@ -1,12 +1,15 @@
-Hermes Hub 0.6.232 (manager solo-utente + letture veloci)
+Hermes Hub 0.6.233 (audit: robustezza generale)
 
-- Server: cambi modo/reboot manager solo da rete con chiave (niente
-  piu locale per l'agente: coda e letture si, gestione no); log
-  applicativi di nuovo visibili.
-- App: nuovo campo URL locale casa + percorso veloce automatico;
-  stato manager/Comfy con timeout brevi e ultimi valori noti.
-- Versioni: Windows/AdminBridge `0.6.232`; Android `versionName 0.6.232`, `versionCode 236`.
-- Asset: `HermesHub-0.6.232-android.apk` (binario Windows invariato).
-- SHA-256 Android: `fe7d4ad8151740ce67333dd75f88bd229b3b3d17e1bf0f6f4f2dc1b150ec183e`.
-- Asset: `HermesHub-0.6.232-linux-gateway.tar.gz`.
-- SHA-256 gateway: `018725d73eb5566792247505223e5a51f0c240321ba29db37c5ff70e8d8c5dfc`.
+- App: eco turno separata per bot, stop onesto entro 60s, swipe solo su
+  gesto deciso, niente reset a turno attivo, stream orfani mai, foto
+  senza caption conservate, retry che riprova davvero.
+- App: VPN vale come rete locale, probe gateway senza hang, voce che
+  non muore su trascrizioni vuote, accessibilità TalkBack estesa.
+- Server: LLM verificato con risposta vera (mai piu verde bugiardo),
+  watchdog 20s, loopback fail-closed, clamp video ad area anti-OOM,
+  rollback completo, deploy con verifica automatica.
+- Versioni: Windows/AdminBridge `0.6.233`; Android `versionName 0.6.233`, `versionCode 237`.
+- Asset: `HermesHub-0.6.233-android.apk` (binario Windows invariato).
+- SHA-256 Android: `17861b9dc0508b90339535e89be7e66bd98182a7aedb635e4fcb7625145fdc62`.
+- Asset: `HermesHub-0.6.233-linux-gateway.tar.gz`.
+- SHA-256 gateway: `1ec127d344e6d59c6e57b49b7f232bf89c9a9f2eda890c70c3689489552c6e99`.
