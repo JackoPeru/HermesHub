@@ -1,12 +1,12 @@
-Hermes Hub 0.6.231 (lavori in background affidabili)
+Hermes Hub 0.6.232 (manager solo-utente + letture veloci)
 
-- App: rientrando in chat dopo un lavoro lungo vedi subito lo stato
-  vero (avanza, finito, fallito) invece del fermo immagine; il
-  risultato viene aggiunto sempre.
-- App: notifica "Risposta pronta" anche se Android aveva chiuso
-  l'app nel mentre (una sola volta, niente doppioni).
-- Versioni: Windows/AdminBridge `0.6.231`; Android `versionName 0.6.231`, `versionCode 235`.
-- Asset: `HermesHub-0.6.231-android.apk` (binario Windows invariato).
-- SHA-256 Android: `057102a761ae5570cbd7420f5ff98c5f3ba02d37caa89e6d879d4a0a7d74067e`.
-- Asset: `HermesHub-0.6.231-linux-gateway.tar.gz`.
-- SHA-256 gateway: `26f333e92cecd0209b6f75985971dbc5d4636fbaad8bc84faac546c876cdc0b2`.
+- Server: cambi modo/reboot manager solo da rete con chiave (niente
+  piu locale per l'agente: coda e letture si, gestione no); log
+  applicativi di nuovo visibili.
+- App: nuovo campo URL locale casa + percorso veloce automatico;
+  stato manager/Comfy con timeout brevi e ultimi valori noti.
+- Versioni: Windows/AdminBridge `0.6.232`; Android `versionName 0.6.232`, `versionCode 236`.
+- Asset: `HermesHub-0.6.232-android.apk` (binario Windows invariato).
+- SHA-256 Android: `fe7d4ad8151740ce67333dd75f88bd229b3b3d17e1bf0f6f4f2dc1b150ec183e`.
+- Asset: `HermesHub-0.6.232-linux-gateway.tar.gz`.
+- SHA-256 gateway: `018725d73eb5566792247505223e5a51f0c240321ba29db37c5ff70e8d8c5dfc`.

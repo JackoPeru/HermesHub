@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.232 - 2026-10-07
+
+- Manager: solo l'utente puo cambiare modo/riavviare (l'agente in
+  locale e limitato a coda e letture); log applicativi ripristinati.
+- App: campo URL locale casa + scelta automatica percorso veloce;
+  letture stato con timeout brevi e valori noti se non aggiornati.
+
 ## 0.6.231 - 2026-10-06
 
 - Lavori in background: la chat ricontrolla lo stato da sola al
