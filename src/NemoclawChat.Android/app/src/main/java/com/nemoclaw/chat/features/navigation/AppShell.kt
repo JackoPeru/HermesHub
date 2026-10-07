@@ -184,6 +184,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -282,7 +286,19 @@ internal fun StartupLoadingScreen() {
         color = AppColors.Background
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Text("Avvio Hermes Hub…", color = AppColors.Muted, fontSize = 14.sp)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(horizontal = 32.dp)
+            ) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text(
+                    "Avvio Hermes Hub…",
+                    color = AppColors.Muted,
+                    fontSize = 14.sp,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                )
+            }
         }
     }
 }
@@ -307,9 +323,9 @@ internal fun SectionTopBar(tab: Tab, onOpenSidebar: () -> Unit, onBackToChat: ()
                 contentDescription = "Apri navigazione",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(48.dp)
                     .clip(RoundedCornerShape(13.dp))
-                    .clickable(onClick = onOpenSidebar)
+                    .clickable(role = Role.Button, onClick = onOpenSidebar)
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(tab.label, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
@@ -598,6 +614,7 @@ internal fun HermesBotSidebar(
                         interactionSource = rowInteraction,
                         indication = LocalIndication.current
                     )
+                    .semantics { stateDescription = if (selected) "Bot selezionato" else "Bot non selezionato" }
                     .padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)

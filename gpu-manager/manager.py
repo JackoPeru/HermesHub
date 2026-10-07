@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import io
+import ipaddress
 import json
 import logging
 import os
@@ -42,7 +43,7 @@ DEFAULT_CONFIG = {
     "api_key": "",
     # False = /mode/media e /mode/direct rifiutati con 409 (i video vanno in
     # coda in AUTO, il manuale non serve). /mode/llm e /mode/auto restano liberi.
-    "allow_manual_modes": True,
+    "allow_manual_modes": False,
     "db_path": "/var/lib/hermes-gpu-manager/state.db",
     "output_dir": "/opt/hermes/gpu-manager/outputs",
     "default_mode": "auto",
@@ -305,12 +306,14 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
                 _h0 = float(params.get("height", 768) or 768)
             except (TypeError, ValueError):
                 _w0, _h0 = 1344.0, 768.0
-            if _h0 > 480:
-                _scale = 480.0 / _h0
+            # Area cap 480x854 (=409920): scala mantenendo l'aspect se
+            # w*h eccede, min 64px per lato (anti-OOM, fail-safe).
+            if _w0 * _h0 > 480 * 854:
+                _scale = (410400.0 / (_w0 * _h0)) ** 0.5
                 params["width"] = max(64, int(_w0 * _scale))
-                params["height"] = 480
-                log.info("preset %s: clip %.0fs > 8s, risoluzione ridotta a %sx480 (anti-OOM)",
-                         preset, _clamp_dur, params["width"])
+                params["height"] = max(64, int(_h0 * _scale))
+                log.info("preset %s: clip %.0fs > 8s, risoluzione ridotta a %sx%s (anti-OOM area)",
+                         preset, _clamp_dur, params["width"], params["height"])
     default_cfg = "6.0" if (PRESETS.get(preset) or {}).get("kind") == "video" else "1.0"
     default_negative = (
         REPO_DEFAULT_NEGATIVE
@@ -639,14 +642,15 @@ async def llm_loaded() -> bool:
 
 
 # Cache della prova di risposta: una completion vera per ogni poll di stato
-# sarebbe spreco e carico; 60s bastano a watchdog (tick 30s) e TopBar (15s).
+# sarebbe spreco e carico; 30s bastano a watchdog (tick 30s) e TopBar (15s).
 _serving_probe = {"ok": False, "at": 0.0}
-SERVING_CACHE_TTL = 60.0
+_serving_lock = asyncio.Lock()
+SERVING_CACHE_TTL = 30.0
 SERVING_PROBE_TIMEOUT = 45
 
 
 async def _llm_serving_probe(timeout: int) -> bool:
-    """Una vera completion da 1 token: 200 + body non vuoto = serve davvero."""
+    """Una vera completion da 1 token: 200 + choices[0].message.content non-blank."""
     try:
         code, body = await _http_async(
             "POST",
@@ -661,9 +665,26 @@ async def _llm_serving_probe(timeout: int) -> bool:
         )
     except Exception:  # noqa: BLE001 - qualunque errore trasporto = non serve
         return False
-    if code != 200 or len(body or "") <= 20:
+    if code != 200:
         return False
-    return True
+    body_s = body or ""
+    try:
+        data = json.loads(body_s)
+        choice0 = (data.get("choices") or [None])[0] or {}
+        msg = choice0.get("message") or {} if isinstance(choice0, dict) else {}
+        content = msg.get("content") if isinstance(msg, dict) else ""
+        if isinstance(content, str) and content.strip():
+            return True
+        reasoning = msg.get("reasoning_content") if isinstance(msg, dict) else ""
+        if isinstance(reasoning, str) and reasoning.strip():
+            return True
+        if isinstance(choice0, dict):
+            rc2 = choice0.get("reasoning_content") or ""
+            if isinstance(rc2, str) and rc2.strip():
+                return True
+        return False
+    except (json.JSONDecodeError, ValueError, AttributeError, IndexError, TypeError):
+        return len(body_s) > 20
 
 
 async def llm_serving(timeout: int = SERVING_PROBE_TIMEOUT) -> bool:
@@ -673,12 +694,14 @@ async def llm_serving(timeout: int = SERVING_PROBE_TIMEOUT) -> bool:
     alle completion mentre llm_loaded() era True. Senza questo, watchdog e
     /status mentivano verde.
     """
-    now = time.monotonic()
-    if now - _serving_probe["at"] < SERVING_CACHE_TTL:
-        return _serving_probe["ok"]
+    async with _serving_lock:
+        now = time.monotonic()
+        if now - _serving_probe["at"] < SERVING_CACHE_TTL:
+            return _serving_probe["ok"]
     ok = await _llm_serving_probe(timeout)
-    _serving_probe["ok"] = ok
-    _serving_probe["at"] = time.monotonic()
+    async with _serving_lock:
+        _serving_probe["ok"] = ok
+        _serving_probe["at"] = time.monotonic()
     return ok
 
 
@@ -770,7 +793,7 @@ async def cleanup_stray_cuda() -> int:
         if exe == "gpu-manager" or "gpu-manager" in low:
             continue
         is_tabby = exe in ("tabbyapi", "tabbyapi.exe", "llama-mainline", "llama-mainline.exe") or "tabbyapi" in low or "llama-mainline" in low
-        is_comfy = exe in ("comfy", "main", "exllamav3") or "comfy" in low or "exllamav3" in low
+        is_comfy = exe in ("comfy", "exllamav3") or "comfy" in low or "exllamav3" in low
         if not (is_tabby or is_comfy):
             continue
         if _pid_service_owned(pid):
@@ -1547,7 +1570,7 @@ async def llm_watchdog() -> None:
         # VRAM piena non basta: tabby sganciato risponde 503 ma risulta loaded.
         # La prova di risposta decide; generazioni vere restano protette dal
         # gate progress qui sotto (mai restore mentre genera).
-        serving = await llm_serving() if loaded else False
+        serving = await llm_serving(timeout=20) if loaded else False
         if not (loaded and serving):
             fails = int(_state.get("llm_notloaded_fails") or 0) + 1
             _state["llm_notloaded_fails"] = fails
@@ -1982,13 +2005,13 @@ except Exception as exc:
 def _manager_keys() -> list:
     """Chiavi accettate: api_key primaria + trusted_keys secondarie
     (es. master key hub, stessa trust-zone sullo stesso host)."""
-    keys = [str(CONFIG.get("api_key") or "")]
+    keys = [CONFIG.get("api_key") or ""]
     extra = CONFIG.get("trusted_keys") or []
     if isinstance(extra, str):
         extra = [extra]
     if isinstance(extra, list):
-        keys.extend(str(k or "") for k in extra)
-    return [k for k in keys if k]
+        keys.extend(k for k in extra if isinstance(k, str) and k)
+    return [k for k in keys if isinstance(k, str) and k]
 
 
 def require_key(request: Request) -> None:
@@ -2005,9 +2028,22 @@ def require_key(request: Request) -> None:
 def _is_local_request(request) -> bool:
     try:
         host = request.client.host if request.client else ""
-    except Exception:  # noqa: BLE001 - mai bloccare su client mancante
+    except Exception:  # noqa: BLE001 - ignoto = limitato (fail-closed)
+        return True
+    # Legacy loopbacks "127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"
+    # ora via ipaddress.is_loopback (+ "localhost" esplicito).
+    if host.strip().lower() in ("localhost",):
+        return True
+    try:
+        ip = ipaddress.ip_address(host.strip())
+        if ip.is_loopback:
+            return True
+        mapped = getattr(ip, "ipv4_mapped", None)
+        if mapped is not None and mapped.is_loopback:
+            return True
         return False
-    return host in ("127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost")
+    except Exception:  # noqa: BLE001 - ignoto = limitato (fail-closed)
+        return True
 
 
 def _require_user_control(request) -> None:
@@ -2099,7 +2135,7 @@ async def status(_: None = Depends(require_key)) -> dict:
         "qwen_image_ready": all(p.is_file() for p in qwen_files),
         "h3_installed": h3_ready,
         "h3_ready": h3_ready,
-        "h3_license_state": "OVERRIDDEN_LOCAL_TEST",
+        "h3_license_state": str(CONFIG.get("h3", {}).get("license_state", "DISABLED_LICENSE_GATE")),
         "presets": sorted(PRESETS),
         "last_error": _state["last_error"] if _state["current_state"] == "ERROR" else "",
         "last_transition": _state["last_transition"],
@@ -2121,7 +2157,7 @@ def _set_desired(mode: str) -> dict:
 
 def _manual_modes_allowed() -> bool:
     """False quando l'operatore vuole restare in AUTO (video in coda)."""
-    return bool(CONFIG.get("allow_manual_modes", True))
+    return bool(CONFIG.get("allow_manual_modes", False))
 
 
 def _log_mode_request(request: Request, mode: str) -> None:
@@ -2200,6 +2236,7 @@ async def submit_job(request: Request, _: None = Depends(require_key)) -> JSONRe
     except Exception:  # noqa: BLE001
         raise HTTPException(400, "invalid JSON")
     kind = "video" if request.url.path.endswith("/video") else "image"
+    # overshoot limitato accettato: check+create senza lock, N submit concorrenti possono superare max_queued di N
     max_queued = int(CONFIG["media"].get("max_queued", 10))
     backlog = len(queued_jobs()) + (1 if _state.get("current_job") else 0)
     if backlog >= max_queued:
@@ -2243,6 +2280,7 @@ async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSON
         raise HTTPException(409, "smart fast path disabled")
     if _triage_mod is None:
         raise HTTPException(500, "triage module unavailable")
+    # overshoot limitato accettato: check+create senza lock, N submit concorrenti possono superare max_queued di N
     max_queued = int(CONFIG["media"].get("max_queued", 10))
     backlog = len(queued_jobs()) + (1 if _state.get("current_job") else 0)
     if backlog >= max_queued:

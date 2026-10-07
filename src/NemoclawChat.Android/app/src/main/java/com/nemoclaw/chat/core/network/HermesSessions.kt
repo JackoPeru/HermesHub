@@ -103,13 +103,13 @@ internal fun foldTranscriptToChat(rows: List<HermesSessionMessage>): List<ChatMe
         when (row.role.lowercase()) {
             "user", "tu" -> {
                 flush()
-                if (row.content.isNotBlank()) {
-                    val blocks = visualBlocksOfRow(row)
+                val userBlocks = visualBlocksOfRow(row)
+                if (row.content.isNotBlank() || userBlocks.isNotEmpty()) {
                     out.add(
                         ChatMessage(
                             "Tu", row.content, fromUser = true,
-                            visualBlocksVersion = VISUAL_BLOCKS_VERSION.takeIf { blocks.isNotEmpty() },
-                            visualBlocks = blocks
+                            visualBlocksVersion = VISUAL_BLOCKS_VERSION.takeIf { userBlocks.isNotEmpty() },
+                            visualBlocks = userBlocks
                         )
                     )
                 }

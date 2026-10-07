@@ -2042,7 +2042,7 @@ internal suspend fun supportsResponsesApi(settings: AppSettings, apiKey: String?
         val body = httpGet("${settings.gatewayUrl.trimEnd('/')}/capabilities", apiKey)
         body.isBlank() || body.contains("responses", ignoreCase = true)
     } catch (_: Exception) {
-        true
+        false
     }
 }
 

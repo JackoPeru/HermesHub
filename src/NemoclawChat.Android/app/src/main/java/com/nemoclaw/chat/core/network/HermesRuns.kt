@@ -227,7 +227,7 @@ class HermesRunClient(
                     HermesHubProtocol.addCorrelationHeaders(builder, HermesHubProtocol.newCorrelationContext())
                     token?.let { builder.header("Authorization", "Bearer $it") }
                     if (!sessionId.isNullOrBlank()) builder.header("X-Hermes-Session-Id", sessionId)
-                    if (isValidHermesSessionKey(sessionKey)) builder.header("X-Hermes-Session-Key", sessionKey!!.trim())
+                    sessionKey?.trim()?.takeIf { isValidHermesSessionKey(it) }?.let { builder.header("X-Hermes-Session-Key", it) }
                     val request = builder.post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())).build()
                     apiHttpClient.newCall(request).execute().use { resp ->
                         val replayed = resp.header("Idempotency-Replayed") == "true"

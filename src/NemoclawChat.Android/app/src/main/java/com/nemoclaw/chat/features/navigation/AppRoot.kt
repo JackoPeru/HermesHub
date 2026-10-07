@@ -300,6 +300,7 @@ private fun Modifier.modeSwipe(
     val density = LocalDensity.current
     val thresholdPx = remember(density) { with(density) { 96.dp.toPx() } }
     val total = remember { mutableStateOf(0f) }
+    LaunchedEffect(enabled, sendingActive) { total.value = 0f }
     return semantics {
         customActions = listOfNotNull(
             onSwipeLeft?.let { action -> androidx.compose.ui.semantics.CustomAccessibilityAction("Vai ai Bot", { action(); true }) },
@@ -311,8 +312,8 @@ private fun Modifier.modeSwipe(
         onDragStopped = { velocity ->
             val dx = total.value
             total.value = 0f
-            if ((dx <= -thresholdPx && velocity <= -200f) || dx <= -thresholdPx * 1.5f) onSwipeLeft?.invoke()
-            else if ((dx >= thresholdPx && velocity >= 200f) || dx >= thresholdPx * 1.5f) onSwipeRight?.invoke()
+            if ((dx <= -thresholdPx && velocity <= -700f) || dx <= -thresholdPx * 1.5f) onSwipeLeft?.invoke()
+            else if ((dx >= thresholdPx && velocity >= 700f) || dx >= thresholdPx * 1.5f) onSwipeRight?.invoke()
         }
     )
 }
@@ -392,7 +393,11 @@ internal fun ChatApp() {
     // sezione roster torni alla chat sottostante senza resettarla.
     // Il reset scarta la bozza: avvisa invece di perderla in silenzio.
     // Mai durante apertura in corso (la coroutine sovrascriverebbe).
-    val selectChatSegment: () -> Unit = {
+    val selectChatSegment: () -> Unit = selectChat@{
+        if (chatState.sending || chatState.streamingState != null) {
+            Toast.makeText(context, "Finisci o interrompi il turno prima di cambiare.", Toast.LENGTH_SHORT).show()
+            return@selectChat
+        }
         if (sidebarBotOpening) {
             Toast.makeText(context, "Apertura in corso.", Toast.LENGTH_SHORT).show()
         } else {
@@ -567,10 +572,14 @@ internal fun ChatApp() {
         }
         return true
     }
-    val selectBotSegment: () -> Unit = {
+    val selectBotSegment: () -> Unit = selectBot@{
         // Main page della sezione = chat dell'ultimo bot usato (non roster).
         // Da bot chat aperta: vai al roster tenendo il contesto.
         // Mai durante apertura in corso.
+        if (chatState.sending || chatState.streamingState != null) {
+            Toast.makeText(context, "Finisci o interrompi il turno prima di cambiare.", Toast.LENGTH_SHORT).show()
+            return@selectBot
+        }
         if (sidebarBotOpening) {
             Toast.makeText(context, "Apertura in corso.", Toast.LENGTH_SHORT).show()
         } else if (!botSectionVisible) {
@@ -605,7 +614,7 @@ internal fun ChatApp() {
         if (pendingBot != null) botSectionVisible = false else selectChatSegment()
     }
     // Da bot chat aperta (sezione chiusa) il back chiude il bot e torna
-    // alla chat sottostante senza resettarla (stesso selectChatSegment).
+    // alla chat sottostante resettandola (stesso selectChatSegment).
     BackHandler(enabled = pendingBot != null && !botSectionVisible && !sidebarOpen && !sidebarBotOpening && selectedTab == Tab.Chat) {
         selectChatSegment()
     }
@@ -713,8 +722,8 @@ internal fun ChatApp() {
                 onSelectBot = selectBotSegment
                 )
                 androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f).modeSwipe(
-                    enabled = !sidebarOpen,
-                    sendingActive = chatState.sending || chatState.streamingState != null,
+                    enabled = !sidebarOpen && !sidebarBotOpening,
+                    sendingActive = chatState.sending || chatState.streamingState != null || chatState.backgroundWork != null,
                     onSwipeLeft = null,
                     onSwipeRight = selectChatSegment
                 )) {
@@ -722,6 +731,10 @@ internal fun ChatApp() {
                     context = context,
                     settings = settings,
                 onOpenBot = { bot ->
+                        if (sidebarBotOpening) {
+                            Toast.makeText(context, "Apertura gia in corso.", Toast.LENGTH_SHORT).show()
+                            return@BotsScreen
+                        }
                         // bot e gia BotChatContext canonico dal funnel BotsScreen:
                         // niente re-resolve (la scan e fail-closed, non si ripete).
                         // Never carry normal-chat messages, attachments or
@@ -747,6 +760,7 @@ internal fun ChatApp() {
                 // entrante carica cio che serve comunque.
                 AnimatedContent(
                 targetState = pendingBot,
+                contentKey = { it?.localConversationId },
                 transitionSpec = {
                     if (targetState != null) {
                         (slideInHorizontally { it } + fadeIn()) togetherWith
@@ -759,8 +773,8 @@ internal fun ChatApp() {
                 label = "chat-bot-chat"
                 ) { bot ->
                 Box(modifier = Modifier.fillMaxSize().modeSwipe(
-                    enabled = !sidebarOpen,
-                    sendingActive = chatState.sending || chatState.streamingState != null,
+                    enabled = !sidebarOpen && !sidebarBotOpening,
+                    sendingActive = chatState.sending || chatState.streamingState != null || chatState.backgroundWork != null,
                     onSwipeLeft = selectBotSegment,
                     onSwipeRight = selectChatSegment
                 )) {

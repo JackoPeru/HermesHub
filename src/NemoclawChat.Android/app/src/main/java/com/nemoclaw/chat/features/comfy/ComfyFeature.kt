@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -308,7 +309,7 @@ internal fun ComfyScreen(
                             fontSize = 13.sp,
                             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
                         )
-                        TextButton(onClick = { refreshNonce++ }, modifier = Modifier.height(48.dp)) {
+                        TextButton(onClick = { refreshNonce++ }, modifier = Modifier.heightIn(min = 48.dp)) {
                             Text("Riprova", color = AppColors.Accent)
                         }
                     }
@@ -347,10 +348,10 @@ internal fun ComfyScreen(
                             if (current.progress != null) {
                                 LinearProgressIndicator(
                                     progress = { current.progress },
-                                    modifier = Modifier.fillMaxWidth().height(8.dp)
+                                    modifier = Modifier.fillMaxWidth().height(8.dp).semantics { contentDescription = "Avanzamento $pct" }
                                 )
                             } else {
-                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(8.dp))
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(8.dp).semantics { contentDescription = "Avanzamento $pct" })
                             }
                         }
                         if (current.error.isNotBlank() || current.state == "ERROR") {
@@ -404,7 +405,10 @@ internal fun ComfyScreen(
                                 fontSize = 13.sp,
                                 maxLines = 8,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
+                                modifier = Modifier.semantics {
+                                    liveRegion = LiveRegionMode.Assertive
+                                    contentDescription = comfyProblem
+                                }
                             )
                         }
                     }
@@ -436,7 +440,7 @@ private fun ComfyRow(label: String, value: String) {
             fontSize = 13.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 12.dp)
+            modifier = Modifier.padding(start = 12.dp).semantics { contentDescription = value }
         )
     }
 }

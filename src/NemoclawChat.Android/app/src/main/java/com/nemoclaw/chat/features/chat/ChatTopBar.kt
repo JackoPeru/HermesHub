@@ -361,7 +361,7 @@ internal fun TopBar(
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
-    LaunchedEffect(managerBase, settings.localGatewayUrl, menuOpen, lifecycleStarted) {
+    LaunchedEffect(managerBase, settings.localGatewayUrl, menuOpen, lifecycleStarted, onWifiTransport) {
         if (!lifecycleStarted) return@LaunchedEffect
         llmError = runCatching { readManagerStatus() }.exceptionOrNull()?.message ?: ""
         var failures = 0
@@ -439,12 +439,12 @@ internal fun TopBar(
                 contentDescription = "Apri navigazione",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(42.dp)
+                    .size(48.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .clickable(role = Role.Button, onClick = onOpenSidebar)
             )
             Column(modifier = Modifier.padding(start = 11.dp).weight(1f)) {
-                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { contentDescription = title })
                 // Testo troncato con ellipsis (niente scroll orizzontale: rubava
                 // lo swipe chat/bot); versione integrale al TalkBack.
                 val statusText = if (probingGateway) {
@@ -453,6 +453,12 @@ internal fun TopBar(
                     gatewayRuntimeLabel(connected, gatewayRuntime) +
                         if (!connected && !probeDetail.isNullOrBlank()) " · ${probeDetail?.take(80)}" else ""
                 }
+                val statusTextFull = if (probingGateway) {
+                    "Verifica gateway…"
+                } else {
+                    gatewayRuntimeLabel(connected, gatewayRuntime) +
+                        if (!connected && !probeDetail.isNullOrBlank()) " · $probeDetail" else ""
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -460,9 +466,9 @@ internal fun TopBar(
                         contentDescription = if (probingGateway) {
                             "Gateway in verifica"
                         } else if (connected) {
-                            "Gateway online. $statusText"
+                            "Gateway online. $statusTextFull"
                         } else {
-                            "Gateway offline. $statusText"
+                            "Gateway offline. $statusTextFull"
                         }
                     }
                 ) {
@@ -560,7 +566,7 @@ internal fun TopBar(
                         llmBusy -> "Applicazione in corso..."
                         direct && directUrl.isNotBlank() -> "Attivo su $directUrl"
                         direct -> "Attivo: apri Comfy nel browser"
-                        else -> "LLM scaricato, Comfy per te sulla tailnet"
+                        else -> "LLM scarico, Comfy pronto in rete."
                     }
                     DropdownMenuItem(
                         text = {
@@ -600,6 +606,12 @@ internal fun TopBar(
                         leadingIcon = { Icon(Icons.Rounded.Image, contentDescription = null, tint = AppColors.Accent) },
                         onClick = { menuOpen = false; onOpenComfy() }
                     )
+                    if (llmError.isNotBlank()) {
+                        DropdownMenuItem(
+                            text = { Text("Riprova lettura") },
+                            onClick = { refreshLlm() }
+                        )
+                    }
                 }
             }
             ContextMeter(usage = contextUsage, modifier = Modifier.size(40.dp))
@@ -612,7 +624,7 @@ internal fun TopBar(
 internal fun ContextMeter(usage: ContextUsage, modifier: Modifier = Modifier) {
     val fill = (usage.percent.coerceIn(0, 100) / 100f)
     Box(
-        modifier = modifier,
+        modifier = modifier.semantics { contentDescription = "Contesto ${usage.percent}%" },
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {

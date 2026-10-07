@@ -1126,7 +1126,7 @@ internal fun BotsScreen(
                     IconButton(onClick = { refreshNonce++ }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna bot", tint = Color.White) }
                 }
             }
-            Text(status, color = AppColors.Muted, modifier = Modifier.padding(top = 12.dp))
+            Text(status, color = AppColors.Muted, modifier = Modifier.padding(top = 12.dp).semantics { liveRegion = LiveRegionMode.Polite })
         }
         // Loading: roster null = primo fetch in corso (skeleton/progress +
         // liveRegion per screen reader). Distinto da empty/error.

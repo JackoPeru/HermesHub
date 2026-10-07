@@ -18,6 +18,7 @@ private val diagnosticHttpClient: OkHttpClient by lazy {
     OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
+        .writeTimeout(5, TimeUnit.SECONDS)
         .callTimeout(6, TimeUnit.SECONDS)
         .retryOnConnectionFailure(false)
         .build()

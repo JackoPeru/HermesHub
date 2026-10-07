@@ -1,6 +1,7 @@
 package com.nemoclaw.chat
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GatewayRootsTest {
@@ -95,5 +96,15 @@ class GatewayRootsTest {
     fun cellularWithBlankConfiguredIsEmpty() {
         val settings = AppSettings(gatewayUrl = "", localGatewayUrl = "http://192.168.1.10:8642/v1")
         assertEquals(emptyList<String>(), raceRootsForTransport(false, settings))
+    }
+
+    @Test
+    fun fastestCacheKeyDistinguishesTransport() {
+        val settings = AppSettings(
+            gatewayUrl = "https://relay.example/v1",
+            localGatewayUrl = "http://192.168.1.10:8642/v1"
+        )
+        assertTrue(fastestCacheKeyFor(settings, true).contains("true"))
+        assertTrue(fastestCacheKeyFor(settings, false).contains("false"))
     }
 }

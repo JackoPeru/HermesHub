@@ -45,7 +45,8 @@ internal fun isWifiTransport(context: Context): Boolean {
             ?: return false
         val caps = manager.getNetworkCapabilities(manager.activeNetwork) ?: return false
         caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
     } catch (_: Exception) {
         false
     }
@@ -163,7 +164,7 @@ internal suspend fun fastestGatewayRoot(settings: AppSettings, onWifi: Boolean):
         }
         fastestCacheKey = key
         fastestCacheRoot = winner
-        fastestCacheAtMs = now
+        fastestCacheAtMs = System.currentTimeMillis()
         return winner
     } catch (e: Exception) {
         if (e is CancellationException) throw e

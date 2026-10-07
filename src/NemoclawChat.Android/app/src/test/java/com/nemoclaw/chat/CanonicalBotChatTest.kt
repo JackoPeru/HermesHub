@@ -103,6 +103,24 @@ class CanonicalBotChatTest {
     }
 
     @Test
+    fun transcriptKeepsUserMediaWithoutCaption() {
+        val block = JSONObject()
+            .put("id", "u1")
+            .put("type", "media_file")
+            .put("media_kind", "image")
+            .put("media_url", "/v1/media/xyz")
+            .put("alt", "foto")
+        val blocks = org.json.JSONArray().put(block)
+        val folded = foldTranscriptToChat(
+            listOf(rowMsg("user", "", mapOf("visual_blocks" to blocks)))
+        )
+        assertEquals(1, folded.size)
+        assertTrue(folded[0].fromUser)
+        assertTrue(folded[0].visualBlocks.isNotEmpty())
+        assertEquals("/v1/media/xyz", folded[0].visualBlocks[0].mediaUrl)
+    }
+
+    @Test
     fun transcriptFoldsLikeNormalChat() {
         val toolRow = JSONObject().put("name", "exec").put("tool_call_id", "c1")
         val calls = org.json.JSONArray().put(toolRow)

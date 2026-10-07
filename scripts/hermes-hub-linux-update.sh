@@ -276,6 +276,9 @@ manager_busy_reason() {
   printf 'header = "Authorization: Bearer %s"\n' "$key" > "$curl_cfg"
   body="$(curl --fail --silent --connect-timeout 3 --max-time 8 -K "$curl_cfg" "$MANAGER_URL/status" 2>/dev/null || true)"
   rm -f "$curl_cfg"
+  # Manager unreachable = defer (stallo voluto, fail-closed): senza stato certo
+  # non si riavvia mai l'hub (wipe run in-memory). Il timer ritenta; nessuna
+  # logica cambiata, solo documentato qui dove il defer nasce.
   if [ -z "$body" ]; then
     printf 'manager unreachable'
     return 0

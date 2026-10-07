@@ -204,15 +204,15 @@ def load_manual_allowed_fn():
 
 
 class TestManualModesPolicy(unittest.TestCase):
-    """Policy modi manuali: default aperto, false blocca (testato via AST)."""
+    """Policy modi manuali: default chiuso, false blocca (testato via AST)."""
 
     def allowed_for(self, config: dict) -> bool:
         ns = load_manual_allowed_fn()
         ns["CONFIG"] = config
         return ns["_manual_modes_allowed"]()
 
-    def test_default_open(self):
-        self.assertTrue(self.allowed_for({}))
+    def test_default_closed(self):
+        self.assertFalse(self.allowed_for({}))
 
     def test_explicit_false_blocks(self):
         self.assertFalse(self.allowed_for({"allow_manual_modes": False}))
@@ -308,6 +308,9 @@ class TestLlmServingProbe(unittest.TestCase):
         self.assertIn("/v1/chat/completions", seg)
         self.assertIn("max_tokens", seg)
         self.assertIn("code != 200", seg)
+        # Restringimento: vero contenuto richiesto, non body lungo qualunque.
+        self.assertIn("choices", seg)
+        self.assertIn("reasoning_content", seg)
 
     def test_serving_cached(self):
         seg = self._func_calls("llm_serving")
@@ -317,7 +320,8 @@ class TestLlmServingProbe(unittest.TestCase):
 
     def test_watchdog_uses_serving_gate(self):
         seg = self._func_calls("llm_watchdog")
-        self.assertIn("llm_serving()", seg)
+        self.assertIn("llm_serving(timeout=", seg)
+        self.assertIn("timeout=", seg)
         self.assertIn("_tabby_recent_progress()", seg)
         self.assertIn("restore_llm_with_retries", seg)
 

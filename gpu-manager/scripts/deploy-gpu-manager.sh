@@ -87,4 +87,24 @@ if ! ${SSH} "python3 -c \"import json; d=json.load(open('/tmp/gpu-manager-verify
   exit 1
 fi
 
+echo "== verify POST /mode/media da 127.0.0.1 (atteso 403/409) =="
+# Locale = solo coda media + letture: _require_user_control rifiuta con 403;
+# fuori localhost con allow_manual_modes=false rifiuta con 409. Accetta 403/409.
+# Chiave via stdin per non esporla in ps/output; stampa solo http code.
+code_mode_media="$(printf '%s' "${HERMES_GPU_MANAGER_KEY}" | ${SSH} 'KEY=$(cat); curl -s -o /dev/null -w "%{http_code}" --max-time 10 -X POST -H "Authorization: Bearer $KEY" http://127.0.0.1:8643/mode/media' || true)"
+echo "mode/media-from-localhost http_code: ${code_mode_media} (atteso 403/409)"
+if [ "${code_mode_media}" != "403" ] && [ "${code_mode_media}" != "409" ]; then
+  echo "verify mode/media fallita (atteso 403/409, ottenuto ${code_mode_media})." >&2
+  rollback
+  exit 1
+fi
+
+echo "== verify llm_serving is True =="
+# shellcheck disable=SC2029
+if ! ${SSH} "python3 -c \"import json; d=json.load(open('/tmp/gpu-manager-verify.json')); assert d.get('llm_serving') is True, d.get('llm_serving')\""; then
+  echo "verify llm_serving fallita (atteso True)." >&2
+  rollback
+  exit 1
+fi
+
 echo "deploy completato (backup in ${BACKUP_DIR})."

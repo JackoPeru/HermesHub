@@ -1147,7 +1147,7 @@ internal suspend fun transcribeVoiceFile(
                 val responseBody = it.body.byteStream().readUtf8Bounded()
                 if (it.isSuccessful) {
                     val text = JSONObject(responseBody).optString("text").trim()
-                    if (text.isBlank()) throw java.io.IOException("Trascrizione vuota.")
+                    if (text.isBlank()) return@withContext ""
                     return@withContext text
                 }
                 lastError = "HTTP ${it.code}: ${responseBody.take(180)}"
@@ -1203,7 +1203,7 @@ private fun isUsefulTranscript(text: String): Boolean {
         "grazie",
         "sottotitoli e revisione a cura di qtss",
         "sottotitoli creati dalla comunita amara.org"
-    )
+    ) && normalized.length >= 2 && !normalized.matches(Regex("\\[.*\\]|\\(.*\\)"))
 }
 
 private fun pcmRms(bytes: ByteArray): Double {

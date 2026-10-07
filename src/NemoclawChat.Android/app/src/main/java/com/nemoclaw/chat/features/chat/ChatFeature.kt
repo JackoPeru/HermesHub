@@ -200,6 +200,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -636,7 +637,7 @@ internal fun ChatScreen(
     var gatewayRuntime by remember(settings.gatewayUrl, settings.inferenceEndpoint, botConnectionId, botEndpoint) {
         mutableStateOf<GatewayRuntimeStatus?>(null)
     }
-    PollWhileStarted(networkOnline, botSettings.gatewayUrl, botSettings.inferenceEndpoint, botApiKey, settings.localGatewayUrl, baseIntervalMs = 5_000L) {
+    PollWhileStarted(networkOnline, botSettings.gatewayUrl, botSettings.inferenceEndpoint, botApiKey, settings.localGatewayUrl, botLoadNonce, baseIntervalMs = 5_000L) {
         if (!networkOnline) {
             // Telefono offline: responso negativo vero, non attesa infinita.
             gatewayAvailable = false
@@ -678,7 +679,7 @@ internal fun ChatScreen(
     // Fine dell'ultimo turno LOCALE: le righe fino a qui sono (anche) nostre,
     // mai segnale di lavoro esterno. Senza, ogni risposta appena arrivata
     // tiene banner+stop accesi fino a scadenza finestra (240s).
-    var localTurnEndMs by remember { mutableLongStateOf(0L) }
+    var localTurnEndMs by remember(botProfile, botSessionId) { mutableLongStateOf(0L) }
     var botLive by remember(botProfile, botSessionId, botLoadNonce) { mutableStateOf<BotLiveActivity?>(null) }
     PollWhileStarted(botProfile, botSessionId, botMultiplexEnabled, botEndpoint, botApiKey, botSettings.gatewayUrl, baseIntervalMs = 5_000L) {
         val profile = botProfile
@@ -813,12 +814,12 @@ internal fun ChatScreen(
             }
         }
     }
-    var scanUri by remember { mutableStateOf<Uri?>(null) }
+    var scanUri by rememberSaveable { mutableStateOf<Uri?>(null) }
     val scanLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val uri = scanUri
         if (ok && uri != null) scope.launch { createAttachmentFromUri(context, uri, settings.maxAttachmentMb)?.let { attachment -> state.pendingAttachments.add(attachment.copy(filename = "scansione-${System.currentTimeMillis()}.jpg")) } }
     }
-    var photoUri by remember { mutableStateOf<Uri?>(null) }
+    var photoUri by rememberSaveable { mutableStateOf<Uri?>(null) }
     val photoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val uri = photoUri
         if (ok && uri != null) {
@@ -1003,6 +1004,20 @@ internal fun ChatScreen(
         if (!isStreaming) {
             return@LaunchedEffect
         }
+        val wasAtBottom = run {
+            val info = listState.layoutInfo
+            val total = info.totalItemsCount
+            if (total <= 1) {
+                true
+            } else {
+                val last = info.visibleItemsInfo.lastOrNull() ?: return@run true
+                !((total - 1 - last.index) >= 1 ||
+                    (last.index == total - 1 && last.offset + last.size > info.viewportEndOffset + 150))
+            }
+        }
+        if (!wasAtBottom) {
+            return@LaunchedEffect
+        }
         val totalItems = state.messages.size + 1
         if (totalItems > 0) {
             listState.scrollToItem(totalItems - 1)
@@ -1176,7 +1191,7 @@ internal fun ChatScreen(
                         opening = false,
                         unreachable = !gatewayAvailable && gatewayProbed,
                         detail = gatewayProbeDetail,
-                        onRetry = { botLoadNonce++; gatewayProbed = false }
+                        onRetry = { botLoadNonce++; gatewayProbed = false; botLive = null }
                     )
                 } else {
                     EmptyState(onPrompt = { quickPrompt = it })
@@ -1189,7 +1204,7 @@ internal fun ChatScreen(
                     if (total <= 1) {
                         false
                     } else {
-                        val last = info.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf true
+                        val last = info.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf false
                         (total - 1 - last.index) >= 1 ||
                             (last.index == total - 1 && last.offset + last.size > info.viewportEndOffset + 150)
                     }
@@ -1239,7 +1254,7 @@ internal fun ChatScreen(
             Surface(color = Color(0xFF7A3E00), modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Assertive }) {
                 Text(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                    text = "Rete Internet non validata. Provo comunque Hermes via LAN/Tailnet.",
+                    text = "Telefono offline: provo comunque via LAN/Tailnet.",
                     color = Color.White,
                     fontSize = 12.sp
                 )
@@ -1322,7 +1337,7 @@ internal fun ChatScreen(
         // Cambio gateway/endpoint/profilo/sessione/chiave: gli stream puntano
         // al vecchio backend, cancellali (niente job orfani che scrivono
         // snapshot fuori schermo). Vale anche tra bot sulla stessa gateway.
-        DisposableEffect(botSettings.gatewayUrl, botProfile, botSessionId, botEndpoint, botApiKey) {
+        DisposableEffect(botSettings.gatewayUrl, botProfile, botSessionId, botEndpoint, botApiKey, conversationId, botMultiplexEnabled) {
             // Solo la propria conversazione: le altre chat tengono i loro stream.
             onDispose {
                 conversationId?.let { cid ->
@@ -1600,7 +1615,7 @@ internal fun ChatScreen(
                         // errore visibile e stop, mai invio monco silenzioso.
                         val sessionInput = if (canonicalBotSession != null && attachments.isNotEmpty()) {
                             val prep = buildPromptWithAttachmentToolRefs(
-                                botSettings, text, attachments, botApiKey,
+                                botSettings, text.ifBlank { displayText }, attachments, botApiKey,
                                 botProfile, botMultiplexEnabled, botAllowCompatAuth
                             )
                             if (isPartialUploadBlocked(attachments.size, prep.uploadedCount, prep.uploadErrors)) {
@@ -2032,9 +2047,9 @@ internal fun ChatScreen(
                 // caso si azzera e il poll riconferma entro 5s se lavora
                 // davvero (mai bugie sul desktop); nel secondo resta l'avviso.
                 if (!state.sending) {
+                    // Finestra eco fissa 60s: il gate poll filtra gia l'eco oltre 30s; oltre 60s e lavoro vero.
                     val echoWindow = localTurnEndMs > 0L &&
-                        System.currentTimeMillis() - localTurnEndMs <
-                            BOT_LIVE_FRESH_WINDOW_MS + BOT_LIVE_ECHO_TOLERANCE_MS
+                        System.currentTimeMillis() - localTurnEndMs < 60_000L
                     if (echoWindow) {
                         botLive = botLive?.copy(running = false, status = "")
                         Toast.makeText(context, "Risposta arrivata, stato aggiornato.", Toast.LENGTH_SHORT).show()
@@ -2250,16 +2265,22 @@ internal fun BotEmptyState(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(scroll)
-            .padding(horizontal = 22.dp, vertical = 12.dp),
+            .padding(horizontal = 22.dp, vertical = 12.dp)
+            .semantics { liveRegion = LiveRegionMode.Polite },
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.Start
     ) {
+        if (opening) {
+            LinearProgressIndicator()
+            Spacer(modifier = Modifier.height(10.dp))
+        }
         Text(
             text = when {
                 opening -> "Apro la chat…"
                 unreachable -> "Bot non raggiungibile"
                 else -> displayName ?: "Bot"
             },
+            modifier = Modifier.semantics { displayName?.let { contentDescription = it } },
             color = Color.White,
             fontWeight = FontWeight.SemiBold,
             fontSize = 27.sp,
@@ -2273,9 +2294,9 @@ internal fun BotEmptyState(
             text = when {
                 opening -> "Recupero la storia condivisa con Hermes desktop."
                 unreachable -> if (detailCapped == null) {
-                    "Il gateway non risponde: controlla la connessione e riprova dal roster."
+                    "Il gateway non risponde: controlla la connessione e tocca Riprova."
                 } else {
-                    "Il gateway non risponde ($detailCapped): controlla la connessione e riprova dal roster."
+                    "Il gateway non risponde ($detailCapped): controlla la connessione e tocca Riprova."
                 }
                 else -> "Questa e la chat persistente del bot: la stessa su telefono e desktop. Scrivi per iniziare."
             },
@@ -2347,6 +2368,7 @@ internal fun SuggestionButton(text: String, onClick: () -> Unit) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clickable(onClick = onClick),
         color = AppColors.Panel,
         shape = RoundedCornerShape(16.dp),
