@@ -305,6 +305,7 @@ internal fun TopBar(
     onOpenComfy: () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
+    val onWifiTransport = isWifiTransport(LocalContext.current)
     val managerBase = remember(settings.gatewayUrl) { gpuManagerBase(settings.gatewayUrl) }
     var menuOpen by remember { mutableStateOf(false) }
     var llmLoaded by remember { mutableStateOf<Boolean?>(null) }
@@ -321,7 +322,7 @@ internal fun TopBar(
     suspend fun readManagerStatus() {
         // Lettura stato veloce: percorso più rapido (locale vs relay) + timeout brevi.
         // Solo letture: le scritture mode/* restano sulla base configurata.
-        val fastRoot = fastestGatewayRoot(settings, isWifiTransport(LocalContext.current))
+        val fastRoot = fastestGatewayRoot(settings, onWifiTransport)
         val fastBase = gpuManagerBase(fastRoot.ifBlank { settings.gatewayUrl })
         // Errori HTTP espliciti: un 401/500 non deve mai sembrare "tutto spento".
         val (code, body) = httpGetResponseQuick("$fastBase/status", managerApiKey)

@@ -252,7 +252,7 @@ internal fun ComfyScreen(
 
     PollWhileStarted(settings.gatewayUrl, settings.localGatewayUrl, refreshNonce, baseIntervalMs = 5_000L) {
         val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
-        val root = fastestGatewayRoot(settings)
+        val root = fastestGatewayRoot(settings, isWifiTransport(appContext))
         status = loadComfyStatus(root.ifBlank { settings.gatewayUrl }, key)
         true
     }
