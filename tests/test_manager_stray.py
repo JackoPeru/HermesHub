@@ -280,5 +280,51 @@ class TestManagerRoles(unittest.TestCase):
         self.assertIn("handlers", seg)
 
 
+class TestLlmServingProbe(unittest.TestCase):
+    """La VRAM piena non basta: tabby sganciato risponde 503 alle completion
+    mentre llm_loaded() e True. llm_serving() fa una vera completion da 1
+    token; il watchdog la usa come gate e /status la espone. Stile statico
+    via AST/stringhe: nessun import di manager.py."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
+        cls.tree = ast.parse(cls.src)
+        cls.funcs = {
+            n.name: n
+            for n in cls.tree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+
+    def _func_calls(self, name: str) -> str:
+        node = self.funcs.get(name)
+        self.assertIsNotNone(node, f"funzione {name} non trovata in manager.py")
+        seg = ast.get_source_segment(self.src, node)
+        self.assertIsNotNone(seg, f"sorgente {name} non estraibile")
+        return seg or ""
+
+    def test_probe_posts_tiny_completion(self):
+        seg = self._func_calls("_llm_serving_probe")
+        self.assertIn("/v1/chat/completions", seg)
+        self.assertIn("max_tokens", seg)
+        self.assertIn("code != 200", seg)
+
+    def test_serving_cached(self):
+        seg = self._func_calls("llm_serving")
+        self.assertIn("SERVING_CACHE_TTL", seg)
+        self.assertIn("_serving_probe", seg)
+        self.assertIn("_llm_serving_probe", seg)
+
+    def test_watchdog_uses_serving_gate(self):
+        seg = self._func_calls("llm_watchdog")
+        self.assertIn("llm_serving()", seg)
+        self.assertIn("_tabby_recent_progress()", seg)
+        self.assertIn("restore_llm_with_retries", seg)
+
+    def test_status_exposes_serving(self):
+        seg = self._func_calls("status")
+        self.assertIn('"llm_serving": await llm_serving()', seg)
+
+
 if __name__ == "__main__":
     unittest.main()

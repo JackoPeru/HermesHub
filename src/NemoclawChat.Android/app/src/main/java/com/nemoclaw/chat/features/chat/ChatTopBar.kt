@@ -321,7 +321,7 @@ internal fun TopBar(
     suspend fun readManagerStatus() {
         // Lettura stato veloce: percorso più rapido (locale vs relay) + timeout brevi.
         // Solo letture: le scritture mode/* restano sulla base configurata.
-        val fastRoot = fastestGatewayRoot(settings)
+        val fastRoot = fastestGatewayRoot(settings, isWifiTransport(LocalContext.current))
         val fastBase = gpuManagerBase(fastRoot.ifBlank { settings.gatewayUrl })
         // Errori HTTP espliciti: un 401/500 non deve mai sembrare "tutto spento".
         val (code, body) = httpGetResponseQuick("$fastBase/status", managerApiKey)

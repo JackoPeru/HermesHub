@@ -648,7 +648,7 @@ internal fun ChatScreen(
         // Percorso più veloce solo per probe dot + bot primario: mai hot path chat/invii.
         val isPrimary = botSettings.gatewayUrl == settings.gatewayUrl
         val probeSettings = if (!settings.localGatewayUrl.isBlank() && isPrimary) {
-            val probeRoot = fastestGatewayRoot(settings)
+            val probeRoot = fastestGatewayRoot(settings, isWifiTransport(context))
             if (probeRoot.isBlank()) botSettings else botSettings.copy(gatewayUrl = probeRoot)
         } else {
             botSettings

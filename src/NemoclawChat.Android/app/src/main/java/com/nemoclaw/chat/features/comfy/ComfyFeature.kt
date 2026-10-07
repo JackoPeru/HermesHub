@@ -44,6 +44,7 @@ import com.nemoclaw.chat.AppColors
 import com.nemoclaw.chat.AppSettings
 import com.nemoclaw.chat.PollWhileStarted
 import com.nemoclaw.chat.fastestGatewayRoot
+import com.nemoclaw.chat.isWifiTransport
 import com.nemoclaw.chat.gatewayProbeHttpClient
 import com.nemoclaw.chat.gpuManagerBase
 import com.nemoclaw.chat.httpGetResponseQuick
@@ -241,7 +242,7 @@ internal fun ComfyScreen(
         scope.launch {
             try {
                 val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
-                val root = fastestGatewayRoot(settings)
+                val root = fastestGatewayRoot(settings, isWifiTransport(appContext))
                 status = loadComfyStatus(root.ifBlank { settings.gatewayUrl }, key)
             } finally {
                 refreshing = false

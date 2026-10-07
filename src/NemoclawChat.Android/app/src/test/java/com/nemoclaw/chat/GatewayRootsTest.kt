@@ -69,4 +69,31 @@ class GatewayRootsTest {
         val settings = AppSettings(gatewayUrl = "", localGatewayUrl = "")
         assertEquals(emptyList<String>(), localRootCandidates(settings))
     }
+
+    @Test
+    fun wifiRacesBothRoots() {
+        val settings = AppSettings(
+            gatewayUrl = "https://relay.example/v1",
+            localGatewayUrl = "http://192.168.1.10:8642/v1"
+        )
+        assertEquals(
+            listOf("http://192.168.1.10:8642/v1", "https://relay.example/v1"),
+            raceRootsForTransport(true, settings)
+        )
+    }
+
+    @Test
+    fun cellularUsesConfiguredOnly() {
+        val settings = AppSettings(
+            gatewayUrl = "https://relay.example/v1",
+            localGatewayUrl = "http://192.168.1.10:8642/v1"
+        )
+        assertEquals(listOf("https://relay.example/v1"), raceRootsForTransport(false, settings))
+    }
+
+    @Test
+    fun cellularWithBlankConfiguredIsEmpty() {
+        val settings = AppSettings(gatewayUrl = "", localGatewayUrl = "http://192.168.1.10:8642/v1")
+        assertEquals(emptyList<String>(), raceRootsForTransport(false, settings))
+    }
 }

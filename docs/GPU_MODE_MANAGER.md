@@ -32,9 +32,11 @@ Config: `/etc/hermes/gpu-manager.yaml`.
 
 ## API (OpenAPI su `/docs`)
 
-- `GET /status` → desired_mode, current_state, llm_online/llm_loaded, media_online,
+- `GET /status` → desired_mode, current_state, llm_online/llm_loaded/llm_serving, media_online,
   queue_length, current_job, media_progress, active_preset, active_media_model,
   qwen_image_installed/ready, h3_installed/ready/license_state, presets[], GPU[].
+  `llm_serving` = vera completion da 1 token (non basta VRAM piena: tabby
+  sganciato risponde 503 e il watchdog lo rileva e ripristina).
 - `POST /mode/llm|media|auto`
 - `POST /jobs/image`, `POST /jobs/video` (raw workflow oppure `{preset, prompt,
   input_images[], parameters{}}` → workflow versionati da `/opt/hermes/media-workflows/`)

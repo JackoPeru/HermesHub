@@ -1,5 +1,8 @@
 package com.nemoclaw.chat
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -11,6 +14,13 @@ import java.net.URI
 /**
  * Scelta automatica del percorso gateway più veloce per letture stato/manager.
  * Solo letture (TopBar, Comfy, probe dot): mai hot path chat/invii.
+ *
+ * Zero configurazione oltre all'URL locale: su WiFi gareggiano locale e
+ * remoto e vince il più veloce (a casa vince il locale in ms, fuori vince
+ * il remoto dopo il fail veloce del locale); su rete mobile si usa solo
+ * il remoto (il locale sarebbe irraggiungibile). Nessun permesso extra:
+ * basta ACCESS_NETWORK_STATE per il tipo di trasporto, niente SSID
+ * (che richiederebbe la posizione).
  */
 
 private const val FASTEST_GATEWAY_CACHE_MS = 60_000L
@@ -25,8 +35,21 @@ private var fastestCacheAtMs: Long = 0L
 @Volatile
 private var fastestCacheKey: String = ""
 
-internal fun fastestCacheKeyFor(settings: AppSettings): String =
-    "${settings.gatewayUrl.trim()}|${settings.localGatewayUrl.trim()}"
+internal fun fastestCacheKeyFor(settings: AppSettings, onWifi: Boolean): String =
+    "${settings.gatewayUrl.trim()}|${settings.localGatewayUrl.trim()}|$onWifi"
+
+/** True se il trasporto attivo è WiFi/Ethernet (rete locale possibile). Pura lettura, niente permessi extra. */
+internal fun isWifiTransport(context: Context): Boolean {
+    return try {
+        val manager = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val caps = manager.getNetworkCapabilities(manager.activeNetwork) ?: return false
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    } catch (_: Exception) {
+        false
+    }
+}
 
 internal fun isHttpUrlWithHost(value: String): Boolean {
     return try {
@@ -83,17 +106,30 @@ private fun probeRootOk(root: String): Boolean {
 }
 
 /**
+ * Quali root gareggiare, in base al trasporto. Pura e testabile.
+ * Su WiFi ha senso provare anche il locale (a casa vince lui); su rete
+ * mobile il locale è irraggiungibile per definizione: solo remoto.
+ */
+internal fun raceRootsForTransport(onWifi: Boolean, settings: AppSettings): List<String> {
+    if (!onWifi) {
+        return listOf(settings.gatewayUrl.trim().trimEnd('/')).filter { it.isNotBlank() }
+    }
+    return localRootCandidates(settings)
+}
+
+/**
  * Ritorna la root più veloce (prima 2xx su GET {root}/v1/capabilities,
- * pareggio -> configurato). Cache in-memory 60s. Mai eccezioni:
+ * pareggio -> configurato). Cache in-memory 60s (chiave con trasporto:
+ * cambiando rete si rigareggia subito). Mai eccezioni:
  * fallback alla root configurata.
  */
-internal suspend fun fastestGatewayRoot(settings: AppSettings): String {
+internal suspend fun fastestGatewayRoot(settings: AppSettings, onWifi: Boolean): String {
     try {
-        val candidates = localRootCandidates(settings)
+        val candidates = raceRootsForTransport(onWifi, settings)
         if (candidates.isEmpty()) return settings.gatewayUrl
         if (candidates.size == 1) return candidates[0]
 
-        val key = fastestCacheKeyFor(settings)
+        val key = fastestCacheKeyFor(settings, onWifi)
         val now = System.currentTimeMillis()
         val cached = fastestCacheRoot
         if (fastestCacheKey == key && cached in candidates && now - fastestCacheAtMs < FASTEST_GATEWAY_CACHE_MS) {

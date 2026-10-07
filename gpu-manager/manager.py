@@ -638,6 +638,50 @@ async def llm_loaded() -> bool:
     return all(g["memory_used_mb"] >= threshold for g in gpus)
 
 
+# Cache della prova di risposta: una completion vera per ogni poll di stato
+# sarebbe spreco e carico; 60s bastano a watchdog (tick 30s) e TopBar (15s).
+_serving_probe = {"ok": False, "at": 0.0}
+SERVING_CACHE_TTL = 60.0
+SERVING_PROBE_TIMEOUT = 45
+
+
+async def _llm_serving_probe(timeout: int) -> bool:
+    """Una vera completion da 1 token: 200 + body non vuoto = serve davvero."""
+    try:
+        code, body = await _http_async(
+            "POST",
+            llm_base() + "/v1/chat/completions",
+            {
+                "model": str(CONFIG["llm"].get("health_model") or "hermes-agent"),
+                "messages": [{"role": "user", "content": "Reply with OK"}],
+                "max_tokens": 2,
+                "stream": False,
+            },
+            timeout=timeout,
+        )
+    except Exception:  # noqa: BLE001 - qualunque errore trasporto = non serve
+        return False
+    if code != 200 or len(body or "") <= 20:
+        return False
+    return True
+
+
+async def llm_serving(timeout: int = SERVING_PROBE_TIMEOUT) -> bool:
+    """True solo se tabby completa davvero (non basta VRAM piena + API su).
+
+    Caso reale: tabby con pesi residenti ma modello sganciato rispondeva 503
+    alle completion mentre llm_loaded() era True. Senza questo, watchdog e
+    /status mentivano verde.
+    """
+    now = time.monotonic()
+    if now - _serving_probe["at"] < SERVING_CACHE_TTL:
+        return _serving_probe["ok"]
+    ok = await _llm_serving_probe(timeout)
+    _serving_probe["ok"] = ok
+    _serving_probe["at"] = time.monotonic()
+    return ok
+
+
 async def media_online() -> bool:
     code, _ = await _http_async("GET", media_base() + "/system_stats", timeout=10)
     if code == 200:
@@ -1499,7 +1543,12 @@ async def llm_watchdog() -> None:
         if _state.get("current_state") in _WATCHDOG_TRANSITIONAL:
             _state["llm_notloaded_fails"] = 0
             return
-        if not await llm_loaded():
+        loaded = await llm_loaded()
+        # VRAM piena non basta: tabby sganciato risponde 503 ma risulta loaded.
+        # La prova di risposta decide; generazioni vere restano protette dal
+        # gate progress qui sotto (mai restore mentre genera).
+        serving = await llm_serving() if loaded else False
+        if not (loaded and serving):
             fails = int(_state.get("llm_notloaded_fails") or 0) + 1
             _state["llm_notloaded_fails"] = fails
             if await _tabby_recent_progress():
@@ -2033,6 +2082,7 @@ async def status(_: None = Depends(require_key)) -> dict:
         "worker_alive_s": round(time.monotonic() - float(_state.get("last_drive_ts") or 0.0), 1),
         "llm_online": await llm_online(),
         "llm_loaded": await llm_loaded(),
+        "llm_serving": await llm_serving(),
         "media_online": await media_online(),
         "queue_length": len(queued_jobs()),
         "current_job": _state["current_job"],
