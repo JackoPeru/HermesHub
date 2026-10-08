@@ -86,13 +86,5 @@ def shot_scale(face_ratio: float) -> str:
         return "medium shot"
     return "full shot"
 
-
-def angle_bucket(yaw: float | None) -> str:
-    if yaw is None:
-        return "unknown"
-    a = abs(yaw)
-    if a < 18:
-        return "front"
-    if a < 45:
-        return "three_quarter_left" if yaw < 0 else "three_quarter_right"
-    return "profile_left" if yaw < 0 else "profile_right"
+# NOTA: i bucket di posa vivono in dataset.classify_pose (unica fonte di verita,
+# nomi da spec). Non duplicare qui.

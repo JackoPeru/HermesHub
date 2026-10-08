@@ -189,6 +189,50 @@ def publish_lora_link(loras_dir: Path, slug: str, version: int, target: Path) ->
     return link.name
 
 
+def publish_extra_link(loras_dir: Path, slug: str, source: Path) -> str:
+    """Extra LoRA utente reso visibile a ComfyUI (nome stabile dal contenuto path)."""
+    import hashlib as _hashlib
+
+    digest = _hashlib.sha256(str(source).encode()).hexdigest()[:12]
+    loras_dir.mkdir(parents=True, exist_ok=True)
+    link = loras_dir / f"{slug}_x{digest}.safetensors"
+    if link.is_symlink():
+        if Path(os.readlink(link)) == source:
+            return link.name
+        link.unlink()
+    elif link.exists():
+        link.unlink()
+    os.symlink(source, link)
+    return link.name
+
+
+def remove_character_links(loras_dir: Path, slug: str) -> int:
+    """Rimuove i symlink del personaggio (rename/delete): solo link, mai file veri."""
+    removed = 0
+    if not loras_dir.is_dir():
+        return 0
+    for child in loras_dir.iterdir():
+        if child.is_symlink() and child.name.startswith(slug + "_v"):
+            try:
+                child.unlink()
+                removed += 1
+            except OSError:
+                continue
+    return removed
+
+
+def is_trusted_lora_path(path: str) -> bool:
+    """Extra LoRA solo da root fidate (stessa policy degli input manager)."""
+    try:
+        resolved = Path(path).resolve()
+    except OSError:
+        return False
+    return any(
+        str(resolved) == str(root) or str(resolved).startswith(str(root) + os.sep)
+        for root in (Path("/home/matteo/.hermes"), Path("/opt/hermes"), Path("/tmp"))
+    )
+
+
 def stage_references(refs: list[str], dest_dir: Path) -> list[str]:
     """Copie reali (mai symlink: il manager rifiuta symlink fuori trusted roots)."""
     dest_dir.mkdir(parents=True, exist_ok=True)

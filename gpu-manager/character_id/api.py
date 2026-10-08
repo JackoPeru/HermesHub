@@ -36,6 +36,7 @@ from .training import (
 from .validation import (
     MAX_FILE_BYTES,
     MAX_IMAGES,
+    is_safe_preview_name,
     validate_upload_filename,
     validate_upload_size,
 )
@@ -47,6 +48,21 @@ DEFAULT_COMFY_INPUT = "/opt/hermes/runtimes/comfyui/app/input"
 DEFAULT_LORAS_DIR = "/opt/hermes/runtimes/comfyui/app/models/loras"
 
 # (M6+: tutte le rotte sono implementate; niente piu stub 501.)
+
+
+def _is_character_worker(pid: int) -> bool:
+    """Il pid appartiene davvero a un worker character-id? Anti pid-recycling.
+
+    Legge /proc/<pid>/cmdline (solo POSIX/server). Sconosciuto = False
+    (mai uccidere alla cieca).
+    """
+    from .validation import is_character_worker_cmdline
+
+    try:
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "ignore")
+    except (OSError, ValueError):
+        return False
+    return is_character_worker_cmdline(cmdline.replace("\x00", " "))
 
 
 def register_character_routes(
@@ -99,21 +115,38 @@ def register_character_routes(
 
     @app.patch("/characters/{character_id}")
     async def characters_patch(character_id: str, payload: dict, request: Request, _: None = key_dep) -> dict:
+        from .generate import remove_character_links
+
         user_dep(request)
+        before = _manifest_or_404(character_id)
         try:
             manifest = await _run(store.patch_character, character_id, payload or {})
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         if manifest is None:
             raise HTTPException(404, "character non trovato")
+        if manifest.get("slug") != before.get("slug"):
+            # Lo slug e nel nome link: pulisci gli orfani del vecchio slug.
+            try:
+                remove_character_links(Path(loras_dir), before.get("slug", ""))
+            except OSError:
+                pass
         return manifest
 
     @app.delete("/characters/{character_id}")
     async def characters_delete(character_id: str, request: Request, _: None = key_dep) -> dict:
+        from .generate import remove_character_links
+
         user_dep(request)
+        manifest = _manifest_or_404(character_id)
         deleted = await _run(store.delete_character, character_id)
         if not deleted:
             raise HTTPException(404, "character non trovato")
+        # Pulizia link LoRA orfani (solo symlink <slug>_v*, mai file veri).
+        try:
+            remove_character_links(Path(loras_dir), manifest.get("slug", ""))
+        except OSError:
+            pass
         return {"deleted": character_id}
 
     @app.get("/characters/{character_id}/status")
@@ -279,6 +312,8 @@ def register_character_routes(
         if not Path(trainer_python).is_file():
             raise HTTPException(409, "trainer non installato (setup M4 sul server)")
         version = int((payload or {}).get("version") or (manifest["training_version"] + 1))
+        if not 1 <= version <= 999:
+            raise HTTPException(422, "version fuori range 1..999")
         job = await _run(store.create_job, character_id, "train", version)
         await _run(store.set_status, character_id, "training")
         pid, _ = _spawn("character_id.worker_train",
@@ -297,7 +332,9 @@ def register_character_routes(
         if job is None:
             raise HTTPException(409, "nessun job attivo")
         pid = int(job.get("pid", 0) or 0)
-        if pid_alive(pid):
+        killed = False
+        if pid_alive(pid) and _is_character_worker(pid):
+            killed = True
             try:
                 os.killpg(pid, 15)  # SIGTERM al gruppo (start_new_session)
             except (OSError, ProcessLookupError):
@@ -306,13 +343,15 @@ def register_character_routes(
                 await asyncio.sleep(1)
                 if not pid_alive(pid):
                     break
-            if pid_alive(pid):
+            if pid_alive(pid) and _is_character_worker(pid):
                 try:
                     os.killpg(pid, 9)
                 except (OSError, ProcessLookupError):
                     pass
         await _run(store.update_job, job["id"], status="cancelled", progress=1.0,
-                   detail="cancellato dall'utente", error="")
+                   detail="cancellato dall'utente" if killed else
+                   "tracking annullato (worker gia morto o pid riciclato)",
+                   error="")
         model = await _run(store.latest_model, character_id, "fl2va")
         await _run(store.set_status, character_id, "ready" if model else "ready_to_train")
         clear_lock(store.root)
@@ -353,7 +392,9 @@ def register_character_routes(
                                   _: None = key_dep) -> dict:
         from .generate import (
             build_workflow,
+            is_trusted_lora_path,
             parse_mentions,
+            publish_extra_link,
             publish_lora_link,
             resolve_request,
             stage_references,
@@ -382,20 +423,32 @@ def register_character_routes(
                 link_name = publish_lora_link(
                     Path(loras_dir), manifest["slug"], manifest["training_version"],
                     Path(model["path"]))
+                raw_extras = spec["extra_loras"]
+                if not isinstance(raw_extras, list):
+                    raise ValueError("additional_loras deve essere una lista")
+                for entry in raw_extras:
+                    if not isinstance(entry, dict) or not is_trusted_lora_path(
+                            str(entry.get("path", ""))):
+                        raise ValueError("extra LoRA fuori dalle root fidate")
                 chain = validate_stack(
                     [{"path": str(Path(loras_dir) / link_name),
                       "strength": spec["strength"], "family": "fl2va"}]
                     + [{"path": e.get("path", ""), "strength": e.get("strength", 1.0),
                         "family": e.get("family", "fl2va"), "enabled": e.get("enabled", True)}
-                       for e in spec["extra_loras"]],
+                       for e in raw_extras if isinstance(e, dict)],
                     "fl2va")
-                chain = [{"file": link_name, "strength": spec["strength"]}] + [
-                    {"file": Path(e["path"]).name, "strength": e["strength"]} for e in chain[1:]]
+                published = [{"file": link_name, "strength": spec["strength"]}]
+                for entry in chain[1:]:
+                    published.append({
+                        "file": publish_extra_link(
+                            Path(loras_dir), manifest["slug"], Path(entry["path"])),
+                        "strength": entry["strength"],
+                    })
                 template = json.loads((Path(workflows_dir) / "h3" / "t2v.json").read_text())
-                workflow = await _run(build_workflow, template, spec, chain, [])
+                workflow = await _run(build_workflow, template, spec, published, [])
             else:
                 slots = manifest.get("references", {})
-                refs = [slots[k] for k in ("front", "three_quarter_left", "three_quarter_right",
+                refs = [slots[k] for k in ("front", "left_three_quarter", "right_three_quarter",
                                            "profile_left", "profile_right", "full_body")
                         if slots.get(k)] or slots.get("preferred", [])
                 real = [r for r in (refs if isinstance(refs, list) else [refs])
@@ -430,10 +483,10 @@ def register_character_routes(
         from fastapi.responses import FileResponse
 
         _manifest_or_404(character_id)
-        if "/" in name or "\\" in name or ".." in name:
+        if not is_safe_preview_name(name):
             raise HTTPException(422, "nome preview non valido")
         path = store.char_dir(character_id) / "previews" / name
-        if not path.is_file() or path.suffix.lower() not in (".jpg", ".jpeg", ".png", ".webp", ".mp4"):
+        if not path.is_file():
             raise HTTPException(404, "preview non trovata")
         return FileResponse(path)
 
@@ -465,12 +518,21 @@ def register_character_routes(
         from .export_pkg import import_package
 
         user_dep(request)
-        data = await file.read(2 * 1024 * 1024 * 1024 + 1)
-        if len(data) > 2 * 1024 * 1024 * 1024 or not (file.filename or "").endswith(".hcid"):
-            raise HTTPException(422, "package .hcid non valido o troppo grande (max 2 GB)")
+        if not (file.filename or "").endswith(".hcid"):
+            raise HTTPException(422, "package .hcid non valido (max 2 GB)")
+        # Scrittura a chunk: mai 2 GB in RAM.
         tmp = store.root / "cache" / f"import_{uuid.uuid4().hex}.hcid"
-        tmp.write_bytes(data)
+        size = 0
         try:
+            with open(tmp, "wb") as handle:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > 2 * 1024 * 1024 * 1024:
+                        raise HTTPException(422, "package troppo grande (max 2 GB)")
+                    handle.write(chunk)
             manifest = await _run(import_package, tmp, store, False)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc

@@ -158,6 +158,11 @@ class CharacterStore:
         self._db = sqlite3.connect(str(self.root / "characters.db"), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         with self._lock, self._db:
+            # WAL: letture manager concorrenti non bloccano il writer del worker
+            # (processi diversi); busy_timeout contro lock transienti.
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA busy_timeout=10000")
+            self._db.execute("PRAGMA synchronous=NORMAL")
             self._db.executescript(_SCHEMA)
 
     def close(self) -> None:
@@ -188,9 +193,18 @@ class CharacterStore:
                 (cid,),
             ).fetchone()["n"]
             model = self._db.execute(
-                "SELECT * FROM character_models WHERE character_id=? AND family='fl2va' ORDER BY version DESC LIMIT 1",
-                (cid,),
+                "SELECT * FROM character_models WHERE character_id=? AND family='fl2va'"
+                " AND version=? LIMIT 1",
+                (cid, row["current_version"]),
             ).fetchone()
+            if model is None:
+                # Fallback: versione corrente senza modello (es. dopo rollback
+                # a versione mai addestrata) -> ultimo modello disponibile.
+                model = self._db.execute(
+                    "SELECT * FROM character_models WHERE character_id=? AND family='fl2va'"
+                    " ORDER BY version DESC LIMIT 1",
+                    (cid,),
+                ).fetchone()
             job = self._db.execute(
                 "SELECT * FROM character_jobs WHERE character_id=? AND status NOT IN ('ready','failed','cancelled') ORDER BY updated_at DESC LIMIT 1",
                 (cid,),
@@ -376,6 +390,20 @@ class CharacterStore:
                 )
             if "lora_strength" in patch:
                 strength = validate_lora_strength(patch["lora_strength"])
+                # Merge con gli score esistenti: non azzerare mai recommended_engine
+                # e metriche eval con un PATCH parziale.
+                latest = self._db.execute(
+                    "SELECT scores_json FROM character_metrics WHERE character_id=?"
+                    " ORDER BY created_at DESC LIMIT 1",
+                    (character_id,),
+                ).fetchone()
+                scores = {}
+                if latest:
+                    try:
+                        scores = json.loads(latest["scores_json"])
+                    except (ValueError, TypeError):
+                        scores = {}
+                scores["lora_strength"] = strength
                 self._db.execute(
                     "INSERT INTO character_metrics(id,character_id,version,suite,scores_json,created_at)"
                     " VALUES (?,?,?,?,?,?)",
@@ -384,7 +412,7 @@ class CharacterStore:
                         character_id,
                         0,
                         "identity_settings",
-                        json.dumps({"lora_strength": strength}),
+                        json.dumps(scores),
                         _utcnow(),
                     ),
                 )

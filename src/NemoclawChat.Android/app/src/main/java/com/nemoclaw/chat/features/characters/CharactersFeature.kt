@@ -19,9 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -145,15 +142,20 @@ internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVid
 
 @Composable
 private fun CharacterGrid(items: List<CharacterSummary>, onOpen: (String) -> Unit, onUse: (String) -> Unit) {
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(160.dp),
-        modifier = Modifier.height((170 * ((items.size + 1) / 2)).dp.coerceAtMost(1200.dp)),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        userScrollEnabled = false
-    ) {
-        items(items, key = { it.id }) { item ->
-            CharacterCard(item = item, onOpen = { onOpen(item.id) }, onUse = { onUse(item.id) })
+    // Righe da 2 nella LazyColumn madre: niente griglia annidata, niente clip
+    // con molti personaggi (il calcolo altezza fissa tagliava oltre ~14 card).
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        items.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                row.forEach { item ->
+                    androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f)) {
+                        CharacterCard(item = item, onOpen = { onOpen(item.id) }, onUse = { onUse(item.id) })
+                    }
+                }
+                if (row.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
         }
     }
 }
@@ -207,8 +209,16 @@ private fun CreateCharacterWizard(context: Context, settings: AppSettings, onDon
         busy = true
         message = "Carico ${uris.size} foto…"
         scope.launch {
-            val (uploaded, info) = uploadCharacterPhotos(context, settings, managerKey, id, uris.take(80))
-            message = info
+            // Batch da 10: un unico multipart da 80 foto supererebbe timeout/RAM.
+            var uploaded = 0
+            var info = ""
+            for (batch in uris.take(80).chunked(10)) {
+                val (count, batchInfo) = uploadCharacterPhotos(context, settings, managerKey, id, batch)
+                uploaded += count
+                info = batchInfo
+                if (count < batch.size) break
+            }
+            message = if (uploaded > 0) "Caricate $uploaded foto." else info
             busy = false
             if (uploaded > 0) step = 3
         }
@@ -287,6 +297,9 @@ private fun AnalyzeStep(context: Context, settings: AppSettings, characterId: St
             val manifest = loadCharacterManifest(settings, managerKey, characterId)
             counts = "${manifest?.optInt("image_count", 0)} foto utilizzabili"
             onReady()
+        } else {
+            val (good, warn, bad) = loadImageVerdicts(settings, managerKey, characterId)
+            if (good + warn + bad > 0) counts = "✓ $good buone · ⚠ $warn dubbie · ✕ $bad scartate"
         }
         if (active?.status == "failed") onMessage(active.error.ifBlank { "Analisi fallita" })
         true
@@ -480,7 +493,8 @@ private fun CharacterDetail(context: Context, settings: AppSettings, id: String,
         }
         if (generateOpen) {
             item {
-                GenerateSheet(context, settings, id = id, name = name, onClose = { generateOpen = false }, onOpenVideo = onOpenVideo)
+                val currentStrength = manifest?.optJSONObject("identity")?.optDouble("lora_strength", 0.9)?.toString() ?: "0.9"
+                GenerateSheet(context, settings, id = id, name = name, strength = currentStrength, onClose = { generateOpen = false }, onOpenVideo = onOpenVideo)
             }
         }
     }
@@ -488,7 +502,7 @@ private fun CharacterDetail(context: Context, settings: AppSettings, id: String,
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun GenerateSheet(context: Context, settings: AppSettings, id: String, name: String, onClose: () -> Unit, onOpenVideo: () -> Unit) {
+private fun GenerateSheet(context: Context, settings: AppSettings, id: String, name: String, strength: String, onClose: () -> Unit, onOpenVideo: () -> Unit) {
     val scope = rememberCoroutineScope()
     val managerKey = remember { managerKeyOf(context) }
     var prompt by rememberSaveable(id) { mutableStateOf("") }
@@ -525,11 +539,11 @@ private fun GenerateSheet(context: Context, settings: AppSettings, id: String, n
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(3, 5, 10).forEach { seconds ->
-                    OutlinedButton(onClick = { duration = seconds }) { Text("${seconds}s") }
+                    OutlinedButton(onClick = { duration = seconds }) { Text(if (duration == seconds) "✓ ${seconds}s" else "${seconds}s") }
                 }
                 Spacer(modifier = Modifier.width(4.dp))
                 listOf("16:9", "9:16", "1:1").forEach { ratio ->
-                    OutlinedButton(onClick = { aspect = ratio }) { Text(ratio) }
+                    OutlinedButton(onClick = { aspect = ratio }) { Text(if (aspect == ratio) "✓ $ratio" else ratio) }
                 }
             }
             TextButton(onClick = { advanced = !advanced }) { Text("Impostazioni avanzate identità") }
@@ -538,7 +552,7 @@ private fun GenerateSheet(context: Context, settings: AppSettings, id: String, n
                     Text("Seed", color = AppColors.Muted, fontSize = 13.sp)
                     TextField(value = seedText, onValueChange = { seedText = it.filter { c -> c.isDigit() }.take(9) }, singleLine = true, modifier = Modifier.width(140.dp))
                 }
-                Text("Durata: ${duration}s · Formato: $aspect · LoRA extra e strength dal server (impostazioni avanzate).", color = AppColors.Faint, fontSize = 11.sp)
+                Text("Durata: ${duration}s · Formato: $aspect · Strength: $strength (dal server, non modificabile qui).", color = AppColors.Faint, fontSize = 11.sp)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(

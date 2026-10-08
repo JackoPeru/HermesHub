@@ -55,12 +55,23 @@ def export_character(char_dir: Path, dest: Path, include_originals: bool = False
     return dest
 
 
+def _safe_members(archive: zipfile.ZipFile) -> list[str]:
+    """Solo path relativi interni (anti zip-slip): niente assoluti, niente '..'."""
+    safe = []
+    for name in archive.namelist():
+        parts = Path(name).parts
+        if not parts or Path(name).is_absolute() or ".." in parts:
+            raise ValueError(f".hcid con membro non sicuro: {name}")
+        safe.append(name)
+    return safe
+
+
 def inspect_package(pkg: Path) -> dict:
     """Valida .hcid senza scrivere nulla. Solleva ValueError se incompatibile."""
     if not zipfile.is_zipfile(pkg):
         raise ValueError("non e un archivio .hcid valido")
     with zipfile.ZipFile(pkg) as archive:
-        names = set(archive.namelist())
+        names = set(_safe_members(archive))
         for required in REQUIRED_MEMBERS:
             if required not in names:
                 raise ValueError(f".hcid senza {required}")
@@ -80,6 +91,7 @@ def import_package(pkg: Path, store, include_originals: bool = False) -> dict:
     cid = created["id"]
     char_dir = store.char_dir(cid)
     with zipfile.ZipFile(pkg) as archive:
+        _safe_members(archive)  # valida prima di estrarre (zip-slip)
         archive.extractall(char_dir / "import_tmp")
     try:
         staged = char_dir / "import_tmp"

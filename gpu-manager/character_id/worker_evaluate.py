@@ -159,7 +159,7 @@ def main(argv: list[str]) -> int:
         if not ckpts:
             raise RuntimeError("nessun checkpoint da valutare")
         results: dict[str, dict] = {}
-        total_units = len(ckpts) * (len(EVAL_SUITE) + 2 + 2)
+        total_units = len(ckpts) * (len(EVAL_SUITE) + 2 + 4)
         done_units = 0
 
         for step, ckpt in sorted(ckpts.items()):
@@ -245,6 +245,8 @@ def main(argv: list[str]) -> int:
                     ref_sims.append(sim)
         ref_identity = _avg(ref_sims)
         lora_overall = results[best_step]["overall"] or 0.0
+        # Ref2VA non ha video temporali in benchmark: 0.5*identita + 0.5 neutro.
+        # E un confronto pratico (stessi prompt/seed), non una metrica pura.
         ref_overall = (0.5 * ref_identity + 0.5 * 1.0) if ref_identity is not None else None
         engine = "lora"
         if ref_overall is not None and ref_overall > lora_overall:
@@ -255,10 +257,47 @@ def main(argv: list[str]) -> int:
         import shutil as _shutil
 
         _shutil.copy2(best_ckpt, final)
+        # Gate Fase 11: vN attiva solo se >= v(N-1), altrimenti resta la vecchia.
+        prev_overall: float | None = None
+        if version > 1:
+            prev = store.latest_model(character_id, "fl2va")
+            if prev:
+                try:
+                    prev_overall = float((json.loads(prev.get("metrics_json") or "{}")).get("eval_overall"))
+                except (ValueError, TypeError):
+                    prev_overall = None
+        keep_new = prev_overall is None or lora_overall >= prev_overall - 1e-9
         store.add_model(character_id, version, "fl2va", "character_lora", str(final),
                         rank=16, alpha=16, strength=best_strength,
                         metrics={"eval": results, "best_step": best_step,
-                                 "ref2va_identity": ref_identity})
+                                 "eval_overall": lora_overall,
+                                 "ref2va_identity": ref_identity,
+                                 "superseded": not keep_new})
+        if not keep_new:
+            # vN peggiore di v(N-1): resta attiva la precedente (rollback automatico).
+            store.set_current_version(character_id, version - 1)
+        # Preview automatiche (Fase 10): ritratto, mezzo busto, figura intera.
+        preview_dir = char_dir / "previews"
+        preview_dir.mkdir(parents=True, exist_ok=True)
+        for pname, pprompt in (
+            ("portrait", f"{trigger} photo of <Subject 1>, close-up portrait, neutral studio lighting, still photo"),
+            ("medium", f"{trigger} photo of <Subject 1>, medium shot, soft daylight, still photo"),
+            ("fullbody", f"{trigger} photo of <Subject 1>, full body, outdoor daylight, still photo"),
+        ):
+            image = generate(pprompt, 900 + len(pname), f"preview_{pname}",
+                             lora=best_ckpt, strength=best_strength)
+            if image is not None:
+                dest = preview_dir / f"{pname}.png"
+                if dest.exists():
+                    dest.unlink()
+                image.rename(dest)
+        # Cleanup: solo il vincitore resta (sorgente + finale + metriche).
+        for step, ckpt in sorted(ckpts.items()):
+            if str(step) != best_step:
+                try:
+                    ckpt.unlink()
+                except OSError:
+                    pass
         store.record_engine(character_id, engine, best_strength,
                             lora_score=lora_overall, ref_score=ref_overall)
         (char_dir / "metrics" / f"eval-v{version}.json").write_text(
@@ -267,15 +306,15 @@ def main(argv: list[str]) -> int:
                         "recommended_engine": engine}, indent=2), encoding="utf-8")
         progress(0.95, f"engine={engine} ckpt={best_step} s={best_strength}")
         metrics = results[best_step]
-        if ((metrics["identity"] or 0) >= 0.5 and (metrics["containment"] or 0) >= 0.5
-                and (metrics["preservation"] or 0) >= 0.5):
+        if (not keep_new or (metrics["identity"] or 0) < 0.5
+                or (metrics["containment"] or 0) < 0.5 or (metrics["preservation"] or 0) < 0.5):
+            store.set_status(character_id, "needs_retrain")
+            store.update_job(job_id, status="ready", progress=1.0,
+                             detail=f"needs_retrain: {metrics} keep_new={keep_new}")
+        else:
             store.set_status(character_id, "ready")
             store.update_job(job_id, status="ready", progress=1.0,
                              detail=f"ready (engine {engine}, ckpt {best_step})")
-        else:
-            store.set_status(character_id, "needs_retrain")
-            store.update_job(job_id, status="ready", progress=1.0,
-                             detail=f"needs_retrain: {metrics}")
         store.close()
         clear_lock(root)
         systemctl("start", "hermes-tabby.service")

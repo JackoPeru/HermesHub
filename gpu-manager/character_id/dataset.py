@@ -20,8 +20,8 @@ IDENTITY_WARN_COS = 0.45  # sotto = warning, non auto-reject
 
 ANGLE_BUCKETS = (
     "front",
-    "three_quarter_left",
-    "three_quarter_right",
+    "left_three_quarter",
+    "right_three_quarter",
     "profile_left",
     "profile_right",
     "full_body",
@@ -70,6 +70,33 @@ def classify_asset(info: dict, have_embedding: bool) -> tuple[str, str]:
     if blur is not None and float(blur) < SEVERE_BLUR * 3:
         return "warning", "foto mossa"
     return "accepted", ""
+
+
+def angle_bucket(yaw: float | None) -> str:
+    """Bucket yaw -> nomi da spec (unica fonte di verita per le pose)."""
+    if yaw is None:
+        return "unknown"
+    a = abs(yaw)
+    if a < 18:
+        return "front"
+    if a < 45:
+        return "left_three_quarter" if yaw < 0 else "right_three_quarter"
+    return "profile_left" if yaw < 0 else "profile_right"
+
+
+def classify_pose(yaw: float | None, face_ratio: float, width: int, height: int) -> str:
+    """Bucket posa: euristica full-body (volto piccolo + foto verticale) sopra lo yaw.
+
+    Onesto per costruzione: e un proxy geometrico, non un body detector (VLM futuro).
+    """
+    if (
+        yaw is not None
+        and abs(yaw) < 45
+        and 0.0 < face_ratio < 0.03
+        and height > width
+    ):
+        return "full_body"
+    return angle_bucket(yaw)
 
 
 def quality_score(info: dict) -> float:

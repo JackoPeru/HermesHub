@@ -22,8 +22,10 @@ from character_id import (  # noqa: E402 (sys.path setup sopra)
     SCHEMA_VERSION,
 )
 from character_id.dataset import (  # noqa: E402 (sys.path setup sopra)
+    angle_bucket,
     build_caption,
     classify_asset,
+    classify_pose,
     cosine,
     diversity_report,
     pick_references,
@@ -39,7 +41,11 @@ from character_id.generate import (  # noqa: E402 (sys.path setup sopra)
     build_workflow,
     duration_to_length,
     inject_trigger,
+    is_trusted_lora_path,
     parse_mentions,
+    publish_extra_link,
+    publish_lora_link,
+    remove_character_links,
     resolve_request,
     stage_references,
     strip_mentions,
@@ -54,9 +60,9 @@ from character_id.training import (  # noqa: E402 (sys.path setup sopra)
     dataset_toml,
     pid_alive,
     train_cmd,
+    training_active,
 )
 from character_id.imaging import (  # noqa: E402 (sys.path setup sopra)
-    angle_bucket,
     dhash_hex,
     hamming_hex,
     mean_brightness,
@@ -68,6 +74,8 @@ from character_id.store import CharacterStore  # noqa: E402 (sys.path setup sopr
 from character_id.validation import (  # noqa: E402 (sys.path setup sopra)
     MAX_IMAGES,
     MIN_IMAGES,
+    is_character_worker_cmdline,
+    is_safe_preview_name,
     is_uuid,
     validate_default_mode,
     validate_lora_strength,
@@ -340,9 +348,13 @@ class TestImaging(unittest.TestCase):
         self.assertEqual(shot_scale(0.06), "medium shot")
         self.assertEqual(shot_scale(0.01), "full shot")
         self.assertEqual(angle_bucket(5.0), "front")
-        self.assertEqual(angle_bucket(-30.0), "three_quarter_left")
+        self.assertEqual(angle_bucket(-30.0), "left_three_quarter")
         self.assertEqual(angle_bucket(60.0), "profile_right")
         self.assertEqual(angle_bucket(None), "unknown")
+        # full_body: volto piccolo + verticale (euristica, non detector).
+        self.assertEqual(classify_pose(5.0, 0.02, 800, 1200), "full_body")
+        self.assertEqual(classify_pose(5.0, 0.10, 800, 1200), "front")
+        self.assertEqual(classify_pose(60.0, 0.02, 800, 1200), "profile_right")
 
     def test_no_backend_no_crash(self):
         photo = make_photo(self.root / "n.jpg")
@@ -394,7 +406,7 @@ class TestDataset(unittest.TestCase):
             {"id": "t", "angle_bucket": "front", "face_quality": 0.9},
             {"id": "a", "angle_bucket": "profile_left", "face_quality": 0.5},
             {"id": "b", "angle_bucket": "front", "face_quality": 0.8},
-            {"id": "c", "angle_bucket": "three_quarter_right", "face_quality": 0.7},
+            {"id": "c", "angle_bucket": "right_three_quarter", "face_quality": 0.7},
         ]
         refs = pick_subject_refs("t", items)
         self.assertNotIn("t", refs)
@@ -578,7 +590,8 @@ class TestTrainingRecipe(unittest.TestCase):
                          "--h3_teacher_loss_mag_weight 0.5",
                          "--h3_teacher_loss_dc_weight 0.3",
                          "--network_dim 16", "--optimizer_type adamw8bit",
-                         "--blocks_to_swap 48", "--save_every_n_steps 50"):
+                         "--blocks_to_swap 48", "--save_every_n_steps 50",
+                         "--save_last_n_steps 12"):
                 self.assertIn(flag, text)
             resume_cmd = " ".join(train_cmd(toml, Path(tmp) / "out", resume="/x/state"))
             self.assertIn("--resume /x/state", resume_cmd)
@@ -657,6 +670,21 @@ class TestRecoveryExport(unittest.TestCase):
         finally:
             store2.close()
 
+    def test_import_rejects_zip_slip(self):
+        import zipfile
+
+        evil = Path(self.tmp.name) / "evil.hcid"
+        with zipfile.ZipFile(evil, "w") as archive:
+            archive.writestr("manifest.json", '{"schema_version": 1, "name": "x", "models": {}}')
+            archive.writestr("../../evil.txt", "pwned")
+        store2 = CharacterStore(Path(self.tmp.name) / "hcid3")
+        try:
+            with self.assertRaises(ValueError):
+                import_package(evil, store2)
+            self.assertFalse((Path(self.tmp.name) / "evil.txt").exists())
+        finally:
+            store2.close()
+
     def test_add_model_validates_family(self):
         m = self.store.create_character("Sofia")
         with self.assertRaises(ValueError):
@@ -664,6 +692,139 @@ class TestRecoveryExport(unittest.TestCase):
         self.assertIsNone(self.store.latest_model(m["id"]))
         self.store.set_current_version(m["id"], 3)
         self.assertEqual(self.store.get_character(m["id"])["training_version"], 3)
+
+    def test_patch_strength_keeps_engine(self):
+        m = self.store.create_character("Sofia")
+        self.store.record_engine(m["id"], "reference", 0.9, lora_score=0.4, ref_score=0.8)
+        patched = self.store.patch_character(m["id"], {"lora_strength": 1.0})
+        self.assertEqual(patched["identity"]["recommended_engine"], "reference")
+        self.assertAlmostEqual(patched["identity"]["lora_strength"], 1.0)
+        # Il modello mostrato segue current_version, non l'ultimo in assoluto.
+        with tempfile.TemporaryDirectory() as tmp:
+            first = make_lora(Path(tmp) / "v1.safetensors")
+            second = make_lora(Path(tmp) / "v2.safetensors")
+            self.store.add_model(m["id"], 1, "fl2va", "character_lora", str(first))
+            self.store.add_model(m["id"], 2, "fl2va", "character_lora", str(second))
+            shown = self.store.get_character(m["id"])["models"]["fl2va"]
+            self.assertEqual(shown["path"], str(second))
+            self.store.set_current_version(m["id"], 1)
+            shown = self.store.get_character(m["id"])["models"]["fl2va"]
+            self.assertEqual(shown["path"], str(first))
+
+
+class TestBountyHardening(unittest.TestCase):
+    """Regression bounty: lock GPU, traversal, trusted roots, link, integrazione."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = CharacterStore(Path(self.tmp.name) / "hcid")
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def test_training_lock_lifecycle(self):
+        from character_id import training as _t
+
+        self.assertIsNone(training_active(Path(self.tmp.name)))
+        # Lock stale (pid morto) = inattivo, mai blocco fantasma.
+        _t.write_lock(Path(self.tmp.name), {"job_id": "j", "pid": 0})
+        self.assertIsNone(training_active(Path(self.tmp.name)))
+        # Lock vivo solo con pid vivo + job attivo (monkeypatch, sicuro ovunque).
+        real = _t.pid_alive
+        _t.pid_alive = lambda pid: pid == 424242
+        try:
+            _t.write_lock(Path(self.tmp.name), {"job_id": "j", "pid": 424242})
+            self.assertIsNone(training_active(Path(self.tmp.name),
+                                              lambda jid: False))
+            locked = training_active(Path(self.tmp.name), lambda jid: True)
+            self.assertIsNotNone(locked)
+            self.assertEqual(locked["pid"], 424242)
+        finally:
+            _t.pid_alive = real
+
+    def test_stale_lock_cleaned_by_scan(self):
+        from character_id import training as _t
+
+        _t.write_lock(self.store.root, {"job_id": "fantasma", "pid": 0})
+        actions = scan_interruptions(self.store)
+        self.assertTrue(any("stale" in str(a) for a in actions))
+        self.assertIsNone(_t.read_lock(self.store.root))
+
+    def test_preview_name_guard(self):
+        self.assertTrue(is_safe_preview_name("portrait.png"))
+        self.assertTrue(is_safe_preview_name("clip.mp4"))
+        for bad in ("", "../x.png", "a/b.png", "..\\x.png", "x.exe", "x"):
+            self.assertFalse(is_safe_preview_name(bad), msg=bad)
+        self.assertTrue(is_character_worker_cmdline(
+            "/opt/hermes/character-id/trainer/venv/bin/python\x00-m\x00character_id.worker_train\x00x"))
+        self.assertFalse(is_character_worker_cmdline("/usr/bin/python TabbyAPI"))
+
+    def test_trusted_lora_roots(self):
+        import os as _os
+
+        # Negativi portabili ovunque.
+        self.assertFalse(is_trusted_lora_path("/etc/passwd"))
+        self.assertFalse(is_trusted_lora_path("/opt/hermes/../etc/x"))
+        self.assertFalse(is_trusted_lora_path(""))
+        if _os.name != "posix":
+            self.skipTest("root fidate sono path server POSIX")
+        self.assertTrue(is_trusted_lora_path("/opt/hermes/models/minimax-h3/x.safetensors"))
+        self.assertTrue(is_trusted_lora_path("/tmp/x.safetensors"))
+
+    def test_lora_links_lifecycle(self):
+        import os as _os
+
+        if _os.name != "posix":
+            self.skipTest("symlink richiedono privilegi su Windows (server: Linux)")
+        with tempfile.TemporaryDirectory() as tmp:
+            loras = Path(tmp) / "loras"
+            target = make_lora(Path(tmp) / "real.safetensors")
+            name = publish_lora_link(loras, "sofia", 1, target)
+            self.assertEqual(name, "sofia_v1.safetensors")
+            self.assertTrue((loras / name).is_symlink())
+            extra = publish_extra_link(loras, "sofia", target)
+            self.assertTrue((loras / extra).is_symlink())
+            # remove_character_links toglie solo i link <slug>_v*, mai file veri.
+            real_file = loras / "sofia_v9.safetensors"
+            real_file.write_bytes(b"no-link")
+            removed = remove_character_links(loras, "sofia")
+            self.assertEqual(removed, 1)
+            self.assertTrue(real_file.is_file())
+            self.assertFalse((loras / name).exists())
+
+    def test_integration_fake_training_to_generate(self):
+        """create -> modello fake -> engine -> resolve lora -> workflow valido."""
+        m = self.store.create_character("Sofia")
+        lora = make_lora(Path(self.tmp.name) / "char.safetensors")
+        self.store.add_model(m["id"], 1, "fl2va", "character_lora", str(lora),
+                             rank=16, alpha=16, strength=0.9)
+        self.store.record_engine(m["id"], "lora", 0.9, lora_score=0.8, ref_score=0.4)
+        self.store.set_status(m["id"], "ready")
+        manifest = self.store.get_character(m["id"])
+        self.assertEqual(manifest["status"], "ready")
+        spec = resolve_request(manifest, {"prompt": "@Sofia walking in Tokyo",
+                                          "identity_mode": "auto",
+                                          "duration": 5, "aspect_ratio": "16:9",
+                                          "seed": 7})
+        self.assertEqual(spec["engine"], "lora")
+        self.assertTrue(spec["prompt"].startswith(manifest["trigger_token"]))
+        self.assertNotIn("@Sofia", spec["prompt"])
+        template = {
+            "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "x"}},
+            "4": {"class_type": "MiniMaxH3ImageToVideo",
+                  "inputs": {"prompt": "", "width": 0, "height": 0, "length": 0}},
+            "5": {"class_type": "KSampler",
+                  "inputs": {"model": ["1", 0], "seed": 0, "steps": 0, "cfg": 0}},
+        }
+        workflow = build_workflow(template, spec,
+                                  [{"file": "sofia_v1.safetensors", "strength": 0.9}], [])
+        sampler = workflow["5"]["inputs"]
+        self.assertEqual(sampler["seed"], 7)
+        self.assertEqual(sampler["steps"], 25)
+        node = workflow[sampler["model"][0]]
+        self.assertEqual(node["class_type"], "LoraLoaderModelOnly")
+        self.assertEqual(node["inputs"]["lora_name"], "sofia_v1.safetensors")
 
 
 if __name__ == "__main__":

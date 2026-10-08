@@ -144,6 +144,26 @@ internal suspend fun loadCharacterManifest(settings: AppSettings, managerKey: St
         }.getOrNull()
     }
 
+internal suspend fun loadImageVerdicts(settings: AppSettings, managerKey: String?, id: String): Triple<Int, Int, Int> =
+    withContext(Dispatchers.IO) {
+        runCatching {
+            val (code, body) = httpGetResponse("${charactersBase(settings)}/characters/$id/images", managerKey)
+            if (code !in 200..299) return@runCatching Triple(0, 0, 0)
+            val array = JSONObject(body).optJSONArray("images") ?: return@runCatching Triple(0, 0, 0)
+            var good = 0
+            var warn = 0
+            var bad = 0
+            for (i in 0 until array.length()) {
+                when (array.optJSONObject(i)?.optString("accepted")) {
+                    "accepted" -> good++
+                    "warning" -> warn++
+                    "rejected" -> bad++
+                }
+            }
+            Triple(good, warn, bad)
+        }.getOrElse { Triple(0, 0, 0) }
+    }
+
 internal suspend fun loadCharacterStatus(settings: AppSettings, managerKey: String?, id: String): Triple<String, CharacterJob?, JSONObject?> =
     withContext(Dispatchers.IO) {
         runCatching {

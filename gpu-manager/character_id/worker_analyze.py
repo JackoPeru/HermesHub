@@ -43,6 +43,7 @@ def main(argv: list[str]) -> int:
         build_caption,
         centroid,
         classify_asset,
+        classify_pose,
         cosine,
         diversity_report,
         pick_references,
@@ -53,7 +54,6 @@ def main(argv: list[str]) -> int:
     )
     from character_id.face_backend import available_backends, detect_faces
     from character_id.imaging import (
-        angle_bucket,
         dhash_hex,
         hamming_hex,
         image_size,
@@ -81,6 +81,19 @@ def main(argv: list[str]) -> int:
         with open(log_path, "w", encoding="utf-8") as handle:
             store.update_job(job_id, status="preparing", progress=0.02, detail="scansione originali")
             store.set_status(character_id, "analyzing")
+            # Re-analyze pulita: niente doppi conteggi (righe + normalizzate + embedding).
+            for old in store.list_assets(character_id):
+                store.delete_asset(character_id, old["id"])
+            for stale in (char_dir / "normalized").glob("*.jpg"):
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
+            for stale in (char_dir / "cache").glob("*.emb.json"):
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
             originals = sorted(
                 p for p in (char_dir / "originals").iterdir()
                 if p.is_file() and p.suffix.lower() in ALLOWED_EXTS
@@ -129,7 +142,9 @@ def main(argv: list[str]) -> int:
                                 emb_path = char_dir / "cache" / f"{asset_id}.emb.json"
                                 emb_path.write_text(json.dumps(best["embedding"]), encoding="utf-8")
                                 info["embedding_path"] = str(emb_path)
-                        info["angle_bucket"] = angle_bucket(info.get("yaw"))
+                        info["angle_bucket"] = classify_pose(
+                            info.get("yaw"), float(info.get("face_ratio", 0.0)), width, height
+                        )
                         info["shot"] = shot_scale(float(info.get("face_ratio", 0.0)))
                 except Exception as exc:  # noqa: BLE001 - singolo file rotto non ferma tutto
                     info["corrupt"] = str(exc)[:200]

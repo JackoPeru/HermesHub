@@ -68,10 +68,12 @@ gpu-manager/character_id/
 Ruoli: letture = sola chiave; **scritture = chiave + controllo-utente**
 (localhost → 403, come `/mode/*`: solo l'utente gestisce il manager, mai l'agente).
 
-### Progress realtime (M3+)
+### Progress realtime
 
-Riuso di `hub_notifications.json` + `GET/POST/PATCH /v1/hub/notifications`
-(l'app fa già poll): il backend character scrive avanzamento lì. Niente WebSocket nuovo.
+Poll `GET .../status` ogni 3s a schermo attivo (progress reali 0..1 dai job,
+mai simulati). Niente WebSocket: `hub_notifications.json` e riservato all'hub
+(scritture concorrenti senza lock rischierebbero corruzione); il poll basta
+per training da ore (l'app dorme in background, lo stato persiste nel DB).
 
 ## Mappa fasi → codice (TODO oltre M2)
 
@@ -90,8 +92,11 @@ Riuso di `hub_notifications.json` + `GET/POST/PATCH /v1/hub/notifications`
 - M9 benchmark + `recommended_engine`; M10 `models/fl2va/*.safetensors` caricato
   come LoRA nel workflow t2v (precedente: `astro_nsfw` in `loras/`) + Mode B/C
   routing nel backend (il frontend non costruisce workflow).
-- M11 UI Android `Characters` (come `ComfyFeature`); M12 cancel/recovery (pid+stati
-  persistiti già pronti); M13 multi-LoRA (validazione `family` fl2va/ref2va);
-  M14 export `.hcid`; M15 acceptance (baseline pronta in `CHARACTER_ID_BASELINE.md` §7).
+- M11 UI Android `Characters`; M12 cancel/recovery (killpg con verifica cmdline,
+  boot-scan, lock stale); M13 multi-LoRA (`ComfyUI-H3-PowerLoraStack` assente:
+  chain native `LoraLoaderModelOnly` + validazione family/strength/file, max 4);
+  M14 export `.hcid` (zip-slip guard); M15 acceptance (baseline in `CHARACTER_ID_BASELINE.md` §7).
+- Limiti noti V1: caption/diversita geometriche (niente VLM locale); recovery =
+  ripartenza pulita con cache presenti (niente `--resume` presunto).
 - Futuro hybrid `Ref2VA + Ref2VA-LoRA`: `manifest.models.ref2va` già previsto,
   sempre `null` in V1. Mai applicare il LoRA FL2VA sopra Ref2VA.

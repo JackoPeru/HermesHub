@@ -171,7 +171,9 @@ def train_cmd(toml: Path, output_dir: Path, max_steps: int = MAX_TRAIN_STEPS,
         "--mixed_precision", "bf16", "--gradient_checkpointing",
         "--optimizer_type", "adamw8bit", "--blocks_to_swap", str(blocks_to_swap),
         "--output_dir", str(output_dir), "--output_name", "character",
-        "--save_every_n_steps", "50", "--save_last_n_steps", "3",
+        # Step frequenti per progress reale + eval 100/250/500; i non-vincitori
+        # vengono eliminati dopo la selezione (worker_evaluate).
+        "--save_every_n_steps", "50", "--save_last_n_steps", "12",
     ]
     if resume:
         launch += ["--resume", resume]

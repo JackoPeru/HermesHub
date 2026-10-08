@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from pathlib import Path
 
 from . import IDENTITY_MODES
 
@@ -81,3 +82,17 @@ def is_uuid(value: object) -> bool:
     except (ValueError, AttributeError):
         return False
     return str(parsed) == value.lower()
+
+
+def is_safe_preview_name(name: object) -> bool:
+    """Nome file preview senza traversal + estensione servibile."""
+    if not isinstance(name, str) or not name:
+        return False
+    if "/" in name or "\\" in name or ".." in name:
+        return False
+    return Path(name).suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".mp4")
+
+
+def is_character_worker_cmdline(cmdline: str) -> bool:
+    """La cmdline appartiene a un worker character-id? (anti pid-recycling)."""
+    return "character_id.worker_" in cmdline

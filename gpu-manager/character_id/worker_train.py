@@ -118,11 +118,11 @@ def main(argv: list[str]) -> int:
             raise RuntimeError(f"cache testo fallita (exit {code}), vedi log")
 
         progress(0.26, "training avviato (500 step)", "training")
-        resume_state = out_dir / "last_state"  # musubi --resume se esiste (recovery)
-        resume = str(resume_state) if resume_state.exists() else None
+        # Recovery onesta: ripartenza pulita (cache presenti via --skip_existing,
+        # checkpoint precedenti conservati in out_dir), mai resume presunto.
         train_log = open(log_path, "ab")  # noqa: PTH123 - chiusura esplicita sotto
         train_process = subprocess.Popen(
-            train_cmd(toml, out_dir, resume=resume), env=env, cwd=Path(TRAINER_SRC),
+            train_cmd(toml, out_dir), env=env, cwd=Path(TRAINER_SRC),
             stdout=train_log, stderr=subprocess.STDOUT,
         )
         store.update_job(job_id, pid=train_process.pid)
