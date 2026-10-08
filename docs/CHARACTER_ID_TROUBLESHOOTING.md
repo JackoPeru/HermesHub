@@ -1,5 +1,11 @@
 # Hermes Character ID — Troubleshooting
 
+## Job fermo in `queued` (mai partito)
+
+Il claim esclusivo impedisce partenze doppie; se il worker muore prima di
+scrivere il lock, il job resta in coda: `POST .../cancel` lo chiude e libera
+tutto. Altrimenti il boot-scan lo marca `failed` automaticamente.
+
 ## `POST .../train` → 409
 
 | Dettaglio | Causa | Fare |

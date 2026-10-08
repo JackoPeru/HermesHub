@@ -63,8 +63,11 @@ def main(argv: list[str]) -> int:
         shot_scale,
     )
     from character_id.store import CharacterStore
+    from character_id.validation import MAX_IMAGE_SIDE
 
     root, character_id, job_id = argv[1], argv[2], argv[3]
+    # Pesi faccia gia locali (setup M3): mai download a sorpresa durante l'analisi.
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
     store = CharacterStore(root)
     manifest = store.get_character(character_id)
     if manifest is None:
@@ -123,6 +126,12 @@ def main(argv: list[str]) -> int:
                 try:
                     info["sha256"] = sha256_file(src)
                     width, height = image_size(src)
+                    if max(width, height) > MAX_IMAGE_SIDE:
+                        info["pre_reject"] = f"risoluzione eccessiva ({width}x{height})"
+                        log(handle, f"{src.name}: SCARTATA ({info['pre_reject']})")
+                        infos.append(info)
+                        progress(0.02 + 0.55 * (index + 1) / total, f"analisi {index + 1}/{total}")
+                        continue
                     info["width"], info["height"] = width, height
                     info["dhash"] = dhash_hex(src)
                     info["phash"] = info["dhash"]  # persistito in character_assets.phash

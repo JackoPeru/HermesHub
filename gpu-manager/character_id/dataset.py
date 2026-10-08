@@ -47,6 +47,8 @@ def centroid(vectors: list[list[float]]) -> list[float] | None:
 
 def classify_asset(info: dict, have_embedding: bool) -> tuple[str, str]:
     """(accepted|warning|rejected, motivo). Mai auto-reject borderline."""
+    if info.get("pre_reject"):
+        return "rejected", str(info["pre_reject"])
     if info.get("corrupt"):
         return "rejected", "file corrotto"
     if info.get("duplicate_of"):
@@ -125,7 +127,7 @@ def diversity_report(items: list[dict]) -> dict:
     for bucket, count in by_angle.items():
         if count / total >= 0.70:
             report["warnings"].append(f"il {count/total:.0%} delle foto e '{bucket}': aggiungi varieta")
-    missing = [b for b in ANGLE_BUCKETS if b not in ("unknown", "full_body") and b not in by_angle]
+    missing = [b for b in ANGLE_BUCKETS if b not in ("unknown",) and b not in by_angle]
     if missing:
         report["warnings"].append("angoli mancanti: " + ", ".join(missing))
     return report

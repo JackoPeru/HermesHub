@@ -367,6 +367,8 @@ class TestDataset(unittest.TestCase):
     def test_classify_rejects_objective_only(self):
         base = {"face_count": 1, "face_ratio": 0.05, "dominant_subject": True}
         self.assertEqual(classify_asset({**base}, False)[0], "accepted")
+        self.assertEqual(classify_asset({**base, "pre_reject": "risoluzione eccessiva"}, False),
+                         ("rejected", "risoluzione eccessiva"))
         self.assertEqual(classify_asset({**base, "corrupt": "x"}, False), ("rejected", "file corrotto"))
         self.assertEqual(classify_asset({**base, "duplicate_of": "y"}, False), ("rejected", "duplicato quasi identico"))
         self.assertEqual(classify_asset({**base, "face_count": 0}, False)[0], "rejected")
@@ -419,6 +421,9 @@ class TestDataset(unittest.TestCase):
         self.assertEqual(picks, {"front": ["x0"]})
         report = diversity_report([{"angle_bucket": "front"}] * 8)
         self.assertTrue(any("70" in w or "%" in w for w in report["warnings"]))
+        # full_body mancante segnalato (non piu escluso).
+        report2 = diversity_report([{"angle_bucket": "front"}])
+        self.assertTrue(any("full_body" in w for w in report2["warnings"]))
 
     def test_jsonl_validates_paths(self):
         with tempfile.TemporaryDirectory() as tmp:

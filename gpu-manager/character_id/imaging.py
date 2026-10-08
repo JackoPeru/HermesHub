@@ -11,6 +11,14 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
+# Bomba di decompressione: JPEG da 15MB possono esplodere a centinaia di MP.
+# Tetto esplicito (PIL avverte e basta di default). Il tetto lato 4096
+# (validation.MAX_IMAGE_SIDE) e applicato dal worker in analyze.
+try:
+    Image.MAX_IMAGE_PIXELS = 50_000_000
+except AttributeError:
+    pass
+
 # Lato training: normalizzate RGB, lato max 1536, JPEG q95 (foto di persone).
 NORMALIZED_MAX_SIDE = 1536
 NORMALIZED_JPEG_QUALITY = 95

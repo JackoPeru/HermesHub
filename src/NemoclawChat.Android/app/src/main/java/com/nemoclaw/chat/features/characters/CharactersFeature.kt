@@ -95,7 +95,7 @@ internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVid
             status = message
         }
     }
-    PollWhileStarted("list", refresh, listBump, baseIntervalMs = 15000) {
+    PollWhileStarted("list", refresh, listBump, settings.gatewayUrl, baseIntervalMs = 15000) {
         val (list, message) = loadCharacters(settings, managerKeyOf(context))
         items = list
         status = message
@@ -225,9 +225,10 @@ private fun CreateCharacterWizard(context: Context, settings: AppSettings, onDon
                 failedReasons.firstOrNull() ?: "Nessuna foto caricata."
             }
             busy = false
-            if (uploaded > 0) step = 3
+            if (uploaded > 0 && step == 2) step = 3
         }
     }
+    val pickPhotos = { picker.launch("image/*") }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -270,24 +271,24 @@ private fun CreateCharacterWizard(context: Context, settings: AppSettings, onDon
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Aggiungi foto", color = Color.White, fontWeight = FontWeight.SemiBold)
                         Text("Carica 20-80 foto della stessa persona (jpg/png/webp, max 15MB). Più angoli ed espressioni = identità migliore.", color = AppColors.Muted, fontSize = 13.sp)
-                        Button(enabled = !busy, onClick = { picker.launch("image/*") }) { Text("Scegli foto") }
+                        Button(enabled = !busy, onClick = { pickPhotos() }) { Text("Scegli foto") }
                         if (busy) CircularProgressIndicator()
                         if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
                     }
                 }
             }
             3, 4 -> item {
-                AnalyzeStep(context, settings, characterId = characterId, onReady = { step = 5 }, message = message, onMessage = { message = it })
+                AnalyzeStep(context, settings, characterId = characterId, onReady = { step = 5 }, message = message, onMessage = { message = it }, onPickPhotos = { pickPhotos() })
             }
             5 -> item {
-                ReadyStep(context, settings, characterId = characterId, name = name, onDone = onDone, message = message, onMessage = { message = it })
+                ReadyStep(context, settings, characterId = characterId, name = name, onDone = onDone, message = message, onMessage = { message = it }, onPickPhotos = { pickPhotos() })
             }
         }
     }
 }
 
 @Composable
-private fun AnalyzeStep(context: Context, settings: AppSettings, characterId: String?, onReady: () -> Unit, message: String, onMessage: (String) -> Unit) {
+private fun AnalyzeStep(context: Context, settings: AppSettings, characterId: String?, onReady: () -> Unit, message: String, onMessage: (String) -> Unit, onPickPhotos: () -> Unit) {
     val scope = rememberCoroutineScope()
     val managerKey = remember { managerKeyOf(context) }
     var state by remember { mutableStateOf("draft") }
@@ -318,12 +319,15 @@ private fun AnalyzeStep(context: Context, settings: AppSettings, characterId: St
                 Text("Analisi ${ (active.progress * 100).toInt()}% · ${active.detail}", color = AppColors.Muted, fontSize = 12.sp)
             } else {
                 Text("Stato: ${characterStatusLabel(state)}", color = AppColors.Muted, fontSize = 13.sp)
-                Button(onClick = {
-                    scope.launch {
-                        val (code, body) = postCharacterAction(settings, managerKey, characterId ?: return@launch, "analyze")
-                        onMessage(if (code in 200..299) "Analisi avviata" else "Analisi HTTP $code")
-                    }
-                }) { Text("Avvia analisi") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        scope.launch {
+                            val (code, body) = postCharacterAction(settings, managerKey, characterId ?: return@launch, "analyze")
+                            onMessage(if (code in 200..299) "Analisi avviata" else "Analisi HTTP $code")
+                        }
+                    }) { Text("Avvia analisi") }
+                    OutlinedButton(onClick = onPickPhotos) { Text("Aggiungi foto") }
+                }
             }
             if (counts.isNotBlank()) Text(counts, color = Color.White, fontSize = 13.sp)
             if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
@@ -332,7 +336,7 @@ private fun AnalyzeStep(context: Context, settings: AppSettings, characterId: St
 }
 
 @Composable
-private fun ReadyStep(context: Context, settings: AppSettings, characterId: String?, name: String, onDone: (String) -> Unit, message: String, onMessage: (String) -> Unit) {
+private fun ReadyStep(context: Context, settings: AppSettings, characterId: String?, name: String, onDone: (String) -> Unit, message: String, onMessage: (String) -> Unit, onPickPhotos: () -> Unit) {
     val scope = rememberCoroutineScope()
     val managerKey = remember { managerKeyOf(context) }
     var manifest by remember { mutableStateOf<JSONObject?>(null) }
@@ -357,7 +361,10 @@ private fun ReadyStep(context: Context, settings: AppSettings, characterId: Stri
                     }
                 }
             ) { Text(if (busy) "Avvio…" else "Crea ${name.ifBlank { "personaggio" }}") }
-            if (count < 20) Text("Servono almeno 20 foto utilizzabili: aggiungine altre e riavvia l'analisi.", color = AppColors.Accent, fontSize = 12.sp)
+            if (count < 20) {
+                Text("Servono almeno 20 foto utilizzabili: aggiungine altre e riavvia l'analisi.", color = AppColors.Accent, fontSize = 12.sp)
+                OutlinedButton(onClick = onPickPhotos) { Text("Aggiungi foto") }
+            }
             if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
         }
     }
@@ -367,7 +374,7 @@ private fun ReadyStep(context: Context, settings: AppSettings, characterId: Stri
 private fun DatasetQualityView(manifest: JSONObject?) {
     if (manifest == null) return
     val refs = manifest.optJSONObject("references")
-    val slots = listOf("front" to "Frontale", "three_quarter_left" to "3/4 sinistra", "three_quarter_right" to "3/4 destra", "profile_left" to "Profilo sx", "profile_right" to "Profilo dx", "full_body" to "Figura intera")
+    val slots = listOf("front" to "Frontale", "left_three_quarter" to "3/4 sinistra", "right_three_quarter" to "3/4 destra", "profile_left" to "Profilo sx", "profile_right" to "Profilo dx", "full_body" to "Figura intera")
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Qualità dataset", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
         slots.forEach { (key, label) ->
@@ -458,6 +465,12 @@ private fun CharacterDetail(context: Context, settings: AppSettings, id: String,
         item {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(enabled = state == "ready", onClick = { generateOpen = true }) { Text("Usa personaggio") }
+                OutlinedButton(enabled = state == "draft" || state == "failed" || state == "interrupted", onClick = {
+                    scope.launch {
+                        val (code, _) = postCharacterAction(settings, managerKey, id, "analyze")
+                        message = if (code in 200..299) "Analisi avviata" else "Analisi HTTP $code"
+                    }
+                }) { Text("Analizza") }
                 OutlinedButton(enabled = state == "ready_to_train" || state == "failed" || state == "interrupted" || state == "needs_retrain", onClick = {
                     scope.launch {
                         val (code, _) = postCharacterAction(settings, managerKey, id, "train")
@@ -467,8 +480,11 @@ private fun CharacterDetail(context: Context, settings: AppSettings, id: String,
                 OutlinedButton(onClick = { renameOpen = !renameOpen }) { Text("Rinomina") }
                 OutlinedButton(onClick = {
                     scope.launch {
-                        val (code, _) = postCharacterAction(settings, managerKey, id, "export", JSONObject().put("include_originals", false))
-                        message = if (code in 200..299) "Esportato (.hcid)" else "Export HTTP $code"
+                        val (code, body) = postCharacterAction(settings, managerKey, id, "export", JSONObject().put("include_originals", false))
+                        message = if (code in 200..299) {
+                            val file = runCatching { JSONObject(body).optString("file") }.getOrDefault("")
+                            "Esportato: $file (scaricalo da /characters/$id/export/download)"
+                        } else "Export HTTP $code"
                     }
                 }) { Text("Esporta") }
                 OutlinedButton(onClick = {

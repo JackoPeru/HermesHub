@@ -107,7 +107,7 @@ def main(argv: list[str]) -> int:
         store.update_job(job_id, detail=f"VRAM libera {free:.0f} MB, temp {gpu_temp(gpu_index):.0f}C")
 
         toml = dataset_toml(char_dir, char_dir / "training" / "dataset.jsonl",
-                            char_dir / "training" / "cache")
+                            char_dir / "training" / f"cache-v{version}")
         if not (char_dir / "training" / "dataset.jsonl").is_file():
             raise RuntimeError("dataset.jsonl assente: riesegui analyze prima del training")
         progress(0.06, "cache latenti (ref2va)", "caching")

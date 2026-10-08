@@ -81,6 +81,7 @@ def write_lock(root: str | Path, payload: dict) -> None:
     path = lock_path(root)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload), encoding="utf-8")
+    os.chmod(tmp, 0o600)
     os.replace(tmp, path)
 
 
