@@ -35,7 +35,12 @@ def available_backends() -> list[str]:
 
 
 def detect_faces(path: Path, preferred: str = "insightface") -> list[dict]:
-    """Ritorna [{bbox:(x1,y1,x2,y2), score, embedding|None, yaw|None, pitch|None}]."""
+    """Ritorna [{bbox:(x1,y1,x2,y2), score, embedding|None, yaw|None, pitch|None}].
+
+    Il fallback scatta solo su ECCEZIONE del backend (modello rotto, OOM...),
+    mai su "zero volti": se insightface (accurato) non vede volti, haar (debole)
+    aggiungerebbe solo falsi positivi.
+    """
     backends = available_backends()
     if preferred in backends:
         order = [preferred] + [b for b in backends if b != preferred]

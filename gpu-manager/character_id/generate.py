@@ -118,7 +118,8 @@ def aspect_to_size(aspect: str) -> tuple[int, int]:
 def duration_to_length(duration_s: float) -> int:
     frames = int(float(duration_s or 5) * 24)
     grid_len = ((frames - 5 + 16) // 17) * 17 + 5
-    return max(22, min(124, grid_len))
+    # H3 supporta 4-15s: tetto 360 frame (~15s), mai accorciare in silenzio sotto.
+    return max(22, min(360, grid_len))
 
 
 def resolve_request(manifest: dict, body: dict) -> dict:
@@ -229,10 +230,12 @@ def publish_extra_link(loras_dir: Path, slug: str, source: Path) -> str:
 def remove_character_links(loras_dir: Path, slug: str) -> int:
     """Rimuove i symlink del personaggio (rename/delete): solo link, mai file veri."""
     removed = 0
-    if not loras_dir.is_dir():
+    if not loras_dir.is_dir() or not slug:
         return 0
     for child in loras_dir.iterdir():
-        if child.is_symlink() and child.name.startswith(slug + "_v"):
+        if child.is_symlink() and (
+            child.name.startswith(slug + "_v") or child.name.startswith(slug + "_x")
+        ):
             try:
                 child.unlink()
                 removed += 1

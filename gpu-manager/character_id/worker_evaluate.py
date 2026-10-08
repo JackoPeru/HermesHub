@@ -69,12 +69,24 @@ def main(argv: list[str]) -> int:
         systemctl,
     )
 
-    root, character_id, job_id, version = argv[1], argv[2], argv[3], int(argv[4])
+    if len(argv) != 5:
+        print("uso: worker_evaluate <root> <character_id> <job_id> <version>", flush=True)
+        return 2
+    try:
+        version_arg = int(argv[4])
+    except ValueError:
+        print(f"version non valida: {argv[4]}", flush=True)
+        return 2
+    root, character_id, job_id, version = argv[1], argv[2], argv[3], version_arg
     store = CharacterStore(root)
     store.update_job(job_id, pid=os.getpid(), detail="eval avviata")
     manifest = store.get_character(character_id)
     if manifest is None:
-        print("character non trovato", flush=True)
+        store.update_job(job_id, status="failed", progress=1.0,
+                         detail="character eliminato prima dell'eval",
+                         error="character non trovato")
+        store.close()
+        print(f"character non trovato: {character_id}", flush=True)
         return 2
     char_dir = store.char_dir(character_id)
     out_dir = char_dir / "models" / "fl2va" / f"v{version}"
@@ -197,6 +209,8 @@ def main(argv: list[str]) -> int:
             return round(cosine(emb, centroid), 3) if emb else None
 
         store.set_status(character_id, "validating")
+        store.update_job(job_id, status="validating", progress=0.03,
+                         detail="suite eval avviata")
 
         from character_id.training import ckpt_path
 
@@ -338,11 +352,13 @@ def main(argv: list[str]) -> int:
         if ref_overall is not None and ref_overall > lora_overall:
             engine = "reference"
 
-        # Promozione modello + manifest.
+        # Promozione modello + manifest (copia atomica: mai final parziali letti da export).
         final = char_dir / "models" / "fl2va" / f"character_v{version}.safetensors"
         import shutil as _shutil
 
-        _shutil.copy2(best_ckpt, final)
+        tmp_final = final.with_suffix(".safetensors.tmp")
+        _shutil.copy2(best_ckpt, tmp_final)
+        os.replace(tmp_final, final)
         # Gate Fase 11: vN attiva solo se >= v(N-1), altrimenti resta la vecchia.
         prev_overall: float | None = None
         if version > 1:

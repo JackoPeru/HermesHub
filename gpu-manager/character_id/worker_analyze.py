@@ -38,6 +38,9 @@ def laplacian_variance(image_path: Path):
 
 
 def main(argv: list[str]) -> int:
+    if len(argv) != 4:
+        print("uso: worker_analyze <root> <character_id> <job_id>", flush=True)
+        return 2
     from character_id.dataset import (
         DUP_HAMMING,
         build_caption,
@@ -71,6 +74,10 @@ def main(argv: list[str]) -> int:
     store = CharacterStore(root)
     manifest = store.get_character(character_id)
     if manifest is None:
+        store.update_job(job_id, status="failed", progress=1.0,
+                         detail="character eliminato prima dell'analisi",
+                         error="character non trovato")
+        store.close()
         print(f"character non trovato: {character_id}", flush=True)
         return 2
     char_dir = store.char_dir(character_id)
@@ -119,6 +126,7 @@ def main(argv: list[str]) -> int:
 
             infos: list[dict] = []
             seen_hashes: list[tuple[str, str]] = []  # (asset_id, dhash)
+            backends_used: set[str] = set()
             total = len(originals)
             for index, src in enumerate(originals):
                 asset_id = f"{job_id[:8]}-{index:03d}"
@@ -150,6 +158,9 @@ def main(argv: list[str]) -> int:
                         faces = detect_faces(norm_path)
                         info["face_count"] = len(faces)
                         if faces:
+                            for face in faces:
+                                if face.get("backend"):
+                                    backends_used.add(str(face["backend"]))
                             best = max(faces, key=lambda f: (f["bbox"][2] - f["bbox"][0]) * (f["bbox"][3] - f["bbox"][1]))
                             x1, y1, x2, y2 = best["bbox"]
                             area = max(0, x2 - x1) * max(0, y2 - y1)
@@ -200,7 +211,8 @@ def main(argv: list[str]) -> int:
             log(handle, f"accepted={sum(1 for i in infos if i['accepted']=='accepted')} "
                         f"warning={sum(1 for i in infos if i['accepted']=='warning')} "
                         f"rejected={sum(1 for i in infos if i['accepted']=='rejected')} "
-                        f"embedding={'si' if have_embedding else 'no'}")
+                        f"embedding={'si' if have_embedding else 'no'} "
+                        f"backend_usati={sorted(backends_used) or 'nessuno'}")
 
             # Split stratificato + reference pack (symlink, mai copie).
             usable = [

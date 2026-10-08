@@ -91,7 +91,8 @@ class TestValidation(unittest.TestCase):
         self.assertEqual(validate_name("  Sofia  "), "Sofia")
 
     def test_name_rejects(self):
-        for bad in ("", "   ", "x" * 65, "a\x01b", None, 123):
+        for bad in ("", "   ", "x" * 65, "a\x01b", None, 123,
+                    "Sofia\u202e Evil", "a\u200bb"):
             with self.assertRaises(ValueError, msg=repr(bad)):
                 validate_name(bad)
 
@@ -109,7 +110,10 @@ class TestValidation(unittest.TestCase):
 
     def test_upload_filename(self):
         self.assertEqual(validate_upload_filename("foto01.JPG"), ".jpg")
-        for bad in ("../x.jpg", "a/b.png", "..\\x.png", ".jpg", "foto.bmp", "foto", "", None):
+        self.assertEqual(validate_upload_filename("Screenshot 2026-10-08 120000.jpg"), ".jpg")
+        self.assertEqual(validate_upload_filename("foto (1).png"), ".png")
+        for bad in ("../x.jpg", "a/b.png", "..\\x.png", ".jpg", "foto.bmp", "foto", "", None,
+                    "a:b.jpg", "x?.png", 'q"q.jpg'):
             with self.assertRaises(ValueError, msg=repr(bad)):
                 validate_upload_filename(bad)
 
@@ -536,6 +540,8 @@ class TestGenerate(unittest.TestCase):
         self.assertEqual(spec["engine"], "reference")  # recommended vince in auto
         self.assertEqual((spec["width"], spec["height"]), (1344, 768))
         self.assertEqual(duration_to_length(5), 124)
+        self.assertEqual(duration_to_length(10), 243)
+        self.assertEqual(duration_to_length(60), 360)
         self.assertEqual(aspect_to_size("1:1"), (1024, 1024))
 
     def test_stack_validation(self):
@@ -842,9 +848,10 @@ class TestBountyHardening(unittest.TestCase):
             real_file = loras / "sofia_v9.safetensors"
             real_file.write_bytes(b"no-link")
             removed = remove_character_links(loras, "sofia")
-            self.assertEqual(removed, 1)
+            self.assertEqual(removed, 2)  # _v1 + _x extra
             self.assertTrue(real_file.is_file())
             self.assertFalse((loras / name).exists())
+            self.assertFalse((loras / extra).exists())
 
     def test_integration_fake_training_to_generate(self):
         """create -> modello fake -> engine -> resolve lora -> workflow valido."""

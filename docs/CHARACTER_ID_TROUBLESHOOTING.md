@@ -1,5 +1,14 @@
 # Hermes Character ID — Troubleshooting
 
+## Backup dati personaggi
+
+Deploy manager non tocca `/opt/hermes/character-id/`. Backup manuale:
+
+```bash
+sqlite3 /opt/hermes/character-id/characters.db ".backup /backup/characters.db"
+rsync -a /opt/hermes/character-id/characters/ /backup/character-id/characters/
+```
+
 ## Job fermo in `queued` (mai partito)
 
 Il claim esclusivo impedisce partenze doppie; se il worker muore prima di

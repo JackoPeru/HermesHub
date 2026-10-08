@@ -17,7 +17,16 @@ MAX_FILE_BYTES = 15 * 1024 * 1024
 # Lato server M3 rifiuta anche immagini oltre questa risoluzione (anti-OOM).
 MAX_IMAGE_SIDE = 4096
 
-_SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# Nomi file: il server rinomina comunque in UUID, conta solo estensione +
+# niente traversal. Spazi/parens/unicode ammessi (foto telefono reali).
+_SAFE_FILENAME_RE = re.compile(r"^[^\x00-\x1f/\\:*?\"<>|][^\x00-\x1f/\\:*?\"<>|]*$")
+
+
+_BIDI_CONTROLS = frozenset(
+    ["\u202a", "\u202b", "\u202c", "\u202d", "\u202e",
+     "\u2066", "\u2067", "\u2068", "\u2069",
+     "\u200b", "\u200c", "\u200d", "\u200e", "\u200f", "\ufeff"]
+)
 
 
 def validate_name(name: object) -> str:
@@ -31,6 +40,8 @@ def validate_name(name: object) -> str:
         raise ValueError(f"name troppo lungo (max {MAX_NAME_LEN})")
     if any(ord(c) < 32 for c in clean):
         raise ValueError("name contiene caratteri di controllo")
+    if any(c in _BIDI_CONTROLS for c in clean):
+        raise ValueError("name contiene controlli bidirezionali/invisibili")
     return clean
 
 
@@ -56,6 +67,8 @@ def validate_upload_filename(filename: object) -> str:
         raise ValueError("filename mancante")
     if "/" in filename or "\\" in filename or ".." in filename:
         raise ValueError("filename non sicuro (path traversal)")
+    if filename.startswith("."):
+        raise ValueError("filename non valido (nascosto)")
     if not _SAFE_FILENAME_RE.match(filename) or "." not in filename:
         raise ValueError("filename non valido")
     ext = "." + filename.rsplit(".", 1)[1].lower()

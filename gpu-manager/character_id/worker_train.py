@@ -58,11 +58,23 @@ def main(argv: list[str]) -> int:
         write_lock,
     )
 
-    root, character_id, job_id, version = argv[1], argv[2], argv[3], int(argv[4])
+    if len(argv) != 5:
+        print("uso: worker_train <root> <character_id> <job_id> <version>", flush=True)
+        return 2
+    try:
+        version_arg = int(argv[4])
+    except ValueError:
+        print(f"version non valida: {argv[4]}", flush=True)
+        return 2
+    root, character_id, job_id, version = argv[1], argv[2], argv[3], version_arg
     store = CharacterStore(root)
     manifest = store.get_character(character_id)
     if manifest is None:
-        print("character non trovato", flush=True)
+        store.update_job(job_id, status="failed", progress=1.0,
+                         detail="character eliminato prima del training",
+                         error="character non trovato")
+        store.close()
+        print(f"character non trovato: {character_id}", flush=True)
         return 2
     char_dir = store.char_dir(character_id)
     out_dir = char_dir / "models" / "fl2va" / f"v{version}"
