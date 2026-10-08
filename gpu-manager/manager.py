@@ -33,6 +33,12 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+try:
+    # Sottosistema Character ID (pacchetto separato, rotte /characters/*).
+    from character_id.api import register_character_routes as _register_character_routes
+except ImportError:
+    _register_character_routes = None  # type: ignore[assignment] - mai rompere il boot
+
 APP_NAME = "hermes-gpu-manager"
 
 # ---------------------------------------------------------------- config ---
@@ -77,6 +83,11 @@ DEFAULT_CONFIG = {
     "recovery": {
         "max_retries": 3,
         "retry_backoff": [10, 30, 60],
+    },
+    "character_id": {
+        # Root dati Character ID (baseline §11: /var/lib/hermes assente sul
+        # server, si riusa la convenzione /opt/hermes esistente).
+        "root": "/opt/hermes/character-id",
     },
 }
 
@@ -2408,6 +2419,20 @@ async def on_startup() -> None:
     cleanup_old_artifacts()
     _worker_task = asyncio.create_task(worker_loop())
     log.info("hermes-gpu-manager starting, desired=%s", _state["desired_mode"])
+
+
+if _register_character_routes is not None:
+    try:
+        _register_character_routes(
+            app,
+            require_key=require_key,
+            require_user=_require_user_control,
+            root=str(CONFIG.get("character_id", {}).get("root") or "/opt/hermes/character-id"),
+        )
+    except Exception as exc:  # noqa: BLE001 - character-id non deve rompere il manager
+        log.warning("character-id non registrato: %s", exc)
+else:  # pragma: no cover - pacchetto sempre presente nel deploy normale
+    log.warning("character-id assente: rotte /characters/* disabilitate")
 
 
 if __name__ == "__main__":

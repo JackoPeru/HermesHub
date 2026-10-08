@@ -4,7 +4,7 @@
 #   HOST default 192.168.1.6 (env HOST), USER default matteo (env USER).
 #   Richiede HERMES_GPU_MANAGER_KEY in env locale per la verify con chiave giusta
 #   (mai stampata: in output solo http code + stato).
-# Passi: scp manager.py+display_bridge.py in /tmp, backup datato in
+# Passi: scp manager.py+display_bridge.py+character_id/ in /tmp, backup datato in
 # /opt/hermes/gpu-manager, py_compile col venv, restart servizio, verify
 # (curl /status: senza chiave 401, chiave sbagliata 401, chiave giusta 200 +
 # stato via python3), rollback automatico da backup se verify fallisce.
@@ -34,6 +34,10 @@ if [ ! -f "${SRC_DIR}/manager.py" ] || [ ! -f "${SRC_DIR}/display_bridge.py" ]; 
   echo "Sorgenti non trovati in ${SRC_DIR} (manager.py/display_bridge.py)." >&2
   exit 1
 fi
+if [ ! -d "${SRC_DIR}/character_id" ]; then
+  echo "Pacchetto character_id assente in ${SRC_DIR}." >&2
+  exit 1
+fi
 if [ -z "${HERMES_GPU_MANAGER_KEY:-}" ]; then
   echo "HERMES_GPU_MANAGER_KEY non impostata: serve per la verify con chiave giusta." >&2
   exit 1
@@ -42,19 +46,22 @@ fi
 echo "== deploy gpu-manager su ${USER}@${HOST} (backup ${BACKUP_DIR}) =="
 
 echo "== scp sorgenti in /tmp =="
+rm -rf /tmp/hcid_deploy_pkg
+mkdir -p /tmp/hcid_deploy_pkg
 scp "${SRC_DIR}/manager.py" "${SRC_DIR}/display_bridge.py" "${USER}@${HOST}:/tmp/"
+scp -r "${SRC_DIR}/character_id" "${USER}@${HOST}:/tmp/hcid_deploy_pkg/character_id"
 
 echo "== backup datato + install + py_compile =="
 # shellcheck disable=SC2029
-${SSH} "sudo mkdir -p '${BACKUP_DIR}' && sudo cp -a '${REMOTE_DIR}/manager.py' '${BACKUP_DIR}/manager.py' && sudo cp -a '${REMOTE_DIR}/display_bridge.py' '${BACKUP_DIR}/display_bridge.py' && echo \"backup in ${BACKUP_DIR}\""
+${SSH} "sudo mkdir -p '${BACKUP_DIR}' && sudo cp -a '${REMOTE_DIR}/manager.py' '${BACKUP_DIR}/manager.py' && sudo cp -a '${REMOTE_DIR}/display_bridge.py' '${BACKUP_DIR}/display_bridge.py' && (sudo cp -a '${REMOTE_DIR}/character_id' '${BACKUP_DIR}/character_id' 2>/dev/null || true) && echo \"backup in ${BACKUP_DIR}\""
 
 # shellcheck disable=SC2029
-${SSH} "sudo cp -a /tmp/manager.py '${REMOTE_DIR}/manager.py' && sudo cp -a /tmp/display_bridge.py '${REMOTE_DIR}/display_bridge.py' && sudo '${VENV_PY}' -m py_compile '${REMOTE_DIR}/manager.py' '${REMOTE_DIR}/display_bridge.py' && echo compile-ok"
+${SSH} "sudo cp -a /tmp/manager.py '${REMOTE_DIR}/manager.py' && sudo cp -a /tmp/display_bridge.py '${REMOTE_DIR}/display_bridge.py' && sudo rm -rf '${REMOTE_DIR}/character_id' && sudo cp -a /tmp/hcid_deploy_pkg/character_id '${REMOTE_DIR}/character_id' && sudo '${VENV_PY}' -m py_compile '${REMOTE_DIR}/manager.py' '${REMOTE_DIR}/display_bridge.py' && sudo '${VENV_PY}' -m compileall -q '${REMOTE_DIR}/character_id' && echo compile-ok"
 
 rollback() {
   echo "== ROLLBACK da ${BACKUP_DIR} ==" >&2
   # shellcheck disable=SC2029
-  ${SSH} "sudo cp -a '${BACKUP_DIR}/manager.py' '${REMOTE_DIR}/manager.py' && sudo cp -a '${BACKUP_DIR}/display_bridge.py' '${REMOTE_DIR}/display_bridge.py' && sudo systemctl restart '${SERVICE}'" || true
+  ${SSH} "sudo cp -a '${BACKUP_DIR}/manager.py' '${REMOTE_DIR}/manager.py' && sudo cp -a '${BACKUP_DIR}/display_bridge.py' '${REMOTE_DIR}/display_bridge.py' && (sudo rm -rf '${REMOTE_DIR}/character_id' && sudo cp -a '${BACKUP_DIR}/character_id' '${REMOTE_DIR}/character_id' 2>/dev/null || true) && sudo systemctl restart '${SERVICE}'" || true
   echo "rollback completato (backup conservato in ${BACKUP_DIR})." >&2
 }
 
