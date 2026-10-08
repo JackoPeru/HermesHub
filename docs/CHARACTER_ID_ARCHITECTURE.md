@@ -1,7 +1,9 @@
 # Hermes Character ID — Architettura
 
-Stato: M3 implementata e verificata live (storage + DB + API CRUD + upload +
-pipeline foto + dataset scoring). Fasi M4+ marcate TODO.
+Stato: backend completo e deployato (M2-M10/M12-M14: storage, upload, pipeline,
+train/eval/generate/cancel/export/import/recovery) + UI Android (M11).
+Pendenti: smoke GPU 1/10-step + baseline H3 in finestra idle (M4/M15),
+training reale (foto utente), acceptance, release.
 
 ## Scelta di integrazione (Fase 0 → M2)
 
