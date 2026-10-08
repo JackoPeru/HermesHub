@@ -88,6 +88,8 @@ DEFAULT_CONFIG = {
         # Root dati Character ID (baseline §11: /var/lib/hermes assente sul
         # server, si riusa la convenzione /opt/hermes esistente).
         "root": "/opt/hermes/character-id",
+        # Interprete del tools-venv (numpy/opencv/insightface, CPU-only).
+        "tools_python": "/opt/hermes/character-id/tools-venv/bin/python",
     },
 }
 
@@ -2428,6 +2430,10 @@ if _register_character_routes is not None:
             require_key=require_key,
             require_user=_require_user_control,
             root=str(CONFIG.get("character_id", {}).get("root") or "/opt/hermes/character-id"),
+            tools_python=str(
+                CONFIG.get("character_id", {}).get("tools_python")
+                or "/opt/hermes/character-id/tools-venv/bin/python"
+            ),
         )
     except Exception as exc:  # noqa: BLE001 - character-id non deve rompere il manager
         log.warning("character-id non registrato: %s", exc)

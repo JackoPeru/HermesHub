@@ -102,6 +102,13 @@ CREATE INDEX IF NOT EXISTS idx_assets_character ON character_assets(character_id
 CREATE INDEX IF NOT EXISTS idx_models_character ON character_models(character_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_character ON character_jobs(character_id);
 CREATE INDEX IF NOT EXISTS idx_metrics_character ON character_metrics(character_id);
+CREATE TABLE IF NOT EXISTS character_refs(
+  character_id TEXT NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+  slot TEXT NOT NULL,
+  asset_id TEXT NOT NULL DEFAULT '',
+  path TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (character_id, slot)
+);
 """
 
 _SUBDIRS = (
@@ -182,6 +189,9 @@ class CharacterStore:
                 "SELECT scores_json FROM character_metrics WHERE character_id=? ORDER BY created_at DESC LIMIT 1",
                 (cid,),
             ).fetchone()
+            ref_rows = self._db.execute(
+                "SELECT slot, asset_id, path FROM character_refs WHERE character_id=?", (cid,)
+            ).fetchall()
         scores: dict = {}
         if metrics:
             try:
@@ -220,13 +230,14 @@ class CharacterStore:
                 "ref2va": None,
             },
             "references": {
-                "preferred": [],
+                "preferred": [r["asset_id"] for r in ref_rows if r["asset_id"]],
                 "front": None,
                 "left_three_quarter": None,
                 "right_three_quarter": None,
                 "profile_left": None,
                 "profile_right": None,
                 "full_body": None,
+                **{r["slot"]: r["path"] for r in ref_rows},
             },
             "metrics": {
                 "lora_identity_score": scores.get("lora_identity_score"),
@@ -393,12 +404,114 @@ class CharacterStore:
                 "character_models",
                 "character_jobs",
                 "character_metrics",
+                "character_refs",
             ):
                 self._db.execute(f"DELETE FROM {table} WHERE character_id=?", (character_id,))
             self._db.execute("DELETE FROM characters WHERE id=?", (character_id,))
         # Cancellazione completa: dataset, cache, modelli, log del personaggio.
         shutil.rmtree(self.char_dir(character_id), ignore_errors=True)
         return True
+
+    def refresh_manifest(self, character_id: str) -> dict | None:
+        row = self.get_row(character_id)
+        if row is None:
+            return None
+        manifest = self.build_manifest(row)
+        self._write_manifest(manifest)
+        return manifest
+
+    # -- asset (M3: pipeline foto) ------------------------------------------------
+
+    _ASSET_FIELDS = (
+        "id", "character_id", "original_path", "normalized_path", "sha256", "phash",
+        "width", "height", "face_count", "face_quality", "blur_score", "yaw", "pitch",
+        "embedding_path", "accepted", "rejection_reason", "dataset_split",
+    )
+
+    def insert_asset(self, character_id: str, info: dict) -> dict:
+        if self.get_row(character_id) is None:
+            raise KeyError(character_id)
+        asset_id = str(info.get("id") or uuid.uuid4())
+        if "accepted" not in info:
+            info = {**info, "accepted": "pending"}
+        text_fields = {
+            "original_path", "normalized_path", "sha256", "phash", "embedding_path",
+            "accepted", "rejection_reason", "dataset_split",
+        }
+        values = [asset_id, character_id] + [
+            info.get(field, "" if field in text_fields else 0) for field in self._ASSET_FIELDS[2:]
+        ] + [_utcnow()]
+        with self._lock, self._db:
+            self._db.execute(
+                f"INSERT INTO character_assets({','.join(self._ASSET_FIELDS)},created_at) "
+                f"VALUES ({','.join('?' * (len(self._ASSET_FIELDS) + 1))})",
+                values,
+            )
+        return self.get_asset(asset_id)  # type: ignore[return-value]
+
+    def get_asset(self, asset_id: str) -> dict | None:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM character_assets WHERE id=?", (asset_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_assets(self, character_id: str) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM character_assets WHERE character_id=? ORDER BY created_at", (character_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_assets(self, character_id: str) -> int:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT COUNT(*) AS n FROM character_assets WHERE character_id=?", (character_id,)
+            ).fetchone()
+        return int(row["n"])
+
+    def delete_asset(self, character_id: str, asset_id: str) -> dict | None:
+        with self._lock, self._db:
+            row = self._db.execute(
+                "SELECT * FROM character_assets WHERE id=? AND character_id=?", (asset_id, character_id)
+            ).fetchone()
+            if row is None:
+                return None
+            self._db.execute("DELETE FROM character_assets WHERE id=?", (asset_id,))
+        return dict(row)
+
+    def set_split_many(self, split: dict[str, str]) -> None:
+        with self._lock, self._db:
+            for asset_id, bucket in split.items():
+                self._db.execute(
+                    "UPDATE character_assets SET dataset_split=? WHERE id=?", (bucket, asset_id)
+                )
+
+    def set_references(self, character_id: str, slots: dict[str, dict]) -> None:
+        with self._lock, self._db:
+            self._db.execute("DELETE FROM character_refs WHERE character_id=?", (character_id,))
+            for slot, ref in slots.items():
+                self._db.execute(
+                    "INSERT INTO character_refs(character_id,slot,asset_id,path) VALUES (?,?,?,?)",
+                    (character_id, slot, ref.get("asset_id", ""), ref.get("path", "")),
+                )
+
+    def record_dataset_stats(self, character_id: str, split: dict[str, str], diversity: dict) -> None:
+        train = sum(1 for v in split.values() if v == "train")
+        validation = sum(1 for v in split.values() if v == "validation")
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT INTO character_metrics(id,character_id,version,suite,scores_json,created_at)"
+                " VALUES (?,?,?,?,?,?)",
+                (
+                    str(uuid.uuid4()),
+                    character_id,
+                    0,
+                    "dataset",
+                    json.dumps(
+                        {"train": train, "validation": validation, "diversity": diversity}
+                    ),
+                    _utcnow(),
+                ),
+            )
 
     # -- job (stato persistente per M6; API minima gia pronta) ------------------
 

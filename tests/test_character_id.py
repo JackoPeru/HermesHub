@@ -21,6 +21,27 @@ from character_id import (  # noqa: E402 (sys.path setup sopra)
     LORA_FAMILIES,
     SCHEMA_VERSION,
 )
+from character_id.dataset import (  # noqa: E402 (sys.path setup sopra)
+    build_caption,
+    classify_asset,
+    cosine,
+    diversity_report,
+    pick_references,
+    pick_subject_refs,
+    quality_score,
+    stratified_split,
+    write_dataset_jsonl,
+)
+from character_id.face_backend import available_backends, detect_faces  # noqa: E402
+from character_id.imaging import (  # noqa: E402 (sys.path setup sopra)
+    angle_bucket,
+    dhash_hex,
+    hamming_hex,
+    mean_brightness,
+    save_normalized,
+    sha256_file,
+    shot_scale,
+)
 from character_id.store import CharacterStore  # noqa: E402 (sys.path setup sopra)
 from character_id.validation import (  # noqa: E402 (sys.path setup sopra)
     MAX_IMAGES,
@@ -217,6 +238,191 @@ class TestApiWiring(unittest.TestCase):
     def test_stubs_are_honest(self):
         self.assertIn("status_code=501", self.src)
         self.assertIn("not_implemented_yet", self.src)
+
+    def test_m3_routes_present(self):
+        for route in (
+            '"/characters/{character_id}/images"',
+            '"/characters/{character_id}/images/{image_id}"',
+            '"/characters/{character_id}/analyze"',
+        ):
+            self.assertIn(route, self.src, msg=route)
+        self.assertIn("UploadFile", self.src)
+        self.assertIn("tools_python", self.src)
+        # Regressione live: _run usato anche con kwargs (pid=..., detail=...).
+        self.assertIn("async def _run(fn, *args, **kwargs):", self.src)
+
+
+def make_photo(path: Path, size=(640, 480), color=(200, 120, 90), pattern=True, mirror=False) -> Path:
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", size, color)
+    if pattern:
+        draw = ImageDraw.Draw(image)
+        # Motivo asimmetrico: dhash vede struttura, non solo tinta unita.
+        bar = [size[0] * 2 // 3, 0, size[0], size[1]] if mirror else [0, 0, size[0] // 3, size[1]]
+        draw.rectangle(bar, fill=(30, 30, 30))
+        draw.ellipse([size[0] // 2, size[1] // 4, size[0] * 3 // 4, size[1] * 3 // 4], fill=(240, 240, 240))
+    image.save(path, format="JPEG", quality=90)
+    return path
+
+
+class TestImaging(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_dhash_stable_and_similar(self):
+        first = make_photo(self.root / "a.jpg")
+        twin = make_photo(self.root / "b.jpg")
+        other = make_photo(self.root / "c.jpg", mirror=True)
+        self.assertEqual(dhash_hex(first), dhash_hex(first))
+        self.assertEqual(len(dhash_hex(first)), 16)
+        self.assertLessEqual(hamming_hex(dhash_hex(first), dhash_hex(twin)), 4)
+        self.assertGreater(hamming_hex(dhash_hex(first), dhash_hex(other)), 4)
+
+    def test_normalized_caps_size(self):
+        big = make_photo(self.root / "big.jpg", size=(3000, 2000))
+        out = self.root / "norm.jpg"
+        width, height = save_normalized(big, out)
+        self.assertLessEqual(max(width, height), 1536)
+        self.assertTrue(out.is_file())
+
+    def test_brightness_range(self):
+        bright = make_photo(self.root / "bright.jpg", color=(250, 250, 250), pattern=False)
+        dark = make_photo(self.root / "dark.jpg", color=(10, 10, 10), pattern=False)
+        self.assertGreater(mean_brightness(bright), 0.8)
+        self.assertLess(mean_brightness(dark), 0.2)
+
+    def test_sha256(self):
+        photo = make_photo(self.root / "s.jpg")
+        self.assertEqual(len(sha256_file(photo)), 64)
+
+    def test_buckets(self):
+        self.assertEqual(shot_scale(0.20), "close-up")
+        self.assertEqual(shot_scale(0.06), "medium shot")
+        self.assertEqual(shot_scale(0.01), "full shot")
+        self.assertEqual(angle_bucket(5.0), "front")
+        self.assertEqual(angle_bucket(-30.0), "three_quarter_left")
+        self.assertEqual(angle_bucket(60.0), "profile_right")
+        self.assertEqual(angle_bucket(None), "unknown")
+
+    def test_no_backend_no_crash(self):
+        photo = make_photo(self.root / "n.jpg")
+        self.assertEqual(available_backends(), [])
+        self.assertEqual(detect_faces(photo), [])
+
+
+class TestDataset(unittest.TestCase):
+    def test_classify_rejects_objective_only(self):
+        base = {"face_count": 1, "face_ratio": 0.05, "dominant_subject": True}
+        self.assertEqual(classify_asset({**base}, False)[0], "accepted")
+        self.assertEqual(classify_asset({**base, "corrupt": "x"}, False), ("rejected", "file corrotto"))
+        self.assertEqual(classify_asset({**base, "duplicate_of": "y"}, False), ("rejected", "duplicato quasi identico"))
+        self.assertEqual(classify_asset({**base, "face_count": 0}, False)[0], "rejected")
+        self.assertEqual(classify_asset({**base, "face_count": 2, "dominant_subject": False}, False)[0], "rejected")
+        self.assertEqual(classify_asset({**base, "face_ratio": 0.001}, False)[0], "rejected")
+        self.assertEqual(classify_asset({**base, "identity_sim": 0.10}, True)[0], "rejected")
+        # Borderline = warning, mai auto-reject.
+        verdict, _ = classify_asset({**base, "identity_sim": 0.35}, True)
+        self.assertEqual(verdict, "warning")
+
+    def test_cosine_centroid(self):
+        self.assertAlmostEqual(cosine([1.0, 0.0], [1.0, 0.0]), 1.0)
+        self.assertAlmostEqual(cosine([1.0, 0.0], [0.0, 1.0]), 0.0)
+        self.assertAlmostEqual(cosine([], []), 0.0)
+        from character_id.dataset import centroid
+
+        self.assertEqual(centroid([[1.0, 2.0], [3.0, 4.0]]), [2.0, 3.0])
+        self.assertIsNone(centroid([]))
+
+    def test_split_stratified(self):
+        items = [{"id": f"front-{i}", "angle_bucket": "front"} for i in range(5)]
+        items += [{"id": f"prof-{i}", "angle_bucket": "profile_left"} for i in range(5)]
+        split = stratified_split(items)
+        self.assertEqual(len(split), 10)
+        front_val = [k for k, v in split.items() if k.startswith("front") and v == "validation"]
+        prof_val = [k for k, v in split.items() if k.startswith("prof") and v == "validation"]
+        self.assertTrue(front_val and prof_val)
+
+    def test_caption_no_identity_traits(self):
+        caption = build_caption("HCID_A7F29C", {"shot": "medium shot", "angle_bucket": "front", "brightness": 0.8})
+        self.assertTrue(caption.startswith("HCID_A7F29C"))
+        for banned in ("blue eyes", "brown hair", "nose", "jaw", "blonde", "brunette"):
+            self.assertNotIn(banned, caption)
+
+    def test_subject_refs_exclude_self_and_vary(self):
+        items = [
+            {"id": "t", "angle_bucket": "front", "face_quality": 0.9},
+            {"id": "a", "angle_bucket": "profile_left", "face_quality": 0.5},
+            {"id": "b", "angle_bucket": "front", "face_quality": 0.8},
+            {"id": "c", "angle_bucket": "three_quarter_right", "face_quality": 0.7},
+        ]
+        refs = pick_subject_refs("t", items)
+        self.assertNotIn("t", refs)
+        self.assertGreaterEqual(len(refs), 2)
+        self.assertEqual(refs[0], "c")  # angolo diverso, migliore qualita prima
+
+    def test_references_and_diversity(self):
+        picks = pick_references([{"id": f"x{i}", "angle_bucket": "front", "face_quality": 0.5} for i in range(3)])
+        self.assertEqual(picks, {"front": ["x0"]})
+        report = diversity_report([{"angle_bucket": "front"}] * 8)
+        self.assertTrue(any("70" in w or "%" in w for w in report["warnings"]))
+
+    def test_jsonl_validates_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "t.jpg"
+            target.write_bytes(b"x")
+            good = [{"target": str(target), "caption": "HCID_X photo", "references": []}]
+            out = Path(tmp) / "d.jsonl"
+            write_dataset_jsonl(out, good)
+            self.assertTrue(out.is_file())
+            bad = [{"target": str(Path(tmp) / "manca.jpg"), "caption": "x", "references": []}]
+            with self.assertRaises(ValueError):
+                write_dataset_jsonl(out, bad)
+
+    def test_quality_score_bounds(self):
+        score = quality_score({"face_ratio": 0.2, "blur_score": 500.0, "yaw": 5.0, "accepted": "accepted"})
+        self.assertGreaterEqual(score, 0.0)
+        self.assertLessEqual(score, 1.0)
+
+
+class TestStoreAssets(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = CharacterStore(Path(self.tmp.name) / "hcid")
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def test_asset_crud_and_refs(self):
+        m = self.store.create_character("Sofia")
+        cid = m["id"]
+        asset = self.store.insert_asset(cid, {"original_path": "/tmp/a.jpg", "sha256": "abc"})
+        self.assertEqual(asset["accepted"], "pending")
+        self.assertEqual(self.store.count_assets(cid), 1)
+        listed = self.store.list_assets(cid)
+        self.assertEqual(len(listed), 1)
+        self.store.set_split_many({asset["id"]: "train"})
+        self.assertEqual(self.store.get_asset(asset["id"])["dataset_split"], "train")
+        self.store.set_references(cid, {"front": {"asset_id": asset["id"], "path": "/tmp/r.jpg"}})
+        manifest = self.store.get_character(cid)
+        self.assertIn(asset["id"], manifest["references"]["preferred"])
+        self.assertEqual(manifest["references"]["front"], "/tmp/r.jpg")
+        removed = self.store.delete_asset(cid, asset["id"])
+        self.assertEqual(removed["id"], asset["id"])
+        self.assertEqual(self.store.count_assets(cid), 0)
+        self.assertIsNone(self.store.delete_asset(cid, asset["id"]))
+
+    def test_dataset_stats_and_refresh(self):
+        m = self.store.create_character("Sofia")
+        self.store.record_dataset_stats(m["id"], {"a": "train", "b": "validation"}, {"buckets": {}})
+        refreshed = self.store.refresh_manifest(m["id"])
+        self.assertEqual(refreshed["id"], m["id"])
+        self.assertIsNone(self.store.refresh_manifest("12345678-1234-1234-1234-1234567890ab"))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 # Hermes Character ID — Architettura
 
-Stato: M2 implementata (storage + DB + API CRUD). Fasi M3+ marcate TODO.
+Stato: M3 implementata e verificata live (storage + DB + API CRUD + upload +
+pipeline foto + dataset scoring). Fasi M4+ marcate TODO.
 
 ## Scelta di integrazione (Fase 0 → M2)
 
@@ -72,8 +73,13 @@ Riuso di `hub_notifications.json` + `GET/POST/PATCH /v1/hub/notifications`
 
 ## Mappa fasi → codice (TODO oltre M2)
 
-- M3 upload/preprocessing: `POST .../images` (multipart, validatori già pronti in
-  `validation.py`: 20–80 file, jpg/png/webp, max 15 MB) + pipeline EXIF→embedding→scoring.
+- M3 upload/preprocessing: `POST .../images` (multipart, 20–80 file, jpg/png/webp,
+  max 15 MB, nomi UUID, 0600) + worker `worker_analyze.py` nel tools-venv
+  (numpy/Pillow/opencv/insightface-buffalo_l, CPU-only): EXIF→RGB, sha256, dhash,
+  duplicati, normalizzate JPEG, blur, volti+embedding+yaw/pitch, cluster identita,
+  accepted/warning/rejected, split 80/20 stratificato, reference pack in symlink,
+  caption col solo trigger, `training/dataset.jsonl` validato. Verificato live:
+  verdict corretti, job fallito onesto sotto minimo, cleanup a cascata.
 - M4 Musubi: venv isolato `/opt/hermes/character-id/trainer/`, `TRAINER_VERSION`.
 - M5–M6 training: job `train` nel manager worker + stato `h3-character-train`
   (acquisisce lock, scarica Qwen/Comfy, verifica VRAM, avvia, ripristina).
