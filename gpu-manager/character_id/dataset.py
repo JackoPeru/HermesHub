@@ -137,18 +137,23 @@ def pick_references(items: list[dict], per_bucket: int = 1) -> dict[str, list[st
 
 
 def build_caption(trigger: str, info: dict) -> str:
-    """Caption student per Teacher Matching: trigger + scena misurata, MAI tratti identitari."""
-    parts = [trigger]
+    """Caption student per Teacher Matching: trigger + scena misurata, MAI tratti identitari.
+
+    Include `<Subject 1>` (ricetta upstream validata): l'auto-wrap del teacher lo
+    definisce sul lato teacher legandolo alla foto, mentre sullo student text-only
+    resta un trigger come gli altri.
+    """
+    parts = [trigger, "photo of <Subject 1>,"]
     shot = info.get("shot")
     if shot:
-        parts.append(shot)
+        parts.append(shot + ",")
     bucket = info.get("angle_bucket")
     if bucket and bucket != "unknown":
-        parts.append(bucket.replace("_", " "))
+        parts.append(bucket.replace("_", " ") + ",")
     brightness = info.get("brightness")
     if brightness is not None:
         parts.append("bright daylight" if brightness > 0.65 else "low light" if brightness < 0.3 else "soft light")
-    parts.append("photo")
+    parts.append("still photo")
     return " ".join(parts)
 
 
@@ -167,16 +172,21 @@ def pick_subject_refs(target_id: str, items: list[dict], count: int = 3) -> list
 
 
 def write_dataset_jsonl(path: Path, records: list[dict]) -> None:
-    """Valida tutti i path prima di scrivere: nessun path mancante al training."""
+    """Schema Musubi image JSONL: image_path + caption + references[{type,path}].
+
+    Valida tutti i path prima di scrivere: nessun path mancante al training.
+    """
     for record in records:
-        for key in ("target", "caption", "references"):
+        for key in ("image_path", "caption", "references"):
             if key not in record:
                 raise ValueError(f"record senza '{key}': {record}")
-        if not os.path.isfile(record["target"]):
-            raise ValueError(f"target mancante: {record['target']}")
+        if not os.path.isfile(record["image_path"]):
+            raise ValueError(f"target mancante: {record['image_path']}")
         for ref in record["references"]:
-            if not os.path.isfile(ref):
-                raise ValueError(f"reference mancante: {ref}")
+            if not isinstance(ref, dict) or ref.get("type") != "image" or "path" not in ref:
+                raise ValueError(f"reference non valida: {ref}")
+            if not os.path.isfile(ref["path"]):
+                raise ValueError(f"reference mancante: {ref['path']}")
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
         for record in records:

@@ -350,6 +350,7 @@ class TestDataset(unittest.TestCase):
     def test_caption_no_identity_traits(self):
         caption = build_caption("HCID_A7F29C", {"shot": "medium shot", "angle_bucket": "front", "brightness": 0.8})
         self.assertTrue(caption.startswith("HCID_A7F29C"))
+        self.assertIn("<Subject 1>", caption)
         for banned in ("blue eyes", "brown hair", "nose", "jaw", "blonde", "brunette"):
             self.assertNotIn(banned, caption)
 
@@ -375,13 +376,30 @@ class TestDataset(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "t.jpg"
             target.write_bytes(b"x")
-            good = [{"target": str(target), "caption": "HCID_X photo", "references": []}]
+            ref = Path(tmp) / "r.jpg"
+            ref.write_bytes(b"y")
+            good = [{
+                "image_path": str(target),
+                "caption": "HCID_X photo of <Subject 1>, still photo",
+                "references": [{"type": "image", "path": str(ref)}],
+            }]
             out = Path(tmp) / "d.jsonl"
             write_dataset_jsonl(out, good)
             self.assertTrue(out.is_file())
-            bad = [{"target": str(Path(tmp) / "manca.jpg"), "caption": "x", "references": []}]
+            bad = [{
+                "image_path": str(Path(tmp) / "manca.jpg"),
+                "caption": "x",
+                "references": [],
+            }]
             with self.assertRaises(ValueError):
                 write_dataset_jsonl(out, bad)
+            bad_ref = [{
+                "image_path": str(target),
+                "caption": "x",
+                "references": [{"type": "image", "path": str(Path(tmp) / "niente.jpg")}],
+            }]
+            with self.assertRaises(ValueError):
+                write_dataset_jsonl(out, bad_ref)
 
     def test_quality_score_bounds(self):
         score = quality_score({"face_ratio": 0.2, "blur_score": 500.0, "yaw": 5.0, "accepted": "accepted"})

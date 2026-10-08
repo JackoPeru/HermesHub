@@ -202,10 +202,14 @@ def main(argv: list[str]) -> int:
             for info in accepted:
                 if split.get(info["id"]) != "train" or not info.get("normalized_path"):
                     continue
-                refs = [norm_of[r] for r in pick_subject_refs(info["id"], usable) if norm_of.get(r)]
+                refs = [
+                    {"type": "image", "path": norm_of[r]}
+                    for r in pick_subject_refs(info["id"], usable)
+                    if norm_of.get(r)
+                ]
                 records.append(
                     {
-                        "target": info["normalized_path"],
+                        "image_path": info["normalized_path"],
                         "caption": build_caption(trigger, info),
                         "references": refs,
                     }
