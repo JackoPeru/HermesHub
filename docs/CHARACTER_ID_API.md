@@ -19,6 +19,7 @@ GET    /characters/{id}/status            {status, current_version, active_job}
 
 ```text
 POST   /characters/{id}/images            multipart files[] (20-80 tot, jpg/png/webp, max 15MB)
+                                          -> 201 {uploaded, total, failed[]} (tollerante per-file)
 GET    /characters/{id}/images            verdict accepted/warning/rejected + motivi
 DELETE /characters/{id}/images/{image_id} rimuove file + riga
 POST   /characters/{id}/analyze           202 {job_id} (worker tools-venv, CPU)
@@ -28,11 +29,16 @@ POST   /characters/{id}/analyze           202 {job_id} (worker tools-venv, CPU)
 
 ```text
 POST   /characters/{id}/train             202 {job_id, version} (409 se GPU occupata / foto <20)
+                                          training solo in AUTO (protegge sessioni DIRECT)
 POST   /characters/{id}/retrain           = train su versione N+1 (vN mai sovrascritta)
-POST   /characters/{id}/cancel            SIGTERM gruppo, restore tabby, stato coerente
+POST   /characters/{id}/cancel            SIGTERM gruppo (verifica cmdline anti pid-recycling), restore tabby
 POST   /characters/{id}/rollback          {version} (riattiva vN precedente + re-link LoRA)
 GET    /characters/{id}/metrics           suite dataset/engine/eval
 ```
+
+Mentre un training gira, il worker manager e parcheggiato (`_drive`, watchdog
+e boot-reconcile saltano i restore: niente guerre di VRAM); le submit media
+rispondono 409 finche il lock e attivo.
 
 ## Generazione (M10)
 

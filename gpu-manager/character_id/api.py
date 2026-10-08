@@ -139,6 +139,22 @@ def register_character_routes(
 
         user_dep(request)
         manifest = _manifest_or_404(character_id)
+        # Mai orfani GPU: termina prima l'albero del worker attivo (come /cancel).
+        job = await _run(store.active_job, character_id)
+        if job is not None:
+            from .training import read_lock as _read_lock, terminate_tree as _terminate_tree
+
+            pid = int(job.get("pid", 0) or 0)
+            if pid_alive(pid) and _is_character_worker(pid):
+                try:
+                    await _run(_terminate_tree, os.getpgid(pid))
+                except (OSError, ValueError):
+                    pass
+            lock = await _run(_read_lock, store.root)
+            if lock and lock.get("character_id") == character_id:
+                pgid = int(lock.get("pgid", 0) or 0)
+                if pgid > 1:
+                    await _run(_terminate_tree, pgid)
         deleted = await _run(store.delete_character, character_id)
         if not deleted:
             raise HTTPException(404, "character non trovato")
@@ -197,29 +213,41 @@ def register_character_routes(
         dest_dir = store.char_dir(character_id) / "originals"
         dest_dir.mkdir(parents=True, exist_ok=True)
         uploaded = 0
+        failed: list[str] = []
         for upload in files:
             try:
                 ext = validate_upload_filename(upload.filename)
             except ValueError as exc:
-                raise HTTPException(422, f"{upload.filename}: {exc}") from exc
+                failed.append(f"{upload.filename}: {exc}")
+                continue
             data = await upload.read(MAX_FILE_BYTES + 1)
             try:
                 validate_upload_size(len(data))
             except ValueError as exc:
-                raise HTTPException(422, f"{upload.filename}: {exc}") from exc
+                failed.append(f"{upload.filename}: {exc}")
+                continue
             asset_id = str(uuid.uuid4())
             dest = dest_dir / f"{asset_id}{ext}"
-            dest.write_bytes(data)
-            os.chmod(dest, 0o600)
-            await _run(
-                store.insert_asset,
-                character_id,
-                {"id": asset_id, "original_path": str(dest),
-                 "sha256": hashlib.sha256(data).hexdigest(), "accepted": "pending"},
-            )
+            try:
+                # I/O disco fuori dall'event loop (15MB × N file).
+                await _run(dest.write_bytes, data)
+                await _run(os.chmod, dest, 0o600)
+                await _run(
+                    store.insert_asset,
+                    character_id,
+                    {"id": asset_id, "original_path": str(dest),
+                     "sha256": hashlib.sha256(data).hexdigest(), "accepted": "pending"},
+                )
+            except OSError as exc:
+                try:
+                    dest.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                failed.append(f"{upload.filename}: {exc}")
+                continue
             uploaded += 1
         await _run(store.refresh_manifest, character_id)
-        return {"uploaded": uploaded, "total": existing + uploaded}
+        return {"uploaded": uploaded, "total": existing + uploaded, "failed": failed}
 
     @app.delete("/characters/{character_id}/images/{image_id}")
     async def characters_image_delete(character_id: str, image_id: str, request: Request, _: None = key_dep) -> dict:
@@ -267,15 +295,16 @@ def register_character_routes(
         await _run(store.update_job, job["id"], pid=proc.pid, detail="worker avviato")
         return {"job_id": job["id"], "status": "queued"}
 
-    def _training_busy() -> dict | None:
-        locked = training_active(
+    async def _training_busy() -> dict | None:
+        locked = await _run(
+            training_active,
             store.root,
             lambda jid: (store.get_job(jid) or {}).get("status")
             not in ("ready", "failed", "cancelled", None),
         )
         if locked is not None:
             return locked
-        trainings = store.active_training_jobs()
+        trainings = await _run(store.active_training_jobs)
         return {"job_id": trainings[0]["id"], "via": "job"} if trainings else None
 
     def _spawn(module: str, args: list[str], python: str, log_name: str,
@@ -298,12 +327,13 @@ def register_character_routes(
         user_dep(request)
         manifest = _manifest_or_404(character_id)
         if manifest["status"] not in ("ready_to_train", "needs_retrain", "failed", "interrupted", "draft"):
-            raise HTTPException(409, f"personaggio in stato {manifest['status']}: analizza prima le foto")
+            hint = "usa /retrain per una nuova versione" if manifest["status"] == "ready" else "analizza prima le foto"
+            raise HTTPException(409, f"personaggio in stato {manifest['status']}: {hint}")
         if int(manifest["image_count"]) < 20:
             raise HTTPException(409, "servono almeno 20 foto utilizzabili (analizza prima)")
         if await _run(store.active_job, character_id) is not None:
             raise HTTPException(409, "un job e gia attivo per questo personaggio")
-        if _training_busy() is not None:
+        if await _training_busy() is not None:
             raise HTTPException(409, "GPU occupata: training Character ID in corso")
         if idle_cb is not None:
             ok, reason = await idle_cb() if asyncio.iscoroutinefunction(idle_cb) else idle_cb()
@@ -331,23 +361,25 @@ def register_character_routes(
         job = await _run(store.active_job, character_id)
         if job is None:
             raise HTTPException(409, "nessun job attivo")
-        pid = int(job.get("pid", 0) or 0)
+        from .training import read_lock as _read_lock, terminate_tree as _terminate_tree
+
         killed = False
+        targets: set[int] = set()
+        pid = int(job.get("pid", 0) or 0)
         if pid_alive(pid) and _is_character_worker(pid):
-            killed = True
             try:
-                os.killpg(pid, 15)  # SIGTERM al gruppo (start_new_session)
-            except (OSError, ProcessLookupError):
-                pass
-            for _ in range(20):
-                await asyncio.sleep(1)
-                if not pid_alive(pid):
-                    break
-            if pid_alive(pid) and _is_character_worker(pid):
-                try:
-                    os.killpg(pid, 9)
-                except (OSError, ProcessLookupError):
-                    pass
+                targets.add(os.getpgid(pid))
+            except (OSError, ValueError):
+                targets.add(pid)
+        # Gruppo del lock (copre eval concatenata e figli musubi orfani del train).
+        lock = await _run(_read_lock, store.root)
+        if lock and lock.get("character_id") == character_id:
+            pgid = int(lock.get("pgid", 0) or 0)
+            if pgid > 1:
+                targets.add(pgid)
+        for target in targets:
+            if await _run(_terminate_tree, target):
+                killed = True
         await _run(store.update_job, job["id"], status="cancelled", progress=1.0,
                    detail="cancellato dall'utente" if killed else
                    "tracking annullato (worker gia morto o pid riciclato)",
@@ -357,7 +389,7 @@ def register_character_routes(
         clear_lock(store.root)
         # Ripristina chat: il worker_loop del manager riconcilia comunque.
         try:
-            systemctl("start", "hermes-tabby.service")
+            await _run(systemctl, "start", "hermes-tabby.service")
         except Exception:  # noqa: BLE001 - best effort, il manager riconcilia
             pass
         await _run(store.refresh_manifest, character_id)
@@ -375,6 +407,8 @@ def register_character_routes(
 
         user_dep(request)
         manifest = _manifest_or_404(character_id)
+        if await _run(store.active_job, character_id) is not None:
+            raise HTTPException(409, "job attivo: rollback a training finito")
         try:
             version = int((payload or {}).get("version"))
         except (TypeError, ValueError):
@@ -413,7 +447,7 @@ def register_character_routes(
             spec = resolve_request(manifest, body)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-        if _training_busy() is not None:
+        if await _training_busy() is not None:
             raise HTTPException(409, "GPU occupata: training Character ID in corso")
         if submit_cb is None or validate_cb is None:
             raise HTTPException(409, "generazione media non configurata sul server")
@@ -518,7 +552,7 @@ def register_character_routes(
         from .export_pkg import import_package
 
         user_dep(request)
-        if not (file.filename or "").endswith(".hcid"):
+        if not str(file.filename or "").lower().endswith(".hcid"):
             raise HTTPException(422, "package .hcid non valido (max 2 GB)")
         # Scrittura a chunk: mai 2 GB in RAM.
         tmp = store.root / "cache" / f"import_{uuid.uuid4().hex}.hcid"

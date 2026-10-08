@@ -596,6 +596,14 @@ class TestTrainingRecipe(unittest.TestCase):
             resume_cmd = " ".join(train_cmd(toml, Path(tmp) / "out", resume="/x/state"))
             self.assertIn("--resume /x/state", resume_cmd)
 
+    def test_eval_module_imports_cleanly(self):
+        # worker_evaluate: solo stdlib a import time (av/insightface lazy).
+        import importlib
+
+        mod = importlib.import_module("character_id.worker_evaluate")
+        self.assertTrue(callable(mod.main))
+        self.assertTrue(callable(mod.extract_frames))
+
     def test_dataset_toml(self):
         with tempfile.TemporaryDirectory() as tmp:
             char_dir = Path(tmp)
@@ -730,6 +738,10 @@ class TestBountyHardening(unittest.TestCase):
         # Lock stale (pid morto) = inattivo, mai blocco fantasma.
         _t.write_lock(Path(self.tmp.name), {"job_id": "j", "pid": 0})
         self.assertIsNone(training_active(Path(self.tmp.name)))
+        # terminate_tree: pgid invalidi mai toccati (sicuro ovunque, niente syscall).
+        self.assertFalse(_t.terminate_tree(0))
+        self.assertFalse(_t.terminate_tree(-5))
+        self.assertFalse(_t.terminate_tree(1))
         # Lock vivo solo con pid vivo + job attivo (monkeypatch, sicuro ovunque).
         real = _t.pid_alive
         _t.pid_alive = lambda pid: pid == 424242

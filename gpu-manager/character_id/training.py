@@ -91,6 +91,34 @@ def clear_lock(root: str | Path) -> None:
         pass
 
 
+def terminate_tree(pgid: int, sig_term: int = 15, sig_kill: int = 9, wait_s: int = 20) -> bool:
+    """SIGTERM poi SIGKILL a un intero gruppo processi. Ritorna True se spento.
+
+    Best-effort anti-orfani GPU: il chiamante verifica prima che il gruppo sia
+    davvero nostro (cmdline worker o lock attivo).
+    """
+    import time as _time
+
+    if pgid <= 1:
+        return False
+    try:
+        os.killpg(pgid, sig_term)
+    except (OSError, ValueError):
+        return True  # gruppo inesistente: niente da spegnere
+    deadline = _time.monotonic() + wait_s
+    while _time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except (OSError, ValueError):
+            return True
+        _time.sleep(1)
+    try:
+        os.killpg(pgid, sig_kill)
+    except (OSError, ValueError):
+        pass
+    return True
+
+
 def gpu_free_mb(index: int) -> float:
     out = subprocess.run(
         ["nvidia-smi", f"--id={index}", "--query-gpu=memory.free",
@@ -194,7 +222,10 @@ def ckpt_steps_in(output_dir: Path) -> list[int]:
 
 
 def systemctl(*args: str) -> tuple[int, str]:
-    proc = subprocess.run(["systemctl", *args], capture_output=True, text=True, timeout=120)
+    # Il manager gira come matteo + sudo NOPASSWD (stessa policy di manager.py):
+    # systemctl nudo fallirebbe e lascerebbe VRAM occupata.
+    proc = subprocess.run(["sudo", "-n", "systemctl", *args],
+                          capture_output=True, text=True, timeout=120)
     return proc.returncode, (proc.stdout + proc.stderr)[-500:]
 
 

@@ -1552,6 +1552,13 @@ async def drive_auto_once() -> None:
     """One reconciliation step. Called in a loop; never raises."""
     now = time.monotonic()
     _state["last_drive_ts"] = now
+    if _character_training_hold():
+        # Il trainer possiede le GPU (lock+job attivi): il worker resta
+        # parcheggiato, niente restore LLM/media che ruberebbero VRAM.
+        if now - float(_state.get("chartrain_log_ts", 0.0)) > 600.0:
+            _state["chartrain_log_ts"] = now
+            log.info("character training owns the GPUs; worker parked")
+        return
     if now - float(_state.get("last_cleanup_ts") or 0.0) > 3600:
         _state["last_cleanup_ts"] = now
         await asyncio.to_thread(cleanup_old_artifacts)
@@ -1573,9 +1580,11 @@ async def llm_watchdog() -> None:
     engine for minutes, so /v1/models times out and llm_loaded() goes False
     on a HEALTHY backend. Restoring on the first failure killed the live
     tabby mid-generation in a loop. Now: skip while transitional, skip while
-    tabby is actually generating, and require 4 consecutive failures
+    tabby is actually generating, and     require 4 consecutive failures
     (2 min, longer than any legit restart) before restoring.
     """
+    if _character_training_hold():
+        return  # trainer attivo: mai restore LLM (guerra VRAM)
     now = time.monotonic()
     if now - float(_state.get("llm_watch_ts") or 0.0) >= 30:
         _state["llm_watch_ts"] = now
@@ -1853,6 +1862,22 @@ async def reconcile_boot() -> None:
             update_job(jid, status="failed",
                        error="manager restarted, tracking lost, resubmit")
             log.info("job %s failed after manager restart", jid)
+    # Character ID recovery PRIMA di qualsiasi restore: a reboot vero i worker
+    # sono morti e vanno marcati (mai `ready` presunto); a restart manager con
+    # training vivo restano attivi e il gate sotto protegge le GPU.
+    try:
+        if _character_store is not None:
+            from character_id.recovery import scan_interruptions
+
+            for action in scan_interruptions(_character_store):
+                log.info("character-id recovery: %r", action)
+    except Exception as exc:  # noqa: BLE001 - recovery non deve rompere il boot
+        log.warning("character-id recovery fallita: %s", exc)
+    if _character_training_hold():
+        # Training sopravvissuto al restart: backend intoccati, il trainer
+        # li gestisce (al termine ripristina lui; il worker riparte dopo).
+        log.info("boot: character training attivo, backend intoccati")
+        return
     llm_up = await llm_loaded()
     media_up = await media_online()
     threshold = float(CONFIG["switching"].get("vram_free_mb", 2500))
@@ -1882,15 +1907,6 @@ async def reconcile_boot() -> None:
             set_state("LLM_READY", "boot")
     else:
         set_state("LLM_READY" if llm_up else "GPU_FREE", "boot")
-    # Character ID recovery: job interrotti da reboot/crash (mai dichiarati Ready).
-    try:
-        if _character_store is not None:
-            from character_id.recovery import scan_interruptions
-
-            for action in scan_interruptions(_character_store):
-                log.info("character-id recovery: %r", action)
-    except Exception as exc:  # noqa: BLE001 - recovery non deve rompere il boot
-        log.warning("character-id recovery fallita: %s", exc)
 
 
 async def worker_loop() -> None:
@@ -2448,6 +2464,8 @@ if _register_character_routes is not None:
         _cid_cfg = CONFIG.get("character_id", {}) or {}
 
         def _hcid_idle() -> tuple[bool, str]:
+            if _state.get("desired_mode") != "AUTO":
+                return False, f"modalita manuale {_state.get('desired_mode')} (training solo in AUTO)"
             if _state.get("current_job"):
                 return False, f"media job {_state.get('current_job')} in corso"
             if queued_jobs():
@@ -2492,6 +2510,18 @@ if _register_character_routes is not None:
         log.warning("character-id non registrato: %s", exc)
 else:  # pragma: no cover - pacchetto sempre presente nel deploy normale
     log.warning("character-id assente: rotte /characters/* disabilitate")
+
+
+def _character_training_hold() -> bool:
+    """Training character attivo? Il worker manager deve parcheggiarsi.
+
+    True = job train/evaluate/benchmark non terminali: il trainer possiede le
+    GPU (ha scaricato lui i backend e li ripristina lui). Mai eccezioni.
+    """
+    try:
+        return bool(_character_store is not None and _character_store.active_training_jobs())
+    except Exception:  # noqa: BLE001 - store rotto: il manager guida normale
+        return False
 
 
 if __name__ == "__main__":
