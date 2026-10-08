@@ -32,7 +32,29 @@ from character_id.dataset import (  # noqa: E402 (sys.path setup sopra)
     stratified_split,
     write_dataset_jsonl,
 )
+from character_id.export_pkg import export_character, import_package  # noqa: E402
 from character_id.face_backend import available_backends, detect_faces  # noqa: E402
+from character_id.generate import (  # noqa: E402 (sys.path setup sopra)
+    aspect_to_size,
+    build_workflow,
+    duration_to_length,
+    inject_trigger,
+    parse_mentions,
+    resolve_request,
+    stage_references,
+    strip_mentions,
+    validate_lora_file,
+    validate_stack,
+)
+from character_id.recovery import scan_interruptions  # noqa: E402
+from character_id.training import (  # noqa: E402 (sys.path setup sopra)
+    CHECKPOINT_STEPS,
+    EVAL_SUITE,
+    ckpt_steps_in,
+    dataset_toml,
+    pid_alive,
+    train_cmd,
+)
 from character_id.imaging import (  # noqa: E402 (sys.path setup sopra)
     angle_bucket,
     dhash_hex,
@@ -235,9 +257,22 @@ class TestApiWiring(unittest.TestCase):
         # ...e ogni scrittura passa anche dal controllo-utente (localhost 403).
         self.assertGreaterEqual(self.src.count("user_dep(request)"), 7)
 
-    def test_stubs_are_honest(self):
-        self.assertIn("status_code=501", self.src)
-        self.assertIn("not_implemented_yet", self.src)
+    def test_full_api_wired(self):
+        for route in (
+            '"/characters/{character_id}/train"',
+            '"/characters/{character_id}/cancel"',
+            '"/characters/{character_id}/retrain"',
+            '"/characters/{character_id}/rollback"',
+            '"/characters/{character_id}/generate"',
+            '"/characters/{character_id}/metrics"',
+            '"/characters/{character_id}/previews"',
+            '"/characters/{character_id}/export"',
+            '"/characters/import"',
+        ):
+            self.assertIn(route, self.src, msg=route)
+        # M6+: niente piu stub 501, tutto implementato o con 409 onesto.
+        self.assertNotIn("status_code=501", self.src)
+        self.assertNotIn("not_implemented_yet", self.src)
 
     def test_m3_routes_present(self):
         for route in (
@@ -441,6 +476,194 @@ class TestStoreAssets(unittest.TestCase):
         refreshed = self.store.refresh_manifest(m["id"])
         self.assertEqual(refreshed["id"], m["id"])
         self.assertIsNone(self.store.refresh_manifest("12345678-1234-1234-1234-1234567890ab"))
+
+
+def make_lora(path: Path, key: str = "lora_unet_blocks_0_attn_out_proj.lora_down.weight") -> Path:
+    import json as _json
+
+    header = _json.dumps({key: {"dtype": "F32", "shape": [2, 2]},
+                          "__metadata__": {}}).encode()
+    with open(path, "wb") as handle:
+        handle.write(len(header).to_bytes(8, "little"))
+        handle.write(header)
+        handle.write(b"\x00" * (2 * 1024 * 1024))
+    return path
+
+
+class TestGenerate(unittest.TestCase):
+    def test_mentions(self):
+        self.assertEqual(parse_mentions("@Sofia walking @Marco home"), ["Sofia", "Marco"])
+        self.assertEqual(strip_mentions("@Sofia walking"), "walking")
+
+    def test_trigger_injection(self):
+        out = inject_trigger("@Sofia walking in Tokyo", "HCID_ABC123")
+        self.assertTrue(out.startswith("HCID_ABC123 photo of <Subject 1>, "))
+        self.assertNotIn("@Sofia", out)
+        self.assertIn("Tokyo", out)
+
+    def test_resolve_modes(self):
+        manifest = {"identity": {"recommended_engine": "reference", "lora_strength": 0.9},
+                    "trigger_token": "HCID_X",
+                    "models": {"fl2va": None, "ref2va": None},
+                    "references": {}}
+        spec = resolve_request(manifest, {"prompt": "ciao", "identity_mode": "auto"})
+        self.assertEqual(spec["engine"], "reference")
+        with self.assertRaises(ValueError):
+            resolve_request(manifest, {"prompt": "ciao", "identity_mode": "lora"})
+        with self.assertRaises(ValueError):
+            resolve_request(manifest, {"prompt": "ciao", "identity_mode": "hybrid"})
+        manifest["models"]["fl2va"] = {"path": "/x.safetensors"}
+        spec = resolve_request(manifest, {"prompt": "ciao", "identity_mode": "auto"})
+        self.assertEqual(spec["engine"], "reference")  # recommended vince in auto
+        self.assertEqual((spec["width"], spec["height"]), (1344, 768))
+        self.assertEqual(duration_to_length(5), 124)
+        self.assertEqual(aspect_to_size("1:1"), (1024, 1024))
+
+    def test_stack_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            good = make_lora(Path(tmp) / "a.safetensors")
+            other = make_lora(Path(tmp) / "b.safetensors", key="dense_layer.weight")
+            cleaned = validate_stack([{"path": str(good), "strength": 0.9}], "fl2va")
+            self.assertEqual(len(cleaned), 1)
+            with self.assertRaises(ValueError):
+                validate_stack([{"path": str(good), "family": "ref2va"}], "fl2va")
+            with self.assertRaises(ValueError):
+                validate_stack([{"path": str(other)}], "fl2va")
+            with self.assertRaises(ValueError):
+                validate_stack([{"path": str(good)}] * 5, "fl2va")
+            with self.assertRaises(ValueError):
+                validate_stack([{"path": str(good), "strength": 5.0}], "fl2va")
+            self.assertTrue(validate_lora_file(Path(tmp) / "manca.safetensors"))
+
+    def test_build_workflow_lora(self):
+        template = {
+            "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "x"}},
+            "4": {"class_type": "MiniMaxH3ImageToVideo",
+                  "inputs": {"prompt": "", "width": 0, "height": 0, "length": 0}},
+            "5": {"class_type": "KSampler",
+                  "inputs": {"model": ["1", 0], "seed": 0, "steps": 0, "cfg": 0}},
+        }
+        spec = {"prompt": "HCID_X photo", "width": 1344, "height": 768,
+                "length": 39, "seed": 7}
+        workflow = build_workflow(template, spec,
+                                  [{"file": "sofia_v1.safetensors", "strength": 0.9}], [])
+        lora_nodes = [v for v in workflow.values()
+                      if isinstance(v, dict) and v.get("class_type") == "LoraLoaderModelOnly"]
+        self.assertEqual(len(lora_nodes), 1)
+        self.assertEqual(workflow["5"]["inputs"]["model"], [lora_nodes and "6" or "1", 0])
+        self.assertEqual(workflow["4"]["inputs"]["prompt"], "HCID_X photo")
+        with self.assertRaises(ValueError):
+            build_workflow({"1": {"class_type": "X", "inputs": {}}}, spec, [], [])
+
+    def test_stage_references_copies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = make_photo(Path(tmp) / "r.jpg", pattern=False)
+            staged = stage_references([str(src)], Path(tmp) / "dest")
+            self.assertEqual(len(staged), 1)
+            self.assertFalse((Path(tmp) / "dest" / staged[0]).is_symlink())
+            with self.assertRaises(ValueError):
+                stage_references([], Path(tmp) / "dest")
+
+
+class TestTrainingRecipe(unittest.TestCase):
+    def test_train_cmd_teacher(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            toml = Path(tmp) / "i.toml"
+            toml.write_text("x")
+            cmd = train_cmd(toml, Path(tmp) / "out")
+            text = " ".join(cmd)
+            for flag in ("--task t2va", "--one_frame", "--video_only",
+                         "--h3_teacher_matching", "--h3_teacher_conditions subject_ref",
+                         "--h3_teacher_condition_sigma_min 0.15",
+                         "--h3_teacher_loss_mag_weight 0.5",
+                         "--h3_teacher_loss_dc_weight 0.3",
+                         "--network_dim 16", "--optimizer_type adamw8bit",
+                         "--blocks_to_swap 48", "--save_every_n_steps 50"):
+                self.assertIn(flag, text)
+            resume_cmd = " ".join(train_cmd(toml, Path(tmp) / "out", resume="/x/state"))
+            self.assertIn("--resume /x/state", resume_cmd)
+
+    def test_dataset_toml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            char_dir = Path(tmp)
+            (char_dir / "training").mkdir()
+            toml = dataset_toml(char_dir, char_dir / "d.jsonl", char_dir / "cache")
+            text = toml.read_text()
+            self.assertIn("image_jsonl_file", text)
+            self.assertIn("cache_directory", text)
+
+    def test_ckpt_parsing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            (out / "character-100.safetensors").write_bytes(b"x")
+            (out / "character-250.safetensors").write_bytes(b"x")
+            (out / "character-last.safetensors").write_bytes(b"x")
+            self.assertEqual(ckpt_steps_in(out), [100, 250])
+            self.assertEqual(ckpt_steps_in(Path(tmp) / "vuota"), [])
+
+    def test_eval_suite_fixed(self):
+        self.assertEqual(len(EVAL_SUITE), 8)
+        seeds = [seed for _, seed in EVAL_SUITE]
+        self.assertEqual(len(set(seeds)), 8)
+        self.assertEqual(tuple(sorted(CHECKPOINT_STEPS)), (100, 250, 500))
+
+    def test_pid_alive(self):
+        import os as _os
+
+        # 0/negativi: morti per definizione, senza syscall (sicuro ovunque).
+        self.assertFalse(pid_alive(0))
+        self.assertFalse(pid_alive(-5))
+        if _os.name == "posix":
+            # Solo POSIX: kill(pid, 0) reale (su Windows puo uccidere il runner).
+            self.assertTrue(pid_alive(_os.getpid()))
+            self.assertFalse(pid_alive(2 ** 30))
+
+
+class TestRecoveryExport(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = CharacterStore(Path(self.tmp.name) / "hcid")
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def test_scan_interruptions(self):
+        m = self.store.create_character("Sofia")
+        job = self.store.create_job(m["id"], "train")
+        self.store.update_job(job["id"], pid=0)  # pid 0 = morto per definizione
+        actions = scan_interruptions(self.store)
+        self.assertTrue(any(a.get("job_id") == job["id"] for a in actions))
+        self.assertEqual(self.store.get_job(job["id"])["status"], "failed")
+        self.assertEqual(self.store.get_character(m["id"])["status"], "interrupted")
+        # Secondo giro: niente piu azioni.
+        self.assertEqual(scan_interruptions(self.store), [])
+
+    def test_export_import_roundtrip(self):
+        m = self.store.create_character("Sofia")
+        lora = make_lora(Path(self.tmp.name) / "l.safetensors")
+        self.store.add_model(m["id"], 1, "fl2va", "character_lora", str(lora),
+                             rank=16, alpha=16, strength=0.9)
+        self.store.record_engine(m["id"], "lora", 0.9, lora_score=0.8, ref_score=0.4)
+        dest = Path(self.tmp.name) / "sofia.hcid"
+        export_character(self.store.char_dir(m["id"]), dest)
+        self.assertTrue(dest.is_file())
+        store2 = CharacterStore(Path(self.tmp.name) / "hcid2")
+        try:
+            imported = import_package(dest, store2)
+            self.assertEqual(imported["status"], "ready")
+            self.assertIsNotNone(imported["models"]["fl2va"])
+            self.assertEqual(imported["identity"]["recommended_engine"], "lora")
+        finally:
+            store2.close()
+
+    def test_add_model_validates_family(self):
+        m = self.store.create_character("Sofia")
+        with self.assertRaises(ValueError):
+            self.store.add_model(m["id"], 1, "sdxl", "x", "/tmp/x.safetensors")
+        self.assertIsNone(self.store.latest_model(m["id"]))
+        self.store.set_current_version(m["id"], 3)
+        self.assertEqual(self.store.get_character(m["id"])["training_version"], 3)
 
 
 if __name__ == "__main__":

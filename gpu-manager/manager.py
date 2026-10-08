@@ -90,6 +90,9 @@ DEFAULT_CONFIG = {
         "root": "/opt/hermes/character-id",
         # Interprete del tools-venv (numpy/opencv/insightface, CPU-only).
         "tools_python": "/opt/hermes/character-id/tools-venv/bin/python",
+        # Interprete del trainer venv (torch cu128 + musubi, GPU).
+        "trainer_python": "/opt/hermes/character-id/trainer/venv/bin/python",
+        "workflows_dir": "/opt/hermes/media-workflows",
     },
 }
 
@@ -206,7 +209,7 @@ ALLOWED_NODE_CLASSES = frozenset({
     "VAELoader", "TextEncodeQwenImage21",
     "QwenImage21Cache", "ComfySwitchNode",
     "EmptyLatentImage", "KSampler", "VAEDecode", "SaveImage",
-    "LoadImage", "LoraLoader", "SaveAnimatedPNG",
+    "LoadImage", "LoraLoader", "LoraLoaderModelOnly", "SaveAnimatedPNG",
     "MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo",
     "H3MultiStream",
 })
@@ -1879,6 +1882,15 @@ async def reconcile_boot() -> None:
             set_state("LLM_READY", "boot")
     else:
         set_state("LLM_READY" if llm_up else "GPU_FREE", "boot")
+    # Character ID recovery: job interrotti da reboot/crash (mai dichiarati Ready).
+    try:
+        if _character_store is not None:
+            from character_id.recovery import scan_interruptions
+
+            for action in scan_interruptions(_character_store):
+                log.info("character-id recovery: %r", action)
+    except Exception as exc:  # noqa: BLE001 - recovery non deve rompere il boot
+        log.warning("character-id recovery fallita: %s", exc)
 
 
 async def worker_loop() -> None:
@@ -2149,6 +2161,9 @@ async def status(_: None = Depends(require_key)) -> dict:
         "h3_installed": h3_ready,
         "h3_ready": h3_ready,
         "h3_license_state": str(CONFIG.get("h3", {}).get("license_state", "DISABLED_LICENSE_GATE")),
+        "character_training": (
+            _character_store.active_training_jobs() if _character_store is not None else []
+        ),
         "presets": sorted(PRESETS),
         "last_error": _state["last_error"] if _state["current_state"] == "ERROR" else "",
         "last_transition": _state["last_transition"],
@@ -2254,6 +2269,8 @@ async def submit_job(request: Request, _: None = Depends(require_key)) -> JSONRe
     backlog = len(queued_jobs()) + (1 if _state.get("current_job") else 0)
     if backlog >= max_queued:
         raise HTTPException(429, f"media queue full ({backlog}/{max_queued})")
+    if _character_store is not None and _character_store.active_training_jobs():
+        raise HTTPException(409, "GPU occupata: training Character ID in corso")
     preset = str(body.get("preset", "") or "")
     params = body.get("parameters", {}) or {}
     for alias in ("prompt", "input_images", "negative_prompt", "seed", "steps",
@@ -2298,6 +2315,8 @@ async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSON
     backlog = len(queued_jobs()) + (1 if _state.get("current_job") else 0)
     if backlog >= max_queued:
         raise HTTPException(429, f"media queue full ({backlog}/{max_queued})")
+    if _character_store is not None and _character_store.active_training_jobs():
+        raise HTTPException(409, "GPU occupata: training Character ID in corso")
     text = str(body.get("text", "") or "")
     images = body.get("input_images", []) or []
     if isinstance(images, str):
@@ -2423,17 +2442,51 @@ async def on_startup() -> None:
     log.info("hermes-gpu-manager starting, desired=%s", _state["desired_mode"])
 
 
+_character_store = None
 if _register_character_routes is not None:
     try:
-        _register_character_routes(
+        _cid_cfg = CONFIG.get("character_id", {}) or {}
+
+        def _hcid_idle() -> tuple[bool, str]:
+            if _state.get("current_job"):
+                return False, f"media job {_state.get('current_job')} in corso"
+            if queued_jobs():
+                return False, f"coda media non vuota ({len(queued_jobs())} job)"
+            state = _state.get("current_state", "")
+            if state in ("ERROR",):
+                return False, f"manager in {state}"
+            return True, ""
+
+        def _hcid_submit(workflow: dict, params: dict) -> dict:
+            return create_job("video", workflow, preset="character",
+                              backend="minimax-h3", params=params)
+
+        _character_store = _register_character_routes(
             app,
             require_key=require_key,
             require_user=_require_user_control,
-            root=str(CONFIG.get("character_id", {}).get("root") or "/opt/hermes/character-id"),
+            root=str(_cid_cfg.get("root") or "/opt/hermes/character-id"),
             tools_python=str(
-                CONFIG.get("character_id", {}).get("tools_python")
+                _cid_cfg.get("tools_python")
                 or "/opt/hermes/character-id/tools-venv/bin/python"
             ),
+            trainer_python=str(
+                _cid_cfg.get("trainer_python")
+                or "/opt/hermes/character-id/trainer/venv/bin/python"
+            ),
+            workflows_dir=str(_cid_cfg.get("workflows_dir") or WORKFLOWS_DIR),
+            comfy_input_dir=str(
+                _cid_cfg.get("comfy_input_dir")
+                or CONFIG.get("media", {}).get("input_dir")
+                or "/opt/hermes/runtimes/comfyui/app/input"
+            ),
+            loras_dir=str(
+                _cid_cfg.get("loras_dir")
+                or "/opt/hermes/runtimes/comfyui/app/models/loras"
+            ),
+            submit_cb=_hcid_submit,
+            validate_cb=validate_workflow,
+            idle_cb=_hcid_idle,
         )
     except Exception as exc:  # noqa: BLE001 - character-id non deve rompere il manager
         log.warning("character-id non registrato: %s", exc)

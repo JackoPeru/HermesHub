@@ -135,6 +135,16 @@ def _utcnow() -> float:
     return time.time()
 
 
+def _sha256_file(path: str) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 64), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 class CharacterStore:
     """Thread-safe (lock + sqlite check_same_thread=False)."""
 
@@ -552,7 +562,6 @@ class CharacterStore:
         with self._lock:
             row = self._db.execute("SELECT * FROM character_jobs WHERE id=?", (job_id,)).fetchone()
         return dict(row) if row else None
-
     def active_job(self, character_id: str) -> dict | None:
         with self._lock:
             row = self._db.execute(
@@ -561,3 +570,115 @@ class CharacterStore:
                 (character_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def active_training_jobs(self) -> list[dict]:
+        """Job train/evaluate/benchmark non terminali (tutti i personaggi)."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM character_jobs WHERE kind IN ('train','evaluate','benchmark')"
+                " AND status NOT IN ('ready','failed','cancelled')"
+                " ORDER BY updated_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    # -- modelli / metriche / lookup (M7+) ---------------------------------------
+
+    def add_model(self, character_id: str, version: int, family: str, model_type: str,
+                  path: str, rank: int = 0, alpha: int = 0, strength: float = 0.9,
+                  metrics: dict | None = None, sha256: str = "") -> dict:
+        if self.get_row(character_id) is None:
+            raise KeyError(character_id)
+        if family not in ("fl2va", "ref2va"):
+            raise ValueError(f"family non valida: {family}")
+        model_id = str(uuid.uuid4())
+        resolved_sha = sha256
+        if not resolved_sha and os.path.isfile(path):
+            resolved_sha = _sha256_file(path)
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT INTO character_models(id,character_id,version,family,model_type,"
+                "path,sha256,rank,alpha,strength,metrics_json,created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (model_id, character_id, version, family, model_type, path, resolved_sha,
+                 rank, alpha, strength, json.dumps(metrics or {}), _utcnow()),
+            )
+            self._db.execute(
+                "UPDATE characters SET current_version=?, updated_at=? WHERE id=?",
+                (version, _utcnow(), character_id),
+            )
+        self._refresh_manifest(character_id)
+        return self.get_model(model_id)  # type: ignore[return-value]
+
+    def get_model(self, model_id: str) -> dict | None:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM character_models WHERE id=?", (model_id,)).fetchone()
+        return dict(row) if row else None
+
+    def latest_model(self, character_id: str, family: str = "fl2va") -> dict | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM character_models WHERE character_id=? AND family=?"
+                " ORDER BY version DESC LIMIT 1",
+                (character_id, family),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def set_current_version(self, character_id: str, version: int) -> dict | None:
+        if self.get_row(character_id) is None:
+            return None
+        with self._lock, self._db:
+            self._db.execute(
+                "UPDATE characters SET current_version=?, updated_at=? WHERE id=?",
+                (version, _utcnow(), character_id),
+            )
+        return self.refresh_manifest(character_id)
+
+    def record_engine(self, character_id: str, engine: str, strength: float,
+                      lora_score: float | None = None, ref_score: float | None = None) -> None:
+        if engine not in ("lora", "reference"):
+            raise ValueError(f"engine non valido: {engine}")
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT INTO character_metrics(id,character_id,version,suite,scores_json,created_at)"
+                " VALUES (?,?,?,?,?,?)",
+                (str(uuid.uuid4()), character_id, 0, "engine_selection",
+                 json.dumps({"recommended_engine": engine, "lora_strength": strength,
+                             "lora_identity_score": lora_score,
+                             "reference_identity_score": ref_score,
+                             "default_identity_score": max(
+                                 [s for s in (lora_score, ref_score) if s is not None] or [None])}),
+                 _utcnow()),
+            )
+            self._db.execute("UPDATE characters SET updated_at=? WHERE id=?",
+                             (_utcnow(), character_id))
+        self._refresh_manifest(character_id)
+
+    def get_metrics(self, character_id: str) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT suite, scores_json, created_at FROM character_metrics"
+                " WHERE character_id=? ORDER BY created_at",
+                (character_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def find_by_name(self, name: str) -> list[dict]:
+        clean = name.strip().lower()
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM characters WHERE LOWER(name)=? ORDER BY updated_at DESC", (clean,)
+            ).fetchall()
+        return [self.summary(r) for r in rows]
+
+    def identity_centroid(self, character_id: str) -> list[float] | None:
+        """Centroide embedding volti principali (dataset, per eval/generate)."""
+        from .dataset import centroid as _centroid
+
+        vectors: list[list[float]] = []
+        for asset in self.list_assets(character_id):
+            emb_file = asset.get("embedding_path", "")
+            if emb_file and os.path.isfile(emb_file) and asset.get("accepted") in ("accepted", "warning"):
+                try:
+                    vectors.append(json.loads(Path(emb_file).read_text(encoding="utf-8")))
+                except (ValueError, OSError):
+                    continue
+        return _centroid(vectors)
