@@ -124,13 +124,22 @@ def import_package(pkg: Path, store, include_originals: bool = False) -> dict:
         if include_originals and (staged / "originals").is_dir():
             shutil.copytree(staged / "originals", char_dir / "originals", dirs_exist_ok=True)
         if model_path:
-            from .generate import validate_lora_file
+            from .generate import lora_base_family, read_lora_header, validate_lora_file
 
             problem = validate_lora_file(Path(model_path))
             if problem:
                 raise ValueError(problem)
+            _problem, _keys, meta = read_lora_header(Path(model_path))
+            declared = lora_base_family(meta)
+            if declared is not None and declared != "fl2va":
+                raise ValueError(f"package con LoRA per {declared}: V1 importa solo fl2va")
+            try:
+                rank = int(fl2va.get("rank", 0) or 0)
+                alpha = int(fl2va.get("alpha", 0) or 0)
+            except (TypeError, ValueError):
+                raise ValueError("manifest package con rank/alpha non validi") from None
             store.add_model(cid, 1, "fl2va", "character_lora", model_path,
-                            rank=int(fl2va.get("rank", 0)), alpha=int(fl2va.get("alpha", 0)),
+                            rank=rank, alpha=alpha,
                             strength=0.9, metrics={"imported": True})
             engine = (manifest.get("identity") or {}).get("recommended_engine", "lora")
             store.record_engine(cid, engine if engine in ("lora", "reference") else "lora", 0.9)

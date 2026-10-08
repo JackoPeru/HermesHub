@@ -46,8 +46,10 @@ fi
 echo "== deploy gpu-manager su ${USER}@${HOST} (backup ${BACKUP_DIR}) =="
 
 echo "== scp sorgenti in /tmp =="
-rm -rf /tmp/hcid_deploy_pkg
-mkdir -p /tmp/hcid_deploy_pkg
+# Pulisci lato remoto prima: scp -r dentro una dir esistente ANNIDA invece di
+# sovrascrivere (incidente reale: deploy con codice stantio).
+# shellcheck disable=SC2029
+${SSH} "rm -rf /tmp/hcid_deploy_pkg /tmp/manager.py /tmp/display_bridge.py && mkdir -p /tmp/hcid_deploy_pkg"
 scp "${SRC_DIR}/manager.py" "${SRC_DIR}/display_bridge.py" "${USER}@${HOST}:/tmp/"
 scp -r "${SRC_DIR}/character_id" "${USER}@${HOST}:/tmp/hcid_deploy_pkg/character_id"
 
@@ -110,6 +112,22 @@ echo "== verify llm_serving is True =="
 # shellcheck disable=SC2029
 if ! ${SSH} "python3 -c \"import json; d=json.load(open('/tmp/gpu-manager-verify.json')); assert d.get('llm_serving') is True, d.get('llm_serving')\""; then
   echo "verify llm_serving fallita (atteso True)." >&2
+  rollback
+  exit 1
+fi
+
+echo "== verify character-id (atteso 200 + character_training) =="
+# Chiave via stdin; stampa solo http code + campo training.
+code_char="$(printf '%s' "${HERMES_GPU_MANAGER_KEY}" | ${SSH} 'KEY=$(cat); curl -s -o /tmp/hcid-verify.json -w "%{http_code}" --max-time 10 -H "Authorization: Bearer $KEY" http://127.0.0.1:8643/characters' || true)"
+echo "characters http_code: ${code_char} (atteso 200)"
+if [ "${code_char}" != "200" ]; then
+  echo "verify characters fallita." >&2
+  rollback
+  exit 1
+fi
+# shellcheck disable=SC2029
+if ! ${SSH} "python3 -c \"import json; d=json.load(open('/tmp/gpu-manager-verify.json')); assert 'character_training' in d, 'campo character_training assente'\""; then
+  echo "verify character_training fallita." >&2
   rollback
   exit 1
 fi

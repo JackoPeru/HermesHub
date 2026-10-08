@@ -208,7 +208,7 @@ internal suspend fun renameCharacter(settings: AppSettings, managerKey: String?,
 /**
  * Upload foto (multipart, campo "files" ripetuto). Copia ogni URI in cache con
  * tetto 15MB prima dell'invio: niente OOM, niente file giganti al server.
- * Ritorna (inviati, messaggio).
+ * Ritorna (inviati, messaggio, motivi scarto).
  */
 internal suspend fun uploadCharacterPhotos(
     context: Context,
@@ -216,12 +216,13 @@ internal suspend fun uploadCharacterPhotos(
     managerKey: String?,
     id: String,
     uris: List<Uri>
-): Pair<Int, String> = withContext(Dispatchers.IO) {
+): Triple<Int, String, List<String>> = withContext(Dispatchers.IO) {
     runCatching {
         val base = charactersBase(settings)
-        if (base.isBlank()) return@runCatching 0 to "Gateway non configurato"
+        if (base.isBlank()) return@runCatching Triple(0, "Gateway non configurato", emptyList())
         val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
         var staged = 0
+        val skipped = mutableListOf<String>()
         val tempFiles = mutableListOf<File>()
         try {
             for ((index, uri) in uris.withIndex()) {
@@ -240,16 +241,22 @@ internal suspend fun uploadCharacterPhotos(
                         total
                     }
                     out
-                } ?: continue
+                }
+                if (bytes == null) {
+                    temp.delete()
+                    skipped.add("file $index illeggibile")
+                    continue
+                }
                 if (bytes <= 0 || bytes > 15L * 1024 * 1024) {
                     temp.delete()
+                    skipped.add("file $index oltre 15MB")
                     continue
                 }
                 tempFiles.add(temp)
                 builder.addFormDataPart("files", temp.name, temp.asRequestBody("image/jpeg".toMediaTypeOrNull()))
                 staged++
             }
-            if (staged == 0) return@runCatching 0 to "Nessuna foto leggibile (max 15MB cad.)"
+            if (staged == 0) return@runCatching Triple(0, "Nessuna foto leggibile (max 15MB cad.)", skipped)
             val request = Request.Builder()
                 .url("$base/characters/$id/images")
                 .post(builder.build())
@@ -259,13 +266,21 @@ internal suspend fun uploadCharacterPhotos(
             val code = response.code
             val body = response.body?.string().orEmpty()
             response.close()
-            if (code !in 200..299) return@runCatching 0 to "Upload HTTP $code: ${body.take(160)}"
-            val uploaded = JSONObject(body).optInt("uploaded", staged)
-            uploaded to "Caricate $uploaded foto."
+            if (code !in 200..299) return@runCatching Triple(0, "Upload HTTP $code: ${body.take(160)}", skipped)
+            val root = JSONObject(body)
+            val uploaded = root.optInt("uploaded", staged)
+            val serverFailed = mutableListOf<String>()
+            val failedArray = root.optJSONArray("failed")
+            if (failedArray != null) {
+                for (i in 0 until failedArray.length()) {
+                    serverFailed.add(failedArray.optString(i))
+                }
+            }
+            Triple(uploaded, "Caricate $uploaded foto.", skipped + serverFailed)
         } finally {
             tempFiles.forEach { it.delete() }
         }
-    }.getOrElse { 0 to "Upload fallito" }
+    }.getOrElse { Triple(0, "Upload fallito", emptyList()) }
 }
 
 internal suspend fun generateCharacterVideo(

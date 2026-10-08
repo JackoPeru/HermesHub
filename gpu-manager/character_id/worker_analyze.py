@@ -80,6 +80,7 @@ def main(argv: list[str]) -> int:
     try:
         with open(log_path, "w", encoding="utf-8") as handle:
             store.update_job(job_id, status="preparing", progress=0.02, detail="scansione originali")
+            previous_status = (manifest.get("status") or "draft")
             store.set_status(character_id, "analyzing")
             # Re-analyze pulita: niente doppi conteggi (righe + normalizzate + embedding).
             for old in store.list_assets(character_id):
@@ -94,6 +95,17 @@ def main(argv: list[str]) -> int:
                     stale.unlink()
                 except OSError:
                     pass
+            # Reference pack e dataset precedenti: mai stale in giro.
+            refs_dir = char_dir / "references"
+            if refs_dir.is_dir():
+                for stale in refs_dir.iterdir():
+                    try:
+                        if stale.is_file() or stale.is_symlink():
+                            stale.unlink()
+                    except OSError:
+                        pass
+            else:
+                refs_dir.mkdir(parents=True, exist_ok=True)
             originals = sorted(
                 p for p in (char_dir / "originals").iterdir()
                 if p.is_file() and p.suffix.lower() in ALLOWED_EXTS
@@ -113,6 +125,7 @@ def main(argv: list[str]) -> int:
                     width, height = image_size(src)
                     info["width"], info["height"] = width, height
                     info["dhash"] = dhash_hex(src)
+                    info["phash"] = info["dhash"]  # persistito in character_assets.phash
                     for other_id, other_hash in seen_hashes:
                         if hamming_hex(info["dhash"], other_hash) <= DUP_HAMMING:
                             info["duplicate_of"] = other_id
@@ -141,6 +154,7 @@ def main(argv: list[str]) -> int:
                             if best["embedding"]:
                                 emb_path = char_dir / "cache" / f"{asset_id}.emb.json"
                                 emb_path.write_text(json.dumps(best["embedding"]), encoding="utf-8")
+                                os.chmod(emb_path, 0o600)  # vettore biometrico
                                 info["embedding_path"] = str(emb_path)
                         info["angle_bucket"] = classify_pose(
                             info.get("yaw"), float(info.get("face_ratio", 0.0)), width, height
@@ -170,6 +184,7 @@ def main(argv: list[str]) -> int:
                 verdict, reason = classify_asset(info, have_embedding)
                 info["accepted"] = verdict
                 info["rejection_reason"] = reason
+                # face_quality in DB = score 0..1 per ranking (non piu detection score).
                 info["face_quality"] = quality_score(info)
                 store.insert_asset(character_id, info)
             accepted = [i for i in infos if i["accepted"] in ("accepted", "warning")]
@@ -186,7 +201,6 @@ def main(argv: list[str]) -> int:
             ]
             split = stratified_split(usable)
             store.set_split_many(split)
-            refs_dir = char_dir / "references"
             refs_dir.mkdir(parents=True, exist_ok=True)
             picks = pick_references(usable)
             ref_slots: dict[str, dict] = {}
@@ -222,6 +236,8 @@ def main(argv: list[str]) -> int:
                     for r in pick_subject_refs(info["id"], usable)
                     if norm_of.get(r)
                 ]
+                if not refs:
+                    continue  # Musubi richiede >=1 reference per record
                 records.append(
                     {
                         "image_path": info["normalized_path"],
@@ -229,8 +245,8 @@ def main(argv: list[str]) -> int:
                         "references": refs,
                     }
                 )
-            if records:
-                write_dataset_jsonl(char_dir / "training" / "dataset.jsonl", records)
+            # Sempre scritto (anche vuoto): mai dataset stale di run precedenti.
+            write_dataset_jsonl(char_dir / "training" / "dataset.jsonl", records)
             store.record_dataset_stats(character_id, split, diversity_report(usable))
             progress(0.95, f"{len(records)} record training")
 
@@ -252,7 +268,13 @@ def main(argv: list[str]) -> int:
         try:
             store.update_job(job_id, status="failed", progress=1.0, detail="errore pipeline",
                              error=str(exc)[:500])
-            store.set_status(character_id, "failed")
+            # Non degradare un personaggio che aveva gia un modello: torna allo
+            # stato precedente (solo draft/analyzing -> failed).
+            try:
+                fallback = previous_status
+            except NameError:
+                fallback = "failed"
+            store.set_status(character_id, fallback if fallback not in ("draft", "analyzing") else "failed")
             with open(log_path, "a", encoding="utf-8") as handle:
                 handle.write(traceback.format_exc())
         finally:

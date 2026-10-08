@@ -67,6 +67,8 @@ def mean_brightness(path: Path) -> float:
 
 def save_normalized(src: Path, dest: Path) -> tuple[int, int]:
     """Copia normalizzata RGB con tetto lato max. Ritorna (w, h)."""
+    import os as _os
+
     image = load_rgb(src)
     width, height = image.size
     longest = max(width, height)
@@ -75,6 +77,7 @@ def save_normalized(src: Path, dest: Path) -> tuple[int, int]:
         image = image.resize((round(width * scale), round(height * scale)), Image.LANCZOS)
     dest.parent.mkdir(parents=True, exist_ok=True)
     image.save(dest, format="JPEG", quality=NORMALIZED_JPEG_QUALITY)
+    _os.chmod(dest, 0o600)  # dati biometrici: mai world-readable
     return image.size
 
 

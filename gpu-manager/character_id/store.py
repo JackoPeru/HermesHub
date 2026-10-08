@@ -210,18 +210,36 @@ class CharacterStore:
                 (cid,),
             ).fetchone()
             metrics = self._db.execute(
-                "SELECT scores_json FROM character_metrics WHERE character_id=? ORDER BY created_at DESC LIMIT 1",
+                "SELECT suite, scores_json FROM character_metrics WHERE character_id=?"
+                " ORDER BY created_at DESC LIMIT 20",
                 (cid,),
-            ).fetchone()
+            ).fetchall()
             ref_rows = self._db.execute(
                 "SELECT slot, asset_id, path FROM character_refs WHERE character_id=?", (cid,)
             ).fetchall()
-        scores: dict = {}
-        if metrics:
-            try:
-                scores = json.loads(metrics["scores_json"])
-            except (ValueError, TypeError):
-                scores = {}
+        # Score per suite (ultima per suite): la riga piu recente puo essere
+        # "dataset" (senza engine/strength) e non deve azzerare eval/engine.
+        by_suite: dict[str, dict] = {}
+        for row_m in metrics:
+            if row_m["suite"] not in by_suite:
+                try:
+                    by_suite[row_m["suite"]] = json.loads(row_m["scores_json"])
+                except (ValueError, TypeError):
+                    by_suite[row_m["suite"]] = {}
+        engine_scores = by_suite.get("engine_selection", {})
+        identity_scores = by_suite.get("identity_settings", {})
+        recommended = str(engine_scores.get("recommended_engine", "lora"))
+        if recommended not in ("lora", "reference"):
+            recommended = "lora"
+        try:
+            strength = float(identity_scores.get("lora_strength",
+                                                 engine_scores.get("lora_strength",
+                                                                   DEFAULT_LORA_STRENGTH)))
+        except (TypeError, ValueError):
+            strength = DEFAULT_LORA_STRENGTH
+        lora_score = engine_scores.get("lora_identity_score")
+        ref_score = engine_scores.get("reference_identity_score")
+        default_score = (lora_score if recommended == "lora" else ref_score)
         manifest = {
             "schema_version": SCHEMA_VERSION,
             "id": cid,
@@ -235,8 +253,8 @@ class CharacterStore:
             "training_version": row["current_version"],
             "identity": {
                 "default_mode": row["default_mode"],
-                "lora_strength": float(scores.get("lora_strength", DEFAULT_LORA_STRENGTH)),
-                "recommended_engine": scores.get("recommended_engine", "lora"),
+                "lora_strength": strength,
+                "recommended_engine": recommended,
             },
             "models": {
                 "fl2va": (
@@ -261,12 +279,12 @@ class CharacterStore:
                 "profile_left": None,
                 "profile_right": None,
                 "full_body": None,
-                **{r["slot"]: r["path"] for r in ref_rows},
+                **{r["slot"]: r["path"] for r in ref_rows if r["slot"] != "preferred"},
             },
             "metrics": {
-                "lora_identity_score": scores.get("lora_identity_score"),
-                "reference_identity_score": scores.get("reference_identity_score"),
-                "default_identity_score": scores.get("default_identity_score"),
+                "lora_identity_score": lora_score,
+                "reference_identity_score": ref_score,
+                "default_identity_score": default_score,
             },
             "active_job": (
                 {"id": job["id"], "kind": job["kind"], "status": job["status"], "progress": job["progress"]}
@@ -375,34 +393,38 @@ class CharacterStore:
         unknown = set(patch) - allowed
         if unknown:
             raise ValueError(f"campi non ammessi: {sorted(unknown)}")
+        # Slug/validazioni PRIMA del lock: _unique_slug acquisisce _lock
+        # (non rientrante: mai chiamarlo da dentro un blocco lock).
+        clean = validate_name(patch["name"]) if "name" in patch else None
+        slug = self._unique_slug(_slugify(clean)) if clean is not None else None
+        mode = validate_default_mode(patch["default_mode"]) if "default_mode" in patch else None
+        strength = validate_lora_strength(patch["lora_strength"]) if "lora_strength" in patch else None
         with self._lock, self._db:
-            if "name" in patch:
-                clean = validate_name(patch["name"])
+            if clean is not None and slug is not None:
                 self._db.execute(
                     "UPDATE characters SET name=?, slug=?, updated_at=? WHERE id=?",
-                    (clean, self._unique_slug(_slugify(clean)), _utcnow(), character_id),
+                    (clean, slug, _utcnow(), character_id),
                 )
-            if "default_mode" in patch:
-                mode = validate_default_mode(patch["default_mode"])
+            if mode is not None:
                 self._db.execute(
                     "UPDATE characters SET default_mode=?, updated_at=? WHERE id=?",
                     (mode, _utcnow(), character_id),
                 )
-            if "lora_strength" in patch:
-                strength = validate_lora_strength(patch["lora_strength"])
-                # Merge con gli score esistenti: non azzerare mai recommended_engine
-                # e metriche eval con un PATCH parziale.
-                latest = self._db.execute(
-                    "SELECT scores_json FROM character_metrics WHERE character_id=?"
-                    " ORDER BY created_at DESC LIMIT 1",
-                    (character_id,),
-                ).fetchone()
-                scores = {}
-                if latest:
-                    try:
-                        scores = json.loads(latest["scores_json"])
-                    except (ValueError, TypeError):
-                        scores = {}
+            if strength is not None:
+                # Merge con identity_settings/engine_selection: mai copiare dentro
+                # chiavi di altre suite (es. dataset) e mai perdere l'engine.
+                scores: dict = {}
+                for suite in ("identity_settings", "engine_selection"):
+                    row_s = self._db.execute(
+                        "SELECT scores_json FROM character_metrics WHERE character_id=?"
+                        " AND suite=? ORDER BY created_at DESC LIMIT 1",
+                        (character_id, suite),
+                    ).fetchone()
+                    if row_s:
+                        try:
+                            scores.update(json.loads(row_s["scores_json"]))
+                        except (ValueError, TypeError):
+                            pass
                 scores["lora_strength"] = strength
                 self._db.execute(
                     "INSERT INTO character_metrics(id,character_id,version,suite,scores_json,created_at)"
@@ -476,9 +498,14 @@ class CharacterStore:
             "original_path", "normalized_path", "sha256", "phash", "embedding_path",
             "accepted", "rejection_reason", "dataset_split",
         }
-        values = [asset_id, character_id] + [
-            info.get(field, "" if field in text_fields else 0) for field in self._ASSET_FIELDS[2:]
-        ] + [_utcnow()]
+        values = [asset_id, character_id]
+        for field in self._ASSET_FIELDS[2:]:
+            value = info.get(field, "" if field in text_fields else 0)
+            # None esplicito (yaw/pitch/blur assenti) -> default: le colonne sono NOT NULL.
+            if value is None:
+                value = "" if field in text_fields else 0
+            values.append(value)
+        values.append(_utcnow())
         with self._lock, self._db:
             self._db.execute(
                 f"INSERT INTO character_assets({','.join(self._ASSET_FIELDS)},created_at) "
@@ -664,6 +691,7 @@ class CharacterStore:
                       lora_score: float | None = None, ref_score: float | None = None) -> None:
         if engine not in ("lora", "reference"):
             raise ValueError(f"engine non valido: {engine}")
+        default_score = lora_score if engine == "lora" else ref_score
         with self._lock, self._db:
             self._db.execute(
                 "INSERT INTO character_metrics(id,character_id,version,suite,scores_json,created_at)"
@@ -672,8 +700,7 @@ class CharacterStore:
                  json.dumps({"recommended_engine": engine, "lora_strength": strength,
                              "lora_identity_score": lora_score,
                              "reference_identity_score": ref_score,
-                             "default_identity_score": max(
-                                 [s for s in (lora_score, ref_score) if s is not None] or [None])}),
+                             "default_identity_score": default_score}),
                  _utcnow()),
             )
             self._db.execute("UPDATE characters SET updated_at=? WHERE id=?",

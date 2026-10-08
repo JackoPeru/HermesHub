@@ -534,7 +534,9 @@ def register_character_routes(
         include = bool((payload or {}).get("include_originals", False))
         dest = store.char_dir(character_id) / "cache" / f"{manifest['slug']}.hcid"
         await _run(export_character, store.char_dir(character_id), dest, include)
-        return {"file": dest.name, "size": dest.stat().st_size, "include_originals": include}
+        has_model = manifest.get("models", {}).get("fl2va") is not None
+        return {"file": dest.name, "size": dest.stat().st_size,
+                "include_originals": include, "has_model": has_model}
 
     @app.get("/characters/{character_id}/export/download")
     async def characters_export_download(character_id: str, _: None = key_dep) -> Any:

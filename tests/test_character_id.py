@@ -490,11 +490,12 @@ class TestStoreAssets(unittest.TestCase):
         self.assertIsNone(self.store.refresh_manifest("12345678-1234-1234-1234-1234567890ab"))
 
 
-def make_lora(path: Path, key: str = "lora_unet_blocks_0_attn_out_proj.lora_down.weight") -> Path:
+def make_lora(path: Path, key: str = "lora_unet_blocks_0_attn_out_proj.lora_down.weight",
+              meta: dict | None = None) -> Path:
     import json as _json
 
     header = _json.dumps({key: {"dtype": "F32", "shape": [2, 2]},
-                          "__metadata__": {}}).encode()
+                          "__metadata__": meta or {}}).encode()
     with open(path, "wb") as handle:
         handle.write(len(header).to_bytes(8, "little"))
         handle.write(header)
@@ -535,6 +536,8 @@ class TestGenerate(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             good = make_lora(Path(tmp) / "a.safetensors")
             other = make_lora(Path(tmp) / "b.safetensors", key="dense_layer.weight")
+            ref_lora = make_lora(Path(tmp) / "c.safetensors",
+                                 meta={"ss_minimax_h3_base_family": "ref2va"})
             cleaned = validate_stack([{"path": str(good), "strength": 0.9}], "fl2va")
             self.assertEqual(len(cleaned), 1)
             with self.assertRaises(ValueError):
@@ -545,6 +548,9 @@ class TestGenerate(unittest.TestCase):
                 validate_stack([{"path": str(good)}] * 5, "fl2va")
             with self.assertRaises(ValueError):
                 validate_stack([{"path": str(good), "strength": 5.0}], "fl2va")
+            # Metadata dichiara ref2va ma base e fl2va: rigetto reale, non fidato.
+            with self.assertRaises(ValueError):
+                validate_stack([{"path": str(ref_lora)}], "fl2va")
             self.assertTrue(validate_lora_file(Path(tmp) / "manca.safetensors"))
 
     def test_build_workflow_lora(self):

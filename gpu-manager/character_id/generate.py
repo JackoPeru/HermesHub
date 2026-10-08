@@ -39,6 +39,29 @@ def inject_trigger(prompt: str, trigger: str) -> str:
     return prefix + clean
 
 
+def read_lora_header(path: Path) -> tuple[str, list[str], dict]:
+    """Header safetensors in una sola lettura: (errore, chiavi peso, metadata)."""
+    try:
+        with open(path, "rb") as handle:
+            header_len = int.from_bytes(handle.read(8), "little")
+            if header_len <= 0 or header_len > 100 * 1024 * 1024:
+                return f"lora header non valido: {path}", [], {}
+            header = json.loads(handle.read(header_len))
+    except (OSError, ValueError, KeyError) as exc:
+        return f"lora illeggibile: {exc}", [], {}
+    keys = [k for k in header.keys() if k != "__metadata__"]
+    if not keys:
+        return f"lora vuota: {path}", [], {}
+    meta = header.get("__metadata__") or {}
+    return "", keys, meta if isinstance(meta, dict) else {}
+
+
+def lora_base_family(meta: dict) -> str | None:
+    """Family dichiarata dal trainer (Musubi) o None se assente (LoRA legacy)."""
+    family = meta.get("ss_minimax_h3_base_family")
+    return family if family in ("fl2va", "ref2va") else None
+
+
 def validate_lora_file(path: Path) -> str:
     """Verifica strutturale LoRA H3: safetensors + pesi lora_unet_*. Ritorna '' se ok."""
     if not path.is_file():
@@ -47,19 +70,11 @@ def validate_lora_file(path: Path) -> str:
         return f"lora non safetensors: {path}"
     if path.stat().st_size < 1024 * 1024:
         return f"lora troppo piccola: {path}"
-    try:
-        with open(path, "rb") as handle:
-            header_len = int.from_bytes(handle.read(8), "little")
-            if header_len <= 0 or header_len > 100 * 1024 * 1024:
-                return f"lora header non valido: {path}"
-            header = json.loads(handle.read(header_len))
-        keys = [k for k in header.keys() if k != "__metadata__"]
-        if not keys:
-            return f"lora vuota: {path}"
-        if not any(k.startswith("lora_unet_") or ".lora_down." in k or ".lora_A." in k for k in keys):
-            return f"lora non-H3 (chiavi inattese): {path}"
-    except (OSError, ValueError, KeyError) as exc:
-        return f"lora illeggibile: {exc}"
+    problem, keys, _meta = read_lora_header(path)
+    if problem:
+        return problem
+    if not any(k.startswith("lora_unet_") or ".lora_down." in k or ".lora_A." in k for k in keys):
+        return f"lora non-H3 (chiavi inattese): {path}"
     return ""
 
 
@@ -79,6 +94,11 @@ def validate_stack(entries: list[dict], family: str) -> list[dict]:
         problem = validate_lora_file(Path(path))
         if problem:
             raise ValueError(problem)
+        # Verifica reale: se il file dichiara la sua family (Musubi), deve coincidere.
+        _problem, _keys, meta = read_lora_header(Path(path))
+        declared = lora_base_family(meta)
+        if declared is not None and declared != family:
+            raise ValueError(f"LoRA {path}: addestrato per {declared}, incompatibile con base {family}")
         try:
             strength = float(entry.get("strength", 1.0))
         except (TypeError, ValueError):

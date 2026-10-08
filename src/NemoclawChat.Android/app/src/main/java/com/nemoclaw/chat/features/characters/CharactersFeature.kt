@@ -211,14 +211,18 @@ private fun CreateCharacterWizard(context: Context, settings: AppSettings, onDon
         scope.launch {
             // Batch da 10: un unico multipart da 80 foto supererebbe timeout/RAM.
             var uploaded = 0
-            var info = ""
+            val failedReasons = mutableListOf<String>()
             for (batch in uris.take(80).chunked(10)) {
-                val (count, batchInfo) = uploadCharacterPhotos(context, settings, managerKey, id, batch)
-                uploaded += count
-                info = batchInfo
-                if (count < batch.size) break
+                val result = uploadCharacterPhotos(context, settings, managerKey, id, batch)
+                uploaded += result.first
+                failedReasons.addAll(result.third)
+                if (result.first < batch.size) break
             }
-            message = if (uploaded > 0) "Caricate $uploaded foto." else info
+            message = if (uploaded > 0) {
+                "Caricate $uploaded foto." + if (failedReasons.isNotEmpty()) " Scartate: ${failedReasons.take(3).joinToString("; ")}" else ""
+            } else {
+                failedReasons.firstOrNull() ?: "Nessuna foto caricata."
+            }
             busy = false
             if (uploaded > 0) step = 3
         }
