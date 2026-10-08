@@ -461,7 +461,7 @@ internal fun HermesSidebar(
                 SidebarSectionLabel("CONTENUTI", settings.sidebarContenuti) { onToggleSidebarSection("contenuti") }
             }
             if (settings.sidebarContenuti) {
-                items(listOf(Tab.News, Tab.Video), key = { "content-${it.name}" }) { tab ->
+                items(listOf(Tab.News, Tab.Video, Tab.Characters), key = { "content-${it.name}" }) { tab ->
                     SidebarTabRow(tab, selectedTab == tab, onOpenTab)
                 }
             }
@@ -728,6 +728,7 @@ internal fun SidebarTabRow(tab: Tab, selected: Boolean, onOpenTab: (Tab) -> Unit
         Tab.Notifications -> "Avvisi Hermes"
         Tab.News -> "Articoli generati"
         Tab.Video -> "Libreria e rendering"
+        Tab.Characters -> "Identita persistenti H3"
         Tab.Settings -> "Connessione e comportamento"
         Tab.Profile -> "Identita e informazioni"
     }

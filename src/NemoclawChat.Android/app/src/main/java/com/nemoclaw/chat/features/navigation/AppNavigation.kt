@@ -13,6 +13,7 @@ import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DesktopWindows
 import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.Face
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Mic
@@ -45,6 +46,7 @@ internal enum class Tab(val label: String, val icon: ImageVector) {
     Health("Salute", Icons.Rounded.FavoriteBorder),
     Video("Video", Icons.Rounded.PlayCircle),
     News("News", Icons.AutoMirrored.Rounded.Article),
+    Characters("Personaggi", Icons.Rounded.Face),
     Settings("Impostazioni", Icons.Rounded.Tune),
     Profile("Profilo", Icons.Rounded.AccountCircle)
 }
@@ -59,6 +61,7 @@ internal fun tabForIncomingRoute(value: String): Tab = when {
     value.equals("screen", ignoreCase = true) -> Tab.Screen
     value.equals("artifacts", ignoreCase = true) -> Tab.Artifacts
     value.equals("archive", ignoreCase = true) -> Tab.Archive
+    value.equals("characters", ignoreCase = true) -> Tab.Characters
     value.equals("settings", ignoreCase = true) -> Tab.Settings
     else -> Tab.Chat
 }

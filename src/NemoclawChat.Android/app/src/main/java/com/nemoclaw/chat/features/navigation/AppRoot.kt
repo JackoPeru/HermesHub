@@ -903,6 +903,7 @@ internal fun ChatApp() {
                 pendingPrompt = prompt
                 setSelectedTab(Tab.Chat)
                 } }
+                composable(Tab.Characters.navRoute) { com.nemoclaw.chat.features.characters.CharactersScreen(context, settings) { setSelectedTab(Tab.Video) } }
                 composable(Tab.Settings.navRoute) { SettingsScreen(
                 settings = settings,
                 gatewaySecret = initialGatewaySecret.value,
