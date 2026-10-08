@@ -61,8 +61,14 @@ CUDA_VISIBLE_DEVICES=1 PYTHONPATH=$SRC/src $VENV/bin/accelerate launch \
   --mixed_precision bf16 --gradient_checkpointing \
   --optimizer_type adamw8bit --blocks_to_swap 48 \
   --output_dir <char>/models/fl2va --output_name character \
-  --save_every_n_steps 50 --save_last_n_steps 3
+  --save_every_n_steps 50 --save_last_n_steps 600
 ```
+
+Checkpoint su disco: `<name>-step00000100.safetensors` (zero-padding Musubi).
+`save_last` alto di proposito: con `save_every=50` un valore piccolo
+cancellerebbe 100/250 durante il run (`remove_step_no`); i non-vincitori
+vengono eliminati dopo la selezione eval. Verificato: bitsandbytes 0.50.2
+funziona su Blackwell (micro-step CUDA ok).
 
 Note vincolanti (dal data contract upstream):
 
@@ -92,7 +98,10 @@ Risultati registrati in `docs/CHARACTER_ID_HARDWARE_ACCEPTANCE.md` (M16).
 ## Automazione (M6)
 
 Il worker training gira sotto lock manager con stato `h3-character-train`:
-acquisisce lock → registra stato → scarica Qwen/Comfy → libera cache → verifica
-VRAM → cache+train con la ricetta sopra → libera VRAM → ripristina stato.
+claim esclusivo `O_EXCL` (due POST concorrenti: uno solo vince),
+acquisisce lock, scarica Qwen/Comfy (`sudo -n`, stessa policy del manager),
+verifica VRAM (gate 13 GB), cache+train con la ricetta sopra, watchdog
+stallo 6h/tetto 14h, libera VRAM, ripristina stato.
+Mentre gira, il worker manager e parcheggiato (niente restore che rubino VRAM).
 Job `train` persistito (stati queued…ready/failed/cancelled), pid registrato,
 cancel via terminazione pulita (M12), resume da checkpoint (M13-recovery).

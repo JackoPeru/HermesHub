@@ -91,6 +91,43 @@ def clear_lock(root: str | Path) -> None:
         pass
 
 
+def try_claim_lock(root: str | Path, payload: dict, is_job_active=None) -> bool:
+    """Claim esclusivo anti-doppio-training (TOCTOU check-then-act).
+
+    O_CREAT|O_EXCL atomico: due POST /train concorrenti, uno solo vince.
+    Il perdente deve fallire il suo job. Lock stale (pid morto + nessun job
+    attivo) rubato. Ritorna True se il lock e nostro.
+    """
+    path = lock_path(root)
+    data = json.dumps(payload).encode()
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        pass
+    else:
+        try:
+            os.write(fd, data)
+        finally:
+            os.close(fd)
+        return True
+    # Esiste gia: stale? (stessi criteri di training_active).
+    if training_active(root, is_job_active) is not None:
+        return False
+    try:
+        path.unlink()
+    except OSError:
+        return False
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return False
+    try:
+        os.write(fd, data)
+    finally:
+        os.close(fd)
+    return True
+
+
 def terminate_tree(pgid: int, sig_term: int = 15, sig_kill: int = 9, wait_s: int = 20) -> bool:
     """SIGTERM poi SIGKILL a un intero gruppo processi. Ritorna True se spento.
 
@@ -199,26 +236,36 @@ def train_cmd(toml: Path, output_dir: Path, max_steps: int = MAX_TRAIN_STEPS,
         "--mixed_precision", "bf16", "--gradient_checkpointing",
         "--optimizer_type", "adamw8bit", "--blocks_to_swap", str(blocks_to_swap),
         "--output_dir", str(output_dir), "--output_name", "character",
-        # Step frequenti per progress reale + eval 100/250/500; i non-vincitori
-        # vengono eliminati dopo la selezione (worker_evaluate).
-        "--save_every_n_steps", "50", "--save_last_n_steps", "12",
+        # Step frequenti per progress reale + eval 100/250/500. save_last alto:
+        # con save_every=50 un save_last piccolo cancellerebbe 100/250 durante
+        # il run (remove_step_no); i non-vincitori vengono eliminati dopo
+        # la selezione (worker_evaluate).
+        "--save_every_n_steps", "50", "--save_last_n_steps", "600",
     ]
     if resume:
         launch += ["--resume", resume]
     return launch
 
 
-def ckpt_steps_in(output_dir: Path) -> list[int]:
+def ckpt_steps_in(output_dir: Path, output_name: str = "character") -> list[int]:
+    """Step con checkpoint su disco (nomi Musubi: <name>-step00000100.safetensors)."""
+    import re as _re
+
+    pattern = _re.compile(r"^" + _re.escape(output_name) + r"-step(\d{1,8})\.safetensors$")
     steps = []
     if output_dir.is_dir():
         for child in output_dir.iterdir():
-            name = child.name
-            if name.startswith("character-") and name.endswith(".safetensors"):
+            match = pattern.match(child.name)
+            if match:
                 try:
-                    steps.append(int(name[len("character-"):-len(".safetensors")]))
+                    steps.append(int(match.group(1)))
                 except ValueError:
                     continue
     return sorted(steps)
+
+
+def ckpt_path(output_dir: Path, output_name: str, step: int) -> Path:
+    return output_dir / f"{output_name}-step{step:08d}.safetensors"
 
 
 def systemctl(*args: str) -> tuple[int, str]:

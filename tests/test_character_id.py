@@ -56,6 +56,7 @@ from character_id.recovery import scan_interruptions  # noqa: E402
 from character_id.training import (  # noqa: E402 (sys.path setup sopra)
     CHECKPOINT_STEPS,
     EVAL_SUITE,
+    ckpt_path,
     ckpt_steps_in,
     dataset_toml,
     pid_alive,
@@ -597,7 +598,9 @@ class TestTrainingRecipe(unittest.TestCase):
                          "--h3_teacher_loss_dc_weight 0.3",
                          "--network_dim 16", "--optimizer_type adamw8bit",
                          "--blocks_to_swap 48", "--save_every_n_steps 50",
-                         "--save_last_n_steps 12"):
+                         # save_last alto: un valore piccolo cancellerebbe 100/250
+                         # durante il run (remove_step_no di Musubi).
+                         "--save_last_n_steps 600"):
                 self.assertIn(flag, text)
             resume_cmd = " ".join(train_cmd(toml, Path(tmp) / "out", resume="/x/state"))
             self.assertIn("--resume /x/state", resume_cmd)
@@ -622,11 +625,14 @@ class TestTrainingRecipe(unittest.TestCase):
     def test_ckpt_parsing(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
-            (out / "character-100.safetensors").write_bytes(b"x")
-            (out / "character-250.safetensors").write_bytes(b"x")
+            (out / "character-step00000100.safetensors").write_bytes(b"x")
+            (out / "character-step00000250.safetensors").write_bytes(b"x")
             (out / "character-last.safetensors").write_bytes(b"x")
+            (out / "character.safetensors").write_bytes(b"x")
             self.assertEqual(ckpt_steps_in(out), [100, 250])
             self.assertEqual(ckpt_steps_in(Path(tmp) / "vuota"), [])
+            self.assertEqual(ckpt_path(out, "character", 100),
+                             out / "character-step00000100.safetensors")
 
     def test_eval_suite_fixed(self):
         self.assertEqual(len(EVAL_SUITE), 8)
@@ -748,6 +754,30 @@ class TestBountyHardening(unittest.TestCase):
         self.assertFalse(_t.terminate_tree(0))
         self.assertFalse(_t.terminate_tree(-5))
         self.assertFalse(_t.terminate_tree(1))
+
+    def test_claim_lock_exclusive(self):
+        from character_id import training as _t
+
+        root = Path(self.tmp.name) / "claimroot"
+        root.mkdir()
+        never_active = lambda jid: False  # noqa: E731
+        # Primo vince.
+        self.assertTrue(_t.try_claim_lock(root, {"job_id": "a", "pid": 0}, never_active))
+        # Secondo perde (lock "vivo"? pid 0 = morto + job inattivo = stale -> rubato).
+        # Con job attivo invece perde davvero:
+        always_active = lambda jid: True  # noqa: E731
+        _t.write_lock(root, {"job_id": "a", "pid": 0})
+        real = _t.pid_alive
+        _t.pid_alive = lambda pid: True
+        try:
+            self.assertFalse(_t.try_claim_lock(root, {"job_id": "b", "pid": 0}, always_active))
+        finally:
+            _t.pid_alive = real
+        # Stale rubato: pid morto + job inattivo.
+        self.assertTrue(_t.try_claim_lock(root, {"job_id": "c", "pid": 0}, never_active))
+        data = _t.read_lock(root)
+        self.assertIsNotNone(data)
+        self.assertEqual(data["job_id"], "c")
         # Lock vivo solo con pid vivo + job attivo (monkeypatch, sicuro ovunque).
         real = _t.pid_alive
         _t.pid_alive = lambda pid: pid == 424242

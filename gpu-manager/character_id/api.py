@@ -30,8 +30,8 @@ from .training import (
     pid_alive,
     systemctl,
     training_active,
+    try_claim_lock,
     utcnow,
-    write_lock,
 )
 from .validation import (
     MAX_FILE_BYTES,
@@ -346,12 +346,31 @@ def register_character_routes(
             raise HTTPException(422, "version fuori range 1..999")
         job = await _run(store.create_job, character_id, "train", version)
         await _run(store.set_status, character_id, "training")
-        pid, _ = _spawn("character_id.worker_train",
-                        [store.root.as_posix(), character_id, job["id"], str(version)],
-                        trainer_python, f"train-spawn-{job['id'][:8]}.log", character_id)
+        # Claim esclusivo PRIMA dello spawn: due POST concorrenti, uno solo vince.
+        claimed = await _run(
+            try_claim_lock, store.root,
+            {"job_id": job["id"], "character_id": character_id,
+             "pid": os.getpid(), "started": utcnow()},
+            lambda jid: (store.get_job(jid) or {}).get("status")
+            not in ("ready", "failed", "cancelled", None),
+        )
+        if not claimed:
+            await _run(store.update_job, job["id"], status="cancelled",
+                       detail="un altro training ha vinto la GPU")
+            await _run(store.set_status, character_id, "ready_to_train")
+            raise HTTPException(409, "GPU occupata: training Character ID in corso")
+        try:
+            pid, _ = _spawn("character_id.worker_train",
+                            [store.root.as_posix(), character_id, job["id"], str(version)],
+                            trainer_python, f"train-spawn-{job['id'][:8]}.log", character_id)
+        except Exception as exc:
+            # Spawn fallito: rilascia il claim, mai lock fantasma.
+            await _run(store.update_job, job["id"], status="failed",
+                       error=f"spawn worker: {exc}"[:300])
+            await _run(store.set_status, character_id, "ready_to_train")
+            clear_lock(store.root)
+            raise HTTPException(500, f"avvio worker fallito: {exc}") from exc
         await _run(store.update_job, job["id"], pid=pid, detail="worker training avviato")
-        write_lock(store.root, {"job_id": job["id"], "character_id": character_id,
-                                "pid": pid, "started": utcnow()})
         return {"job_id": job["id"], "status": "queued", "version": version}
 
     @app.post("/characters/{character_id}/cancel")

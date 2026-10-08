@@ -198,7 +198,9 @@ def main(argv: list[str]) -> int:
 
         store.set_status(character_id, "validating")
 
-        ckpts = {s: out_dir / f"character-{s}.safetensors" for s in CHECKPOINT_STEPS}
+        from character_id.training import ckpt_path
+
+        ckpts = {s: ckpt_path(out_dir, "character", s) for s in CHECKPOINT_STEPS}
         ckpts = {s: p for s, p in ckpts.items() if p.is_file()}
         if not ckpts:
             raise RuntimeError("nessun checkpoint da valutare")
@@ -281,17 +283,21 @@ def main(argv: list[str]) -> int:
             }
             results[str(step)]["overall"] = _overall(results[str(step)])
 
+        if not any(r["overall"] is not None for r in results.values()):
+            raise RuntimeError("eval senza misure valide: generate o volti falliti ovunque")
         best_step = max(results, key=lambda s: results[s]["overall"] if results[s]["overall"] is not None else -1.0)
         best_ckpt = ckpts[int(best_step)]
         # Sweep strength sul migliore (identita su 2 prompt, un batch per strength).
         best_strength, best_id = 0.9, -1.0
-        for strength in STRENGTH_SWEEP:
+        for sindex, strength in enumerate(STRENGTH_SWEEP):
             sweep_items = [
                 {"prompt": f"{trigger} photo of <Subject 1>, {prompt}", "seed": seed,
                  "name": f"strength_{strength}_p{index}", "frames": 1, "steps": 20}
                 for index, (prompt, seed) in enumerate((EVAL_SUITE[0], EVAL_SUITE[4]))
             ]
             sweep_out = _batch(sweep_items, DIT_FL2VA, best_ckpt, strength, None)
+            progress(0.60 + 0.15 * (sindex + 1) / len(STRENGTH_SWEEP),
+                     f"sweep strength {strength}: {sum(1 for v in sweep_out.values() if v)}/{len(sweep_items)}")
             sweep_sims: list[float] = []
             for index in range(2):
                 image = sweep_out.get(f"strength_{strength}_p{index}")
@@ -376,8 +382,9 @@ def main(argv: list[str]) -> int:
                     dest.unlink()
                 image.rename(dest)
         # Cleanup: solo il vincitore resta (tutti gli step intermedi via).
-        for stale in sorted(out_dir.glob("character-*.safetensors")):
-            if stale.name != f"character-{best_step}.safetensors":
+        winner_name = f"character-step{int(best_step):08d}.safetensors"
+        for stale in sorted(out_dir.glob("character-step*.safetensors")):
+            if stale.name != winner_name:
                 try:
                     stale.unlink()
                 except OSError:

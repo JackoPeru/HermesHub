@@ -72,6 +72,7 @@ import kotlin.math.roundToInt
 internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVideo: () -> Unit) {
     var detailId by rememberSaveable { mutableStateOf<String?>(null) }
     var wizardOpen by rememberSaveable { mutableStateOf(false) }
+    var listBump by rememberSaveable { mutableIntStateOf(0) }
     val id = detailId
     if (wizardOpen) {
         BackHandler { wizardOpen = false }
@@ -79,8 +80,8 @@ internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVid
         return
     }
     if (id != null) {
-        BackHandler { detailId = null }
-        CharacterDetail(context, settings, id, onBack = { detailId = null }, onOpenVideo = onOpenVideo)
+        BackHandler { detailId = null; listBump++ }
+        CharacterDetail(context, settings, id, onBack = { detailId = null; listBump++ }, onOpenVideo = onOpenVideo)
         return
     }
     var items by remember { mutableStateOf<List<CharacterSummary>>(emptyList()) }
@@ -94,7 +95,7 @@ internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVid
             status = message
         }
     }
-    PollWhileStarted("list", refresh, baseIntervalMs = 15000) {
+    PollWhileStarted("list", refresh, listBump, baseIntervalMs = 15000) {
         val (list, message) = loadCharacters(settings, managerKeyOf(context))
         items = list
         status = message

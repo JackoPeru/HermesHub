@@ -130,7 +130,9 @@ def main(argv: list[str]) -> int:
             )
         except OSError as exc:
             raise RuntimeError(f"avvio trainer fallito: {exc}") from exc
-        store.update_job(job_id, pid=train_process.pid)
+        store.update_job(job_id, detail=f"musubi pid {train_process.pid} (gruppo: worker {os.getpid()})")
+        # NOTA: il pid job resta quello del worker (leader del gruppo): /cancel
+        # fa killpg su di esso. Il pid musubi e solo informativo nel detail.
         # Progress dai checkpoint (mai simulato: solo step reali su disco).
         # Watchdog: stall recupero (nessun ckpt per 6h) o tetto 14h -> kill + fail.
         last_seen = -1
