@@ -95,7 +95,11 @@ def main(argv: list[str]) -> int:
     gpu_index = 1
     backends_stopped: list[str] = []
     chained_eval = False  # True: la GPU resta all'eval, niente restore qui
+    heartbeat = None
     try:
+        from character_id.training import start_heartbeat
+
+        heartbeat = start_heartbeat(store, job_id)
         progress(0.02, "acquisizione GPU", "training")
         store.set_status(character_id, "training")
         # Prima si scaricano i backend, POI si misura: con Qwen residente
@@ -210,10 +214,14 @@ def main(argv: list[str]) -> int:
         store.update_job(job_id, status="ready", progress=1.0,
                          detail=f"training ok, eval {eval_job['id'][:8]} in corso")
         store.set_status(character_id, "validating")
+        if heartbeat is not None:
+            heartbeat.set()
         store.close()
         return 0
     except Exception as exc:  # noqa: BLE001 - job mai appeso, GPU sempre liberata
         try:
+            if heartbeat is not None:
+                heartbeat.set()
             with open(log_path, "ab") as handle:
                 handle.write(traceback.format_exc().encode())
             store.update_job(job_id, status="failed", progress=1.0,

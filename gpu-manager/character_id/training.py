@@ -92,6 +92,29 @@ def clear_lock(root: str | Path) -> None:
         pass
 
 
+def start_heartbeat(store, job_id: str, interval_s: int = 60):
+    """Thread heartbeat: ping DB ogni 60s durante fasi silenziose (cache lunghe).
+
+    Il reaper del manager dichiara morto solo chi non pinga da 15 min E ha
+    pid morto: mai falsi positivi su fasi lente ma vive. Ritorna evento stop.
+    """
+    import threading as _threading
+
+    stop = _threading.Event()
+
+    def _beat() -> None:
+        while not stop.wait(interval_s):
+            try:
+                if not store.ping_job(job_id):
+                    return
+            except Exception:
+                return
+
+    thread = _threading.Thread(target=_beat, name=f"hcid-heartbeat-{job_id[:8]}", daemon=True)
+    thread.start()
+    return stop
+
+
 def try_claim_lock(root: str | Path, payload: dict, is_job_active=None) -> bool:
     """Claim esclusivo anti-doppio-training (TOCTOU check-then-act).
 

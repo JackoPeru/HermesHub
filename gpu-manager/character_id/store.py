@@ -617,6 +617,14 @@ class CharacterStore:
         with self._lock:
             row = self._db.execute("SELECT * FROM character_jobs WHERE id=?", (job_id,)).fetchone()
         return dict(row) if row else None
+
+    def ping_job(self, job_id: str) -> bool:
+        """Heartbeat: aggiorna solo updated_at. False se riga assente."""
+        with self._lock, self._db:
+            cur = self._db.execute(
+                "UPDATE character_jobs SET updated_at=? WHERE id=?", (_utcnow(), job_id)
+            )
+        return cur.rowcount > 0
     def active_job(self, character_id: str) -> dict | None:
         with self._lock:
             row = self._db.execute(

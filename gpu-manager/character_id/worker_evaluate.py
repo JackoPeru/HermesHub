@@ -64,6 +64,7 @@ def main(argv: list[str]) -> int:
         TEXT_ENCODER,
         TRAINER_SRC,
         VIDEO_VAE,
+        ckpt_path,
         clear_lock,
         read_lock,
         systemctl,
@@ -104,6 +105,8 @@ def main(argv: list[str]) -> int:
 
     def progress(value: float, detail: str) -> None:
         store.update_job(job_id, progress=value, detail=detail)
+
+    heartbeat = None
 
     def _base_cmd(dit: str, lora: Path | None, strength: float,
                   refs: list[str] | None) -> list[str]:
@@ -211,8 +214,9 @@ def main(argv: list[str]) -> int:
         store.set_status(character_id, "validating")
         store.update_job(job_id, status="validating", progress=0.03,
                          detail="suite eval avviata")
+        from character_id.training import start_heartbeat as _start_heartbeat
 
-        from character_id.training import ckpt_path
+        heartbeat = _start_heartbeat(store, job_id)
 
         ckpts = {s: ckpt_path(out_dir, "character", s) for s in CHECKPOINT_STEPS}
         ckpts = {s: p for s, p in ckpts.items() if p.is_file()}
@@ -423,11 +427,15 @@ def main(argv: list[str]) -> int:
             store.update_job(job_id, status="ready", progress=1.0,
                              detail=f"ready (engine {engine}, ckpt {best_step})")
         store.close()
+        if heartbeat is not None:
+            heartbeat.set()
         clear_lock(root)
         systemctl("start", "hermes-tabby.service")
         return 0
     except Exception as exc:  # noqa: BLE001
         try:
+            if heartbeat is not None:
+                heartbeat.set()
             with open(log_path, "ab") as handle:
                 handle.write(traceback.format_exc().encode())
             store.update_job(job_id, status="failed", progress=1.0,

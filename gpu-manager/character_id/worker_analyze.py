@@ -87,7 +87,11 @@ def main(argv: list[str]) -> int:
     def progress(value: float, detail: str) -> None:
         store.update_job(job_id, progress=value, detail=detail)
 
+    from character_id.training import start_heartbeat
+
+    heartbeat = None
     try:
+        heartbeat = start_heartbeat(store, job_id)
         with open(log_path, "w", encoding="utf-8") as handle:
             store.update_job(job_id, status="preparing", progress=0.02, detail="scansione originali")
             previous_status = (manifest.get("status") or "draft")
@@ -283,10 +287,14 @@ def main(argv: list[str]) -> int:
                                  detail=f"solo {usable_count} foto utilizzabili (minimo 20)",
                                  error=f"foto insufficienti: {usable_count}/20")
                 log(handle, f"INSUFFICIENTI: {usable_count}/20")
+        if heartbeat is not None:
+            heartbeat.set()
         store.close()
         return 0
     except Exception as exc:  # noqa: BLE001 - il job non deve mai restare appeso
         try:
+            if heartbeat is not None:
+                heartbeat.set()
             store.update_job(job_id, status="failed", progress=1.0, detail="errore pipeline",
                              error=str(exc)[:500])
             # Non degradare un personaggio che aveva gia un modello: torna allo

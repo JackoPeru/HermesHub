@@ -1555,6 +1555,7 @@ async def drive_auto_once() -> None:
     if _character_training_hold():
         # Il trainer possiede le GPU (lock+job attivi): il worker resta
         # parcheggiato, niente restore LLM/media che ruberebbero VRAM.
+        await _reap_dead_character_jobs()
         if now - float(_state.get("chartrain_log_ts", 0.0)) > 600.0:
             _state["chartrain_log_ts"] = now
             log.info("character training owns the GPUs; worker parked")
@@ -2510,6 +2511,57 @@ if _register_character_routes is not None:
         log.warning("character-id non registrato: %s", exc)
 else:  # pragma: no cover - pacchetto sempre presente nel deploy normale
     log.warning("character-id assente: rotte /characters/* disabilitate")
+
+
+async def _reap_dead_character_jobs() -> None:
+    """Orfani GPU: worker morto (SIGKILL/OOM) + silenzio oltre 15 min.
+
+    L'heartbeat dei worker pinga ogni 60s: 15 min senza ping E pid morto =
+    morte certa (mai falsi positivi su fasi lente ma vive). Il job va failed,
+    il personaggio interrupted, il lock si libera e la chat riparte.
+    Mai eccezioni verso il worker loop.
+    """
+    if _character_store is None:
+        return
+    try:
+        jobs = await asyncio.to_thread(_character_store.active_training_jobs)
+    except Exception:
+        return
+    now = time.time()
+    for job in jobs:
+        try:
+            pid = int(job.get("pid", 0) or 0)
+            updated = float(job.get("updated_at", 0) or 0)
+            if pid > 0:
+                try:
+                    os.kill(pid, 0)
+                    continue  # vivo: non toccare
+                except (OSError, ValueError):
+                    pass
+            if now - updated < 900:
+                continue  # giovane o appena pingato: non toccare
+            jid = str(job.get("id", ""))
+            cid = str(job.get("character_id", ""))
+            log.error("character job orfano %s (%s): worker morto da oltre 15 min, marco failed",
+                      jid, job.get("kind"))
+            await asyncio.to_thread(
+                _character_store.update_job, jid, status="failed", progress=1.0,
+                detail="worker morto (reaper)", error="nessun heartbeat da 15 min")
+            if cid:
+                await asyncio.to_thread(_character_store.set_status, cid, "interrupted")
+            try:
+                from character_id.training import clear_lock, read_lock
+
+                lock = read_lock(str((CONFIG.get("character_id", {}) or {}).get("root")
+                                     or "/opt/hermes/character-id"))
+                if lock and str(lock.get("job_id", "")) == jid:
+                    clear_lock(str((CONFIG.get("character_id", {}) or {}).get("root")
+                                   or "/opt/hermes/character-id"))
+            except Exception:
+                pass
+            await systemctl("start", "hermes-tabby.service")
+        except Exception as exc:  # noqa: BLE001 - un job non ferma il reaper
+            log.warning("reaper character fallito su un job: %s", exc)
 
 
 def _character_training_hold() -> bool:
