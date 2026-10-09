@@ -242,7 +242,8 @@ def cache_text_cmd(toml: Path) -> list[str]:
         "--text_encoder", TEXT_ENCODER,
         # TE 32B (26GB) su 16GB: quasi tutto in streaming da CPU (come Comfy
         # che fa encode una tantum con CPU offload; senza: OOM in load).
-        "--text_encoder_blocks_to_swap", "60",
+        # Max 50 (n. layer TE): 48 lascia embeddings + 2 blocchi residenti.
+        "--text_encoder_blocks_to_swap", "48",
         "--skip_existing",
     ]
 
