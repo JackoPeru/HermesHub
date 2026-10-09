@@ -18,6 +18,11 @@ import traceback
 from pathlib import Path
 
 
+# Flag extra per ogni invocazione generate: durate sperimentali (one-frame e
+# video brevi 39f sono sotto i 5s rilasciati: senza, il gate rifiuta tutto).
+EVAL_EXTRA_ARGS: tuple[str, ...] = ("--allow_experimental_duration",)
+
+
 def sh(cmd: list[str], log_path: Path, env: dict, cwd: Path) -> int:
     with open(log_path, "ab") as handle:
         handle.write(("+ " + " ".join(cmd) + "\n").encode())
@@ -119,6 +124,7 @@ def main(argv: list[str]) -> int:
             "--blocks_to_swap", "48",
             "--save_path", str(eval_dir),
         ]
+        cmd += list(EVAL_EXTRA_ARGS)
         if lora is not None:
             cmd += ["--lora_weight", str(lora), "--lora_multiplier", str(strength)]
         for ref in refs or []:
