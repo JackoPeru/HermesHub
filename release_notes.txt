@@ -1,15 +1,12 @@
-Hermes Hub 0.6.233 (audit: robustezza generale)
+Hermes Hub 0.6.234 (visibilita turno bot + fix gateway)
 
-- App: eco turno separata per bot, stop onesto entro 60s, swipe solo su
-  gesto deciso, niente reset a turno attivo, stream orfani mai, foto
-  senza caption conservate, retry che riprova davvero.
-- App: VPN vale come rete locale, probe gateway senza hang, voce che
-  non muore su trascrizioni vuote, accessibilità TalkBack estesa.
-- Server: LLM verificato con risposta vera (mai piu verde bugiardo),
-  watchdog 20s, loopback fail-closed, clamp video ad area anti-OOM,
-  rollback completo, deploy con verifica automatica.
-- Versioni: Windows/AdminBridge `0.6.233`; Android `versionName 0.6.233`, `versionCode 237`.
-- Asset: `HermesHub-0.6.233-android.apk` (binario Windows invariato).
-- SHA-256 Android: `17861b9dc0508b90339535e89be7e66bd98182a7aedb635e4fcb7625145fdc62`.
-- Asset: `HermesHub-0.6.233-linux-gateway.tar.gz`.
-- SHA-256 gateway: `1ec127d344e6d59c6e57b49b7f232bf89c9a9f2eda890c70c3689489552c6e99`.
+- App: banner "sta lavorando" v2 con timer elapsed live, poll transcript
+  2s a turno attivo (era 5s), messaggio onesto oltre 45s senza segnali
+  ("Ancora al lavoro · nessun segnale da Xs") invece di etichetta ferma.
+- Server: snowballstemmer installato nel runtime gateway 3.11 (i turni bot
+  morivano con "No module named"), hold GPU con fallback su lockfile.
+- Versioni: Windows/AdminBridge `0.6.234`; Android `versionName 0.6.234`, `versionCode 238`.
+- Asset: `HermesHub-0.6.234-android.apk` (binario Windows invariato).
+- SHA-256 Android: `16db7dbb9e3e4c856e383115a6ffb6777ef69cd28a8f7ca13fff8d85cce7b789`.
+- Asset: `HermesHub-0.6.234-linux-gateway.tar.gz`.
+- SHA-256 gateway: `3665dcb2dd8b58b1dc7f094c38de3003fb2bff47cade95f4eae89999f1da3892`.

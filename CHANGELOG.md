@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.234 - 2026-10-09
+
+- Chat/bot: banner live v2 (timer elapsed, poll 2s a turno attivo,
+  onesta sul silenzio oltre 45s invece di etichetta congelata).
+- Server: fix dipendenza snowballstemmer nel runtime gateway, hold GPU
+  con fallback lockfile se lo store e illeggibile.
+
 ## 0.6.233 - 2026-10-07
 
 - Chat/bot: eco turno scopata per profilo, stop 60s onesto, swipe
