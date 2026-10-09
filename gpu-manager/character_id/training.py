@@ -201,10 +201,12 @@ def dataset_toml(char_dir: Path, jsonl: Path, cache_dir: Path, resolution: int =
 
 
 def cache_latents_cmd(toml: Path) -> list[str]:
+    # Il latent cache codifica solo con le VAE: niente --dit (il transformer
+    # non serve e il flag non esiste: exit 2).
     return [
         TRAINER_VENV_PY, f"{TRAINER_SRC}/minimax_h3_cache_latents.py",
         "--dataset_config", str(toml), "--task", "ref2va", "--one_frame",
-        "--dit", DIT_FL2VA, "--video_vae", VIDEO_VAE, "--audio_vae", AUDIO_VAE,
+        "--video_vae", VIDEO_VAE, "--audio_vae", AUDIO_VAE,
         "--cache_seed", "42", "--skip_existing",
     ]
 

@@ -596,6 +596,22 @@ class TestGenerate(unittest.TestCase):
 
 
 class TestTrainingRecipe(unittest.TestCase):
+    def test_cache_cmds_flags(self):
+        from character_id.training import cache_latents_cmd, cache_text_cmd
+
+        with tempfile.TemporaryDirectory() as tmp:
+            toml = Path(tmp) / "i.toml"
+            toml.write_text("x")
+            latent = " ".join(cache_latents_cmd(toml))
+            # Il latent cache usa solo VAE: --dit non esiste (exit 2 live).
+            self.assertNotIn("--dit", latent)
+            self.assertIn("--task ref2va", latent)
+            self.assertIn("--one_frame", latent)
+            self.assertIn("--audio_vae", latent)
+            text = " ".join(cache_text_cmd(toml))
+            self.assertIn("--teacher_conditions subject_ref", text)
+            self.assertIn("--task t2va", text)
+
     def test_train_cmd_teacher(self):
         with tempfile.TemporaryDirectory() as tmp:
             toml = Path(tmp) / "i.toml"
