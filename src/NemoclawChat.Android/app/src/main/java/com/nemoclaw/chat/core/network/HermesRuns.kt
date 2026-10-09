@@ -395,22 +395,27 @@ internal suspend fun collectRunSseEvents(
                                 if (!trySendBlocking("connected" to "").isSuccess) return@use
                                 markProgress()
                                 val source = current.body.source()
-                                val dataBuffer = StringBuilder()
+                                val dataBuffer = BoundedSseEventBuffer()
                                 var eventName: String? = null
                                 fun flush(): Boolean {
-                                    if (dataBuffer.isEmpty()) return true
-                                    val data = dataBuffer.toString()
-                                    dataBuffer.clear()
+                                    val data = dataBuffer.take() ?: return true
                                     val name = eventName
                                     eventName = null
                                     return send(name to data)
                                 }
+                                var overflowMessage: String? = null
                                 while (!call.isCanceled()) {
                                     val line = try {
-                                        source.readUtf8LineStrict(256L * 1024L)
+                                        source.readUtf8LineBounded(MAX_SSE_LINE_BYTES)
+                                    } catch (tooLarge: PayloadTooLargeException) {
+                                        overflowMessage = tooLarge.message
+                                        break
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
                                     } catch (_: Exception) {
                                         break
                                     }
+                                    if (line == null) break
                                     // Ogni byte ricevuto resetta il watchdog (keepalive incluso).
                                     markProgress()
                                     if (line.isEmpty()) {
@@ -425,13 +430,26 @@ internal suspend fun collectRunSseEvents(
                                             val part = line.substring(5).let {
                                                 if (it.startsWith(" ")) it.drop(1) else it
                                             }
-                                            if (dataBuffer.isNotEmpty()) dataBuffer.append('\n')
-                                            dataBuffer.append(part)
+                                            try {
+                                                dataBuffer.appendDataLine(part)
+                                            } catch (tooLarge: PayloadTooLargeException) {
+                                                overflowMessage = tooLarge.message
+                                                break
+                                            }
                                         }
                                     }
                                 }
-                                if (!call.isCanceled()) flush()
+                                if (overflowMessage != null) {
+                                    dataBuffer.clear()
+                                    send("error" to overflowMessage.orEmpty())
+                                    call.cancel()
+                                } else if (!call.isCanceled()) {
+                                    flush()
+                                }
                             }
+                        } catch (cancelled: CancellationException) {
+                            call.cancel()
+                            close(cancelled)
                         } catch (_: Exception) {
                             // Chiusura trasporto: il consumer vede solo eventi completi.
                         } finally {

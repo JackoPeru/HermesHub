@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -133,6 +135,29 @@ class ShadowImportTests(unittest.TestCase):
             "conversation_history": [{"role": "user", "content": "ciao"}],
             "session_id": session,
         }
+
+    def test_read_marker_closes_its_file(self):
+        import builtins
+
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "marker"
+            marker.write_text("123.5", encoding="utf-8")
+            real_open = builtins.open
+            opened = []
+
+            def tracking_open(*args, **kwargs):
+                handle = real_open(*args, **kwargs)
+                opened.append(handle)
+                return handle
+
+            with mock.patch("builtins.open", side_effect=tracking_open):
+                self.assertEqual(123.5, shadow_sessions._read_marker(str(marker)))
+
+            self.assertEqual(1, len(opened))
+            closed = opened[0].closed
+            if not closed:
+                opened[0].close()
+            self.assertTrue(closed, "marker handle leaked until garbage collection")
 
     def test_import_creates_and_is_idempotent(self):
         import tempfile as _tempfile

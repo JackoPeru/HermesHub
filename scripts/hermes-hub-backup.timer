@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Hermes Hub and Agent SQLite backup
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+Unit=hermes-hub-backup.service
+
+[Install]
+WantedBy=timers.target

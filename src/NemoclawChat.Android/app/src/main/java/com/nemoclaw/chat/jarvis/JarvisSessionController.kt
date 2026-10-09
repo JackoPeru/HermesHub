@@ -13,6 +13,7 @@ import com.nemoclaw.chat.transcribeVoiceFile
 import com.nemoclaw.chat.stopVoiceForegroundService
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +41,8 @@ import kotlinx.coroutines.withTimeout
 internal object JarvisSessionController {
     private val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lifecycleMutex = Mutex()
+    private val frameQueueMutex = Mutex()
+    private val viewTransitionGeneration = AtomicLong(0L)
     private val speechMutex = Mutex()
     private val _state = MutableStateFlow(JarvisUiState())
     val state: StateFlow<JarvisUiState> = _state.asStateFlow()
@@ -68,6 +71,10 @@ internal object JarvisSessionController {
         objective: String,
         preferPhoneDebug: Boolean
     ) {
+        viewTransitionGeneration.incrementAndGet()
+        if (_state.value.active) {
+            _state.value = _state.value.copy(phase = JarvisPhase.STOPPING, visionActive = false)
+        }
         startupJob?.cancel()
         val job = controllerScope.launch(start = CoroutineStart.LAZY) {
             lifecycleMutex.withLock {
@@ -83,6 +90,10 @@ internal object JarvisSessionController {
     }
 
     fun stop(context: Context) {
+        viewTransitionGeneration.incrementAndGet()
+        if (_state.value.active) {
+            _state.value = _state.value.copy(phase = JarvisPhase.STOPPING, visionActive = false)
+        }
         startupJob?.cancel()
         controllerScope.launch {
             lifecycleMutex.withLock { stopLocked(context.applicationContext, notifyGateway = true) }
@@ -90,6 +101,7 @@ internal object JarvisSessionController {
     }
 
     fun rejectStart(message: String) {
+        viewTransitionGeneration.incrementAndGet()
         lifecycle.tryTransition(JarvisLifecycleEvent.FAILURE)
         _state.value = JarvisUiState(
             phase = JarvisPhase.ERROR,
@@ -99,6 +111,10 @@ internal object JarvisSessionController {
     }
 
     fun serviceStartFailed(context: Context, error: Throwable) {
+        viewTransitionGeneration.incrementAndGet()
+        if (_state.value.active) {
+            _state.value = _state.value.copy(phase = JarvisPhase.STOPPING, visionActive = false)
+        }
         startupJob?.cancel()
         controllerScope.launch {
             lifecycleMutex.withLock {
@@ -111,6 +127,10 @@ internal object JarvisSessionController {
     }
 
     suspend fun stopAndJoin(context: Context) {
+        viewTransitionGeneration.incrementAndGet()
+        if (_state.value.active) {
+            _state.value = _state.value.copy(phase = JarvisPhase.STOPPING, visionActive = false)
+        }
         startupJob?.cancel()
         lifecycleMutex.withLock { stopLocked(context.applicationContext, notifyGateway = true) }
     }
@@ -210,16 +230,7 @@ internal object JarvisSessionController {
                 onBufferOverflow = BufferOverflow.DROP_OLDEST
             )
             frameUploadChannel = uploadChannel
-            frameUploadJob = controllerScope.launch {
-                for (frame in uploadChannel) {
-                    lifecycle.tryTransition(JarvisLifecycleEvent.PROCESSING_STARTED)
-                    runCatching {
-                        gateway.uploadFrame(remote.id, frame.jpeg, frame.capturedAtMillis)
-                    }.onFailure {
-                        if (currentCoroutineContext().isActive) reportError(it)
-                    }
-                }
-            }
+            startFrameUploader(gateway, remote.id, uploadChannel)
             withTimeout(FRAME_SOURCE_START_TIMEOUT_MILLIS) {
                 frameSource.start(
                     onFrame = { jpeg, capturedAt ->
@@ -271,16 +282,21 @@ internal object JarvisSessionController {
         jpeg: ByteArray,
         capturedAtMillis: Long
     ) {
+        if (!_state.value.active || !_state.value.visionActive) return
         val limit = capabilities?.maxFrameBytes ?: 1_000_000
         if (jpeg.isEmpty() || jpeg.size > limit) {
             if (jpeg.size > limit) reportError(IllegalArgumentException("Frame oltre il limite gateway ($limit byte)."))
             return
         }
         val signature = perceptualSignature(jpeg)
-        if (!frameSampler.shouldAccept(capturedAtMillis, signature)) return
-        rollingFrames.add(SampledFrame(jpeg, capturedAtMillis, signature))
-        if (frameUploadChannel?.trySend(SampledFrame(jpeg, capturedAtMillis, signature))?.isSuccess == true) {
-            lifecycle.tryTransition(JarvisLifecycleEvent.FRAME_OBSERVED)
+        frameQueueMutex.withLock {
+            if (!_state.value.active || !_state.value.visionActive) return@withLock
+            if (!frameSampler.shouldAccept(capturedAtMillis, signature)) return@withLock
+            val frame = SampledFrame(jpeg, capturedAtMillis, signature)
+            rollingFrames.add(frame)
+            if (frameUploadChannel?.trySend(frame)?.isSuccess == true) {
+                lifecycle.tryTransition(JarvisLifecycleEvent.FRAME_OBSERVED)
+            }
         }
     }
 
@@ -437,24 +453,75 @@ internal object JarvisSessionController {
     }
 
     private fun updateView(context: Context, paused: Boolean) {
+        val requested = _state.value
+        val sessionId = requested.sessionId ?: return
+        val generation = viewTransitionGeneration.incrementAndGet()
+        if (paused) {
+            _state.value = _state.value.copy(phase = JarvisPhase.PAUSED, visionActive = false, error = null)
+            refreshNotification(context)
+        }
         controllerScope.launch {
             lifecycleMutex.withLock {
-                val sessionId = _state.value.sessionId ?: return@withLock
+                if (_state.value.sessionId != sessionId) return@withLock
                 val gateway = api ?: return@withLock
                 val frameSource = source ?: return@withLock
-                runCatching {
-                    gateway.patchSession(sessionId, viewPaused = paused, status = if (paused) "paused" else "active")
-                    if (paused) frameSource.pause() else frameSource.resume()
-                }.onSuccess {
-                    if (_state.value.sessionId != sessionId || !_state.value.active) return@onSuccess
-                    _state.value = _state.value.copy(
-                        phase = if (paused) JarvisPhase.PAUSED else JarvisPhase.ACTIVE,
-                        visionActive = !paused,
-                        error = null
-                    )
-                    refreshNotification(context)
-                }.onFailure {
-                    if (_state.value.sessionId == sessionId) reportError(it)
+                val uploadChannel = frameUploadChannel ?: return@withLock
+                applyJarvisVisionTransition(
+                    paused = paused,
+                    currentState = { _state.value },
+                    updateState = { _state.value = it },
+                    isCurrentSession = {
+                        _state.value.sessionId == sessionId &&
+                            _state.value.active &&
+                            _state.value.phase != JarvisPhase.STOPPING &&
+                            viewTransitionGeneration.get() == generation
+                    },
+                    pauseSource = { frameSource.pause() },
+                    resumeSource = { frameSource.resume() },
+                    stopUploader = {
+                        frameUploadJob?.cancelAndJoin()
+                        frameUploadJob = null
+                    },
+                    startUploader = { startFrameUploader(gateway, sessionId, uploadChannel) },
+                    clearPendingFrames = {
+                        frameQueueMutex.withLock {
+                            val channel = frameUploadChannel
+                            while (channel?.tryReceive()?.isSuccess == true) Unit
+                            rollingFrames.clear()
+                            frameSampler.reset()
+                        }
+                    },
+                    patchGateway = {
+                        gateway.patchSession(
+                            sessionId,
+                            viewPaused = paused,
+                            status = if (paused) "paused" else "active"
+                        )
+                    },
+                    onError = { reportError(it) }
+                )
+                if (_state.value.sessionId == sessionId) refreshNotification(context)
+            }
+        }
+    }
+
+    private fun startFrameUploader(
+        gateway: JarvisGatewayApi,
+        sessionId: String,
+        channel: Channel<SampledFrame>
+    ) {
+        frameUploadJob = controllerScope.launch {
+            for (frame in channel) {
+                val activeState = _state.value
+                if (!activeState.active || !activeState.visionActive || activeState.sessionId != sessionId) continue
+                lifecycle.tryTransition(JarvisLifecycleEvent.PROCESSING_STARTED)
+                try {
+                    gateway.uploadFrame(sessionId, frame.jpeg, frame.capturedAtMillis)
+                } catch (cancelled: CancellationException) {
+                    if (!currentCoroutineContext().isActive) throw cancelled
+                    reportError(cancelled)
+                } catch (error: Exception) {
+                    if (currentCoroutineContext().isActive) reportError(error)
                 }
             }
         }
@@ -465,6 +532,7 @@ internal object JarvisSessionController {
         notifyGateway: Boolean,
         preserveError: Boolean = false
     ) {
+        viewTransitionGeneration.incrementAndGet()
         val old = _state.value
         lifecycle.tryTransition(JarvisLifecycleEvent.STOP_REQUESTED)
         if (old.active) _state.value = old.copy(phase = JarvisPhase.STOPPING, visionActive = false)
@@ -482,8 +550,10 @@ internal object JarvisSessionController {
         val sessionId = old.sessionId
         if (notifyGateway && !sessionId.isNullOrBlank()) runCatching { api?.deleteSession(sessionId) }
         speaking.set(false)
-        frameSampler.reset()
-        rollingFrames.clear()
+        frameQueueMutex.withLock {
+            frameSampler.reset()
+            rollingFrames.clear()
+        }
         api = null
         settings = null
         apiKey = null

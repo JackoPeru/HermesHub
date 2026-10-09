@@ -257,11 +257,15 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -280,6 +284,8 @@ import javax.crypto.spec.GCMParameterSpec
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.PI
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -753,19 +759,36 @@ internal fun DocumentSlimRow(
     mediaUrl: String
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var opening by remember(mediaUrl) { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(AppColors.Composer)
-            .clickable {
-                val viewUrl = withHermesMediaQueryToken(settings, mediaUrl, loadGatewaySecret(context))
-                val intent = Intent(Intent.ACTION_VIEW, viewUrl.toUri())
-                if (block.mimeType.isNotBlank()) {
-                    intent.setDataAndType(viewUrl.toUri(), block.mimeType)
-                }
-                if (!openAndroidIntent(context, intent)) {
-                    Toast.makeText(context, "Nessuna app per aprire questo file.", Toast.LENGTH_SHORT).show()
+            .clickable(enabled = !opening) {
+                opening = true
+                scope.launch {
+                    val result = try {
+                        Result.success(openHermesMediaExternally(
+                            context,
+                            settings,
+                            mediaUrl,
+                            block.filename.ifBlank { block.title.ifBlank { "hermes-file" } },
+                            block.mimeType,
+                            loadGatewaySecret(context)
+                        ))
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        Result.failure(error)
+                    }
+                    opening = false
+                    if (result.isFailure) {
+                        Toast.makeText(context, "Impossibile aprire l'allegato.", Toast.LENGTH_LONG).show()
+                    } else if (result.getOrDefault(false).not()) {
+                        Toast.makeText(context, "Nessuna app per aprire questo file.", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -809,6 +832,7 @@ internal fun MediaFileBlock(block: VisualBlock) {
     val scope = rememberCoroutineScope()
     val gatewaySecret = remember { loadGatewaySecret(context) }
     var isDownloading by remember(block.mediaUrl) { mutableStateOf(false) }
+    var isOpening by remember(block.mediaUrl) { mutableStateOf(false) }
     var pendingLegacyDownload by remember(block.id) { mutableStateOf<Pair<String, String>?>(null) }
     val canOpen = resolvedMediaUrl != null
     val downloadNow: (String, String) -> Unit = { url, filename ->
@@ -844,7 +868,7 @@ internal fun MediaFileBlock(block: VisualBlock) {
         }
     }
 
-    if (block.mediaKind == "image" && canOpen && !isLocalAttachment && resolvedMediaUrl != null) {
+    if (block.mediaKind == "image" && canOpen && !isLocalAttachment) {
         ChatInlineImage(
             settings = settings,
             block = block,
@@ -855,7 +879,7 @@ internal fun MediaFileBlock(block: VisualBlock) {
         )
         return
     }
-    if (!isLocalAttachment && canOpen && resolvedMediaUrl != null) {
+    if (!isLocalAttachment && canOpen) {
         when (block.mediaKind) {
             "video" -> {
                 ChatInlineVideoPlayer(
@@ -926,16 +950,33 @@ internal fun MediaFileBlock(block: VisualBlock) {
                 }
                 if (canOpen) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     IconButton(
-                        enabled = canOpen,
+                        enabled = canOpen && !isOpening,
                         onClick = {
                             val url = resolvedMediaUrl
-                            val viewUrl = withHermesMediaQueryToken(settings, url, loadGatewaySecret(context))
-                            val intent = Intent(Intent.ACTION_VIEW, viewUrl.toUri())
-                            if (block.mimeType.isNotBlank()) {
-                                intent.setDataAndType(viewUrl.toUri(), block.mimeType)
-                            }
-                            if (!openAndroidIntent(context, intent)) {
-                                Toast.makeText(context, "Nessuna app per aprire questo allegato.", Toast.LENGTH_SHORT).show()
+                            if (!isOpening) {
+                                isOpening = true
+                                scope.launch {
+                                    val result = try {
+                                        Result.success(openHermesMediaExternally(
+                                            context,
+                                            settings,
+                                            checkNotNull(url),
+                                            block.filename.ifBlank { block.title.ifBlank { "hermes-file" } },
+                                            block.mimeType,
+                                            gatewaySecret
+                                        ))
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
+                                    } catch (error: Exception) {
+                                        Result.failure(error)
+                                    }
+                                    isOpening = false
+                                    if (result.isFailure) {
+                                        Toast.makeText(context, "Impossibile aprire l'allegato.", Toast.LENGTH_LONG).show()
+                                    } else if (!result.getOrDefault(false)) {
+                                        Toast.makeText(context, "Nessuna app per aprire questo allegato.", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             }
                         }
                     ) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri allegato", tint = Color.White) }
@@ -958,6 +999,194 @@ internal fun MediaFileBlock(block: VisualBlock) {
             }
         }
     }
+}
+
+internal data class ExternalMediaRequestPlan(val url: String, val bearerToken: String?)
+
+internal fun externalMediaRequestPlan(
+    settings: AppSettings,
+    url: String,
+    apiKey: String?
+): ExternalMediaRequestPlan = ExternalMediaRequestPlan(
+    url = url,
+    bearerToken = apiKey?.trim()?.takeIf { it.isNotEmpty() && shouldAuthenticateHermesUrl(settings, url) }
+)
+
+internal suspend fun openHermesMediaExternally(
+    context: Context,
+    settings: AppSettings,
+    url: String,
+    filename: String,
+    mimeType: String,
+    apiKey: String?
+): Boolean = withContext(Dispatchers.IO) {
+    val directory = File(context.cacheDir, "exports/media")
+    if (!directory.exists() && !directory.mkdirs()) throw java.io.IOException("Cache allegati non accessibile.")
+    pruneExternalMediaCache(directory)
+    val maxBytes = settings.maxAttachmentMb.coerceIn(1, 150).toLong() * 1024L * 1024L
+    var lastError = "Nessuna risposta dal server."
+    for (candidateUrl in plugAndPlayUrlCandidates(url)) {
+        val plan = externalMediaRequestPlan(settings, candidateUrl, apiKey)
+        val request = Request.Builder()
+            .url(plan.url)
+            .get()
+            .header("Accept", "*/*")
+            .header("User-Agent", "HermesHub-Android")
+            .apply { plan.bearerToken?.let { header("Authorization", "Bearer $it") } }
+            .build()
+        try {
+            val safeName = sanitizeDownloadFilename(filename.ifBlank { "hermes-file" })
+            val extension = safeName.substringAfterLast('.', "").takeIf { it.matches(Regex("[A-Za-z0-9]{1,12}")) }
+            return@withContext downloadAndOpenExternalMedia(
+                request,
+                directory,
+                maxBytes,
+                extension?.let { ".$it" } ?: ".bin"
+            ) { completed ->
+                val contentUri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    completed
+                )
+                val resolvedMime = mimeType.ifBlank {
+                    android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
+                }
+                val intent = Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, resolvedMime).apply {
+                    clipData = ClipData.newUri(context.contentResolver, safeName, contentUri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                openAndroidIntent(context, intent)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (tooLarge: PayloadTooLargeException) {
+            throw tooLarge
+        } catch (error: java.io.IOException) {
+            lastError = error.message ?: error.javaClass.simpleName
+        }
+    }
+    throw java.io.IOException(lastError)
+}
+
+/** Enqueue, stream, and publish in one cancellable operation; tests exercise this production seam. */
+internal suspend fun downloadAndOpenExternalMedia(
+    request: Request,
+    directory: File,
+    maxBytes: Long,
+    fileSuffix: String = ".media",
+    openDownloadedFile: (File) -> Boolean
+): Boolean = suspendCancellableCoroutine { continuation ->
+    require(maxBytes >= 0L) { "maxBytes deve essere non negativo" }
+    if (!directory.exists() && !directory.mkdirs()) {
+        continuation.resumeWithException(java.io.IOException("Cache allegati non accessibile."))
+        return@suspendCancellableCoroutine
+    }
+    val fileLock = Any()
+    var partial: File? = null
+    var completed: File? = null
+    var keepCompleted = false
+    val call = apiHttpClient.newCall(request)
+    fun cleanupFiles() {
+        synchronized(fileLock) {
+            partial?.delete()
+            if (!keepCompleted) completed?.delete()
+        }
+    }
+    continuation.invokeOnCancellation {
+        call.cancel()
+        cleanupFiles()
+    }
+    fun resumeFailure(error: Throwable) {
+        if (continuation.isActive) continuation.resumeWithException(error)
+    }
+    call.enqueue(object : Callback {
+        override fun onFailure(call: Call, e: java.io.IOException) {
+            resumeFailure(e)
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            try {
+                response.use { current ->
+                    if (!continuation.isActive) {
+                        call.cancel()
+                        return@use
+                    }
+                    if (!current.isSuccessful) {
+                        resumeFailure(java.io.IOException("HTTP ${current.code}"))
+                        return@use
+                    }
+                    val body = current.body
+                    if (body.contentLength() > maxBytes) {
+                        resumeFailure(PayloadTooLargeException("Risposta superiore al limite di $maxBytes byte"))
+                        return@use
+                    }
+                    val files = synchronized(fileLock) {
+                        if (!continuation.isActive) {
+                            null
+                        } else {
+                            val createdPartial = File.createTempFile("hermes-open-", ".part", directory)
+                            val createdCompleted = File(
+                                directory,
+                                "${createdPartial.nameWithoutExtension}$fileSuffix"
+                            )
+                            partial = createdPartial
+                            completed = createdCompleted
+                            createdPartial to createdCompleted
+                        }
+                    } ?: return@use
+                    val (partialFile, completedFile) = files
+                    FileOutputStream(partialFile).use { output ->
+                        val input = body.byteStream()
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var total = 0L
+                        while (true) {
+                            if (!continuation.isActive) throw CancellationException("Apertura allegato annullata.")
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            if (!continuation.isActive) throw CancellationException("Apertura allegato annullata.")
+                            if (read == 0) continue
+                            if (total > maxBytes - read.toLong()) {
+                                throw PayloadTooLargeException("Risposta superiore al limite di $maxBytes byte")
+                            }
+                            output.write(buffer, 0, read)
+                            total += read
+                        }
+                        if (!continuation.isActive) throw CancellationException("Apertura allegato annullata.")
+                        output.fd.sync()
+                    }
+                    if (!continuation.isActive) return@use
+                    if (!partialFile.renameTo(completedFile)) {
+                        throw java.io.IOException("Impossibile finalizzare l'allegato.")
+                    }
+                    val opened = synchronized(fileLock) {
+                        if (!continuation.isActive) {
+                            null
+                        } else {
+                            openDownloadedFile(completedFile).also { keepCompleted = it }
+                        }
+                    } ?: return@use
+                    if (!opened) cleanupFiles()
+                    if (continuation.isActive) continuation.resume(opened)
+                }
+            } catch (cancelled: CancellationException) {
+                cleanupFiles()
+                resumeFailure(cancelled)
+            } catch (error: Exception) {
+                cleanupFiles()
+                resumeFailure(error)
+            }
+        }
+    })
+}
+
+private fun pruneExternalMediaCache(directory: File) {
+    val files = directory.listFiles().orEmpty()
+    val cutoff = System.currentTimeMillis() - 7L * 24L * 60L * 60L * 1000L
+    files.filter { it.lastModified() < cutoff }.forEach { it.delete() }
+    directory.listFiles().orEmpty()
+        .sortedByDescending { it.lastModified() }
+        .drop(12)
+        .forEach { it.delete() }
 }
 
 suspend fun downloadHermesMediaFile(context: Context, settings: AppSettings, url: String, filename: String, mimeType: String, apiKey: String?): String = withContext(Dispatchers.IO) {
@@ -1012,20 +1241,16 @@ suspend fun downloadHermesMediaFile(context: Context, settings: AppSettings, url
 }
 
 /**
- * Aggiunge il token gateway come query `hub_token` all'URL media.
+ * Fallback query per client HTTP Hermes legacy che non accettano il Bearer.
  *
  * SICUREZZA (audit header-vs-query): preferire SEMPRE l'header `Authorization: Bearer`.
  * Già migrati a header: ExoPlayer (DefaultHttpDataSource via [authHeaders] in
  * ChatInlineVideoPlayer/ChatInlineAudioPlayer), MediaMetadataRetriever
  * ([loadVideoThumbnail] usa setDataSource con header), OkHttp/HttpURLConnection
- * ([downloadHermesMediaFile]/[loadRemoteBitmapAttempt] inviano l'header; il secondo
- * tentativo con query è solo fallback di compatibilità verso server che non accettano
- * l'header). Il query token resta SOLO per gli Intent ACTION_VIEW esterni
- * (DocumentSlimRow/apertura allegati): un'app esterna non può ricevere header custom,
- * quindi l'URL non può essere autenticato altrimenti (tecnicamente impossibile).
- * Nessun VideoView/MediaPlayer nativo usa questa funzione. Formato token ed endpoint
- * invariati; la guardia same-origin [shouldAuthenticateHermesUrl] evita leak del token
- * verso host esterni.
+ * ([downloadHermesMediaFile]/[loadRemoteBitmapAttempt] inviano prima l'header; il secondo
+ * tentativo query resta solo come compatibilità con gateway legacy. Gli Intent esterni
+ * non usano questa funzione: scaricano il contenuto autenticato in cache privata e
+ * condividono un URI FileProvider con permesso di sola lettura.
  */
 internal fun withHermesMediaQueryToken(settings: AppSettings, url: String, apiKey: String?): String {
     val token = apiKey?.trim().orEmpty()

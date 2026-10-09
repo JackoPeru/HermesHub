@@ -2,6 +2,11 @@ package com.nemoclaw.chat.jarvis
 
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import com.nemoclaw.chat.BoundedSseEventBuffer
+import com.nemoclaw.chat.MAX_JARVIS_JSON_RESPONSE_BYTES
+import com.nemoclaw.chat.MAX_SSE_LINE_BYTES
+import com.nemoclaw.chat.readUtf8Bounded
+import com.nemoclaw.chat.readUtf8LineBounded
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -115,33 +120,42 @@ internal class JarvisGatewayApi(
                     return
                 }
                 launch {
-                    response.use {
-                        val source = it.body.source()
-                        var id: String? = null
-                        var eventName: String? = null
-                        val data = StringBuilder()
-                        while (!source.exhausted()) {
-                            val line = source.readUtf8Line() ?: break
-                            when {
-                                line.startsWith("id:") -> id = line.substringAfter(':').trim()
-                                line.startsWith("event:") -> eventName = line.substringAfter(':').trim()
-                                line.startsWith("data:") -> {
-                                    if (data.isNotEmpty()) data.append('\n')
-                                    data.append(line.substringAfter(':').trimStart())
-                                }
-                                line.isEmpty() -> {
-                                    if (data.isNotEmpty()) {
-                                        runCatching { JarvisEvent.parse(data.toString(), id, eventName) }
-                                            .onSuccess { send(it) }
+                    var failure: Throwable? = null
+                    try {
+                        response.use {
+                            val source = it.body.source()
+                            var id: String? = null
+                            var eventName: String? = null
+                            val data = BoundedSseEventBuffer()
+                            while (true) {
+                                val line = source.readUtf8LineBounded(MAX_SSE_LINE_BYTES) ?: break
+                                when {
+                                    line.startsWith("id:") -> id = line.substringAfter(':').trim()
+                                    line.startsWith("event:") -> eventName = line.substringAfter(':').trim()
+                                    line.startsWith("data:") -> {
+                                        data.appendDataLine(line.substringAfter(':').trimStart())
                                     }
-                                    id = null
-                                    eventName = null
-                                    data.setLength(0)
+                                    line.isEmpty() -> {
+                                        val payload = data.take()
+                                        if (payload != null) {
+                                            send(JarvisEvent.parse(payload, id, eventName))
+                                        }
+                                        id = null
+                                        eventName = null
+                                        data.clear()
+                                    }
                                 }
                             }
                         }
+                    } catch (cancelled: CancellationException) {
+                        failure = cancelled
+                        throw cancelled
+                    } catch (error: Exception) {
+                        failure = error
+                        call.cancel()
+                    } finally {
+                        close(failure)
                     }
-                    close()
                 }
             }
         })
@@ -174,16 +188,21 @@ internal class JarvisGatewayApi(
             }
 
             override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    val raw = it.body.string().take(512 * 1024)
-                    if (!it.isSuccessful) {
-                        val detail = runCatching {
-                            JSONObject(raw).optJSONObject("error")?.optString("message")
-                        }.getOrNull().orEmpty().ifBlank { raw.take(240) }
-                        if (continuation.isActive) continuation.resumeWithException(IOException("HTTP ${it.code}: $detail"))
-                    } else if (continuation.isActive) {
-                        continuation.resume(raw)
+                try {
+                    response.use {
+                        val raw = it.body.byteStream().readUtf8Bounded(MAX_JARVIS_JSON_RESPONSE_BYTES)
+                        if (!it.isSuccessful) {
+                            val detail = runCatching {
+                                JSONObject(raw).optJSONObject("error")?.optString("message")
+                            }.getOrNull().orEmpty().ifBlank { raw.take(240) }
+                            if (continuation.isActive) continuation.resumeWithException(IOException("HTTP ${it.code}: $detail"))
+                        } else if (continuation.isActive) {
+                            continuation.resume(raw)
+                        }
                     }
+                } catch (error: Exception) {
+                    call.cancel()
+                    if (continuation.isActive) continuation.resumeWithException(error)
                 }
             }
         })

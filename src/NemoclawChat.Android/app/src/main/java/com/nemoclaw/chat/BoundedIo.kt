@@ -13,16 +13,26 @@ import okio.BufferedSource
 internal const val MAX_JSON_RESPONSE_BYTES = 2L * 1024L * 1024L
 internal const val MAX_ARCHIVE_JSON_RESPONSE_BYTES = 64L * 1024L * 1024L
 internal const val MAX_TTS_AUDIO_BYTES = 100L * 1024L * 1024L
+internal const val MAX_SSE_LINE_BYTES = 256L * 1024L
+internal const val MAX_SSE_EVENT_BYTES = 2 * 1024 * 1024
+internal const val MAX_JARVIS_JSON_RESPONSE_BYTES = 512L * 1024L
+internal const val MAX_SCREEN_FRAME_BYTES = 8L * 1024L * 1024L
 private const val MIN_WAV_BYTES = 44L
 
 internal class PayloadTooLargeException(message: String) : IOException(message)
 
-internal fun InputStream.copyToBounded(output: OutputStream, maxBytes: Long): Long {
+internal fun InputStream.copyToBounded(
+    output: OutputStream,
+    maxBytes: Long,
+    checkCancellation: (() -> Unit)? = null
+): Long {
     require(maxBytes >= 0L) { "maxBytes deve essere non negativo" }
     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
     var total = 0L
     while (true) {
+        checkCancellation?.invoke()
         val read = read(buffer)
+        checkCancellation?.invoke()
         if (read < 0) break
         if (read == 0) continue
         if (total > maxBytes - read.toLong()) {
@@ -39,6 +49,41 @@ internal fun InputStream.readUtf8Bounded(maxBytes: Long = MAX_JSON_RESPONSE_BYTE
     return ByteArrayOutputStream(initialCapacity).use { output ->
         copyToBounded(output, maxBytes)
         output.toString(StandardCharsets.UTF_8.name())
+    }
+}
+
+internal fun InputStream.readBytesBounded(maxBytes: Long): ByteArray {
+    val initialCapacity = minOf(maxBytes, DEFAULT_BUFFER_SIZE.toLong()).toInt()
+    return ByteArrayOutputStream(initialCapacity).use { output ->
+        copyToBounded(output, maxBytes)
+        output.toByteArray()
+    }
+}
+
+internal class BoundedSseEventBuffer(private val maxBytes: Int = MAX_SSE_EVENT_BYTES) {
+    private val data = StringBuilder()
+    private var byteCount = 0
+
+    fun appendDataLine(line: String) {
+        val lineBytes = line.toByteArray(StandardCharsets.UTF_8).size
+        val separatorBytes = if (data.isNotEmpty()) 1 else 0
+        val addedBytes = lineBytes + separatorBytes
+        if (addedBytes > maxBytes - byteCount) {
+            throw PayloadTooLargeException("Evento SSE superiore al limite di $maxBytes byte")
+        }
+        if (separatorBytes != 0) data.append('\n')
+        data.append(line)
+        byteCount += addedBytes
+    }
+
+    fun take(): String? {
+        if (data.isEmpty()) return null
+        return data.toString().also { clear() }
+    }
+
+    fun clear() {
+        data.setLength(0)
+        byteCount = 0
     }
 }
 

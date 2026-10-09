@@ -89,7 +89,7 @@ class MainActivity : ComponentActivity() {
             uri?.scheme == "hermes-hub" -> {
                 val parsed = parseHermesDeepLink(uri.toString())
                 if (parsed == null) {
-                    Log.w(TAG_HERMES_DEEPLINK, "Deeplink hermes-hub rifiutato (fuori allowlist): $uri")
+                    Log.w(TAG_HERMES_DEEPLINK, "Deeplink hermes-hub rifiutato (fuori allowlist).")
                 } else {
                     if (parsed.promptRequiresConfirmation) {
                         // Il prompt finisce SOLO in bozza (anteprima): l'invio resta manuale.

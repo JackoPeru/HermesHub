@@ -26,22 +26,50 @@ UPSTREAM_GATEWAY_FIXTURE = ROOT / "tests" / "fixtures" / "hermes-agent-v2026.7.7
 CURRENT_UPSTREAM_GATEWAY_FIXTURE = (
     ROOT / "tests" / "fixtures" / "hermes-agent-0a62610f1-api_server.py"
 )
+VALID_GATEWAY_CAPABILITIES_RESPONSE = json.dumps({
+    "object": "hermes.api_server.capabilities",
+    "platform": "hermes-agent",
+    "model": "test-model",
+    "jarvis": {},
+    "auth": {"type": "bearer", "required": True},
+    "runtime": {"mode": "server_agent"},
+    "features": {
+        "chat_completions": True,
+        "chat_completions_streaming": True,
+        "hermes_native": True,
+    },
+    "bot_mode": {},
+    "endpoints": {
+        "chat_completions": {"method": "POST", "path": "/v1/chat/completions"},
+        "responses": {"method": "POST", "path": "/v1/responses"},
+        "runs": {"method": "POST", "path": "/v1/runs"},
+        "hermes_native": {"method": "POST", "path": "/v1/hermes/native"},
+    },
+})
 UPDATER_REQUIRED_FILES = (
     "hermes-hub-linux.sh",
     "patch-hermes-gateway-native.py",
     "hermes-hub-linux-update.sh",
     "hermes-hub-agent-update.sh",
     "install-hermes-hub-linux.sh",
+    "hermes-hub-backup.py",
     "hermes-hub-linux.service",
     "hermes-hub-linux-update.service",
     "hermes-hub-linux-update.timer",
     "hermes-hub-agent-update.service",
     "hermes-hub-agent-update.timer",
+    "hermes-hub-backup.service",
+    "hermes-hub-backup.timer",
     "hermes-wait-tailscale.sh",
     "hermes-wait-llama.sh",
     "rehub-patch.sh",
     "hermes-power-monitor.sh",
     "hermes-power-monitor.service",
+)
+BACKUP_BUNDLE_FILES = (
+    "hermes-hub-backup.py",
+    "hermes-hub-backup.service",
+    "hermes-hub-backup.timer",
 )
 
 
@@ -133,6 +161,8 @@ class GatewayScriptTests(unittest.TestCase):
         manager_state: str = "idle",
         comfy_state: str = "idle",
         manager_flip: bool = False,
+        backup_bundle_files: tuple[str, ...] | None = None,
+        preexisting_backup_helper: bytes | None = None,
     ) -> dict[str, object]:
         version = "9.8.7"
         home = root / "home"
@@ -141,10 +171,14 @@ class GatewayScriptTests(unittest.TestCase):
         config_dir = root / "config"
         for directory in (home, install_dir, bin_dir, config_dir):
             directory.mkdir(parents=True, exist_ok=True)
+        if preexisting_backup_helper is not None:
+            (bin_dir / "hermes-hub-backup").write_bytes(preexisting_backup_helper)
 
         archive_path = root / f"HermesHub-{version}-linux-gateway.tar.gz"
+        archive_files = tuple(name for name in UPDATER_REQUIRED_FILES if name not in BACKUP_BUNDLE_FILES)
+        archive_files += BACKUP_BUNDLE_FILES if backup_bundle_files is None else backup_bundle_files
         with tarfile.open(archive_path, "w:gz") as archive:
-            for name in UPDATER_REQUIRED_FILES:
+            for name in archive_files:
                 archive.add(SCRIPTS / name, arcname=f"bundle/{name}")
             version_bytes = f"{version}\n".encode()
             version_info = tarfile.TarInfo("bundle/VERSION")
@@ -199,27 +233,75 @@ class GatewayScriptTests(unittest.TestCase):
         )
 
         curl_log = root / "curl.log"
+        curl_auth_log = root / "curl-auth.log"
+        curl_argv_secret_log = root / "curl-argv-secret.log"
+        curl_config_log = root / "curl-config.log"
+        chmod_log = root / "chmod.log"
         systemctl_log = root / "systemctl.log"
         bash_env = root / "bash-env.sh"
         curl_log.touch()
+        curl_auth_log.touch()
+        curl_argv_secret_log.touch()
+        curl_config_log.touch()
+        chmod_log.touch()
         systemctl_log.touch()
         bash_env.write_text(
             textwrap.dedent(
                 r'''
                 curl() {
-                  local output="" url=""
+                  local output="" url="" auth_config="" write_out="" fail_on_http=false
+                  local raw_arg arg auth="" auth_kind="none" config_mode="none" config_safe="none" secret_arg=false
+                  local response_body="" manager_status="${FAKE_MANAGER_HTTP_STATUS:-200}"
+                  local gateway_status="${FAKE_GATEWAY_HTTP_STATUS:-200}"
+                  local -a raw_args=("$@")
                   while [ "$#" -gt 0 ]; do
                     case "$1" in
                       -o|--output)
                         shift
                         output="${1:-}"
                         ;;
+                      -K|--config)
+                        shift
+                        auth_config="${1:-}"
+                        ;;
+                      -w|--write-out)
+                        shift
+                        write_out="${1:-}"
+                        ;;
+                      --fail|-f) fail_on_http=true ;;
                       http://*|https://*) url="$1" ;;
                     esac
                     shift
                   done
                   printf '%s\n' "$url" >> "$FAKE_CURL_LOG"
-                  if [ -n "$output" ]; then
+                  for raw_arg in "${raw_args[@]}"; do
+                    if { [ -n "${FAKE_MANAGER_EXPECTED_KEY:-}" ] && [[ "$raw_arg" == *"$FAKE_MANAGER_EXPECTED_KEY"* ]]; } ||
+                       { [ -n "${FAKE_GATEWAY_EXPECTED_KEY:-}" ] && [[ "$raw_arg" == *"$FAKE_GATEWAY_EXPECTED_KEY"* ]]; }; then
+                      secret_arg=true
+                    fi
+                  done
+                  printf '%s\n' "$secret_arg" >> "$FAKE_CURL_ARGV_SECRET_LOG"
+                  if [ -n "$auth_config" ] && [ -f "$auth_config" ]; then
+                    auth="$(sed -n 's/^header = "Authorization: Bearer \(.*\)"$/\1/p' "$auth_config" | head -n 1)"
+                    config_mode="$(stat -c '%a' "$auth_config" 2>/dev/null || echo unknown)"
+                    if [ "$(cat "$auth_config")" = "header = \"Authorization: Bearer $auth\"" ] && [ "$(wc -l < "$auth_config")" -eq 1 ]; then
+                      config_safe=true
+                    else
+                      config_safe=false
+                    fi
+                    printf '%s\n' "$auth_config" >> "$FAKE_CURL_CONFIG_LOG"
+                  fi
+                  if [ -n "$auth" ] && [ "$auth" = "${FAKE_MANAGER_EXPECTED_KEY:-}" ]; then
+                    auth_kind=manager
+                  elif [ -n "$auth" ] && [ "$auth" = "${FAKE_GATEWAY_EXPECTED_KEY:-}" ]; then
+                    auth_kind=gateway
+                  elif [ -n "$auth" ]; then
+                    auth_kind=other
+                  fi
+                  if [ -n "$auth_config" ]; then
+                    printf '%s|%s|%s|%s\n' "$url" "$auth_kind" "$config_mode" "$config_safe" >> "$FAKE_CURL_AUTH_LOG"
+                  fi
+                  if [ -n "$output" ] && [[ "$url" == https://assets.invalid/* ]]; then
                     cp "$FAKE_ARCHIVE" "$output"
                   elif [[ "$url" == https://api.github.com/* ]]; then
                     if [ "$FAKE_GATEWAY_PAGE" = "2" ] && [[ "$url" == *"page=1"* ]]; then
@@ -228,25 +310,81 @@ class GatewayScriptTests(unittest.TestCase):
                       cat "$FAKE_RELEASE_JSON"
                     fi
                   elif [ "$url" = "$HERMES_HUB_UPDATE_PROBE_URL" ] && [ "$FAKE_PROBE_OK" = "1" ]; then
-                    printf '{}\n'
+                    printf '%s\n' "$FAKE_PROBE_RESPONSE"
+                  elif [[ "$url" == */health/detailed ]]; then
+                    if [ -n "${FAKE_GATEWAY_RESPONSE:-}" ]; then
+                      response_body="$FAKE_GATEWAY_RESPONSE"
+                    elif [ "${FAKE_GATEWAY_FLIP:-0}" = "1" ]; then
+                      calls="$(cat "$FAKE_GATEWAY_CALLS" 2>/dev/null || echo 0)"
+                      printf '%s' "$((calls + 1))" > "$FAKE_GATEWAY_CALLS"
+                      if [ "$calls" = "0" ]; then
+                        response_body='{"status":"ok","gateway_state":"running","active_agents":0,"gateway_busy":false,"gateway_drainable":true,"api_server":{"active_runs":0},"readiness":{"status":"ok"}}'
+                      else
+                        response_body='{"status":"ok","gateway_state":"running","active_agents":0,"gateway_busy":false,"gateway_drainable":true,"api_server":{"active_runs":1},"readiness":{"status":"ok"}}'
+                      fi
+                    elif [ "$FAKE_GATEWAY_STATE" = "active_agents" ]; then
+                      response_body='{"status":"ok","gateway_state":"running","active_agents":1,"gateway_busy":false,"gateway_drainable":true,"api_server":{"active_runs":0},"readiness":{"status":"ok"}}'
+                    elif [ "$FAKE_GATEWAY_STATE" = "active_runs" ]; then
+                      response_body='{"status":"ok","gateway_state":"running","active_agents":0,"gateway_busy":false,"gateway_drainable":true,"api_server":{"active_runs":2},"readiness":{"status":"ok"}}'
+                    elif [ "$FAKE_GATEWAY_STATE" = "busy" ]; then
+                      response_body='{"status":"ok","gateway_state":"running","active_agents":0,"gateway_busy":true,"gateway_drainable":true,"api_server":{"active_runs":0},"readiness":{"status":"ok"}}'
+                    elif [ "$FAKE_GATEWAY_STATE" = "not_drainable" ]; then
+                      response_body='{"status":"ok","gateway_state":"running","active_agents":0,"gateway_busy":false,"gateway_drainable":false,"api_server":{"active_runs":0},"readiness":{"status":"ok"}}'
+                    elif [ "$FAKE_GATEWAY_STATE" = "wrong_type" ]; then
+                      response_body='{"status":"ok","gateway_state":"running","active_agents":false,"gateway_busy":false,"gateway_drainable":true,"api_server":{"active_runs":0},"readiness":{"status":"ok"}}'
+                    elif [ "$FAKE_GATEWAY_STATE" = "missing" ]; then
+                      response_body='{"status":"ok","gateway_state":"running","active_agents":0,"gateway_busy":false,"gateway_drainable":true,"api_server":{"active_runs":0}}'
+                    elif [ "$FAKE_GATEWAY_STATE" = "invalid_json" ]; then
+                      response_body='{"status":"ok"'
+                    elif [ "$FAKE_GATEWAY_STATE" = "not_running" ]; then
+                      response_body='{"status":"ok","gateway_state":"stopped","active_agents":0,"gateway_busy":false,"gateway_drainable":true,"api_server":{"active_runs":0},"readiness":{"status":"ok"}}'
+                    else
+                      response_body='{"status":"ok","gateway_state":"running","active_agents":0,"gateway_busy":false,"gateway_drainable":true,"api_server":{"active_runs":0},"readiness":{"status":"ok"}}'
+                    fi
+                    if [ -n "$output" ]; then printf '%s\n' "$response_body" > "$output"; fi
+                    [ -n "$write_out" ] && printf '%s' "$gateway_status"
+                    if [ "$fail_on_http" = "true" ] && [ "$gateway_status" != "200" ]; then return 22; fi
                   elif [[ "$url" == */status && "$url" != "$HERMES_HUB_UPDATE_PROBE_URL" ]]; then
+                    if [ "$FAKE_MANAGER_STATE" = "down" ]; then
+                      [ -n "$write_out" ] && printf '000'
+                      return 22
+                    fi
+                    if [ "$manager_status" != "200" ]; then
+                      response_body='{"detail":"manager status unavailable"}'
+                      if [ "$fail_on_http" != "true" ]; then
+                        if [ -n "$output" ]; then printf '%s\n' "$response_body" > "$output"; else printf '%s\n' "$response_body"; fi
+                      fi
+                      [ -n "$write_out" ] && printf '%s' "$manager_status"
+                      if [ "$fail_on_http" = "true" ]; then return 22; fi
+                      return 0
+                    fi
                     if [ "$FAKE_MANAGER_FLIP" = "1" ]; then
                       calls="$(cat "$FAKE_MANAGER_CALLS" 2>/dev/null || echo 0)"
                       printf '%s' "$((calls + 1))" > "$FAKE_MANAGER_CALLS"
                       if [ "$calls" = "0" ]; then
-                        printf '{"desired_mode":"AUTO","current_state":"LLM_READY","queue_length":0,"current_job":null}\n'
+                        response_body='{"desired_mode":"AUTO","current_state":"LLM_READY","queue_length":0,"current_job":null}'
                       else
-                        printf '{"desired_mode":"AUTO","current_state":"MEDIA_BUSY","queue_length":1,"current_job":"flip123"}\n'
+                        response_body='{"desired_mode":"AUTO","current_state":"MEDIA_BUSY","queue_length":1,"current_job":"flip123"}'
                       fi
                     elif [ "$FAKE_MANAGER_STATE" = "queue" ]; then
-                      printf '{"desired_mode":"AUTO","current_state":"MEDIA_BUSY","queue_length":2,"current_job":"abc123"}\n'
+                      response_body='{"desired_mode":"AUTO","current_state":"MEDIA_BUSY","queue_length":2,"current_job":"abc123"}'
                     elif [ "$FAKE_MANAGER_STATE" = "media_idle" ]; then
-                      printf '{"desired_mode":"AUTO","current_state":"MEDIA_READY","queue_length":0,"current_job":null}\n'
-                    elif [ "$FAKE_MANAGER_STATE" = "down" ]; then
-                      return 22
+                      response_body='{"desired_mode":"AUTO","current_state":"MEDIA_READY","queue_length":0,"current_job":null}'
+                    elif [ "$FAKE_MANAGER_STATE" = "invalid_schema" ]; then
+                      response_body='{"desired_mode":"AUTO","current_state":"LLM_READY","queue_length":"bad","current_job":null}'
+                    elif [ "$FAKE_MANAGER_STATE" = "unknown" ]; then
+                      response_body='{"desired_mode":"AUTO","current_state":"FUTURE_STATE","queue_length":0,"current_job":null}'
+                    elif [ "$FAKE_MANAGER_STATE" = "malformed_json" ]; then
+                      response_body='{"current_state":"LLM_READY"'
                     else
-                      printf '{"desired_mode":"AUTO","current_state":"LLM_READY","queue_length":0,"current_job":null}\n'
+                      response_body='{"desired_mode":"AUTO","current_state":"LLM_READY","queue_length":0,"current_job":null}'
                     fi
+                    if [ -n "$output" ]; then
+                      printf '%s\n' "$response_body" > "$output"
+                    else
+                      printf '%s\n' "$response_body"
+                    fi
+                    [ -n "$write_out" ] && printf '%s' "$manager_status"
                   elif [[ "$url" == */queue ]]; then
                     if [ "$FAKE_COMFY_STATE" = "busy" ]; then
                       printf '{"queue_running":{"1":{}},"queue_pending":[]}\n'
@@ -258,10 +396,29 @@ class GatewayScriptTests(unittest.TestCase):
                   fi
                 }
 
+                chmod() {
+                  printf '%s|%s\n' "${1:-}" "${2:-}" >> "$FAKE_CHMOD_LOG"
+                  command chmod "$@"
+                }
+
+                stat() {
+                  local stat_path="${3:-}"
+                  [ "$stat_path" = "--" ] && stat_path="${4:-}"
+                  if [ "${1:-}" = "-c" ] && [ "${2:-}" = "%a %u" ] &&
+                     [ -n "${FAKE_MANAGER_KEY_FILE:-}" ] && [ "$stat_path" = "$FAKE_MANAGER_KEY_FILE" ]; then
+                    local actual_mode="$(command stat -c '%a' -- "$stat_path")"
+                    printf '%s %s\n' "$actual_mode" "${FAKE_MANAGER_KEY_FILE_OWNER:-$(command id -u)}"
+                  else
+                    command stat "$@"
+                  fi
+                }
+
                 systemctl() {
                   printf '%s\n' "$*" >> "$FAKE_SYSTEMCTL_LOG"
                   case " $* " in
-                    *" is-active "*|*" is-enabled "*) return 1 ;;
+                    *" is-active "*) return 1 ;;
+                    *" is-enabled --quiet hermes-hub-backup.timer "*) [ "${FAKE_BACKUP_TIMER_ENABLED:-0}" = "1" ] ;;
+                    *" is-enabled "*) return 1 ;;
                     *) return 0 ;;
                   esac
                 }
@@ -299,21 +456,36 @@ class GatewayScriptTests(unittest.TestCase):
                 "HERMES_HUB_UPDATE_PROBE_SLEEP_SECONDS": "1",
                 "HERMES_HUB_UPDATE_PROBE_URL": "https://probe.invalid/v1/capabilities",
                 "HERMES_HUB_API_KEY": "integration-test-key",
+                "FAKE_GATEWAY_EXPECTED_KEY": "integration-test-key",
+                "FAKE_MANAGER_EXPECTED_KEY": "manager-test-key",
+                "FAKE_MANAGER_HTTP_STATUS": "200",
                 "FAKE_ARCHIVE": bash_path(bash, archive_path),
                 "FAKE_RELEASE_JSON": bash_path(bash, release_json),
                 "FAKE_RELEASE_PAGE_ONE": bash_path(bash, first_page_json),
                 "FAKE_GATEWAY_PAGE": str(gateway_page),
+                "FAKE_GATEWAY_STATE": "idle",
+                "FAKE_GATEWAY_HTTP_STATUS": "200",
+                "FAKE_GATEWAY_FLIP": "0",
                 "FAKE_CURL_LOG": bash_path(bash, curl_log),
+                "FAKE_CURL_AUTH_LOG": bash_path(bash, curl_auth_log),
+                "FAKE_CURL_ARGV_SECRET_LOG": bash_path(bash, curl_argv_secret_log),
+                "FAKE_CURL_CONFIG_LOG": bash_path(bash, curl_config_log),
+                "FAKE_CHMOD_LOG": bash_path(bash, chmod_log),
                 "FAKE_SYSTEMCTL_LOG": bash_path(bash, systemctl_log),
+                "FAKE_BACKUP_TIMER_ENABLED": "0",
                 "FAKE_REAL_PYTHON": bash_path(bash, Path(sys.executable)),
                 "FAKE_PROBE_OK": "1" if probe_ok else "0",
+                "FAKE_PROBE_RESPONSE": VALID_GATEWAY_CAPABILITIES_RESPONSE,
                 "FAKE_MANAGER_STATE": manager_state,
                 "FAKE_COMFY_STATE": comfy_state,
                 "FAKE_MANAGER_FLIP": "1" if manager_flip else "0",
                 "FAKE_MANAGER_CALLS": bash_path(bash, root / "manager_calls"),
+                "FAKE_GATEWAY_CALLS": bash_path(bash, root / "gateway_calls"),
                 "MSYS": "winsymlinks:sys",
             }
         )
+        for key in ("HERMES_HUB_MANAGER_API_KEY", "HERMES_GPU_MANAGER_KEY", "HERMES_HUB_MANAGER_KEY_FILE"):
+            environment.pop(key, None)
         environment.pop("GH_TOKEN", None)
         environment.pop("GITHUB_TOKEN", None)
         return {
@@ -324,6 +496,10 @@ class GatewayScriptTests(unittest.TestCase):
             "bin_dir": bin_dir,
             "service_dir": config_dir / "systemd" / "user",
             "curl_log": curl_log,
+            "curl_auth_log": curl_auth_log,
+            "curl_argv_secret_log": curl_argv_secret_log,
+            "curl_config_log": curl_config_log,
+            "chmod_log": chmod_log,
             "systemctl_log": systemctl_log,
             "environment": environment,
         }
@@ -352,6 +528,41 @@ class GatewayScriptTests(unittest.TestCase):
             check=True,
         )
         return result.stdout.strip()
+
+    def _seed_previous_updater_release(self, bash, fixture) -> Path:
+        install_dir = Path(fixture["install_dir"])
+        old_version = "1.0.0"
+        old_release = install_dir / "releases" / f"{old_version}-existing"
+        old_release.mkdir(parents=True)
+        for name in UPDATER_REQUIRED_FILES:
+            shutil.copy2(SCRIPTS / name, old_release / name)
+        (old_release / "VERSION").write_text(f"{old_version}\n", encoding="utf-8", newline="\n")
+        (install_dir / "VERSION").write_text(f"{old_version}\n", encoding="utf-8", newline="\n")
+        subprocess.run(
+            [
+                bash,
+                "-c",
+                'ln -s "$1" "$2" && test -L "$2"',
+                "_",
+                bash_path(bash, old_release),
+                bash_path(bash, install_dir / "current"),
+            ],
+            env=fixture["environment"],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return old_release
+
+    @staticmethod
+    def _base_gateway_health_payload() -> dict[str, object]:
+        return {
+            "status": "ok",
+            "gateway_state": "running",
+            "active_agents": 0,
+            "gateway_busy": False,
+            "gateway_drainable": True,
+        }
 
     def test_release_selector_skips_app_only_latest_release(self):
         script = (SCRIPTS / "hermes-hub-linux-update.sh").read_text(encoding="utf-8")
@@ -557,6 +768,9 @@ class GatewayScriptTests(unittest.TestCase):
         runtime_block = patched[patched.index("# HERMES_HUB_SQLITE_SYNC_V1"):]
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            self.assertFalse(
+                (root / ".local/share/hermes-hub-gateway/current").exists()
+            )
             namespace = {
                 "__file__": str(root / "api_server.py"),
                 "os": os,
@@ -573,7 +787,9 @@ class GatewayScriptTests(unittest.TestCase):
                 os.environ,
                 {"HERMES_HUB_GATEWAY_PACKAGE": str(root / "missing-package")},
                 clear=False,
-            ), mock.patch("importlib.util.find_spec", return_value=None):
+            ), mock.patch("pathlib.Path.home", return_value=root), mock.patch(
+                "importlib.util.find_spec", return_value=None
+            ):
                 exec(compile(runtime_block, "<generated-runtime>", "exec"), namespace)
                 self.assertIsNone(namespace["_hermes_hub_gateway_runtime_store"]())
                 self.assertEqual(
@@ -937,6 +1153,93 @@ class GatewayScriptTests(unittest.TestCase):
             self.assertEqual(0, packaged_again.returncode, packaged_again.stdout + packaged_again.stderr)
             self.assertEqual(first_digest, hashlib.sha256(archive_path.read_bytes()).hexdigest())
 
+    def test_backup_installer_is_opt_in_and_updater_preserves_timer_state(self):
+        installer = (SCRIPTS / "install-hermes-hub-linux.sh").read_text(encoding="utf-8")
+        updater = (SCRIPTS / "hermes-hub-linux-update.sh").read_text(encoding="utf-8")
+        packager = (SCRIPTS / "package-linux-gateway.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("--enable-backup", installer)
+        self.assertIn("ENABLE_BACKUP=false", installer)
+        self.assertIn("require_file hermes-hub-backup.py", installer)
+        self.assertLess(installer.index("require_file hermes-hub-backup.timer"), installer.index('mkdir -p "$RELEASE_DIR"'))
+        for name in ("hermes-hub-backup.py", "hermes-hub-backup.service", "hermes-hub-backup.timer"):
+            self.assertIn(f'"$SCRIPT_DIR/{name}"', installer)
+            self.assertIn(f'"{name}"', packager)
+            self.assertIn(name, updater)
+        self.assertIn('if [ "$ENABLE_BACKUP" = "true" ]; then', installer)
+        self.assertIn("systemctl --user enable --now hermes-hub-backup.timer", installer)
+        self.assertIn('atomic_install "$RELEASE_DIR/hermes-hub-backup.py" "$BIN_DIR/hermes-hub-backup" 0755', installer)
+        self.assertNotIn('atomic_symlink "$INSTALL_DIR/current/hermes-hub-backup.py" "$BIN_DIR/hermes-hub-backup"', installer)
+
+        self.assertIn("[hermes-hub-backup.py]=0755", updater)
+        self.assertIn('atomic_install "$FINAL_RELEASE_DIR/hermes-hub-backup.py" "$BIN_DIR/hermes-hub-backup" 0755', updater)
+        self.assertNotIn('atomic_symlink "$INSTALL_DIR/current/hermes-hub-backup.py" "$BIN_DIR/hermes-hub-backup"', updater)
+        self.assertIn('atomic_install "$FINAL_RELEASE_DIR/hermes-hub-backup.service" "$SERVICE_DIR/hermes-hub-backup.service" 0644', updater)
+        self.assertIn('atomic_install "$FINAL_RELEASE_DIR/hermes-hub-backup.timer" "$SERVICE_DIR/hermes-hub-backup.timer" 0644', updater)
+        self.assertIn('"$BIN_DIR/hermes-hub-backup"', updater)
+        self.assertIn("BACKUP_TIMER_WAS_ENABLED=false", updater)
+        self.assertIn("systemctl --user is-enabled --quiet hermes-hub-backup.timer", updater)
+        self.assertIn("systemctl --user enable hermes-hub-backup.timer", updater)
+        self.assertNotIn("systemctl --user enable --now hermes-hub-backup.timer", updater)
+        self.assertLess(updater.index("is-enabled --quiet hermes-hub-backup.timer"), updater.index("TRANSACTION_ACTIVE=true"))
+        self.assertIn("BACKUP_BUNDLE_FILES", updater)
+        self.assertIn("incomplete backup bundle", updater.lower())
+
+    def test_updater_keeps_preexisting_backup_files_when_release_is_legacy(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        helper_contents = b"local backup helper\n"
+        service_contents = "local backup service\n"
+        timer_contents = "local backup timer\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(
+                Path(temporary),
+                bash,
+                probe_ok=True,
+                backup_bundle_files=(),
+                preexisting_backup_helper=helper_contents,
+            )
+            helper = Path(fixture["bin_dir"]) / "hermes-hub-backup"
+            service = Path(fixture["service_dir"]) / "hermes-hub-backup.service"
+            timer = Path(fixture["service_dir"]) / "hermes-hub-backup.timer"
+            service.parent.mkdir(parents=True, exist_ok=True)
+            service.write_text(service_contents, encoding="utf-8")
+            timer.write_text(timer_contents, encoding="utf-8")
+
+            result = self._run_updater(bash, fixture, "--no-restart")
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertTrue(helper.is_file())
+            self.assertFalse(helper.is_symlink())
+            self.assertEqual(helper_contents, helper.read_bytes())
+            self.assertEqual(service_contents, service.read_text(encoding="utf-8"))
+            self.assertEqual(timer_contents, timer.read_text(encoding="utf-8"))
+            systemctl_log = Path(fixture["systemctl_log"]).read_text(encoding="utf-8")
+            self.assertNotIn("enable hermes-hub-backup.timer", systemctl_log)
+
+    def test_updater_rejects_partial_backup_bundle(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        helper_contents = b"preexisting helper\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(
+                Path(temporary),
+                bash,
+                probe_ok=True,
+                backup_bundle_files=("hermes-hub-backup.py",),
+                preexisting_backup_helper=helper_contents,
+            )
+            helper = Path(fixture["bin_dir"]) / "hermes-hub-backup"
+
+            result = self._run_updater(bash, fixture, "--no-restart")
+
+            self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("incomplete backup bundle", result.stdout.lower() + result.stderr.lower())
+            self.assertEqual(helper_contents, helper.read_bytes())
+            self.assertFalse((Path(fixture["install_dir"]) / "VERSION").exists())
+
     def test_windows_packager_refuses_version_drift_before_build(self):
         powershell = find_powershell()
         if not powershell:
@@ -998,6 +1301,7 @@ class GatewayScriptTests(unittest.TestCase):
             self.skipTest("bash unavailable")
         with tempfile.TemporaryDirectory() as temporary:
             fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            fixture["environment"]["FAKE_BACKUP_TIMER_ENABLED"] = "1"
             result = self._run_updater(bash, fixture)
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
@@ -1012,16 +1316,73 @@ class GatewayScriptTests(unittest.TestCase):
                 (SCRIPTS / "hermes-hub-linux.service").read_text(encoding="utf-8"),
                 (service_dir / "hermes-hub.service").read_text(encoding="utf-8"),
             )
+            backup_helper = Path(fixture["bin_dir"]) / "hermes-hub-backup"
+            self.assertTrue(backup_helper.is_file())
+            self.assertFalse(backup_helper.is_symlink())
+            self.assertEqual((SCRIPTS / "hermes-hub-backup.py").read_bytes(), backup_helper.read_bytes())
+            for unit in BACKUP_BUNDLE_FILES[1:]:
+                self.assertEqual((SCRIPTS / unit).read_bytes(), (service_dir / unit).read_bytes())
             launcher_target = self._readlink(bash, Path(fixture["home"]) / "hermes-hub-linux.sh", environment)
             self.assertEqual(f"{current_target}/hermes-hub-linux.sh", launcher_target)
             self.assertIn("https://probe.invalid/v1/capabilities", Path(fixture["curl_log"]).read_text(encoding="utf-8"))
             systemctl_log = Path(fixture["systemctl_log"]).read_text(encoding="utf-8")
             self.assertIn("--user daemon-reload", systemctl_log)
             self.assertIn("--user restart hermes-hub.service", systemctl_log)
+            self.assertIn("--user enable hermes-hub-backup.timer", systemctl_log)
+            self.assertNotIn("--user enable --now hermes-hub-backup.timer", systemctl_log)
+            self.assertNotIn("--user start hermes-hub-backup.timer", systemctl_log)
             self.assertIn(f"Installed: {version}", result.stdout)
             self.assertIn("Restarted and verified: hermes-hub.service", result.stdout)
 
-    def _write_busy_lease(self, home: Path, *, expired: bool = False) -> Path:
+    def test_updater_rejects_invalid_capabilities_and_rolls_back_release(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        valid = json.loads(VALID_GATEWAY_CAPABILITIES_RESPONSE)
+        wrong_object = {**valid, "object": "unexpected"}
+        wrong_auth = {**valid, "auth": {"type": [], "required": "true"}}
+        wrong_features = {**valid, "features": {**valid["features"], "hermes_native": "true"}}
+        wrong_endpoints = {**valid, "endpoints": {**valid["endpoints"], "chat_completions": []}}
+        cases = (
+            ("empty object", {}),
+            ("wrong object marker", wrong_object),
+            ("wrong auth types", wrong_auth),
+            ("wrong feature type", wrong_features),
+            ("wrong endpoint type", wrong_endpoints),
+        )
+
+        for label, payload in cases:
+            with self.subTest(schema=label), tempfile.TemporaryDirectory() as temporary:
+                fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+                fixture["environment"]["FAKE_PROBE_RESPONSE"] = json.dumps(payload)
+                old_release = self._seed_previous_updater_release(bash, fixture)
+                install_dir = Path(fixture["install_dir"])
+                service_dir = Path(fixture["service_dir"])
+                service_dir.mkdir(parents=True, exist_ok=True)
+                old_unit = "old gateway unit sentinel\n"
+                (service_dir / "hermes-hub.service").write_text(old_unit, encoding="utf-8")
+
+                result = self._run_updater(bash, fixture)
+
+                self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertIn("gateway readiness probe failed", result.stderr)
+                self.assertEqual("1.0.0", (install_dir / "VERSION").read_text(encoding="utf-8").strip())
+                self.assertEqual(old_release.resolve(), Path(self._readlink(
+                    bash, install_dir / "current", fixture["environment"]
+                )))
+                self.assertEqual(old_unit, (service_dir / "hermes-hub.service").read_text(encoding="utf-8"))
+                self.assertEqual(
+                    f'{fixture["version"]}|{fixture["asset_digest"]}',
+                    (install_dir / "failed-release").read_text(encoding="utf-8").strip(),
+                )
+                restarts = Path(fixture["systemctl_log"]).read_text(encoding="utf-8").count(
+                    "--user restart hermes-hub.service"
+                )
+                self.assertGreaterEqual(restarts, 2)
+
+    def _write_busy_lease(
+        self, home: Path, *, expired: bool = False, expires_in: float = 3600
+    ) -> Path:
         lease_dir = Path(home) / ".hermes"
         lease_dir.mkdir(parents=True, exist_ok=True)
         lease = lease_dir / "hub_busy.lock"
@@ -1030,7 +1391,7 @@ class GatewayScriptTests(unittest.TestCase):
                 {
                     "owner": "test-agent",
                     "task": "long journey task",
-                    "expires_at": time.time() - 60 if expired else time.time() + 3600,
+                    "expires_at": time.time() - 60 if expired else time.time() + expires_in,
                 }
             ),
             encoding="utf-8",
@@ -1052,6 +1413,345 @@ class GatewayScriptTests(unittest.TestCase):
         if releases.is_dir():
             self.assertFalse(any(path.is_dir() for path in releases.iterdir()))
 
+    def _curl_auth_records(self, fixture):
+        return [
+            line.split("|")
+            for line in Path(fixture["curl_auth_log"]).read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+
+    def _assert_paths_absent_in_bash(self, bash, fixture, paths):
+        result = subprocess.run(
+            [bash, "-c", 'for path in "$@"; do [ ! -e "$path" ] || exit 1; done', "_", *paths],
+            env=fixture["environment"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def _require_owner_only_key_file_mode(self, bash, fixture, key_file):
+        result = subprocess.run(
+            [bash, "-c", 'stat -c %a -- "$1"', "_", bash_path(bash, key_file)],
+            env=fixture["environment"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        if result.stdout.strip() not in {"400", "600"}:
+            self.skipTest("filesystem does not preserve POSIX owner-only mode 0400/0600")
+
+    def test_updater_defers_on_manager_auth_rejection_without_fallback(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        for status in ("401", "403"):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as temporary:
+                fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+                environment = fixture["environment"]
+                environment["HERMES_HUB_MANAGER_API_KEY"] = "manager-test-key"
+                environment["FAKE_MANAGER_HTTP_STATUS"] = status
+                result = self._run_updater(bash, fixture)
+
+                self._assert_update_deferred(
+                    bash,
+                    fixture,
+                    result,
+                    reason_fragment=f"manager authentication rejected (HTTP {status})",
+                )
+                records = [
+                    row
+                    for row in self._curl_auth_records(fixture)
+                    if row[0].endswith("/status")
+                ]
+                self.assertEqual(1, len(records))
+                self.assertEqual("manager", records[0][1])
+                self.assertNotIn("integration-test-key", result.stdout + result.stderr)
+                self.assertNotIn("manager-test-key", result.stdout + result.stderr)
+
+    def test_updater_uses_distinct_manager_and_gateway_keys_for_both_gates_and_probe(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            environment = fixture["environment"]
+            environment["HERMES_HUB_MANAGER_API_KEY"] = "manager-test-key"
+            result = self._run_updater(bash, fixture)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+            records = self._curl_auth_records(fixture)
+            manager_records = [row for row in records if row[0].endswith("/status")]
+            probe_records = [row for row in records if row[0] == environment["HERMES_HUB_UPDATE_PROBE_URL"]]
+            self.assertEqual(2, len(manager_records), records)
+            self.assertTrue(all(row[1] == "manager" and row[3] == "true" for row in manager_records), records)
+            self.assertEqual(1, len(probe_records), records)
+            self.assertEqual("gateway", probe_records[0][1])
+            self.assertEqual("true", probe_records[0][3])
+            self.assertTrue(
+                all(line == "false" for line in Path(fixture["curl_argv_secret_log"]).read_text().splitlines())
+            )
+            outputs = result.stdout + result.stderr
+            all_logs = "\n".join(
+                Path(fixture[name]).read_text(encoding="utf-8")
+                for name in ("curl_log", "curl_auth_log", "curl_argv_secret_log", "curl_config_log")
+            )
+            for secret in ("integration-test-key", "manager-test-key"):
+                self.assertNotIn(secret, outputs + all_logs)
+            config_paths = Path(fixture["curl_config_log"]).read_text().splitlines()
+            chmod_calls = Path(fixture["chmod_log"]).read_text().splitlines()
+            for config_path in config_paths:
+                self.assertIn(f"600|{config_path}", chmod_calls)
+            self._assert_paths_absent_in_bash(bash, fixture, config_paths)
+
+    def test_updater_reads_manager_key_from_env_file_before_legacy_gateway_fallback(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            hermes_home = Path(fixture["home"]) / ".hermes"
+            hermes_home.mkdir()
+            (hermes_home / ".env").write_text(
+                "HERMES_GPU_MANAGER_KEY=manager-test-key\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            result = self._run_updater(bash, fixture)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            records = self._curl_auth_records(fixture)
+            manager_records = [row for row in records if row[0].endswith("/status")]
+            self.assertEqual(2, len(manager_records), records)
+            self.assertTrue(all(row[1] == "manager" for row in manager_records), records)
+
+    def test_updater_uses_gateway_key_only_when_manager_key_is_unconfigured(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            result = self._run_updater(bash, fixture)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            manager_records = [row for row in self._curl_auth_records(fixture) if row[0].endswith("/status")]
+            self.assertEqual(2, len(manager_records), manager_records)
+            self.assertTrue(all(row[1] == "gateway" for row in manager_records), manager_records)
+
+    def test_updater_defers_when_manager_and_gateway_keys_are_missing(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            environment = fixture["environment"]
+            for key in (
+                "HERMES_HUB_API_KEY",
+                "HERMES_API_KEY",
+                "HERMES_GATEWAY_API_KEY",
+                "API_SERVER_KEY",
+                "HERMESAPIKEY",
+            ):
+                environment.pop(key, None)
+            result = self._run_updater(bash, fixture)
+            self._assert_update_deferred(
+                bash,
+                fixture,
+                result,
+                reason_fragment="no API key available for gateway health check",
+            )
+            self.assertFalse(self._curl_auth_records(fixture))
+
+    def test_updater_rejects_malformed_explicit_manager_keys_without_fallback(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        malformed_keys = (
+            'manager"key\nurl = https://evil.invalid/status',
+            "manager-key\r\nurl = https://evil.invalid/status",
+            "manager\\key",
+        )
+        for malformed_key in malformed_keys:
+            with self.subTest(malformed_key=repr(malformed_key)), tempfile.TemporaryDirectory() as temporary:
+                fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+                fixture["environment"]["HERMES_HUB_MANAGER_API_KEY"] = malformed_key
+                result = self._run_updater(bash, fixture)
+                self._assert_update_deferred(
+                    bash,
+                    fixture,
+                    result,
+                    reason_fragment="manager API key configuration invalid",
+                )
+                records = self._curl_auth_records(fixture)
+                self.assertFalse([row for row in records if row[0].endswith("/status")])
+                self.assertTrue(all(row[1] == "gateway" for row in records), records)
+                logs = Path(fixture["curl_log"]).read_text(encoding="utf-8")
+                self.assertNotIn("evil.invalid", logs)
+                self.assertNotIn(malformed_key, result.stdout + result.stderr)
+                self.assertNotIn("integration-test-key", result.stdout + result.stderr)
+
+    def test_updater_accepts_owner_only_manager_key_file_and_cleans_curl_config(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            key_file = Path(temporary) / "manager.key"
+            key_file.write_text("manager-test-key", encoding="ascii", newline="")
+            os.chmod(key_file, 0o600)
+            self._require_owner_only_key_file_mode(bash, fixture, key_file)
+            key_file_bash_path = bash_path(bash, key_file)
+            fixture["environment"]["HERMES_HUB_MANAGER_KEY_FILE"] = key_file_bash_path
+            result = self._run_updater(bash, fixture)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            manager_records = [row for row in self._curl_auth_records(fixture) if row[0].endswith("/status")]
+            self.assertEqual(2, len(manager_records), manager_records)
+            self.assertTrue(all(row[1] == "manager" and row[3] == "true" for row in manager_records), manager_records)
+            config_paths = Path(fixture["curl_config_log"]).read_text().splitlines()
+            chmod_calls = Path(fixture["chmod_log"]).read_text().splitlines()
+            for config_path in config_paths:
+                self.assertIn(f"600|{config_path}", chmod_calls)
+            self._assert_paths_absent_in_bash(bash, fixture, config_paths)
+
+    def test_updater_rejects_unsafe_manager_key_files(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            key_file = Path(temporary) / "manager.key"
+            key_file.write_text("manager-test-key", encoding="ascii", newline="")
+            key_file_bash_path = bash_path(bash, key_file)
+            fixture["environment"]["HERMES_HUB_MANAGER_KEY_FILE"] = key_file_bash_path
+            mode_result = subprocess.run(
+                [bash, "-c", 'stat -c %a -- "$1"', "_", key_file_bash_path],
+                env=fixture["environment"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, mode_result.returncode, mode_result.stdout + mode_result.stderr)
+            if mode_result.stdout.strip() != "644":
+                self.skipTest("filesystem does not preserve POSIX mode 0644 for unsafe-file test")
+            result = self._run_updater(bash, fixture)
+            self._assert_update_deferred(
+                bash,
+                fixture,
+                result,
+                reason_fragment="manager API key configuration invalid",
+            )
+            records = self._curl_auth_records(fixture)
+            self.assertFalse([row for row in records if row[0].endswith("/status")])
+            self.assertTrue(all(row[1] == "gateway" for row in records), records)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            missing_key_file = bash_path(bash, Path(temporary) / "missing-manager.key")
+            fixture["environment"]["HERMES_HUB_MANAGER_KEY_FILE"] = missing_key_file
+            fixture["environment"]["FAKE_MANAGER_KEY_FILE"] = missing_key_file
+            result = self._run_updater(bash, fixture)
+            self._assert_update_deferred(
+                bash,
+                fixture,
+                result,
+                reason_fragment="manager API key configuration invalid",
+            )
+            records = self._curl_auth_records(fixture)
+            self.assertFalse([row for row in records if row[0].endswith("/status")])
+            self.assertTrue(all(row[1] == "gateway" for row in records), records)
+
+    def test_updater_rejects_symlink_manager_key_file(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            target = Path(temporary) / "manager-real.key"
+            target.write_text("manager-test-key", encoding="ascii", newline="")
+            os.chmod(target, 0o600)
+            self._require_owner_only_key_file_mode(bash, fixture, target)
+            link = Path(temporary) / "manager-link.key"
+            try:
+                link.symlink_to(target)
+            except OSError as error:
+                self.skipTest(f"symlink unavailable: {error}")
+            link_bash_path = bash_path(bash, link)
+            fixture["environment"]["HERMES_HUB_MANAGER_KEY_FILE"] = link_bash_path
+            result = self._run_updater(bash, fixture)
+            self._assert_update_deferred(
+                bash,
+                fixture,
+                result,
+                reason_fragment="manager API key configuration invalid",
+            )
+            records = self._curl_auth_records(fixture)
+            self.assertFalse([row for row in records if row[0].endswith("/status")])
+            self.assertTrue(all(row[1] == "gateway" for row in records), records)
+
+    def test_updater_rejects_manager_key_file_owned_by_another_user(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        owner_result = subprocess.run([bash, "-c", "id -u"], text=True, capture_output=True, check=True)
+        foreign_owner = "1" if owner_result.stdout.strip() == "0" else "0"
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            key_file = Path(temporary) / "manager.key"
+            key_file.write_text("manager-test-key", encoding="ascii", newline="")
+            os.chmod(key_file, 0o600)
+            self._require_owner_only_key_file_mode(bash, fixture, key_file)
+            key_file_bash_path = bash_path(bash, key_file)
+            fixture["environment"]["HERMES_HUB_MANAGER_KEY_FILE"] = key_file_bash_path
+            fixture["environment"]["FAKE_MANAGER_KEY_FILE"] = key_file_bash_path
+            fixture["environment"]["FAKE_MANAGER_KEY_FILE_OWNER"] = foreign_owner
+            result = self._run_updater(bash, fixture)
+            self._assert_update_deferred(
+                bash,
+                fixture,
+                result,
+                reason_fragment="manager API key configuration invalid",
+            )
+            records = self._curl_auth_records(fixture)
+            self.assertFalse([row for row in records if row[0].endswith("/status")])
+            self.assertTrue(all(row[1] == "gateway" for row in records), records)
+
+    def test_updater_defers_on_invalid_manager_status_schema(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        for manager_state in ("invalid_schema", "unknown", "malformed_json"):
+            with self.subTest(manager_state=manager_state), tempfile.TemporaryDirectory() as temporary:
+                fixture = self._prepare_updater_fixture(
+                    Path(temporary),
+                    bash,
+                    probe_ok=True,
+                    manager_state=manager_state,
+                )
+                fixture["environment"]["HERMES_HUB_MANAGER_API_KEY"] = "manager-test-key"
+                result = self._run_updater(bash, fixture)
+                self._assert_update_deferred(
+                    bash,
+                    fixture,
+                    result,
+                    reason_fragment="manager status unreadable",
+                )
+
+    def test_updater_keeps_manager_network_errors_distinct_from_auth_rejection(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True, manager_state="down")
+            fixture["environment"]["HERMES_HUB_MANAGER_API_KEY"] = "manager-test-key"
+            result = self._run_updater(bash, fixture)
+            self._assert_update_deferred(bash, fixture, result, reason_fragment="manager unreachable")
+            records = [
+                row
+                for row in self._curl_auth_records(fixture)
+                if row[0].endswith("/status")
+            ]
+            self.assertEqual(1, len(records))
+            self.assertEqual("manager", records[0][1])
+
     def test_updater_defers_restart_while_busy_lease_active(self):
         bash = find_bash()
         if not bash:
@@ -1061,6 +1761,224 @@ class GatewayScriptTests(unittest.TestCase):
             self._write_busy_lease(Path(fixture["home"]))
             result = self._run_updater(bash, fixture)
             self._assert_update_deferred(bash, fixture, result, reason_fragment="test-agent")
+
+    def test_updater_keeps_a_lease_that_expires_in_fifteen_seconds_busy(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            self._write_busy_lease(Path(fixture["home"]), expires_in=15)
+            result = self._run_updater(bash, fixture)
+            self._assert_update_deferred(bash, fixture, result, reason_fragment="test-agent")
+
+    def test_updater_uses_distinct_gateway_and_manager_credentials_for_both_gates(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            fixture["environment"]["HERMES_HUB_MANAGER_API_KEY"] = "manager-test-key"
+            result = self._run_updater(bash, fixture)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            records = self._curl_auth_records(fixture)
+            gateway = [row for row in records if row[0].endswith("/health/detailed")]
+            manager = [row for row in records if row[0].endswith("/status")]
+            self.assertEqual(2, len(gateway), records)
+            self.assertTrue(all(row[1] == "gateway" for row in gateway), gateway)
+            self.assertEqual(2, len(manager), records)
+            self.assertTrue(all(row[1] == "manager" for row in manager), manager)
+            urls = Path(fixture["curl_log"]).read_text(encoding="utf-8").splitlines()
+            self.assertEqual(2, sum(url.endswith("/health/detailed") for url in urls), urls)
+            self.assertFalse(any(url.endswith("/health") for url in urls), urls)
+
+    def test_updater_defers_for_active_or_unknown_gateway_health(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        cases = (
+            ("active_agents", "active agent", "200"),
+            ("active_runs", "active run", "200"),
+            ("busy", "busy", "200"),
+            ("not_drainable", "drainable", "200"),
+            ("wrong_type", "gateway health unreadable", "200"),
+            ("missing", "gateway health unreadable", "200"),
+            ("invalid_json", "gateway health unreadable", "200"),
+            ("not_running", "gateway state", "200"),
+            ("idle", "gateway health unavailable (HTTP 404)", "404"),
+            ("idle", "gateway authentication rejected (HTTP 401)", "401"),
+        )
+        for gateway_state, reason, http_status in cases:
+            with self.subTest(gateway_state=gateway_state, http_status=http_status), tempfile.TemporaryDirectory() as temporary:
+                fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+                fixture["environment"]["FAKE_GATEWAY_STATE"] = gateway_state
+                fixture["environment"]["FAKE_GATEWAY_HTTP_STATUS"] = http_status
+                result = self._run_updater(bash, fixture)
+                self._assert_update_deferred(bash, fixture, result, reason_fragment=reason)
+
+    def test_updater_accepts_legacy_0a62610f1_idle_gateway_health(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            health = self._base_gateway_health_payload()
+            health["readiness"] = {
+                "status": "ok",
+                "checks": {
+                    "background_queues": {
+                        "active_api_runs": 0,
+                        "process_completions": 0,
+                        "active_delegations": 0,
+                    }
+                },
+            }
+            fixture["environment"]["FAKE_GATEWAY_RESPONSE"] = json.dumps(health)
+
+            result = self._run_updater(bash, fixture)
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn(f"Installed: {fixture['version']}", result.stdout)
+            self.assertIn("--user restart hermes-hub.service", Path(fixture["systemctl_log"]).read_text(encoding="utf-8"))
+
+    def test_updater_accepts_modern_idle_gateway_health_without_optional_queues(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            health = self._base_gateway_health_payload()
+            health["api_server"] = {"active_runs": 0}
+            health["readiness"] = {"status": "ok"}
+            fixture["environment"]["FAKE_GATEWAY_RESPONSE"] = json.dumps(health)
+
+            result = self._run_updater(bash, fixture)
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn(f"Installed: {fixture['version']}", result.stdout)
+
+    def test_updater_defers_for_legacy_missing_partial_or_unready_health(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        cases = (
+            ("no_readiness", None, "gateway health unreadable"),
+            ("no_readiness_status", {"checks": {}}, "gateway health unreadable"),
+            (
+                "partial_background_queues",
+                {
+                    "status": "ok",
+                    "checks": {"background_queues": {"active_api_runs": 0, "process_completions": 0}},
+                },
+                "gateway health unreadable",
+            ),
+            ("no_background_queues", {"status": "ok", "checks": {}}, "gateway health unreadable"),
+            (
+                "readiness_not_ok",
+                {
+                    "status": "starting",
+                    "checks": {
+                        "background_queues": {
+                            "active_api_runs": 0,
+                            "process_completions": 0,
+                            "active_delegations": 0,
+                        }
+                    },
+                },
+                "gateway readiness",
+            ),
+        )
+        for case, readiness, reason in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+                health = self._base_gateway_health_payload()
+                if readiness is not None:
+                    health["readiness"] = readiness
+                if case == "readiness_not_ok":
+                    health["api_server"] = {"active_runs": 0}
+                fixture["environment"]["FAKE_GATEWAY_RESPONSE"] = json.dumps(health)
+                result = self._run_updater(bash, fixture)
+                self._assert_update_deferred(bash, fixture, result, reason_fragment=reason)
+
+    def test_updater_defers_for_legacy_nonzero_background_queue_counters(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            health = self._base_gateway_health_payload()
+            health["readiness"] = {
+                "status": "ok",
+                "checks": {
+                    "background_queues": {
+                        "active_api_runs": 0,
+                        "process_completions": 1,
+                        "active_delegations": 0,
+                    }
+                },
+            }
+            fixture["environment"]["FAKE_GATEWAY_RESPONSE"] = json.dumps(health)
+
+            result = self._run_updater(bash, fixture)
+
+            self._assert_update_deferred(bash, fixture, result, reason_fragment="background")
+
+    def test_updater_defers_for_malformed_optional_background_queue_counters(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        queue_cases = (
+            ("wrong_type", []),
+            ("missing_counter", {"active_api_runs": 0, "process_completions": 0}),
+            ("invalid_counter", {"active_api_runs": 0, "process_completions": "0", "active_delegations": 0}),
+            ("negative_counter", {"active_api_runs": 0, "process_completions": 0, "active_delegations": -1}),
+            ("nonzero_counter", {"active_api_runs": 0, "process_completions": 0, "active_delegations": 1}),
+        )
+        for schema in ("legacy", "modern"):
+            for case, queues in queue_cases:
+                with self.subTest(schema=schema, case=case), tempfile.TemporaryDirectory() as temporary:
+                    fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+                    health = self._base_gateway_health_payload()
+                    if schema == "modern":
+                        health["api_server"] = {"active_runs": 0}
+                    health["readiness"] = {"status": "ok", "checks": {"background_queues": queues}}
+                    fixture["environment"]["FAKE_GATEWAY_RESPONSE"] = json.dumps(health)
+                    result = self._run_updater(bash, fixture)
+                    reason = "background" if case == "nonzero_counter" else "gateway health unreadable"
+                    self._assert_update_deferred(bash, fixture, result, reason_fragment=reason)
+
+    def test_updater_defers_for_invalid_modern_active_run_counters(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        cases = (
+            ("missing", {}),
+            ("bool", {"active_runs": False}),
+            ("negative", {"active_runs": -1}),
+        )
+        for case, api_server in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+                health = self._base_gateway_health_payload()
+                health["api_server"] = api_server
+                health["readiness"] = {"status": "ok"}
+                fixture["environment"]["FAKE_GATEWAY_RESPONSE"] = json.dumps(health)
+                result = self._run_updater(bash, fixture)
+                self._assert_update_deferred(bash, fixture, result, reason_fragment="gateway health unreadable")
+
+    def test_updater_final_gate_rechecks_gateway_api_active_runs(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            fixture["environment"]["FAKE_GATEWAY_FLIP"] = "1"
+            result = self._run_updater(bash, fixture)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("aborted at final check", result.stderr)
+            self.assertIn("active run", result.stderr)
+            self.assertEqual("2", Path(temporary, "gateway_calls").read_text(encoding="utf-8"))
+            self.assertNotIn("restart hermes-hub.service", Path(fixture["systemctl_log"]).read_text(encoding="utf-8"))
 
     def test_updater_defers_restart_while_manager_queue_busy(self):
         bash = find_bash()
@@ -1135,6 +2053,190 @@ class GatewayScriptTests(unittest.TestCase):
             self.assertIn(f"Installed: {fixture['version']}", result.stdout)
             self.assertFalse(pending.exists())
 
+    def test_updater_probe_failure_restores_preexisting_regular_managed_links(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        targets = (
+            ("launcher", "home", "hermes-hub-linux.sh"),
+            ("patcher", "home", "patch-hermes-gateway-native.py"),
+            ("updater-helper", "bin_dir", "hermes-hub-linux-update"),
+            ("agent-updater-helper", "bin_dir", "hermes-hub-agent-update"),
+            ("backup-helper", "bin_dir", "hermes-hub-backup"),
+            ("tailscale-wait-helper", "bin_dir", "hermes-wait-tailscale.sh"),
+            ("llama-wait-helper", "bin_dir", "hermes-wait-llama.sh"),
+            ("tailscale-wait-alias", "bin_dir", "hermes-wait-tailscale"),
+            ("llama-wait-alias", "bin_dir", "hermes-wait-llama"),
+            ("power-monitor-helper", "bin_dir", "hermes-power-monitor.sh"),
+            ("power-monitor-alias", "bin_dir", "hermes-power-monitor"),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=False)
+            old_release = self._seed_previous_updater_release(bash, fixture)
+            originals = {}
+            for label, directory_key, filename in targets:
+                target = Path(fixture[directory_key]) / filename
+                original = f"pre-existing {label} bytes\n".encode("utf-8")
+                target.write_bytes(original)
+                subprocess.run(
+                    [bash, "-c", 'chmod 751 -- "$1"', "_", bash_path(bash, target)],
+                    env=fixture["environment"],
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                original_mode = None
+                if os.name != "nt":
+                    original_mode = subprocess.run(
+                        [bash, "-c", 'stat -c "%a" -- "$1"', "_", bash_path(bash, target)],
+                        env=fixture["environment"],
+                        text=True,
+                        capture_output=True,
+                        check=True,
+                    ).stdout.strip()
+                    self.assertEqual("751", original_mode)
+                originals[label] = (target, hashlib.sha256(original).hexdigest(), original_mode)
+
+            result = self._run_updater(bash, fixture)
+
+            self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("gateway readiness probe failed", result.stderr)
+            for label, (target, expected_digest, original_mode) in originals.items():
+                with self.subTest(target=label):
+                    regular_file = subprocess.run(
+                        [bash, "-c", 'test -f "$1" && test ! -L "$1"', "_", bash_path(bash, target)],
+                        env=fixture["environment"],
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    self.assertEqual(0, regular_file.returncode, regular_file.stdout + regular_file.stderr)
+                    self.assertEqual(expected_digest, hashlib.sha256(target.read_bytes()).hexdigest())
+                    if original_mode is not None:
+                        mode = subprocess.run(
+                            [bash, "-c", 'stat -c "%a" -- "$1"', "_", bash_path(bash, target)],
+                            env=fixture["environment"],
+                            text=True,
+                            capture_output=True,
+                            check=True,
+                        ).stdout.strip()
+                        self.assertEqual(original_mode, mode)
+            self.assertEqual(
+                bash_path(bash, old_release),
+                self._readlink(bash, Path(fixture["install_dir"]) / "current", fixture["environment"]),
+            )
+
+    def test_updater_probe_failure_restores_old_relative_symlink_target(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=False)
+            old_release = self._seed_previous_updater_release(bash, fixture)
+            home = Path(fixture["home"])
+            link_path = home / "hermes-hub-linux.sh"
+            (home / "previous-launcher-target").write_text("old launcher", encoding="utf-8")
+            subprocess.run(
+                [bash, "-c", 'ln -s "$1" "$2"', "_", "previous-launcher-target", bash_path(bash, link_path)],
+                env=fixture["environment"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            result = self._run_updater(bash, fixture)
+
+            self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("gateway readiness probe failed", result.stderr)
+            is_symlink = subprocess.run(
+                [bash, "-c", 'test -L "$1"', "_", bash_path(bash, link_path)],
+                env=fixture["environment"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, is_symlink.returncode, result.stdout + result.stderr)
+            restored_target = subprocess.run(
+                [bash, "-c", 'readlink -- "$1"', "_", bash_path(bash, link_path)],
+                env=fixture["environment"],
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.rstrip("\n")
+            self.assertEqual("previous-launcher-target", restored_target)
+            self.assertEqual(
+                bash_path(bash, old_release),
+                self._readlink(bash, Path(fixture["install_dir"]) / "current", fixture["environment"]),
+            )
+
+    def test_updater_refuses_unsupported_managed_path_before_switching_release(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            old_release = self._seed_previous_updater_release(bash, fixture)
+            unsupported = Path(fixture["home"]) / "patch-hermes-gateway-native.py"
+            unsupported.mkdir()
+
+            result = self._run_updater(bash, fixture)
+
+            self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("unsupported managed path", result.stderr.lower())
+            self.assertTrue(unsupported.is_dir())
+            self.assertEqual(
+                bash_path(bash, old_release),
+                self._readlink(bash, Path(fixture["install_dir"]) / "current", fixture["environment"]),
+            )
+            self.assertNotIn("restart hermes-hub.service", Path(fixture["systemctl_log"]).read_text(encoding="utf-8"))
+
+    def test_updater_refuses_empty_managed_symlink_target_before_switch(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            old_release = self._seed_previous_updater_release(bash, fixture)
+            link_path = Path(fixture["home"]) / "hermes-hub-linux.sh"
+            target_file = Path(fixture["home"]) / "old-launcher-target"
+            target_file.write_text("old launcher", encoding="utf-8")
+            subprocess.run(
+                [bash, "-c", 'ln -s "$1" "$2"', "_", "old-launcher-target", bash_path(bash, link_path)],
+                env=fixture["environment"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            bash_env = Path(temporary) / "bash-env.sh"
+            with bash_env.open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write(
+                    "\nreadlink() {\n"
+                    '  if [ "${1:-}" = "-z" ] && [ "${3:-}" = "${FAKE_READLINK_EMPTY_PATH:-}" ]; then\n'
+                    "    printf '\\0'\n"
+                    "    return 0\n"
+                    "  fi\n"
+                    '  command readlink "$@"\n'
+                    "}\n"
+                )
+            fixture["environment"]["FAKE_READLINK_EMPTY_PATH"] = bash_path(bash, link_path)
+
+            result = self._run_updater(bash, fixture)
+
+            self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("empty managed symlink target", result.stderr.lower())
+            is_symlink = subprocess.run(
+                [bash, "-c", 'test -L "$1"', "_", bash_path(bash, link_path)],
+                env=fixture["environment"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, is_symlink.returncode, result.stdout + result.stderr)
+            self.assertEqual(
+                bash_path(bash, old_release),
+                self._readlink(bash, Path(fixture["install_dir"]) / "current", fixture["environment"]),
+            )
+
     def test_updater_probe_failure_rolls_back_current_version_and_units(self):
         bash = find_bash()
         if not bash:
@@ -1158,6 +2260,8 @@ class GatewayScriptTests(unittest.TestCase):
                     "hermes-hub.service",
                     "hermes-hub-linux-update.service",
                     "hermes-hub-linux-update.timer",
+                    "hermes-hub-backup.service",
+                    "hermes-hub-backup.timer",
                     "hermes-power-monitor.service",
                 )
             }
@@ -1177,6 +2281,21 @@ class GatewayScriptTests(unittest.TestCase):
                 capture_output=True,
                 check=True,
             )
+            backup_helper = Path(fixture["bin_dir"]) / "hermes-hub-backup"
+            subprocess.run(
+                [
+                    bash,
+                    "-c",
+                    'ln -s "$1" "$2" && test -L "$2"',
+                    "_",
+                    bash_path(bash, install_dir / "current" / "hermes-hub-backup.py"),
+                    bash_path(bash, backup_helper),
+                ],
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
 
             result = self._run_updater(bash, fixture)
             self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
@@ -1189,6 +2308,35 @@ class GatewayScriptTests(unittest.TestCase):
             )
             for name, content in old_units.items():
                 self.assertEqual(content, (service_dir / name).read_text(encoding="utf-8"))
+            self.assertTrue(backup_helper.is_file())
+            self.assertFalse(backup_helper.is_symlink())
+            self.assertEqual((old_release / "hermes-hub-backup.py").read_bytes(), backup_helper.read_bytes())
+            managed_links = (
+                Path(fixture["home"]) / "hermes-hub-linux.sh",
+                Path(fixture["home"]) / "patch-hermes-gateway-native.py",
+                Path(fixture["bin_dir"]) / "hermes-hub-linux-update",
+                Path(fixture["bin_dir"]) / "hermes-hub-agent-update",
+                Path(fixture["bin_dir"]) / "hermes-wait-tailscale.sh",
+                Path(fixture["bin_dir"]) / "hermes-wait-llama.sh",
+                Path(fixture["bin_dir"]) / "hermes-wait-tailscale",
+                Path(fixture["bin_dir"]) / "hermes-wait-llama",
+                Path(fixture["bin_dir"]) / "hermes-power-monitor.sh",
+                Path(fixture["bin_dir"]) / "hermes-power-monitor",
+            )
+            missing_links = subprocess.run(
+                [
+                    bash,
+                    "-c",
+                    'for path in "$@"; do [ ! -e "$path" ] && [ ! -L "$path" ] || exit 1; done',
+                    "_",
+                    *(bash_path(bash, link) for link in managed_links),
+                ],
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, missing_links.returncode, missing_links.stdout + missing_links.stderr)
             self.assertFalse(any(path.name.startswith(f'{fixture["version"]}-') for path in (install_dir / "releases").iterdir()))
             systemctl_log = Path(fixture["systemctl_log"]).read_text(encoding="utf-8")
             self.assertGreaterEqual(systemctl_log.count("--user restart hermes-hub.service"), 2)
@@ -1291,6 +2439,7 @@ class GatewayScriptTests(unittest.TestCase):
             ):
                 environment.pop(key, None)
             environment["HERMES_HOME"] = bash_path(bash, hermes_home)
+            environment["HERMES_NATIVE_GATEWAY_PATCH"] = "false"
             command = auth_preamble + "\nprintf '%s|%s|%s' \"$API_SERVER_KEY\" \"$HERMES_HUB_API_KEY\" \"$HERMES_GATEWAY_API_KEY\""
             result = subprocess.run(
                 [bash, "-c", command],
@@ -1324,6 +2473,7 @@ class GatewayScriptTests(unittest.TestCase):
             ):
                 environment.pop(key, None)
             environment["HERMES_HOME"] = bash_path(bash, hermes_home)
+            environment["HERMES_NATIVE_GATEWAY_PATCH"] = "false"
             command = auth_preamble + "\nprintf '%s|%s|%s' \"$API_SERVER_KEY\" \"$HERMES_API_KEY\" \"$HERMES_HUB_API_KEY\""
             result = subprocess.run(
                 [bash, "-c", command],
@@ -1986,6 +3136,185 @@ class GatewayScriptTests(unittest.TestCase):
         second_pass, second_changes = self.patcher._patch_modular_openai_routes(patched)
         self.assertEqual(patched, second_pass)
         self.assertEqual([], second_changes)
+
+
+class GatewayLauncherSelectionTests(unittest.TestCase):
+    def _launcher_fixture(self, root: Path, bash: str):
+        home = root / "home"
+        hermes_home = home / ".hermes"
+        default_bin = home / ".local" / "bin"
+        spaced_bin = root / "custom bin with spaces"
+        default_bin.mkdir(parents=True)
+        spaced_bin.mkdir(parents=True)
+        log = root / "hermes-calls.log"
+        arguments = root / "hermes-arguments.txt"
+        bash_env = root / "launcher-bash-env.sh"
+        bash_env.write_text(
+            'python3() { "$FAKE_REAL_PYTHON" "$@"; }\n',
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        def write_hermes(path: Path):
+            path.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf '%s\\n' \"$*\" >> \"$HERMES_STUB_LOG\"\n"
+                "if [ \"$#\" -eq 1 ] && [ \"$1\" = \"--version\" ]; then\n"
+                "  printf 'Hermes Stub 9.9\\n'\n"
+                "  exit 0\n"
+                "fi\n"
+                "printf '%s\\n' \"$@\" > \"$HERMES_STUB_ARGUMENTS\"\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            path.chmod(0o755)
+            subprocess.run(
+                [bash, "-c", 'chmod +x -- "$1"', "_", bash_path(bash, path)],
+                check=True,
+                capture_output=True,
+            )
+
+        default_hermes = default_bin / "hermes"
+        custom_hermes = spaced_bin / "hermes cli"
+        write_hermes(default_hermes)
+        write_hermes(custom_hermes)
+
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "HOME": bash_path(bash, home),
+                "HERMES_HOME": bash_path(bash, hermes_home),
+                "HERMES_TERMINAL_CWD": bash_path(bash, root),
+                "HERMES_STUB_LOG": bash_path(bash, log),
+                "HERMES_STUB_ARGUMENTS": bash_path(bash, arguments),
+                "BASH_ENV": bash_path(bash, bash_env),
+                "FAKE_REAL_PYTHON": bash_path(bash, Path(sys.executable)),
+                "PATH": bash_path(bash, default_bin) + ":/usr/local/bin:/usr/bin:/bin",
+                "API_SERVER_KEY": "launcher-test-key",
+                "HERMES_INFERENCE_MODEL": "launcher-test-model",
+                "HERMES_NATIVE_GATEWAY_PATCH": "false",
+                "HERMES_WAIT_ON_START": "false",
+                "HERMES_KOKORO_PRELOAD": "0",
+                "HERMES_KOKORO_PRELOAD_REQUIRED": "0",
+                "HERMES_KOKORO_REQUIRE_GPU": "0",
+                "HERMES_WHISPER_PRELOAD": "0",
+                "HERMES_WHISPER_PRELOAD_REQUIRED": "0",
+                "HERMES_HUB_AGENT_ROOT": bash_path(bash, hermes_home / "hermes-agent"),
+                "MSYS": "winsymlinks:sys",
+            }
+        )
+        environment.pop("HERMES_HUB_GATEWAY_HERMES_BIN", None)
+        environment.pop("HERMES_HUB_NATIVE_PATCHER", None)
+        return {
+            "home": home,
+            "hermes_home": hermes_home,
+            "default_hermes": default_hermes,
+            "custom_hermes": custom_hermes,
+            "log": log,
+            "arguments": arguments,
+            "environment": environment,
+        }
+
+    def _run_launcher(self, bash: str, fixture):
+        return subprocess.run(
+            [bash, bash_path(bash, SCRIPTS / "hermes-hub-linux.sh")],
+            env=fixture["environment"],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            check=False,
+        )
+
+    def test_launcher_uses_default_hermes_binary_for_version_and_exec(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._launcher_fixture(Path(temporary), bash)
+            result = self._run_launcher(bash, fixture)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(
+                ["--version", "gateway run --replace"],
+                Path(fixture["log"]).read_text(encoding="utf-8").splitlines(),
+            )
+            self.assertEqual(
+                ["gateway", "run", "--replace"],
+                Path(fixture["arguments"]).read_text(encoding="utf-8").splitlines(),
+            )
+            runtime = json.loads((Path(fixture["hermes_home"]) / "hub_gateway_runtime.json").read_text(encoding="utf-8"))
+            self.assertEqual("Hermes Stub 9.9", runtime["agent_version"])
+
+    def test_launcher_uses_explicit_hermes_binary_without_word_splitting(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._launcher_fixture(Path(temporary), bash)
+            fixture["environment"]["HERMES_HUB_GATEWAY_HERMES_BIN"] = bash_path(bash, fixture["custom_hermes"])
+            result = self._run_launcher(bash, fixture)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(
+                ["--version", "gateway run --replace"],
+                Path(fixture["log"]).read_text(encoding="utf-8").splitlines(),
+            )
+            self.assertTrue(fixture["default_hermes"].is_file())
+
+    def test_launcher_rejects_invalid_explicit_hermes_binary_without_fallback(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._launcher_fixture(Path(temporary), bash)
+            invalid = Path(temporary) / "not executable"
+            invalid.write_text("not a binary", encoding="utf-8")
+            invalid.chmod(0o644)
+            subprocess.run(
+                [bash, "-c", 'chmod 644 -- "$1"', "_", bash_path(bash, invalid)],
+                check=True,
+                capture_output=True,
+            )
+            fixture["environment"]["HERMES_HUB_GATEWAY_HERMES_BIN"] = bash_path(bash, invalid)
+            result = self._run_launcher(bash, fixture)
+            self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("HERMES_HUB_GATEWAY_HERMES_BIN", result.stderr)
+            self.assertFalse(Path(fixture["log"]).exists())
+            self.assertFalse(Path(fixture["hermes_home"]).exists())
+
+    def test_launcher_accepts_native_patcher_override_as_one_regular_file(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._launcher_fixture(Path(temporary), bash)
+            marker = Path(temporary) / "custom patcher invoked"
+            patcher = Path(temporary) / "patcher dir" / "patcher.py"
+            patcher.parent.mkdir()
+            patcher.write_text(
+                "from pathlib import Path\n"
+                "import os\n"
+                f"Path({str(marker)!r}).write_text(os.environ['HERMES_HUB_GATEWAY_PACKAGE'], encoding='utf-8')\n",
+                encoding="utf-8",
+            )
+            fixture["environment"]["HERMES_NATIVE_GATEWAY_PATCH"] = "true"
+            fixture["environment"]["HERMES_HUB_NATIVE_PATCHER"] = bash_path(bash, patcher)
+            result = self._run_launcher(bash, fixture)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(SCRIPTS.resolve(), Path(marker.read_text(encoding="utf-8")).resolve())
+
+    def test_launcher_rejects_invalid_native_patcher_override_before_setup(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._launcher_fixture(Path(temporary), bash)
+            invalid = Path(temporary) / "missing patcher.py"
+            fixture["environment"]["HERMES_HUB_NATIVE_PATCHER"] = bash_path(bash, invalid)
+            result = self._run_launcher(bash, fixture)
+            self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("HERMES_HUB_NATIVE_PATCHER", result.stderr)
+            self.assertFalse(Path(fixture["log"]).exists())
+            self.assertFalse(Path(fixture["hermes_home"]).exists())
 
 
 if __name__ == "__main__":

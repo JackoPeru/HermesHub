@@ -8,10 +8,13 @@ internal fun hermesAuthRetryCandidates(apiKey: String?): List<String> {
     return candidates.toList()
 }
 
+@Suppress("UNUSED_PARAMETER")
 internal fun hermesAuthCandidates(apiKey: String?, allowCompatAuth: Boolean = true): List<String?> {
     val configured = apiKey?.trim()?.takeIf { it.isNotEmpty() }
-    if (!allowCompatAuth) return listOf(configured)
-    return (hermesAuthRetryCandidates(configured) + listOf(null)).distinct()
+    // Una credenziale configurata resta vincolata alla richiesta: 401 o errore
+    // di trasporto non autorizzano mai il retry anonimo. Senza chiave resta un
+    // solo tentativo anonimo per conservare la compatibilita' preesistente.
+    return hermesAuthRetryCandidates(configured).ifEmpty { listOf(null) }
 }
 
 /**
@@ -48,12 +51,11 @@ internal fun shouldRetryHermesWithBearerAuth(code: Int, body: String): Boolean {
 }
 
 /**
- * Fail-closed stretto: non ritentare con null dopo 401 con key.
- * - token nullo -> false (nessun altro candidato dopo il fallback anonimo).
- * - body con invalid_api_key/unauthorized e token presente -> false
- *   (chiave esplicitamente rifiutata: il fallback null e' inutile/dannoso).
- * Solo 401 generico con token valido consente il retry verso il candidato
- * successivo (compat anonimo su endpoint non-/p/).
+ * Classifica se il piano può proseguire dopo un 401 prima dell'accettazione.
+ * Token nullo o errore esplicito della chiave chiudono il retry. Un 401
+ * generico può proseguire verso un'altra route configurata, ma non aggiunge
+ * credenziali: hermesAuthCandidates mantiene la chiave configurata come unico
+ * candidato, quindi il retry non degrada all'anonimo.
  */
 internal fun shouldRetryHermesWithBearerAuth(code: Int, body: String, token: String?): Boolean {
     if (code != 401) return false

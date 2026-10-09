@@ -20,6 +20,25 @@ class BoundedIoTest {
     }
 
     @Test
+    fun boundedByteReadRejectsOversizedResponse() {
+        assertThrows(PayloadTooLargeException::class.java) {
+            ByteArrayInputStream(ByteArray(9)).readBytesBounded(8L)
+        }
+    }
+
+    @Test
+    fun sseEventBufferCapsAggregateUtf8PayloadAndClearsPartialData() {
+        val event = BoundedSseEventBuffer(maxBytes = 5)
+        event.appendDataLine("ab")
+        event.appendDataLine("é") // 2 UTF-8 bytes plus newline = 5 total.
+        assertEquals("ab\né", event.take())
+        event.appendDataLine("1234")
+        assertThrows(PayloadTooLargeException::class.java) { event.appendDataLine("x") }
+        event.clear()
+        assertEquals(null, event.take())
+    }
+
+    @Test
     fun boundedLineRejectsAnOversizedLineWithoutReadingItAll() {
         val source = Buffer().writeUtf8("abcdefghij\n")
         assertThrows(PayloadTooLargeException::class.java) {

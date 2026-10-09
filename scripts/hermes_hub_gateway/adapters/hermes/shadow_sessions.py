@@ -232,7 +232,8 @@ def build_shadow_conversations(
 
 def _read_marker(marker_path: str) -> float:
     try:
-        return float(open(marker_path, encoding="utf-8").read().strip() or 0)
+        with open(marker_path, encoding="utf-8") as marker_file:
+            return float(marker_file.read().strip() or 0)
     except Exception:
         return 0.0
 

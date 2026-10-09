@@ -1,0 +1,8 @@
+[Unit]
+Description=Hermes Hub and Agent SQLite backup
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/hermes-hub-backup --include-agent-state
+TimeoutStartSec=300
+UMask=0077

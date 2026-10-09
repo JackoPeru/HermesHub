@@ -1750,6 +1750,25 @@ def _hermes_hub_transcribe_file(path, beam_size=None):
     if count:
         changes.append("bounded unambiguous media lookup")
 
+    peer_helper = r'''def _hermes_hub_is_tailnet_peer(request: "web.Request") -> bool:
+    import ipaddress as _ipaddress
+
+    # Only the socket peer is trustworthy here; clients can set X-Forwarded-For.
+    raw = request.remote or ""
+    try:
+        ip = _ipaddress.ip_address(raw)
+    except Exception:
+        return False
+    return ip.is_loopback or ip in _ipaddress.ip_network("100.64.0.0/10")
+'''
+    text, peer_helper_count = re.subn(
+        r'(?ms)^def _hermes_hub_is_tailnet_peer\(request: "web.Request"\) -> bool:\n.*?(?=^def |\Z)',
+        lambda _: peer_helper.rstrip() + "\n\n",
+        text,
+    )
+    if peer_helper_count:
+        changes.append("direct-peer-only local network detection")
+
     cache_path = r'''def _hermes_hub_media_cache_path(source: "Path") -> "Path":
     import hashlib as _hashlib
     import re as _re
@@ -1909,13 +1928,10 @@ def _hermes_hub_transcribe_file(path, beam_size=None):
     media_handler = r'''    async def _handle_hub_media(self, request: "web.Request") -> "web.StreamResponse":
         auth_error = self._check_auth(request)
         if auth_error is not None:
-            if _hermes_hub_is_tailnet_peer(request):
-                auth_error = None
-            else:
-                media_token = request.query.get("hub_token") or request.query.get("api_key") or request.query.get("token")
-                accepted_api_keys = _hermes_hub_api_keys(self._api_key)
-                if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):
-                    return auth_error
+            media_token = request.query.get("hub_token") or request.query.get("api_key") or request.query.get("token")
+            accepted_api_keys = _hermes_hub_api_keys(self._api_key)
+            if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):
+                return auth_error
         media_id = request.match_info.get("media_id", "")
         loop = asyncio.get_running_loop()
         try:
@@ -1932,10 +1948,10 @@ def _hermes_hub_transcribe_file(path, beam_size=None):
                     loop.run_in_executor(_hermes_hub_transcode_executor(), _hermes_hub_transcode_mp4, path),
                     timeout=transcode_timeout,
                 )
-                return web.FileResponse(path, headers={"Content-Type": "video/mp4", "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600"})
+                return web.FileResponse(path, headers={"Content-Type": "video/mp4", "Accept-Ranges": "bytes", "Cache-Control": "private, no-store"})
             import mimetypes as _mimetypes
             mime = _mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-            return web.FileResponse(path, headers={"Content-Type": mime, "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600"})
+            return web.FileResponse(path, headers={"Content-Type": mime, "Accept-Ranges": "bytes", "Cache-Control": "private, no-store"})
         except asyncio.TimeoutError:
             return web.json_response({"error": "Media operation timed out"}, status=504)
         except Exception as exc:
@@ -5125,8 +5141,7 @@ def _patch_sqlite_sync_v1(text: str) -> tuple[str, list[str]]:
     packaged ``hermes_hub_gateway`` module.
     """
     changes: list[str] = []
-    if _SQLITE_SYNC_MARKER not in text:
-        runtime = r'''# HERMES_HUB_SQLITE_SYNC_V1
+    runtime = r'''# HERMES_HUB_SQLITE_SYNC_V1
 def _hermes_hub_gateway_runtime_store():
     """Load the packaged Hub runtime lazily so upstream import stays cheap."""
     global _hermes_hub_sqlite_runtime_store
@@ -5144,16 +5159,22 @@ def _hermes_hub_gateway_runtime_store():
         _Path.home() / ".local" / "share" / "hermes-hub-gateway" / "current",
         _Path(__file__).resolve().parent,
     ])
-    package_found = False
+    selected_candidate = None
     for root in roots:
-        candidates = [root, root / "scripts"]
-        for candidate in candidates:
+        for candidate in (root, root / "scripts"):
             if (candidate / "hermes_hub_gateway").is_dir():
-                package_found = True
-                if str(candidate) not in _sys.path:
-                    _sys.path.insert(0, str(candidate))
+                selected_candidate = candidate
+                break
+        if selected_candidate is not None:
+            break
 
-    if not package_found and _importlib_util.find_spec("hermes_hub_gateway") is None:
+    if selected_candidate is not None:
+        selected_path = str(selected_candidate)
+        if selected_path in _sys.path:
+            _sys.path.remove(selected_path)
+        _sys.path.insert(0, selected_path)
+
+    if selected_candidate is None and _importlib_util.find_spec("hermes_hub_gateway") is None:
         # Legacy-install compatibility: no modular package shipped yet.
         _hermes_hub_sqlite_runtime_store = None
         return None
@@ -5299,8 +5320,24 @@ def _hermes_hub_conversation_event_payload(reason, result=None):
         return base
 
 '''
+    if _SQLITE_SYNC_MARKER not in text:
         text += "\n\n" + runtime.rstrip() + "\n"
         changes.append("SQLite Hub state and revision sync runtime")
+
+    runtime_store_start = runtime.index("def _hermes_hub_gateway_runtime_store():")
+    runtime_store_end = runtime.index("def _hermes_hub_sqlite_source(", runtime_store_start)
+    desired_runtime_store = runtime[runtime_store_start:runtime_store_end]
+    runtime_store_match = re.search(
+        r"(?ms)^def _hermes_hub_gateway_runtime_store\(\):\n.*?(?=^def _hermes_hub_sqlite_source\()",
+        text,
+    )
+    if runtime_store_match and runtime_store_match.group(0) != desired_runtime_store:
+        text = (
+            text[:runtime_store_match.start()]
+            + desired_runtime_store
+            + text[runtime_store_match.end():]
+        )
+        changes.append("SQLite runtime package precedence")
 
     handler = '''    async def _handle_get_hub_sync(self, request: "web.Request") -> "web.Response":
         auth_error = self._check_auth(request)

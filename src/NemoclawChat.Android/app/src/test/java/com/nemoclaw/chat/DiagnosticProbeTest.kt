@@ -14,8 +14,8 @@ class DiagnosticProbeTest {
             listOf("http://configured-gateway:8642/health"),
             plan.routes
         )
-        assertEquals(listOf("configured-secret", null), plan.authCandidates)
-        assertEquals(2, plan.maxAttempts)
+        assertEquals(listOf("configured-secret"), plan.authCandidates)
+        assertEquals(1, plan.maxAttempts)
     }
 
     @Test
@@ -34,38 +34,38 @@ class DiagnosticProbeTest {
     }
 
     @Test
-    fun authRetryStaysOnFirstRouteThatAnsweredHttp() = runBlocking {
+    fun generic401DoesNotDowngradeConfiguredCredential() = runBlocking {
         val attempts = mutableListOf<DiagnosticProbeAttempt>()
 
         val result = probeDiagnosticEndpoint("http://configured-gateway:8642/health", "configured-secret") { attempt ->
             attempts += attempt
-            if (attempt.bearerToken == "configured-secret") {
-                DiagnosticAttemptResult.http(401, "unauthorized")
-            } else {
-                DiagnosticAttemptResult.http(200, "ok")
-            }
+            DiagnosticAttemptResult.http(401, "token not accepted")
         }
 
-        assertEquals(2, attempts.size)
-        assertEquals(listOf("http://configured-gateway:8642/health", "http://configured-gateway:8642/health"), attempts.map { it.url })
-        assertEquals(listOf("configured-secret", null), attempts.map { it.bearerToken })
+        assertEquals(1, attempts.size)
+        assertEquals(listOf("http://configured-gateway:8642/health"), attempts.map { it.url })
+        assertEquals(listOf("configured-secret"), attempts.map { it.bearerToken })
         assertEquals("http://configured-gateway:8642/health", result.effectiveUrl)
-        assertNull(result.bearerToken)
+        assertEquals("configured-secret", result.bearerToken)
+        assertEquals(401, result.statusCode)
+        assertEquals("token not accepted", result.body)
     }
 
     @Test
-    fun exhaustedAuthDoesNotRestartSameAuthPlanOnOtherHosts() = runBlocking {
+    fun rejectedCredentialPreservesOriginal401Response() = runBlocking {
         val attempts = mutableListOf<DiagnosticProbeAttempt>()
 
         val result = probeDiagnosticEndpoint("http://configured-gateway:8642/health", "configured-secret") { attempt ->
             attempts += attempt
-            DiagnosticAttemptResult.http(401, "unauthorized")
+            DiagnosticAttemptResult.http(401, "original error body")
         }
 
-        assertEquals(2, attempts.size)
+        assertEquals(1, attempts.size)
         assertEquals(listOf("http://configured-gateway:8642/health"), attempts.map { it.url }.distinct())
         assertEquals(401, result.statusCode)
-        assertNull(result.bearerToken)
+        assertEquals("original error body", result.body)
+        assertEquals("configured-secret", result.bearerToken)
+        assertEquals(1, result.attemptCount)
     }
 
     @Test

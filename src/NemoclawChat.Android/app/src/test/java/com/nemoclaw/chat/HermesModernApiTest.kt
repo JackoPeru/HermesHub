@@ -288,6 +288,8 @@ class HermesModernApiTest {
     }
 
     @Test fun profileIsolationIsFailClosed() {
+        // Chiave configurata: un 401 generico non deve attivare un tentativo anonimo.
+        assertEquals(listOf<String?>("k"), hermesProfileAuthCandidates("k", null))
         // Profilo nominato: nessun fallback null/anonimo.
         assertEquals(listOf<String?>(null), hermesProfileAuthCandidates(null, null).takeLast(1))
         assertEquals(listOf<String?>(null), hermesProfileAuthCandidates(null, "coder"))
