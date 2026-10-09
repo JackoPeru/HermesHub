@@ -95,6 +95,22 @@ Note vincolanti (dal data contract upstream):
 
 Risultati registrati in `docs/CHARACTER_ID_HARDWARE_ACCEPTANCE.md` (M16).
 
+## Riferimento pubblico (fal Realism People, 82K download, 131 MB)
+
+La migliore ricetta pubblica H3 (`fal/MiniMax-H3-Realism-People-LoRA`) conferma
+le nostre scelte e ne fissa due:
+
+- Trigger unico stile-leet (`r34l1sm`), strength 1.0 (0.6-0.8 light): come i
+  nostri `HCID_*` + sweep 0.7-1.15.
+- Vincitore su 16 configurazioni: rank 32, 1500 step, **bucket alta risoluzione**
+  (non il rank/steps massimi: i dettagli vivono nelle alte frequenze spaziali).
+  Noi restiamo a bucket 1024: le foto sono phone-grade 1536px e la VRAM e 16 GB
+  (margine > risoluzione). LoRA rank 16 stimato ~65 MB.
+- Eval A/B stesso seed base-vs-LoRA con trigger su entrambi i lati (isola
+  l'effetto LoRA): come le nostre suite containment/preservation.
+- Adapter solo sulle attention projections condivise → funziona T2V/I2V/R2V:
+  supporta il nostro deploy T2VA del Character LoRA.
+
 ## Automazione (M6)
 
 Il worker training gira sotto lock manager con stato `h3-character-train`:
