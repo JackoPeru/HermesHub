@@ -1,12 +1,12 @@
-Hermes Hub 0.6.234 (visibilita turno bot + fix gateway)
+Hermes Hub 0.6.235 (stop affidabile + fine turno onesta)
 
-- App: banner "sta lavorando" v2 con timer elapsed live, poll transcript
-  2s a turno attivo (era 5s), messaggio onesto oltre 45s senza segnali
-  ("Ancora al lavoro · nessun segnale da Xs") invece di etichetta ferma.
-- Server: snowballstemmer installato nel runtime gateway 3.11 (i turni bot
-  morivano con "No module named"), hold GPU con fallback su lockfile.
-- Versioni: Windows/AdminBridge `0.6.234`; Android `versionName 0.6.234`, `versionCode 238`.
-- Asset: `HermesHub-0.6.234-android.apk` (binario Windows invariato).
-- SHA-256 Android: `16db7dbb9e3e4c856e383115a6ffb6777ef69cd28a8f7ca13fff8d85cce7b789`.
-- Asset: `HermesHub-0.6.234-linux-gateway.tar.gz`.
-- SHA-256 gateway: `3665dcb2dd8b58b1dc7f094c38de3003fb2bff47cade95f4eae89999f1da3892`.
+- App: stop sblocca sempre il composer (anche se la rete e morta e il
+  server non risponde); turni caduti senza risposta mostrano un messaggio
+  onesto ("Connessione persa..." / "Turno finito senza risposta...") invece
+  del silenzio o della bolla "sta lavorando" appesa; cleanup di fine turno
+  garantito anche se salvataggio/titolo lanciano.
+- Versioni: Windows/AdminBridge `0.6.235`; Android `versionName 0.6.235`, `versionCode 239`.
+- Asset: `HermesHub-0.6.235-android.apk` (binario Windows invariato).
+- SHA-256 Android: `1e7d1b6059b1d2253b721bf58c77ee5dd39b4bdef7230b59f74f2ce553a09ac5`.
+- Asset: `HermesHub-0.6.235-linux-gateway.tar.gz`.
+- SHA-256 gateway: `a584342b72781863230336be4f1d1ce15403632dc1617643f2f0b10ea9bd3366`.

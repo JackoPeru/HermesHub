@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.235 - 2026-10-09
+
+- Chat: stop che sblocca sempre la UI (anche a rete morta), fine turno
+  mai silenziosa (messaggio onesto al posto del vuoto), cleanup
+  garantito anche se snapshot/titolo falliscono, stop che non tocca i
+  turni nuovi, niente titoli da "Connessione persa".
+
 ## 0.6.234 - 2026-10-09
 
 - Chat/bot: banner live v2 (timer elapsed, poll 2s a turno attivo,
