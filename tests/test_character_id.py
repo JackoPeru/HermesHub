@@ -643,6 +643,7 @@ class TestTrainingRecipe(unittest.TestCase):
         self.assertTrue(callable(mod.extract_frames))
         # Gate durate: ogni generate eval deve portare il flag sperimentale.
         self.assertIn("--allow_experimental_duration", mod.EVAL_EXTRA_ARGS)
+        self.assertEqual(mod.EVAL_TE_SWAP, "50")
 
     def test_dataset_toml(self):
         with tempfile.TemporaryDirectory() as tmp:

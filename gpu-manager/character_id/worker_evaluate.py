@@ -22,6 +22,10 @@ from pathlib import Path
 # video brevi 39f sono sotto i 5s rilasciati: senza, il gate rifiuta tutto).
 EVAL_EXTRA_ARGS: tuple[str, ...] = ("--allow_experimental_duration",)
 
+# TE + DiT insieme in 16GB: TE quasi tutto su CPU (il train non lo carica mai,
+# usa le cache; il generate si). Senza: OOM in load.
+EVAL_TE_SWAP = "50"
+
 
 def sh(cmd: list[str], log_path: Path, env: dict, cwd: Path) -> int:
     with open(log_path, "ab") as handle:
@@ -105,6 +109,7 @@ def main(argv: list[str]) -> int:
     env = dict(os.environ)
     env["PYTHONPATH"] = str(Path(TRAINER_SRC) / "src") + os.pathsep + env.get("PYTHONPATH", "")
     # Rete ON: generate CLI + processor come nel train (pesi da path locali).
+    env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     lock = read_lock(root) or {}
     env["CUDA_VISIBLE_DEVICES"] = str(lock.get("gpu", 1))
 
@@ -122,6 +127,7 @@ def main(argv: list[str]) -> int:
             "--text_encoder", TEXT_ENCODER,
             "--video_vae", VIDEO_VAE, "--audio_vae", AUDIO_VAE,
             "--blocks_to_swap", "48",
+            "--text_encoder_blocks_to_swap", EVAL_TE_SWAP,
             "--save_path", str(eval_dir),
         ]
         cmd += list(EVAL_EXTRA_ARGS)

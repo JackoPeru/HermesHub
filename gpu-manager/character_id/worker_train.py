@@ -89,6 +89,7 @@ def main(argv: list[str]) -> int:
 
     env = dict(os.environ)
     env["PYTHONPATH"] = str(Path(TRAINER_SRC) / "src") + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     # Rete ON per le cache: il processor Qwen3-VL va preso dall'hub al primo
     # giro (pochi KB, poi restano in cache). OFF solo per il train lungo
     # (pesi tutti locali: mai download a sorpresa di GB durante 500 step).
