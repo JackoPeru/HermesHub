@@ -216,7 +216,11 @@ def cache_text_cmd(toml: Path) -> list[str]:
         TRAINER_VENV_PY, f"{TRAINER_SRC}/minimax_h3_cache_text_encoder_outputs.py",
         "--dataset_config", str(toml), "--task", "t2va", "--one_frame",
         "--teacher_conditions", "subject_ref",
-        "--text_encoder", TEXT_ENCODER, "--skip_existing",
+        "--text_encoder", TEXT_ENCODER,
+        # TE 32B (26GB) su 16GB: quasi tutto in streaming da CPU (come Comfy
+        # che fa encode una tantum con CPU offload; senza: OOM in load).
+        "--text_encoder_blocks_to_swap", "60",
+        "--skip_existing",
     ]
 
 

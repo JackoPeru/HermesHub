@@ -611,6 +611,7 @@ class TestTrainingRecipe(unittest.TestCase):
             text = " ".join(cache_text_cmd(toml))
             self.assertIn("--teacher_conditions subject_ref", text)
             self.assertIn("--task t2va", text)
+            self.assertIn("--text_encoder_blocks_to_swap", text)
 
     def test_train_cmd_teacher(self):
         with tempfile.TemporaryDirectory() as tmp:
