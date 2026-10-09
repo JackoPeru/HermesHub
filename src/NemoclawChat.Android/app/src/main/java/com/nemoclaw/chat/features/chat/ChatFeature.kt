@@ -681,7 +681,9 @@ internal fun ChatScreen(
     // tiene banner+stop accesi fino a scadenza finestra (240s).
     var localTurnEndMs by remember(botProfile, botSessionId) { mutableLongStateOf(0L) }
     var botLive by remember(botProfile, botSessionId, botLoadNonce) { mutableStateOf<BotLiveActivity?>(null) }
-    PollWhileStarted(botProfile, botSessionId, botMultiplexEnabled, botEndpoint, botApiKey, botSettings.gatewayUrl, baseIntervalMs = 5_000L) {
+    // Poll fitto mentre il turno e attivo (2s), rilassato in idle (5s):
+    // su relay il giro e lungo, dimezzare la staleness si sente.
+    PollWhileStarted(botProfile, botSessionId, botMultiplexEnabled, botEndpoint, botApiKey, botSettings.gatewayUrl, baseIntervalMs = if (botLive?.running == true) 2_000L else 5_000L) {
         val profile = botProfile
         val session = botSessionId
         if (profile.isNullOrBlank() || session.isNullOrBlank() || !gatewayAvailable) {
@@ -710,6 +712,7 @@ internal fun ChatScreen(
             botLive = BotLiveActivity(running = false, status = "", maxRowId = maxId)
             return@PollWhileStarted true
         }
+        val nowMs = System.currentTimeMillis()
         val prev = botLive
         fun latestTsMs(rows: List<HermesSessionMessage>): Long {
             return rows.mapNotNull { (it.raw?.optDouble("timestamp") ?: 0.0).takeIf { ts -> ts > 0 } }
@@ -720,20 +723,21 @@ internal fun ChatScreen(
             // a video dal load). Running solo se lavoro esterno vero
             // (non la nostra risposta appena arrivata).
             val freshTs = latestTsMs(orderedTail)
-            val nowMs = System.currentTimeMillis()
             val fresh = isExternalBotWork(freshTs, nowMs, localTurnEndMs)
             val newest = orderedTail.asReversed().firstOrNull()
             botLive = BotLiveActivity(
                 running = fresh && newest != null,
                 status = if (fresh && newest != null) botLiveStatusFor(newest) else "",
-                maxRowId = maxId
+                maxRowId = maxId,
+                turnStartMs = if (fresh && newest != null) nowMs else 0L,
+                lastSignalMs = if (fresh && newest != null) freshTs.takeIf { it > 0 } ?: nowMs else 0L
             )
             return@PollWhileStarted true
         }
         val newRowsDesc = orderedWithIds.asReversed().filter { it.second > prev.maxRowId }
         val newRows = newRowsDesc.asReversed().map { it.first }
         val freshTs = latestTsMs(orderedTail)
-        val fresh = isExternalBotWork(freshTs, System.currentTimeMillis(), localTurnEndMs)
+        val fresh = isExternalBotWork(freshTs, nowMs, localTurnEndMs)
         if (!fresh && newRows.isEmpty()) {
             botLive = BotLiveActivity(running = false, status = "", maxRowId = maxId)
             return@PollWhileStarted true
@@ -768,7 +772,10 @@ internal fun ChatScreen(
         botLive = BotLiveActivity(
             running = true,
             status = newest?.let { botLiveStatusFor(it) } ?: "Sta lavorando…",
-            maxRowId = maxId
+            maxRowId = maxId,
+            turnStartMs = prev.turnStartMs.takeIf { prev.running && it > 0 } ?: nowMs,
+            lastSignalMs = if (newRows.isNotEmpty()) freshTs.takeIf { it > 0 } ?: nowMs
+            else prev.lastSignalMs.takeIf { it > 0 } ?: freshTs.takeIf { it > 0 } ?: nowMs
         )
         true
     }
@@ -1403,7 +1410,7 @@ internal fun ChatScreen(
         // Live esterno bot: quadratino stop acceso + banner shimmer in fondo.
         val botLiveNow = botLive
         if (botLiveNow?.running == true && !state.sending) {
-            BotLiveBanner(botLiveNow.status)
+            BotLiveBanner(botLiveNow.status, botLiveNow.turnStartMs, botLiveNow.lastSignalMs)
         }
         if (showSendChoiceDialog && busyChoice != null) {
             AlertDialog(
@@ -2241,14 +2248,34 @@ internal fun executeSlashCommand(
 
 
 @Composable
-internal fun BotLiveBanner(statusText: String) {
+internal fun BotLiveBanner(statusText: String, turnStartMs: Long = 0L, lastSignalMs: Long = 0L) {
+    // Timer vivo a 1s mentre il turno corre: l'utente vede che e tutto attivo,
+    // non un'etichetta congelata. Mai fasi inventate: solo tempi misurati.
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(turnStartMs) {
+        while (true) {
+            kotlinx.coroutines.delay(1_000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val elapsed = if (turnStartMs > 0) formatTurnElapsed(nowMs - turnStartMs) else null
+    val stale = if (lastSignalMs > 0) staleTurnLabel(nowMs - lastSignalMs) else null
+    val main = (stale ?: statusText.ifBlank { "Sta lavorando…" })
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Box(modifier = Modifier.size(8.dp).background(AppColors.Accent, CircleShape))
-        ShimmerText(if (statusText.isBlank()) "Sta lavorando…" else statusText, enabled = true)
+        ShimmerText(main, enabled = true)
+        if (elapsed != null) {
+            Text(
+                elapsed,
+                color = AppColors.Muted,
+                fontSize = 12.sp,
+                modifier = Modifier.semantics { contentDescription = "Turno attivo da $elapsed" }
+            )
+        }
     }
 }
 

@@ -413,12 +413,34 @@ internal fun isBotConversationId(id: String?): Boolean {
  * Live esterno di una bot chat (il bot lavora altrove, es. desktop):
  * running accende stop-button e banner shimmer; maxRowId e la baseline
  * per appendere solo le righe nuove senza duplicati.
+ * turnStartMs/lastSignalMs alimentano il banner v2 (elapsed + onesta sul
+ * silenzio): mai inventare fasi, solo tempi misurati.
  */
 internal data class BotLiveActivity(
     val running: Boolean,
     val status: String = "",
-    val maxRowId: Int = 0
+    val maxRowId: Int = 0,
+    val turnStartMs: Long = 0L,
+    val lastSignalMs: Long = 0L
 )
+
+/** Millisecondi -> "m:ss" per l'elapsed del turno. Puro e testabile. */
+internal fun formatTurnElapsed(elapsedMs: Long): String {
+    val total = (elapsedMs.coerceAtLeast(0L) / 1000L).toInt()
+    return "${total / 60}:${(total % 60).toString().padStart(2, '0')}"
+}
+
+/**
+ * Riga onesta del banner quando il bot tace: oltre [staleAfterMs] senza righe
+ * nuove si dice che non ci sono segnali (non si congela l'ultima etichetta).
+ * Pura e testabile.
+ */
+internal fun staleTurnLabel(sinceSignalMs: Long, staleAfterMs: Long = 45_000L): String? {
+    if (sinceSignalMs < staleAfterMs) return null
+    val secs = (sinceSignalMs / 1000L).toInt()
+    return if (secs < 90) "Ancora al lavoro · nessun segnale da ${secs}s"
+    else "Ancora al lavoro · nessun segnale da ${secs / 60} min"
+}
 
 /**
  * Unione anti-perdita per chat condivise (telefono+desktop sullo stesso id

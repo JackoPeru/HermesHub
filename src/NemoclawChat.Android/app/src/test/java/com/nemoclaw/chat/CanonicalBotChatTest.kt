@@ -329,4 +329,21 @@ class CanonicalBotChatTest {
         assertTrue(isExternalBotWork(now - 5_000L, now, 0L))
         assertFalse(isExternalBotWork(now - 300_000L, now, 0L))
     }
+
+    @Test
+    fun turnElapsedFormats() {
+        assertEquals("0:00", formatTurnElapsed(0L))
+        assertEquals("0:07", formatTurnElapsed(7_500L))
+        assertEquals("1:05", formatTurnElapsed(65_000L))
+        assertEquals("0:00", formatTurnElapsed(-1_000L))
+    }
+
+    @Test
+    fun staleLabelHonest() {
+        assertNull(staleTurnLabel(10_000L))
+        assertNull(staleTurnLabel(44_999L))
+        assertEquals("Ancora al lavoro · nessun segnale da 45s", staleTurnLabel(45_000L))
+        assertEquals("Ancora al lavoro · nessun segnale da 89s", staleTurnLabel(89_000L))
+        assertEquals("Ancora al lavoro · nessun segnale da 2 min", staleTurnLabel(150_000L))
+    }
 }
