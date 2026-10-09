@@ -13,10 +13,11 @@ ENABLE_SERVICE=false
 START_SERVICE=false
 ENABLE_AUTO_UPDATE=false
 ENABLE_POWER_MONITOR=false
+ENABLE_BACKUP=false
 
 usage() {
   cat <<'EOF'
-Usage: ./install-hermes-hub-linux.sh [--enable-service] [--start] [--enable-auto-update] [--enable-power-monitor]
+Usage: ./install-hermes-hub-linux.sh [--enable-service] [--start] [--enable-auto-update] [--enable-power-monitor] [--enable-backup]
 
 Installs:
   ~/hermes-hub-linux.sh
@@ -31,6 +32,7 @@ Installs:
 Optional:
   --enable-auto-update installs/enables the user timer that checks every two minutes.
   --enable-power-monitor installs/enables UPS save power monitor service.
+  --enable-backup enables the daily opt-in SQLite backup timer.
 EOF
 }
 
@@ -48,6 +50,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --enable-power-monitor)
       ENABLE_POWER_MONITOR=true
+      ;;
+    --enable-backup)
+      ENABLE_BACKUP=true
       ;;
     -h|--help)
       usage
@@ -82,6 +87,9 @@ require_file patch-hermes-gateway-native.py
 require_file hermes-hub-linux-update.sh
 require_file hermes-hub-agent-update.sh
 require_file hermes-hub-linux.service
+require_file hermes-hub-backup.py
+require_file hermes-hub-backup.service
+require_file hermes-hub-backup.timer
 require_file hermes-hub-agent-update.service
 require_file hermes-hub-agent-update.timer
 require_file hermes-wait-tailscale.sh
@@ -98,6 +106,9 @@ install -m 0755 "$SCRIPT_DIR/hermes-hub-linux-update.sh" "$RELEASE_DIR/hermes-hu
 install -m 0755 "$SCRIPT_DIR/hermes-hub-agent-update.sh" "$RELEASE_DIR/hermes-hub-agent-update.sh"
 install -m 0755 "$SCRIPT_DIR/install-hermes-hub-linux.sh" "$RELEASE_DIR/install-hermes-hub-linux.sh"
 install -m 0644 "$SCRIPT_DIR/hermes-hub-linux.service" "$RELEASE_DIR/hermes-hub-linux.service"
+install -m 0755 "$SCRIPT_DIR/hermes-hub-backup.py" "$RELEASE_DIR/hermes-hub-backup.py"
+install -m 0644 "$SCRIPT_DIR/hermes-hub-backup.service" "$RELEASE_DIR/hermes-hub-backup.service"
+install -m 0644 "$SCRIPT_DIR/hermes-hub-backup.timer" "$RELEASE_DIR/hermes-hub-backup.timer"
 install -m 0755 "$SCRIPT_DIR/hermes-wait-tailscale.sh" "$RELEASE_DIR/hermes-wait-tailscale.sh"
 install -m 0755 "$SCRIPT_DIR/hermes-wait-llama.sh" "$RELEASE_DIR/hermes-wait-llama.sh"
 if [ -f "$SCRIPT_DIR/rehub-patch.sh" ]; then
@@ -139,6 +150,7 @@ atomic_symlink "$INSTALL_DIR/current/hermes-hub-linux.sh" "$HOME/hermes-hub-linu
 atomic_symlink "$INSTALL_DIR/current/patch-hermes-gateway-native.py" "$HOME/patch-hermes-gateway-native.py"
 atomic_symlink "$INSTALL_DIR/current/hermes-hub-linux-update.sh" "$BIN_DIR/hermes-hub-linux-update"
 atomic_symlink "$INSTALL_DIR/current/hermes-hub-agent-update.sh" "$BIN_DIR/hermes-hub-agent-update"
+atomic_install "$RELEASE_DIR/hermes-hub-backup.py" "$BIN_DIR/hermes-hub-backup" 0755
 atomic_symlink "$INSTALL_DIR/current/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-tailscale.sh"
 atomic_symlink "$INSTALL_DIR/current/hermes-wait-llama.sh" "$BIN_DIR/hermes-wait-llama.sh"
 atomic_symlink "$INSTALL_DIR/current/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-tailscale"
@@ -159,6 +171,8 @@ if [ -f "$SCRIPT_DIR/hermes-hub-linux-update.timer" ]; then
 fi
 atomic_install "$SCRIPT_DIR/hermes-hub-agent-update.service" "$SERVICE_DIR/hermes-hub-agent-update.service" 0644
 atomic_install "$SCRIPT_DIR/hermes-hub-agent-update.timer" "$SERVICE_DIR/hermes-hub-agent-update.timer" 0644
+atomic_install "$SCRIPT_DIR/hermes-hub-backup.service" "$SERVICE_DIR/hermes-hub-backup.service" 0644
+atomic_install "$SCRIPT_DIR/hermes-hub-backup.timer" "$SERVICE_DIR/hermes-hub-backup.timer" 0644
 if [ -f "$SCRIPT_DIR/hermes-power-monitor.service" ]; then
   atomic_install "$SCRIPT_DIR/hermes-power-monitor.service" "$SERVICE_DIR/hermes-power-monitor.service" 0644
 fi
@@ -181,6 +195,9 @@ if command -v systemctl >/dev/null 2>&1; then
   fi
   if [ "$ENABLE_POWER_MONITOR" = "true" ]; then
     systemctl --user enable --now hermes-power-monitor.service
+  fi
+  if [ "$ENABLE_BACKUP" = "true" ]; then
+    systemctl --user enable --now hermes-hub-backup.timer
   fi
 else
   echo "WARN: systemctl missing; service not enabled." >&2

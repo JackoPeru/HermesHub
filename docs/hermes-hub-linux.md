@@ -70,6 +70,39 @@ Default sotto `~/.hermes`:
 
 Le root media specifiche precedono sempre `$HERMES_TERMINAL_CWD` o `%h`, che restano fallback finali. I mutatori usano lock e replace atomico.
 
+## Backup SQLite
+
+`~/.local/bin/hermes-hub-backup` crea uno snapshot SQLite con un nome UTC univoco. La sorgente Hub è `HERMES_HUB_SQLITE_PATH` oppure `$HERMES_HOME/hub_state.sqlite3`; senza `HERMES_HOME` usa `~/.hermes`. Gli snapshot sono salvati in `$HERMES_HUB_BACKUP_DIR` oppure `~/.hermes/backups/hub`. Il tool legge i database in sola lettura e usa l'API SQLite online backup, così include anche i dati ancora nel WAL senza copiare file live.
+
+Comandi manuali:
+
+```bash
+~/.local/bin/hermes-hub-backup
+~/.local/bin/hermes-hub-backup --database /percorso/agent.sqlite3
+~/.local/bin/hermes-hub-backup --include-agent-state
+~/.local/bin/hermes-hub-backup --verify ~/.hermes/backups/hub/<snapshot>
+~/.local/bin/hermes-hub-backup --restore-from ~/.hermes/backups/hub/<snapshot> --restore-to ~/hub-restore-2026-10-07
+```
+
+`--database` è ripetibile. `--include-agent-state` aggiunge solo i database noti: nella radice `state.db`, `response_store.db`, `projects.db`, `kanban.db`, `shared-state.db`, `runs_idempotency.db` e `verification_evidence.db`; `cron/executions.db` e `cron/notepad.db`; nei soli figli immediati di `profiles/` e `projects/`, `state.db`, `projects.db`, `response_store.db` e `kanban.db`. I candidati devono essere file regolari, non symlink. Le sorgenti mancanti non vengono create e non si cercano file in modo ricorsivo. Retention predefinita è 7 snapshot completi; `HERMES_HUB_BACKUP_RETENTION` o `--retention` accettano un numero da 1 a 365. Il manifest contiene percorso sorgente, label relativa, dimensione e SHA-256, non dati delle tabelle né credenziali/configurazione.
+
+Il backup e il restore sono database-only: non includono media, configurazione, `.env`, chiavi, segreti o cache. Il restore recupera i database nella nuova directory indicata; l'applicazione deve rimanere offline e l'operatore deve gestire a parte gli altri asset necessari.
+
+Per una copia off-host usare la utility PowerShell. Richiede un alias OpenSSH esplicito, per esempio `hermes-tailscale`; senza `-Snapshot` seleziona l'ultimo nome UTC valido. Verifica manifest, dimensioni e SHA-256 prima della pubblicazione atomica. Conserva al massimo 7 snapshot locali completi e lascia intatte le altre directory.
+
+```powershell
+powershell -File .\scripts\pull-hermes-hub-backup.ps1 -SshHost hermes-tailscale
+powershell -File .\scripts\pull-hermes-hub-backup.ps1 -SshHost hermes-tailscale -Snapshot 20261007T031500000000Z-a1b2c3d4
+```
+
+L'installer copia sempre script e unità systemd, ma il timer giornaliero resta disabilitato salvo richiesta esplicita:
+
+```bash
+./scripts/install-hermes-hub-linux.sh --enable-backup
+```
+
+Il timer è persistente e applica un ritardo casuale finito. Verificare uno snapshot prima di un restore. Il restore richiede sia snapshot sia una nuova directory destinazione inesistente; non scrive mai automaticamente nel database live. Eseguire eventuale ripristino operativo solo con applicazione offline e destinazione scelta dall'operatore.
+
 ## Jarvis Mode
 
 Il patcher aggiunge le sessioni Jarvis allo stesso processo gateway. Sono autenticate, effimere, bounded e trasportano eventi tramite SSE. Nessun frame, perception bus, sintesi o feedback viene scritto negli store Hub. Il Reactor combina prompt stabile, memoria breve incrementale, finestra conversazionale e trigger corrente. Non esiste un loop periodico che forza interventi. Modelli, concorrenza, timeout e soglie sono configurati con `HERMES_JARVIS_*`; il launcher li conserva atomicamente in `.env` senza stamparne le chiavi.
@@ -113,6 +146,10 @@ hard block.
 L'updater cerca la release piu' recente che contenga un asset Linux, verifica versione, dimensione e SHA-256, estrae su staging, aggiorna il symlink `current`, riavvia e fa health probe. Se il probe fallisce ripristina la release precedente.
 
 Il timer controlla gli aggiornamenti ogni due minuti. Quando trova una release piu' recente, l'aggiorna automaticamente, riavvia il gateway e completa l'health probe con rollback in caso di errore. Non ridurre `TimeoutStartSec` sotto il budget complessivo di download, avvio e probe.
+
+Il busy gate interroga il manager GPU con una chiave dedicata, configurabile tramite `HERMES_HUB_MANAGER_API_KEY` o `HERMES_GPU_MANAGER_KEY` nell'ambiente del servizio o in `~/.hermes/.env`. In alternativa, `HERMES_HUB_MANAGER_KEY_FILE` indica un file raw di una sola riga: deve essere regolare, non symlink, posseduto dall'utente updater e accessibile solo al proprietario (`0400` o `0600`). La variabile può essere impostata anche in `.env`. Se nessuna chiave manager è configurata, l'updater usa la chiave gateway per compatibilità con installazioni che condividono ancora il segreto.
+
+Un 401/403 del manager viene registrato come rifiuto autenticazione distinto da rete irraggiungibile. Configurazione credenziale non valida, risposta HTTP non riuscita o status JSON sconosciuto/non valido fanno differire l'aggiornamento; solo uno status valido `LLM_READY`, coda vuota e nessun job corrente autorizza il gate idle. Il probe `/v1/capabilities` dopo il riavvio continua a usare esclusivamente la chiave gateway. Le chiavi passano a `curl` tramite file temporanei `0600`, rimossi dopo la richiesta, senza inserirle negli argomenti di processo o nei log.
 
 ## Packaging
 

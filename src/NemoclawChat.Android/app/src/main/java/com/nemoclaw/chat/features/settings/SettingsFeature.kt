@@ -363,6 +363,7 @@ internal fun SettingsScreen(
     var showRestoreConfirm by remember { mutableStateOf(false) }
     var restorePendingJson by remember { mutableStateOf<String?>(null) }
     var restorePendingCount by remember { mutableStateOf(0) }
+    var restorePendingIgnoredSettings by remember { mutableIntStateOf(0) }
     var showRestoreReport by remember { mutableStateOf(false) }
     var restoreReportText by remember { mutableStateOf("") }
     var advancedVisible by rememberSaveable { mutableStateOf(false) }
@@ -498,15 +499,17 @@ internal fun SettingsScreen(
                     )
                     val json = runCatching { JSONObject(String(decoded, Charsets.UTF_8)) }
                         .getOrElse { throw BackupDecryptException("Backup non valido: payload JSON illeggibile") }
-                    json.toString() to countRestoreEntries(json)
+                    Triple(json.toString(), countRestoreEntries(json), countIgnoredRestoreSettings(json))
                 }
             }
-            outcome.onSuccess { (jsonString, count) ->
+            outcome.onSuccess { (jsonString, count, ignoredSettings) ->
                 restoreAttempts = 0
                 restorePendingJson = jsonString
                 restorePendingCount = count
+                restorePendingIgnoredSettings = ignoredSettings
                 showRestoreConfirm = true
-                status = "Backup pronto: sovrascrive $count voci. Conferma per ripristinare."
+                status = "Backup pronto: $count voci importabili, $ignoredSettings impostazioni ignorate. " +
+                    "Server, credenziali, connessioni e privacy/sicurezza restano invariate."
             }.onFailure { error ->
                 val message = error.message ?: error.javaClass.simpleName
                 // Tre tentativi per password v2 poi errore esplicito, mai loggare la password.
@@ -557,7 +560,9 @@ internal fun SettingsScreen(
                 restorePendingJson = null
             },
             title = { Text("Ripristinare backup?") },
-            text = { Text("Il ripristino sovrascrive $restorePendingCount voci (backup-wins, mai chiavi sensibili). L'operazione non si può annullare.") },
+            text = { Text("Voci importabili: $restorePendingCount. Impostazioni ignorate: $restorePendingIgnoredSettings. " +
+                "Il backup ripristina solo preferenze di visualizzazione e dati archiviati. Indirizzi server, credenziali, " +
+                "connessioni profilo e opzioni privacy/sicurezza restano invariate.") },
             confirmButton = {
                 IconButton(onClick = {
                     val pending = restorePendingJson
@@ -575,7 +580,8 @@ internal fun SettingsScreen(
                             result.onSuccess { report ->
                                 restoreReportText = "Ripristino completato: ${report.applied} impostazioni, " +
                                     "${report.conversationsMerged} conversazioni, ${report.tasksMerged} task, " +
-                                    "${report.workspaceMerged} workspace. Saltate sensibili: ${report.skippedSensitive}."
+                                    "${report.workspaceMerged} workspace. Impostazioni ignorate: ${report.skippedSettings} " +
+                                    "(incluse ${report.skippedSensitive} chiavi sensibili). Endpoint, credenziali e privacy/sicurezza invariate."
                                 status = restoreReportText
                                 showRestoreReport = true
                             }.onFailure { error ->

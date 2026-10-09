@@ -172,23 +172,145 @@ class BackupRestoreTest {
     }
 
     @Test
-    fun `restore applica chiavi non sensibili backup-wins`() {
+    fun `restore importa solo preferenze UI e preserva endpoint privacy e segreti`() {
         val context = FakeRestoreContext()
+        val current = context.prefs("chatclaw_settings")
+        current.data["gatewayUrl"] = "https://gateway-attuale.example/v1"
+        current.data["localGatewayUrl"] = "http://gateway-locale.example/v1"
+        current.data["gatewayWsUrl"] = "wss://gateway-attuale.example/ws"
+        current.data["adminBridgeUrl"] = "https://admin-attuale.example"
+        current.data["inferenceEndpoint"] = "https://inference-attuale.example/v1"
+        current.data["model"] = "modello-attuale"
+        current.data["maxAttachmentMb"] = 32
+        current.data["gatewaySecretCiphertext"] = "ciphertext-attuale"
+        current.data["healthSyncEnabled"] = true
+        current.data["healthIncludeSteps"] = true
+        current.data["blockScreenshots"] = true
+        current.data["autoApprove"] = "deny"
+        context.prefs("chatclaw_connection_secrets").data["profile-key"] = "segreto-profilo"
         val payload = restorePayload(
             settings = JSONObject()
-                .put("gatewayUrl", "https://hermes.test")
-                .put("model", "hermes-agent")
-                .put("maxAttachmentMb", 42)
+                .put("gatewayUrl", "https://attacker.example/v1")
+                .put("localGatewayUrl", "http://attacker.example/v1")
+                .put("gatewayWsUrl", "wss://attacker.example/ws")
+                .put("adminBridgeUrl", "https://attacker.example/admin")
+                .put("inferenceEndpoint", "https://attacker.example/inference")
+                .put("model", "modello-attaccante")
+                .put("maxAttachmentMb", 150)
+                .put("gatewaySecretCiphertext", "ciphertext-attacker")
+                .put("healthSyncEnabled", false)
+                .put("healthIncludeSteps", false)
+                .put("blockScreenshots", false)
+                .put("autoApprove", "always")
                 .put("showToolCalls", true)
+                .put("fontScale", 1.2)
         )
         val report = restoreLocalBackup(context, payload, null)
-        assertEquals(4, report.applied)
-        assertEquals(0, report.skippedSensitive)
+        assertEquals(2, report.applied)
+        assertEquals(1, report.skippedSensitive)
+        assertEquals(12, report.skippedSettings)
         val settingsPrefs = context.prefs("chatclaw_settings")
-        assertEquals("https://hermes.test", settingsPrefs.getString("gatewayUrl", null))
-        assertEquals("hermes-agent", settingsPrefs.getString("model", null))
-        assertEquals(42, settingsPrefs.getInt("maxAttachmentMb", -1))
+        assertEquals("https://gateway-attuale.example/v1", settingsPrefs.getString("gatewayUrl", null))
+        assertEquals("http://gateway-locale.example/v1", settingsPrefs.getString("localGatewayUrl", null))
+        assertEquals("wss://gateway-attuale.example/ws", settingsPrefs.getString("gatewayWsUrl", null))
+        assertEquals("https://admin-attuale.example", settingsPrefs.getString("adminBridgeUrl", null))
+        assertEquals("https://inference-attuale.example/v1", settingsPrefs.getString("inferenceEndpoint", null))
+        assertEquals("modello-attuale", settingsPrefs.getString("model", null))
+        assertEquals(32, settingsPrefs.getInt("maxAttachmentMb", -1))
+        assertEquals("ciphertext-attuale", settingsPrefs.getString("gatewaySecretCiphertext", null))
+        assertTrue(settingsPrefs.getBoolean("healthSyncEnabled", false))
+        assertTrue(settingsPrefs.getBoolean("healthIncludeSteps", false))
+        assertTrue(settingsPrefs.getBoolean("blockScreenshots", false))
+        assertEquals("deny", settingsPrefs.getString("autoApprove", null))
         assertTrue(settingsPrefs.getBoolean("showToolCalls", false))
+        assertEquals(1.2f, settingsPrefs.getFloat("fontScale", 0f), 0.001f)
+        assertEquals("segreto-profilo", context.prefs("chatclaw_connection_secrets").getString("profile-key", null))
+    }
+
+    @Test
+    fun `restore rifiuta tipi UI malformati prima di scrivere impostazioni archivio task e workspace`() {
+        val malformedSettings = listOf(
+            JSONObject().put("showToolCalls", false).put("fontScale", "1.2"),
+            JSONObject().put("fontScale", 1.2).put("showToolCalls", "false"),
+            JSONObject().put("fontScale", 1.2).put("showToolCalls", 0)
+        )
+        for (settings in malformedSettings) {
+            val context = FakeRestoreContext()
+            context.prefs("chatclaw_settings").data["showToolCalls"] = true
+            context.prefs("chatclaw_settings").data["fontScale"] = 0.95f
+            saveConversations(
+                context,
+                listOf(
+                    LocalConversation(
+                        id = "keep", title = "Keep", kind = "Chat",
+                        description = "", prompt = "", updatedAt = 10L, messages = emptyList()
+                    )
+                ),
+                syncAfterSave = false
+            )
+            val oldTasks = JSONArray().put(JSONObject().put("id", "keep-task")).toString()
+            val oldWorkspace = JSONArray().put(JSONObject().put("id", "keep-workspace")).toString()
+            context.prefs("chatclaw_tasks").data["items"] = oldTasks
+            context.prefs("chatclaw_workspace_requests").data["items"] = oldWorkspace
+            val payload = restorePayload(
+                settings = settings,
+                items = JSONArray().put(conversationJson("incoming", "Incoming", 20L)),
+                tasks = JSONArray().put(JSONObject().put("id", "incoming-task")),
+                workspaceItems = JSONArray().put(JSONObject().put("id", "incoming-workspace"))
+            )
+
+            try {
+                restoreLocalBackup(context, payload, null)
+                fail("tipo UI malformato deve lanciare BackupRestoreException")
+            } catch (e: BackupRestoreException) {
+                assertTrue((e.message ?: "").contains("Backup non valido"))
+            }
+
+            val currentSettings = context.prefs("chatclaw_settings")
+            assertTrue(currentSettings.getBoolean("showToolCalls", false))
+            assertEquals(0.95f, currentSettings.getFloat("fontScale", 0f), 0f)
+            assertEquals(listOf("keep"), loadConversations(context, includeDeleted = true).map { it.id })
+            assertEquals(oldTasks, context.prefs("chatclaw_tasks").getString("items", null))
+            assertEquals(oldWorkspace, context.prefs("chatclaw_workspace_requests").getString("items", null))
+        }
+    }
+
+    @Test
+    fun `restore limita fontScale finito ai limiti settings`() {
+        val context = FakeRestoreContext()
+        restoreLocalBackup(
+            context,
+            restorePayload(settings = JSONObject().put("fontScale", 2.0)),
+            null
+        )
+        assertEquals(MAX_FONT_SCALE, context.prefs("chatclaw_settings").getFloat("fontScale", 0f), 0f)
+    }
+
+    @Test
+    fun `restore rifiuta fontScale che overflowa Float`() {
+        val settings = JSONObject().put("fontScale", Double.MAX_VALUE)
+        try {
+            restoreLocalBackup(FakeRestoreContext(), restorePayload(settings = settings), null)
+            fail("fontScale non rappresentabile deve lanciare BackupRestoreException")
+        } catch (e: BackupRestoreException) {
+            assertTrue((e.message ?: "").contains("Backup non valido"))
+        }
+    }
+
+    @Test
+    fun `restore rifiuta fontScale NaN se JSONObject lo rappresenta`() {
+        val settings = JSONObject()
+        val inserted = runCatching { settings.put("fontScale", Double.NaN) }.isSuccess
+        org.junit.Assume.assumeTrue(
+            "JSONObject non rappresenta NaN come Number",
+            inserted && settings.opt("fontScale") is Number
+        )
+        try {
+            restoreLocalBackup(FakeRestoreContext(), restorePayload(settings = settings), null)
+            fail("fontScale NaN deve lanciare BackupRestoreException")
+        } catch (e: BackupRestoreException) {
+            assertTrue((e.message ?: "").contains("Backup non valido"))
+        }
     }
 
     @Test
@@ -205,10 +327,11 @@ class BackupRestoreTest {
                 .put("authorizationHeader", "AUTH")
         )
         val report = restoreLocalBackup(context, payload, null)
-        assertEquals(1, report.applied)
+        assertEquals(0, report.applied)
         assertEquals(6, report.skippedSensitive)
+        assertEquals(7, report.skippedSettings)
         val settingsPrefs = context.prefs("chatclaw_settings")
-        assertEquals("https://hermes.test", settingsPrefs.getString("gatewayUrl", null))
+        assertFalse(settingsPrefs.contains("gatewayUrl"))
         assertFalse(settingsPrefs.contains("apiKey"))
         assertFalse(settingsPrefs.contains("gatewayToken"))
         assertFalse(settingsPrefs.contains("mySecret"))

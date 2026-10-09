@@ -64,12 +64,17 @@ internal suspend fun postScreenRelease(settings: AppSettings, apiKey: String?, v
     }
 
 internal suspend fun fetchScreenFrameBytes(settings: AppSettings, apiKey: String?, width: Int = 480): ByteArray? =
+    fetchScreenFrameBytesFromUrl(
+        "${screenManagerBase(settings)}/display/frame.png?width=${width.coerceIn(160, 1920)}",
+        apiKey
+    )
+
+internal suspend fun fetchScreenFrameBytesFromUrl(url: String, apiKey: String?): ByteArray? =
     withContext(Dispatchers.IO) {
-        val url = "${screenManagerBase(settings)}/display/frame.png?width=${width.coerceIn(160, 1920)}"
         var last: ByteArray? = null
         for (candidateUrl in plugAndPlayUrlCandidates(url)) {
             for (token in hermesAuthCandidates(apiKey)) {
-                last = runCatching {
+                last = try {
                     val builder = okhttp3.Request.Builder()
                         .url(candidateUrl)
                         .header("Accept", "image/png")
@@ -77,9 +82,15 @@ internal suspend fun fetchScreenFrameBytes(settings: AppSettings, apiKey: String
                     token?.let { builder.header("Authorization", "Bearer $it") }
                     apiHttpClient.newCall(builder.get().build()).execute().use { resp ->
                         if (!resp.isSuccessful) null
-                        else resp.body.bytes().takeIf { it.isNotEmpty() }
+                        else resp.body.byteStream().readBytesBounded(MAX_SCREEN_FRAME_BYTES).takeIf { it.isNotEmpty() }
                     }
-                }.getOrNull()
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (tooLarge: PayloadTooLargeException) {
+                    throw tooLarge
+                } catch (_: Exception) {
+                    null
+                }
                 if (last != null) return@withContext last
             }
         }

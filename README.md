@@ -108,7 +108,7 @@ Scarica gli asset dalla pagina [Releases](https://github.com/JackoPeru/HermesHub
 | Piattaforma | Asset | Requisiti |
 |---|---|---|
 | Windows | `NemoclawChat.Windows_X.Y.Z.0_x64.msix` | Windows 10 build 17763 o successiva, x64 |
-| Android | `HermesHub-X.Y.Z-android.apk` | Android 8.0 / API 26 o successiva |
+| Android | `HermesHub-X.Y.Z-android.apk` | Android 10.0 / API 29 o successiva |
 | Server Linux | `HermesHub-X.Y.Z-linux-gateway.tar.gz` | Hermes Agent, systemd e rete Tailnet/LAN |
 
 Per installazione e configurazione del gateway consulta la [guida Linux](docs/hermes-hub-linux.md). I client conservano compatibilità con dati, identità pacchetto e aggiornamenti delle release precedenti.
@@ -199,4 +199,4 @@ docs/                       Guide tecniche e operative
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-Versione corrente: `0.6.233`.
+Versione corrente: `0.6.234`.

@@ -8,6 +8,25 @@ export PATH="$HOME/.local/bin:$HOME/.hermes/bin:$HOME/.hermes/node/bin:$PATH"
 # inference to the production llama.cpp OpenAI-compatible server by default.
 
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+SCRIPT_PATH="$(readlink -f -- "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(dirname -- "$SCRIPT_PATH")"
+HERMES_GATEWAY_HERMES_BIN="${HERMES_HUB_GATEWAY_HERMES_BIN:-hermes}"
+if [[ ${HERMES_HUB_GATEWAY_HERMES_BIN+x} ]] && {
+  [ ! -f "$HERMES_GATEWAY_HERMES_BIN" ] || [ ! -x "$HERMES_GATEWAY_HERMES_BIN" ];
+}; then
+  echo "ERROR: HERMES_HUB_GATEWAY_HERMES_BIN must name a regular executable file." >&2
+  exit 1
+fi
+PATCHER="${HERMES_HUB_NATIVE_PATCHER:-$SCRIPT_DIR/patch-hermes-gateway-native.py}"
+if [[ ${HERMES_HUB_NATIVE_PATCHER+x} ]] && [ ! -f "$PATCHER" ]; then
+  echo "ERROR: HERMES_HUB_NATIVE_PATCHER must name a regular Python file: $PATCHER" >&2
+  exit 1
+fi
+if [ "${HERMES_NATIVE_GATEWAY_PATCH:-true}" = "true" ] && [ ! -f "$PATCHER" ]; then
+  echo "ERROR: missing native gateway patcher: $PATCHER" >&2
+  echo "Copy scripts/patch-hermes-gateway-native.py next to hermes-hub-linux.sh." >&2
+  exit 1
+fi
 HERMES_ENV="$HERMES_HOME/.env"
 HERMES_CONFIG="$HERMES_HOME/config.yaml"
 
@@ -157,8 +176,6 @@ if ! [[ "$HERMES_KOKORO_CUDA_DEVICE" =~ ^[0-9]+$ ]] || ! [[ "$HERMES_WHISPER_DEV
   exit 2
 fi
 
-SCRIPT_PATH="$(readlink -f -- "${BASH_SOURCE[0]}")"
-SCRIPT_DIR="$(dirname -- "$SCRIPT_PATH")"
 # The generated upstream module imports the modular monolith from the same
 # release directory.  Keep this overrideable for staged/offline installations.
 export HERMES_HUB_GATEWAY_PACKAGE="${HERMES_HUB_GATEWAY_PACKAGE:-$SCRIPT_DIR}"
@@ -477,19 +494,13 @@ os.replace(temporary, path)
 PY
 
 if [ "$HERMES_NATIVE_GATEWAY_PATCH" = "true" ]; then
-  PATCHER="$SCRIPT_DIR/patch-hermes-gateway-native.py"
-  if [ ! -f "$PATCHER" ]; then
-    echo "ERROR: missing native gateway patcher: $PATCHER" >&2
-    echo "Copy scripts/patch-hermes-gateway-native.py next to hermes-hub-linux.sh." >&2
-    exit 1
-  fi
-  python3 "$PATCHER"
+  PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 "$PATCHER"
 fi
 
 # State is shared with the authenticated /v1/hub/runtime endpoint.  It is
 # deliberately metadata-only: no filesystem paths, logs, or credentials.
 AGENT_ROOT="${HERMES_HUB_AGENT_ROOT:-$HERMES_HOME/hermes-agent}"
-AGENT_VERSION="$(hermes --version 2>/dev/null | head -n 1 | tr -d '\r' || true)"
+AGENT_VERSION="$("$HERMES_GATEWAY_HERMES_BIN" --version 2>/dev/null | head -n 1 | tr -d '\r' || true)"
 AGENT_REVISION="$(git -C "$AGENT_ROOT" rev-parse --short=12 HEAD 2>/dev/null || true)"
 HUB_VERSION="$(tr -d '[:space:]' < "$SCRIPT_DIR/VERSION" 2>/dev/null || true)"
 python3 - "$HERMES_HUB_RUNTIME_STATE_PATH" "$HUB_VERSION" "$AGENT_VERSION" "$AGENT_REVISION" <<'PY'
@@ -548,4 +559,4 @@ echo "Hub conversations: $HERMES_HUB_CONVERSATIONS_PATH"
 echo "Wait on start: $HERMES_WAIT_ON_START"
 echo "Config: $HERMES_CONFIG"
 
-exec hermes gateway run --replace
+exec "$HERMES_GATEWAY_HERMES_BIN" gateway run --replace

@@ -1059,7 +1059,10 @@ internal suspend fun loadNewsLibrary(settings: AppSettings, apiKey: String?): Pa
 internal suspend fun loadNewsHtml(settings: AppSettings, item: NewsHtmlItem, apiKey: String?): Pair<String, String> = withContext(Dispatchers.IO) {
     return@withContext try {
         val url = resolveWorkspaceUrl(settings, item.url)
-        val response = httpGetResponse(url, apiKey)
+        val response = httpGetResponse(
+            url,
+            apiKey?.takeIf { shouldAuthenticateHermesUrl(settings, url) }
+        )
         if (response.first in 200..299) {
             response.second to "Pagina caricata in app."
         } else {

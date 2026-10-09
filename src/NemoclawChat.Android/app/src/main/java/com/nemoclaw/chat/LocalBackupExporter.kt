@@ -421,10 +421,11 @@ private const val BACKUP_RESTORE_LOG_TAG = "BackupRestore"
 /** Errore esplicito di restore: payload malformato -> abort senza scritture. */
 internal class BackupRestoreException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
-/** Report finale restore: applicate / saltate-sensibili / merge / errori. */
+/** Report finale restore: applicate / impostazioni ignorate / merge / errori. */
 internal data class RestoreReport(
     val applied: Int,
     val skippedSensitive: Int,
+    val skippedSettings: Int,
     val conversationsMerged: Int,
     val tasksMerged: Int,
     val workspaceMerged: Int,
@@ -444,10 +445,13 @@ private fun restoreValueKind(value: Any?): String = when (value) {
     else -> value.javaClass.simpleName
 }
 
-/** Conta le voci ripristinabili (per dialog "sovrascrive N voci"). Puro/testabile. */
+/** Conta le voci effettivamente importabili per l'anteprima. Puro/testabile. */
 internal fun countRestoreEntries(payload: JSONObject): Int {
     var total = 0
-    payload.optJSONObject("settings")?.let { total += it.length() }
+    payload.optJSONObject("settings")?.let { settings ->
+        val keys = settings.keys()
+        while (keys.hasNext()) if (isRestorableUiSetting(keys.next())) total++
+    }
     total += payload.optJSONArray("items")?.length()
         ?: payload.optJSONArray("conversations")?.length()
         ?: extractArchiveConversationsLenient(payload)
@@ -455,6 +459,34 @@ internal fun countRestoreEntries(payload: JSONObject): Int {
     total += workspaceArrayLenient(payload)?.length() ?: 0
     return total
 }
+
+internal fun countIgnoredRestoreSettings(payload: JSONObject): Int {
+    val settings = payload.optJSONObject("settings") ?: return 0
+    var ignored = 0
+    val keys = settings.keys()
+    while (keys.hasNext()) if (!isRestorableUiSetting(keys.next())) ignored++
+    return ignored
+}
+
+private val RESTORABLE_UI_SETTINGS = setOf(
+    "fontScale",
+    "showToolCalls",
+    "showMessageMetrics",
+    "metricTtft",
+    "metricTokensPerSecond",
+    "metricOutputTokens",
+    "metricPromptTokens",
+    "metricContextTokens",
+    "metricDuration",
+    "metricAcceptanceRate",
+    "sidebarOperativita",
+    "sidebarControllo",
+    "sidebarContenuti",
+    "sidebarAccount",
+    "sidebarRecenti"
+)
+
+private fun isRestorableUiSetting(key: String): Boolean = key in RESTORABLE_UI_SETTINGS
 
 private fun extractArchiveConversationsLenient(payload: JSONObject): Int {
     val archive = payload.optJSONObject("archive") ?: return 0
@@ -488,6 +520,7 @@ private fun workspaceArrayLenient(payload: JSONObject): JSONArray? {
 private data class ValidatedRestore(
     val settings: Map<String, Any?>,
     val skippedSensitive: Int,
+    val skippedSettings: Int,
     val conversations: List<JSONObject>,
     val tasks: List<JSONObject>,
     val workspace: List<JSONObject>
@@ -504,6 +537,7 @@ private fun validateRestorePayload(payload: JSONObject): ValidatedRestore {
     // --- settings: deve essere JSONObject con valori primitivi ---
     val settingsMap = linkedMapOf<String, Any?>()
     var skippedSensitive = 0
+    var skippedSettings = 0
     if (payload.has("settings")) {
         val settingsObj = payload.optJSONObject("settings")
             ?: throw BackupRestoreException("Backup non valido: sezione settings malformata")
@@ -515,6 +549,11 @@ private fun validateRestorePayload(payload: JSONObject): ValidatedRestore {
             }
             if (isSensitiveBackupKey(key)) {
                 skippedSensitive++
+                skippedSettings++
+                continue
+            }
+            if (!isRestorableUiSetting(key)) {
+                skippedSettings++
                 continue
             }
             if (settingsObj.isNull(key)) {
@@ -522,10 +561,21 @@ private fun validateRestorePayload(payload: JSONObject): ValidatedRestore {
                 continue
             }
             val value: Any? = settingsObj.opt(key)
-            when (value) {
-                is String, is Boolean, is Number -> settingsMap[key] = value
-                null -> settingsMap[key] = null
-                else -> throw BackupRestoreException(
+            if (key == "fontScale") {
+                val number = value as? Number ?: throw BackupRestoreException(
+                    "Backup non valido: settings chiave malformata (${restoreValueKind(value)})"
+                )
+                val floatValue = number.toFloat()
+                if (!number.toDouble().isFinite() || !floatValue.isFinite()) {
+                    throw BackupRestoreException(
+                        "Backup non valido: settings chiave malformata (${restoreValueKind(value)})"
+                    )
+                }
+                settingsMap[key] = floatValue.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+            } else if (value is Boolean) {
+                settingsMap[key] = value
+            } else {
+                throw BackupRestoreException(
                     "Backup non valido: settings chiave malformata (${restoreValueKind(value)})"
                 )
             }
@@ -535,7 +585,7 @@ private fun validateRestorePayload(payload: JSONObject): ValidatedRestore {
     val conversations = extractRestoreConversations(payload)
     val tasks = extractRestoreTasks(payload)
     val workspace = extractRestoreWorkspace(payload)
-    return ValidatedRestore(settingsMap, skippedSensitive, conversations, tasks, workspace)
+    return ValidatedRestore(settingsMap, skippedSensitive, skippedSettings, conversations, tasks, workspace)
 }
 
 private fun requireConversationObjects(array: JSONArray, label: String): List<JSONObject> {
@@ -659,7 +709,7 @@ internal fun restoreLocalBackup(context: Context, payload: JSONObject, @Suppress
     val validated = validateRestorePayload(payload)
     // --- Fase scrittura: solo dopo validazione completa (atomicita logica) ---
     var settingsApplied = 0
-    if (validated.settings.isNotEmpty() || validated.skippedSensitive > 0) {
+    if (validated.settings.isNotEmpty()) {
         val prefs = migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
         prefs.edit {
             validated.settings.forEach { (key, value) ->
@@ -742,6 +792,7 @@ internal fun restoreLocalBackup(context: Context, payload: JSONObject, @Suppress
     return RestoreReport(
         applied = settingsApplied,
         skippedSensitive = validated.skippedSensitive,
+        skippedSettings = validated.skippedSettings,
         conversationsMerged = conversationsMerged,
         tasksMerged = tasksMerged,
         workspaceMerged = workspaceMerged,

@@ -154,7 +154,7 @@ class ChatStreamProtocolTest {
     fun strictAuthUsesOnlyConfiguredCredential() {
         assertEquals(listOf<String?>("secret"), hermesAuthCandidates(" secret ", allowCompatAuth = false))
         assertEquals(listOf<String?>(null), hermesAuthCandidates(null, allowCompatAuth = false))
-        assertEquals(listOf<String?>("secret", null), hermesAuthCandidates("secret", allowCompatAuth = true))
+        assertEquals(listOf<String?>("secret"), hermesAuthCandidates("secret", allowCompatAuth = true))
     }
 
     @Test

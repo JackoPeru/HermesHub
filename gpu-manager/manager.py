@@ -33,6 +33,12 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+try:
+    # Sottosistema Character ID (pacchetto separato, rotte /characters/*).
+    from character_id.api import register_character_routes as _register_character_routes
+except ImportError:
+    _register_character_routes = None  # type: ignore[assignment] - mai rompere il boot
+
 APP_NAME = "hermes-gpu-manager"
 
 # ---------------------------------------------------------------- config ---
@@ -77,6 +83,16 @@ DEFAULT_CONFIG = {
     "recovery": {
         "max_retries": 3,
         "retry_backoff": [10, 30, 60],
+    },
+    "character_id": {
+        # Root dati Character ID (baseline §11: /var/lib/hermes assente sul
+        # server, si riusa la convenzione /opt/hermes esistente).
+        "root": "/opt/hermes/character-id",
+        # Interprete del tools-venv (numpy/opencv/insightface, CPU-only).
+        "tools_python": "/opt/hermes/character-id/tools-venv/bin/python",
+        # Interprete del trainer venv (torch cu128 + musubi, GPU).
+        "trainer_python": "/opt/hermes/character-id/trainer/venv/bin/python",
+        "workflows_dir": "/opt/hermes/media-workflows",
     },
 }
 
@@ -193,7 +209,7 @@ ALLOWED_NODE_CLASSES = frozenset({
     "VAELoader", "TextEncodeQwenImage21",
     "QwenImage21Cache", "ComfySwitchNode",
     "EmptyLatentImage", "KSampler", "VAEDecode", "SaveImage",
-    "LoadImage", "LoraLoader", "SaveAnimatedPNG",
+    "LoadImage", "LoraLoader", "LoraLoaderModelOnly", "SaveAnimatedPNG",
     "MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo",
     "H3MultiStream",
 })
@@ -1536,6 +1552,13 @@ async def drive_auto_once() -> None:
     """One reconciliation step. Called in a loop; never raises."""
     now = time.monotonic()
     _state["last_drive_ts"] = now
+    if _character_training_hold():
+        # Il trainer possiede le GPU (lock+job attivi): il worker resta
+        # parcheggiato, niente restore LLM/media che ruberebbero VRAM.
+        if now - float(_state.get("chartrain_log_ts", 0.0)) > 600.0:
+            _state["chartrain_log_ts"] = now
+            log.info("character training owns the GPUs; worker parked")
+        return
     if now - float(_state.get("last_cleanup_ts") or 0.0) > 3600:
         _state["last_cleanup_ts"] = now
         await asyncio.to_thread(cleanup_old_artifacts)
@@ -1557,9 +1580,11 @@ async def llm_watchdog() -> None:
     engine for minutes, so /v1/models times out and llm_loaded() goes False
     on a HEALTHY backend. Restoring on the first failure killed the live
     tabby mid-generation in a loop. Now: skip while transitional, skip while
-    tabby is actually generating, and require 4 consecutive failures
+    tabby is actually generating, and     require 4 consecutive failures
     (2 min, longer than any legit restart) before restoring.
     """
+    if _character_training_hold():
+        return  # trainer attivo: mai restore LLM (guerra VRAM)
     now = time.monotonic()
     if now - float(_state.get("llm_watch_ts") or 0.0) >= 30:
         _state["llm_watch_ts"] = now
@@ -1837,6 +1862,22 @@ async def reconcile_boot() -> None:
             update_job(jid, status="failed",
                        error="manager restarted, tracking lost, resubmit")
             log.info("job %s failed after manager restart", jid)
+    # Character ID recovery PRIMA di qualsiasi restore: a reboot vero i worker
+    # sono morti e vanno marcati (mai `ready` presunto); a restart manager con
+    # training vivo restano attivi e il gate sotto protegge le GPU.
+    try:
+        if _character_store is not None:
+            from character_id.recovery import scan_interruptions
+
+            for action in scan_interruptions(_character_store):
+                log.info("character-id recovery: %r", action)
+    except Exception as exc:  # noqa: BLE001 - recovery non deve rompere il boot
+        log.warning("character-id recovery fallita: %s", exc)
+    if _character_training_hold():
+        # Training sopravvissuto al restart: backend intoccati, il trainer
+        # li gestisce (al termine ripristina lui; il worker riparte dopo).
+        log.info("boot: character training attivo, backend intoccati")
+        return
     llm_up = await llm_loaded()
     media_up = await media_online()
     threshold = float(CONFIG["switching"].get("vram_free_mb", 2500))
@@ -2136,6 +2177,9 @@ async def status(_: None = Depends(require_key)) -> dict:
         "h3_installed": h3_ready,
         "h3_ready": h3_ready,
         "h3_license_state": str(CONFIG.get("h3", {}).get("license_state", "DISABLED_LICENSE_GATE")),
+        "character_training": (
+            _character_store.active_training_jobs() if _character_store is not None else []
+        ),
         "presets": sorted(PRESETS),
         "last_error": _state["last_error"] if _state["current_state"] == "ERROR" else "",
         "last_transition": _state["last_transition"],
@@ -2241,6 +2285,8 @@ async def submit_job(request: Request, _: None = Depends(require_key)) -> JSONRe
     backlog = len(queued_jobs()) + (1 if _state.get("current_job") else 0)
     if backlog >= max_queued:
         raise HTTPException(429, f"media queue full ({backlog}/{max_queued})")
+    if _character_store is not None and _character_store.active_training_jobs():
+        raise HTTPException(409, "GPU occupata: training Character ID in corso")
     preset = str(body.get("preset", "") or "")
     params = body.get("parameters", {}) or {}
     for alias in ("prompt", "input_images", "negative_prompt", "seed", "steps",
@@ -2285,6 +2331,8 @@ async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSON
     backlog = len(queued_jobs()) + (1 if _state.get("current_job") else 0)
     if backlog >= max_queued:
         raise HTTPException(429, f"media queue full ({backlog}/{max_queued})")
+    if _character_store is not None and _character_store.active_training_jobs():
+        raise HTTPException(409, "GPU occupata: training Character ID in corso")
     text = str(body.get("text", "") or "")
     images = body.get("input_images", []) or []
     if isinstance(images, str):
@@ -2408,6 +2456,85 @@ async def on_startup() -> None:
     cleanup_old_artifacts()
     _worker_task = asyncio.create_task(worker_loop())
     log.info("hermes-gpu-manager starting, desired=%s", _state["desired_mode"])
+
+
+_character_store = None
+if _register_character_routes is not None:
+    try:
+        _cid_cfg = CONFIG.get("character_id", {}) or {}
+
+        def _hcid_idle() -> tuple[bool, str]:
+            if _state.get("desired_mode") != "AUTO":
+                return False, f"modalita manuale {_state.get('desired_mode')} (training solo in AUTO)"
+            if _state.get("current_job"):
+                return False, f"media job {_state.get('current_job')} in corso"
+            if queued_jobs():
+                return False, f"coda media non vuota ({len(queued_jobs())} job)"
+            state = _state.get("current_state", "")
+            if state in ("ERROR",):
+                return False, f"manager in {state}"
+            return True, ""
+
+        def _hcid_submit(workflow: dict, params: dict) -> dict:
+            return create_job("video", workflow, preset="character",
+                              backend="minimax-h3", params=params)
+
+        _character_store = _register_character_routes(
+            app,
+            require_key=require_key,
+            require_user=_require_user_control,
+            root=str(_cid_cfg.get("root") or "/opt/hermes/character-id"),
+            tools_python=str(
+                _cid_cfg.get("tools_python")
+                or "/opt/hermes/character-id/tools-venv/bin/python"
+            ),
+            trainer_python=str(
+                _cid_cfg.get("trainer_python")
+                or "/opt/hermes/character-id/trainer/venv/bin/python"
+            ),
+            workflows_dir=str(_cid_cfg.get("workflows_dir") or WORKFLOWS_DIR),
+            comfy_input_dir=str(
+                _cid_cfg.get("comfy_input_dir")
+                or CONFIG.get("media", {}).get("input_dir")
+                or "/opt/hermes/runtimes/comfyui/app/input"
+            ),
+            loras_dir=str(
+                _cid_cfg.get("loras_dir")
+                or "/opt/hermes/runtimes/comfyui/app/models/loras"
+            ),
+            submit_cb=_hcid_submit,
+            validate_cb=validate_workflow,
+            idle_cb=_hcid_idle,
+        )
+    except Exception as exc:  # noqa: BLE001 - character-id non deve rompere il manager
+        log.warning("character-id non registrato: %s", exc)
+else:  # pragma: no cover - pacchetto sempre presente nel deploy normale
+    log.warning("character-id assente: rotte /characters/* disabilitate")
+
+
+def _character_training_hold() -> bool:
+    """Training character attivo? Il worker manager deve parcheggiarsi.
+
+    True = job train/evaluate/benchmark non terminali: il trainer possiede le
+    GPU (ha scaricato lui i backend e li ripristina lui). Mai eccezioni.
+    Se lo store e illeggibile, fallback sul lockfile (niente DB): lock
+    presente + pid vivo = hold. Mai permissivo verso la GPU, mai cieco.
+    """
+    try:
+        return bool(_character_store is not None and _character_store.active_training_jobs())
+    except Exception:  # noqa: BLE001 - store rotto: prova il lockfile
+        pass
+    try:
+        from character_id.training import pid_alive, read_lock
+
+        root = str((CONFIG.get("character_id", {}) or {}).get("root")
+                   or "/opt/hermes/character-id")
+        lock = read_lock(root)
+        if lock and pid_alive(int(lock.get("pid", 0) or 0)):
+            return True
+    except Exception:  # noqa: BLE001 - neanche il lock si legge: guida normale
+        pass
+    return False
 
 
 if __name__ == "__main__":

@@ -18,6 +18,8 @@ MAX_ASSET_MB="${HERMES_HUB_UPDATE_MAX_ASSET_MB:-256}"
 PROBE_ATTEMPTS="${HERMES_HUB_UPDATE_PROBE_ATTEMPTS:-30}"
 PROBE_SLEEP_SECONDS="${HERMES_HUB_UPDATE_PROBE_SLEEP_SECONDS:-2}"
 PROBE_URL="${HERMES_HUB_UPDATE_PROBE_URL:-http://127.0.0.1:${HERMES_API_PORT:-8642}/v1/capabilities}"
+GATEWAY_BASE_URL="${HERMES_HUB_GATEWAY_URL:-${PROBE_URL%/v1/capabilities}}"
+GATEWAY_HEALTH_URL="${GATEWAY_BASE_URL%/}/health/detailed"
 API_SERVER_KEY_FILE="${API_SERVER_KEY_FILE:-$HOME/.hermes/api_server.key}"
 HERMES_ENV_FILE="${HERMES_ENV_FILE:-$HOME/.hermes/.env}"
 MANAGER_URL="${HERMES_HUB_MANAGER_URL:-http://127.0.0.1:8643}"
@@ -32,6 +34,8 @@ TMP_DIR=""
 LOCK_DIR=""
 TRANSACTION_ACTIVE=false
 COMMITTED=false
+BACKUP_TIMER_WAS_ENABLED=false
+BACKUP_BUNDLE_PRESENT=false
 PREVIOUS_TARGET=""
 FINAL_RELEASE_DIR=""
 OLD_VERSION_PRESENT=false
@@ -51,6 +55,8 @@ Env:
   HERMES_HUB_UPDATE_MAX_RELEASE_PAGES=5
   HERMES_HUB_UPDATE_MAX_ASSET_MB=256
   HERMES_HUB_UPDATE_PROBE_URL=http://127.0.0.1:8642/v1/capabilities
+  HERMES_HUB_MANAGER_API_KEY or HERMES_GPU_MANAGER_KEY
+  HERMES_HUB_MANAGER_KEY_FILE=/path/to/owner-only-key-file
   HERMES_HUB_MANAGER_URL=http://127.0.0.1:8643
   HERMES_HUB_COMFY_URL=http://127.0.0.1:8188
   HERMES_HUB_BUSY_LEASE=$HOME/.hermes/hub_busy.lock
@@ -154,6 +160,7 @@ else
 fi
 
 TMP_DIR="$(mktemp -d "$INSTALL_DIR/.update-tmp.XXXXXX")"
+chmod 700 "$TMP_DIR"
 
 atomic_symlink() {
   local target="$1"
@@ -206,6 +213,100 @@ resolve_probe_key() {
   printf '%s' "$key"
 }
 
+env_file_has_key() {
+  local file="$1"
+  local key_name="$2"
+  awk -v key="$key_name" 'index($0, key "=") == 1 {found=1} END {exit !found}' "$file" 2>/dev/null
+}
+
+is_safe_bearer_key() {
+  local key="$1"
+  local bearer_pattern='^[A-Za-z0-9._~+/-]+={0,}$'
+  [ "${#key}" -le 4096 ] && [[ "$key" =~ $bearer_pattern ]]
+}
+
+read_manager_key_file() {
+  local key_file="$1"
+  local metadata mode owner current_owner size key
+  if [ -z "$key_file" ] || [ -L "$key_file" ] || [ ! -f "$key_file" ]; then
+    return 1
+  fi
+  metadata="$(stat -c '%a %u' -- "$key_file" 2>/dev/null)" || return 1
+  mode="${metadata%% *}"
+  owner="${metadata##* }"
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  current_owner="$(id -u 2>/dev/null)" || return 1
+  [ "$owner" = "$current_owner" ] || return 1
+  if (( (8#$mode & 077) != 0 || (8#$mode & 0400) == 0 || (8#$mode & 0111) != 0 )); then
+    return 1
+  fi
+  size="$(wc -c < "$key_file" 2>/dev/null | tr -d '[:space:]')" || return 1
+  [[ "$size" =~ ^[0-9]+$ ]] || return 1
+  if (( 10#$size == 0 || 10#$size > 4097 )); then
+    return 1
+  fi
+  key="$(cat -- "$key_file" 2>/dev/null)" || return 1
+  is_safe_bearer_key "$key" || return 1
+  printf '%s' "$key"
+}
+
+resolve_manager_key() {
+  local gateway_key="$1"
+  local key_name key key_file
+
+  for key_name in HERMES_HUB_MANAGER_API_KEY HERMES_GPU_MANAGER_KEY; do
+    if [[ ${!key_name+x} ]]; then
+      key="${!key_name}"
+      is_safe_bearer_key "$key" || return 2
+      printf '%s' "$key"
+      return 0
+    fi
+  done
+
+  if [[ ${HERMES_HUB_MANAGER_KEY_FILE+x} ]]; then
+    key_file="$HERMES_HUB_MANAGER_KEY_FILE"
+    key="$(read_manager_key_file "$key_file")" || return 2
+    printf '%s' "$key"
+    return 0
+  fi
+
+  if [ -e "$HERMES_ENV_FILE" ] && [ ! -r "$HERMES_ENV_FILE" ]; then
+    return 2
+  fi
+  if [ -s "$HERMES_ENV_FILE" ]; then
+    for key_name in HERMES_HUB_MANAGER_API_KEY HERMES_GPU_MANAGER_KEY; do
+      if env_file_has_key "$HERMES_ENV_FILE" "$key_name"; then
+        key="$(read_env_value "$HERMES_ENV_FILE" "$key_name")"
+        is_safe_bearer_key "$key" || return 2
+        printf '%s' "$key"
+        return 0
+      fi
+    done
+    if env_file_has_key "$HERMES_ENV_FILE" HERMES_HUB_MANAGER_KEY_FILE; then
+      key_file="$(read_env_value "$HERMES_ENV_FILE" HERMES_HUB_MANAGER_KEY_FILE)"
+      key="$(read_manager_key_file "$key_file")" || return 2
+      printf '%s' "$key"
+      return 0
+    fi
+  fi
+
+  if [ -n "$gateway_key" ]; then
+    is_safe_bearer_key "$gateway_key" || return 2
+    printf '%s' "$gateway_key"
+    return 0
+  fi
+  return 1
+}
+
+write_curl_auth_config() {
+  local key="$1"
+  local config_file="$2"
+  is_safe_bearer_key "$key" || return 1
+  chmod 600 "$config_file" || return 1
+  printf 'header = "Authorization: Bearer %s"\n' "$key" > "$config_file" || return 1
+  chmod 600 "$config_file" || return 1
+}
+
 # --- update busy gate -------------------------------------------------
 # The updater must never restart the hub while work is in flight: a
 # restart wipes in-memory agent runs. Three independent signals, first
@@ -232,9 +333,10 @@ import json
 import sys
 import time
 try:
-    lease = json.load(open(sys.argv[1], encoding="utf-8"))
+    with open(sys.argv[1], encoding="utf-8") as lease_file:
+        lease = json.load(lease_file)
     exp = float(lease.get("expires_at") or 0)
-    if exp > time.time() + 30:
+    if exp > time.time():
         owner = str(lease.get("owner") or "?")
         task = str(lease.get("task") or "?")
         print("LEASE busy lease by %s: %s" % (owner, task))
@@ -268,47 +370,232 @@ manager_busy_reason() {
     printf 'no API key available for manager busy check'
     return 0
   fi
-  local body curl_cfg
-  # Chiave via file di config curl (-K), mai in argv: con -H resterebbe
-  # visibile in `ps` per tutta la durata della richiesta.
-  curl_cfg="$(mktemp "${TMPDIR:-/tmp}/hermes-curl.XXXXXX")" || { printf 'manager unreachable'; return 0; }
-  chmod 600 "$curl_cfg"
-  printf 'header = "Authorization: Bearer %s"\n' "$key" > "$curl_cfg"
-  body="$(curl --fail --silent --connect-timeout 3 --max-time 8 -K "$curl_cfg" "$MANAGER_URL/status" 2>/dev/null || true)"
-  rm -f "$curl_cfg"
-  # Manager unreachable = defer (stallo voluto, fail-closed): senza stato certo
-  # non si riavvia mai l'hub (wipe run in-memory). Il timer ritenta; nessuna
-  # logica cambiata, solo documentato qui dove il defer nasce.
-  if [ -z "$body" ]; then
-    printf 'manager unreachable'
+  if ! is_safe_bearer_key "$key"; then
+    printf 'manager API key configuration invalid'
     return 0
   fi
-  python3 - "$body" <<'PY' 2>/dev/null || printf 'manager status unreadable'
+  local body_file curl_cfg status reason
+  # Chiave in un file 600 per curl (-K), mai in argv o log.
+  curl_cfg="$(mktemp "$TMP_DIR/manager-auth.XXXXXX")" || { printf 'manager auth configuration unavailable'; return 0; }
+  body_file="$(mktemp "$TMP_DIR/manager-status.XXXXXX")" || {
+    rm -f "$curl_cfg"
+    printf 'manager status unavailable'
+    return 0
+  }
+  if ! write_curl_auth_config "$key" "$curl_cfg"; then
+    rm -f "$curl_cfg" "$body_file"
+    printf 'manager API key configuration invalid'
+    return 0
+  fi
+  status="$(curl --silent --connect-timeout 3 --max-time 8 \
+    -K "$curl_cfg" --output "$body_file" --write-out '%{http_code}' \
+    "$MANAGER_URL/status" 2>/dev/null || true)"
+  rm -f "$curl_cfg"
+  case "$status" in
+    401|403)
+      rm -f "$body_file"
+      printf 'manager authentication rejected (HTTP %s)' "$status"
+      return 0
+      ;;
+    000|'')
+      rm -f "$body_file"
+      printf 'manager unreachable'
+      return 0
+      ;;
+    200) ;;
+    [0-9][0-9][0-9])
+      rm -f "$body_file"
+      printf 'manager unavailable (HTTP %s)' "$status"
+      return 0
+      ;;
+    *)
+      rm -f "$body_file"
+      printf 'manager status unreadable'
+      return 0
+      ;;
+  esac
+
+  reason="$(python3 - "$body_file" <<'PY' 2>/dev/null || true
 import json
 import sys
 try:
-    st = json.loads(sys.argv[1])
+    with open(sys.argv[1], encoding="utf-8") as status_file:
+        st = json.load(status_file)
 except Exception:
     print("manager status unreadable")
+    raise SystemExit(0)
+if not isinstance(st, dict):
+    print("manager status unreadable")
+    raise SystemExit(0)
+queued = st.get("queue_length")
+state = st.get("current_state")
+job = st.get("current_job")
+known_states = {"LLM_READY", "MEDIA_READY", "MEDIA_BUSY", "LLM_BUSY", "LLM_LOADING"}
+if (
+    type(queued) is not int or queued < 0 or
+    not isinstance(state, str) or state not in known_states or
+    "current_job" not in st or not (job is None or isinstance(job, (str, bool)))
+):
+    print("manager status unreadable")
+elif queued > 0:
+    print("manager queue holds %d job(s)" % queued)
+elif isinstance(job, str) and job:
+    print("manager has an active job")
+elif job is True:
+    print("manager has an active job")
+elif state == "LLM_READY":
+    print("__MANAGER_IDLE__")
 else:
-    try:
-        queued = int(st.get("queue_length") or 0)
-    except (TypeError, ValueError):
-        queued = 0
-    if queued > 0:
-        print("manager queue holds %d job(s)" % queued)
-    elif st.get("current_job"):
-        print("manager runs job %s" % st.get("current_job"))
-    else:
-        state = str(st.get("current_state") or "")
-        if state == "" :
-            print("manager status unreadable")
-        elif state == "LLM_READY":
-            print("")
-        else:
-            print("manager state %s" % state)
+    print("manager state %s" % state)
 PY
-  return 0
+  )"
+  rm -f "$body_file"
+  if [ "$reason" = "__MANAGER_IDLE__" ]; then
+    return 0
+  elif [ -z "$reason" ]; then
+    printf 'manager status unreadable'
+  else
+    printf '%s' "$reason"
+  fi
+}
+
+gateway_busy_reason() {
+  local key="$1"
+  if [ -z "$key" ]; then
+    printf 'no API key available for gateway health check'
+    return 0
+  fi
+  if ! is_safe_bearer_key "$key"; then
+    printf 'gateway API key configuration invalid'
+    return 0
+  fi
+  local body_file curl_cfg status reason
+  curl_cfg="$(mktemp "$TMP_DIR/gateway-auth.XXXXXX")" || { printf 'gateway auth configuration unavailable'; return 0; }
+  body_file="$(mktemp "$TMP_DIR/gateway-health.XXXXXX")" || {
+    rm -f "$curl_cfg"
+    printf 'gateway health unavailable'
+    return 0
+  }
+  if ! write_curl_auth_config "$key" "$curl_cfg"; then
+    rm -f "$curl_cfg" "$body_file"
+    printf 'gateway API key configuration invalid'
+    return 0
+  fi
+  status="$(curl --silent --connect-timeout 3 --max-time 8 \
+    -K "$curl_cfg" --output "$body_file" --write-out '%{http_code}' \
+    "$GATEWAY_HEALTH_URL" 2>/dev/null || true)"
+  rm -f "$curl_cfg"
+  case "$status" in
+    401|403)
+      rm -f "$body_file"
+      printf 'gateway authentication rejected (HTTP %s)' "$status"
+      return 0
+      ;;
+    000|'')
+      rm -f "$body_file"
+      printf 'gateway health endpoint unreachable'
+      return 0
+      ;;
+    200) ;;
+    [0-9][0-9][0-9])
+      rm -f "$body_file"
+      printf 'gateway health unavailable (HTTP %s)' "$status"
+      return 0
+      ;;
+    *)
+      rm -f "$body_file"
+      printf 'gateway health unreadable'
+      return 0
+      ;;
+  esac
+
+  reason="$(python3 - "$body_file" <<'PY' 2>/dev/null || true
+import json
+import sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as health_file:
+        health = json.load(health_file)
+except Exception:
+    print("gateway health unreadable")
+    raise SystemExit(0)
+if not isinstance(health, dict):
+    print("gateway health unreadable")
+    raise SystemExit(0)
+status = health.get("status")
+gateway_state = health.get("gateway_state")
+active_agents = health.get("active_agents")
+gateway_busy = health.get("gateway_busy")
+gateway_drainable = health.get("gateway_drainable")
+api_server_present = "api_server" in health
+api_server = health.get("api_server")
+readiness = health.get("readiness")
+checks = readiness.get("checks") if isinstance(readiness, dict) else None
+queues_present = isinstance(checks, dict) and "background_queues" in checks
+background_queues = checks.get("background_queues") if queues_present else None
+active_runs = None
+queue_counts = {}
+schema_invalid = (
+    not isinstance(status, str) or
+    not isinstance(gateway_state, str) or
+    type(active_agents) is not int or active_agents < 0 or
+    type(gateway_busy) is not bool or
+    type(gateway_drainable) is not bool or
+    not isinstance(readiness, dict) or
+    not isinstance(readiness.get("status"), str) or
+    (isinstance(readiness, dict) and "checks" in readiness and not isinstance(checks, dict))
+)
+if api_server_present:
+    if (
+        not isinstance(api_server, dict) or
+        type(api_server.get("active_runs")) is not int or api_server["active_runs"] < 0
+    ):
+        schema_invalid = True
+    else:
+        active_runs = api_server["active_runs"]
+elif not queues_present:
+    schema_invalid = True
+
+if queues_present:
+    if not isinstance(background_queues, dict):
+        schema_invalid = True
+    else:
+        for counter in ("active_api_runs", "process_completions", "active_delegations"):
+            count = background_queues.get(counter)
+            if type(count) is not int or count < 0:
+                schema_invalid = True
+                break
+            queue_counts[counter] = count
+
+if schema_invalid:
+    print("gateway health unreadable")
+elif status != "ok":
+    print("gateway status %s" % status)
+elif gateway_state != "running":
+    print("gateway state %s" % gateway_state)
+elif active_agents > 0:
+    print("gateway has %d active agent(s)" % active_agents)
+elif gateway_busy:
+    print("gateway reports busy")
+elif not gateway_drainable:
+    print("gateway is not drainable")
+elif readiness["status"] != "ok":
+    print("gateway readiness %s" % readiness["status"])
+elif active_runs is not None and active_runs > 0:
+    print("gateway API has %d active run(s)" % active_runs)
+elif any(queue_counts.values()):
+    print("gateway background queues are active")
+else:
+    print("__GATEWAY_IDLE__")
+PY
+  )"
+  rm -f "$body_file"
+  if [ "$reason" = "__GATEWAY_IDLE__" ]; then
+    return 0
+  elif [ -z "$reason" ]; then
+    printf 'gateway health unreadable'
+  else
+    printf '%s' "$reason"
+  fi
 }
 
 comfy_busy_reason() {
@@ -334,14 +621,28 @@ PY
 }
 
 hub_busy_reason() {
-  local key="$1"
-  local reason
+  local gateway_key="$1"
+  local manager_key resolve_status reason
   reason="$(lease_busy_reason)"
   if [ -n "$reason" ]; then
     printf '%s' "$reason"
     return 0
   fi
-  reason="$(manager_busy_reason "$key")"
+  reason="$(gateway_busy_reason "$gateway_key")"
+  if [ -n "$reason" ]; then
+    printf '%s' "$reason"
+    return 0
+  fi
+  if manager_key="$(resolve_manager_key "$gateway_key")"; then
+    reason="$(manager_busy_reason "$manager_key")"
+  else
+    resolve_status=$?
+    if [ "$resolve_status" -eq 1 ]; then
+      reason="no API key available for manager busy check"
+    else
+      reason="manager API key configuration invalid"
+    fi
+  fi
   if [ -n "$reason" ]; then
     printf '%s' "$reason"
     return 0
@@ -377,26 +678,101 @@ defer_update() {
 
 restore_units() {
   local name
-  for name in hermes-hub.service hermes-hub-linux-update.service hermes-hub-linux-update.timer hermes-hub-agent-update.service hermes-hub-agent-update.timer hermes-power-monitor.service; do
+  for name in hermes-hub.service hermes-hub-linux-update.service hermes-hub-linux-update.timer hermes-hub-agent-update.service hermes-hub-agent-update.timer hermes-hub-backup.service hermes-hub-backup.timer hermes-power-monitor.service; do
     if [ -f "$TMP_DIR/unit-backup/$name" ]; then
       atomic_install "$TMP_DIR/unit-backup/$name" "$SERVICE_DIR/$name" 0644
     elif [ -f "$TMP_DIR/unit-backup/$name.missing" ]; then
       rm -f "$SERVICE_DIR/$name"
     fi
   done
-  local link_file link_path safe target_file
+  local link_file link_path safe target_file regular_file missing_file restore_target restore_tmp
   for link_file in "$TMP_DIR/link-backup/"*.link; do
     [ -e "$link_file" ] || continue
     link_path="$(cat "$link_file")"
     [ -n "$link_path" ] || continue
     safe="$(basename "$link_file" .link)"
     target_file="$TMP_DIR/link-backup/$safe.target"
+    regular_file="$TMP_DIR/link-backup/$safe.regular"
+    missing_file="$TMP_DIR/link-backup/$safe.missing"
     if [ -f "$target_file" ]; then
-      ln -sfn "$(cat "$target_file")" "$link_path"
-    elif [ -f "$TMP_DIR/link-backup/$safe.missing" ]; then
+      restore_target=""
+      if IFS= read -r -d '' restore_target < "$target_file" && [ -n "$restore_target" ]; then
+        atomic_symlink "$restore_target" "$link_path" || echo "WARN: failed to restore managed symlink: $link_path" >&2
+      else
+        echo "WARN: refusing to restore empty managed symlink target: $link_path" >&2
+      fi
+    elif [ -f "$regular_file" ]; then
+      restore_tmp="${link_path}.restore.$$"
+      rm -f -- "$restore_tmp"
+      if cp -p -- "$regular_file" "$restore_tmp" && mv -fT -- "$restore_tmp" "$link_path"; then
+        :
+      else
+        rm -f -- "$restore_tmp"
+        echo "WARN: failed to restore managed regular file: $link_path" >&2
+      fi
+    elif [ -f "$missing_file" ]; then
       rm -f "$link_path"
     fi
   done
+  if [ "$BACKUP_BUNDLE_PRESENT" = "true" ]; then
+    if [ -f "$TMP_DIR/helper-backup/hermes-hub-backup" ]; then
+      restore_tmp="$BIN_DIR/hermes-hub-backup.restore.$$"
+      rm -f -- "$restore_tmp"
+      if cp -p -- "$TMP_DIR/helper-backup/hermes-hub-backup" "$restore_tmp" &&
+        mv -fT -- "$restore_tmp" "$BIN_DIR/hermes-hub-backup"; then
+        :
+      else
+        rm -f -- "$restore_tmp"
+        echo "WARN: failed to restore hermes-hub-backup helper" >&2
+      fi
+    elif [ -f "$TMP_DIR/helper-backup/hermes-hub-backup.missing" ]; then
+      rm -f "$BIN_DIR/hermes-hub-backup"
+    fi
+  fi
+}
+
+snapshot_managed_links() {
+  local managed_path safe target_file regular_file missing_file target
+  if ! mkdir -p "$TMP_DIR/link-backup"; then
+    echo "ERROR: cannot create private managed-link snapshot directory" >&2
+    return 1
+  fi
+  for managed_path in "$HOME/hermes-hub-linux.sh" "$HOME/patch-hermes-gateway-native.py" "$BIN_DIR/hermes-hub-linux-update" "$BIN_DIR/hermes-hub-agent-update" "$BIN_DIR/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-llama.sh" "$BIN_DIR/hermes-wait-tailscale" "$BIN_DIR/hermes-wait-llama" "$BIN_DIR/hermes-power-monitor.sh" "$BIN_DIR/hermes-power-monitor"; do
+    if ! safe="$(printf '%s' "$managed_path" | tr -c 'A-Za-z0-9' '_')"; then
+      echo "ERROR: cannot name managed path snapshot: $managed_path" >&2
+      return 1
+    fi
+    target_file="$TMP_DIR/link-backup/$safe.target"
+    regular_file="$TMP_DIR/link-backup/$safe.regular"
+    missing_file="$TMP_DIR/link-backup/$safe.missing"
+    if [ -L "$managed_path" ]; then
+      if ! readlink -z -- "$managed_path" > "$target_file"; then
+        echo "ERROR: cannot snapshot managed symlink target: $managed_path" >&2
+        return 1
+      fi
+      target=""
+      if ! IFS= read -r -d '' target < "$target_file" || [ -z "$target" ]; then
+        echo "ERROR: empty managed symlink target: $managed_path" >&2
+        return 1
+      fi
+    elif [ -f "$managed_path" ]; then
+      if ! cp -p -- "$managed_path" "$regular_file"; then
+        echo "ERROR: cannot snapshot managed regular file: $managed_path" >&2
+        return 1
+      fi
+    elif [ -e "$managed_path" ]; then
+      echo "ERROR: unsupported managed path type: $managed_path" >&2
+      return 1
+    elif ! : > "$missing_file"; then
+      echo "ERROR: cannot snapshot missing managed path: $managed_path" >&2
+      return 1
+    fi
+    if ! printf '%s' "$managed_path" > "$TMP_DIR/link-backup/$safe.link"; then
+      echo "ERROR: cannot record managed path snapshot: $managed_path" >&2
+      return 1
+    fi
+  done
+  return 0
 }
 
 rollback() {
@@ -433,6 +809,10 @@ cleanup() {
   trap - EXIT
   if [ "$TRANSACTION_ACTIVE" = "true" ] && [ "$COMMITTED" != "true" ]; then
     rollback
+  elif [ "$COMMITTED" != "true" ] && [ -n "$FINAL_RELEASE_DIR" ] && [ -d "$FINAL_RELEASE_DIR" ]; then
+    case "$FINAL_RELEASE_DIR" in
+      "$INSTALL_DIR"/releases/*) rm -rf "$FINAL_RELEASE_DIR" || true ;;
+    esac
   fi
   if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then
     rm -rf "$TMP_DIR"
@@ -745,6 +1125,44 @@ for name in "${!FILE_MODE[@]}"; do
   fi
 done
 
+BACKUP_BUNDLE_FILES=(hermes-hub-backup.py hermes-hub-backup.service hermes-hub-backup.timer)
+BACKUP_FILE_COUNT=0
+for name in "${BACKUP_BUNDLE_FILES[@]}"; do
+  FOUND_FILE[$name]="$(find_one "$name")"
+  if [ -n "${FOUND_FILE[$name]}" ]; then
+    BACKUP_FILE_COUNT=$((BACKUP_FILE_COUNT + 1))
+  fi
+done
+if [ "$BACKUP_FILE_COUNT" -ne 0 ] && [ "$BACKUP_FILE_COUNT" -ne "${#BACKUP_BUNDLE_FILES[@]}" ]; then
+  echo "ERROR: incomplete backup bundle; include the backup script, service, and timer together" >&2
+  exit 1
+fi
+if [ "$BACKUP_FILE_COUNT" -eq "${#BACKUP_BUNDLE_FILES[@]}" ]; then
+  BACKUP_BUNDLE_PRESENT=true
+  FILE_MODE[hermes-hub-backup.py]=0755
+  FILE_MODE[hermes-hub-backup.service]=0644
+  FILE_MODE[hermes-hub-backup.timer]=0644
+  if [ -e "$BIN_DIR/hermes-hub-backup" ] && [ ! -f "$BIN_DIR/hermes-hub-backup" ] && [ ! -L "$BIN_DIR/hermes-hub-backup" ]; then
+    echo "ERROR: existing backup helper path is not a file or symlink" >&2
+    exit 1
+  fi
+  mkdir -p "$TMP_DIR/helper-backup"
+  if [ -L "$BIN_DIR/hermes-hub-backup" ]; then
+    if [ -f "$BIN_DIR/hermes-hub-backup" ]; then
+      cp -p "$BIN_DIR/hermes-hub-backup" "$TMP_DIR/helper-backup/hermes-hub-backup"
+    else
+      : > "$TMP_DIR/helper-backup/hermes-hub-backup.missing"
+    fi
+  elif [ -f "$BIN_DIR/hermes-hub-backup" ]; then
+    cp -p "$BIN_DIR/hermes-hub-backup" "$TMP_DIR/helper-backup/hermes-hub-backup"
+  else
+    : > "$TMP_DIR/helper-backup/hermes-hub-backup.missing"
+  fi
+  if command -v systemctl >/dev/null 2>&1 && systemctl --user is-enabled --quiet hermes-hub-backup.timer; then
+    BACKUP_TIMER_WAS_ENABLED=true
+  fi
+fi
+
 STAGED_RELEASE="$TMP_DIR/release"
 mkdir -p "$STAGED_RELEASE"
 for name in "${!FILE_MODE[@]}"; do
@@ -782,23 +1200,16 @@ if [ -L "$INSTALL_DIR/current" ]; then
   PREVIOUS_TARGET="$(readlink -f "$INSTALL_DIR/current" || true)"
 fi
 mkdir -p "$TMP_DIR/unit-backup"
-for name in hermes-hub.service hermes-hub-linux-update.service hermes-hub-linux-update.timer hermes-hub-agent-update.service hermes-hub-agent-update.timer hermes-power-monitor.service; do
+for name in hermes-hub.service hermes-hub-linux-update.service hermes-hub-linux-update.timer hermes-hub-agent-update.service hermes-hub-agent-update.timer hermes-hub-backup.service hermes-hub-backup.timer hermes-power-monitor.service; do
   if [ -f "$SERVICE_DIR/$name" ]; then
     cp -p "$SERVICE_DIR/$name" "$TMP_DIR/unit-backup/$name"
   else
     : > "$TMP_DIR/unit-backup/$name.missing"
   fi
 done
-mkdir -p "$TMP_DIR/link-backup"
-for _link in "$HOME/hermes-hub-linux.sh" "$HOME/patch-hermes-gateway-native.py" "$BIN_DIR/hermes-hub-linux-update" "$BIN_DIR/hermes-hub-agent-update" "$BIN_DIR/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-llama.sh" "$BIN_DIR/hermes-wait-tailscale" "$BIN_DIR/hermes-wait-llama" "$BIN_DIR/hermes-power-monitor.sh" "$BIN_DIR/hermes-power-monitor"; do
-  _safe="$(printf '%s' "$_link" | tr -c 'A-Za-z0-9' '_')"
-  printf '%s' "$_link" > "$TMP_DIR/link-backup/$_safe.link"
-  if [ -L "$_link" ]; then
-    readlink "$_link" > "$TMP_DIR/link-backup/$_safe.target"
-  else
-    : > "$TMP_DIR/link-backup/$_safe.missing"
-  fi
-done
+if ! snapshot_managed_links; then
+  exit 1
+fi
 
 TRANSACTION_ACTIVE=true
 atomic_symlink "$FINAL_RELEASE_DIR" "$INSTALL_DIR/current"
@@ -806,6 +1217,9 @@ atomic_symlink "$INSTALL_DIR/current/hermes-hub-linux.sh" "$HOME/hermes-hub-linu
 atomic_symlink "$INSTALL_DIR/current/patch-hermes-gateway-native.py" "$HOME/patch-hermes-gateway-native.py"
 atomic_symlink "$INSTALL_DIR/current/hermes-hub-linux-update.sh" "$BIN_DIR/hermes-hub-linux-update"
 atomic_symlink "$INSTALL_DIR/current/hermes-hub-agent-update.sh" "$BIN_DIR/hermes-hub-agent-update"
+if [ "$BACKUP_BUNDLE_PRESENT" = "true" ]; then
+  atomic_install "$FINAL_RELEASE_DIR/hermes-hub-backup.py" "$BIN_DIR/hermes-hub-backup" 0755
+fi
 atomic_symlink "$INSTALL_DIR/current/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-tailscale.sh"
 atomic_symlink "$INSTALL_DIR/current/hermes-wait-llama.sh" "$BIN_DIR/hermes-wait-llama.sh"
 atomic_symlink "$INSTALL_DIR/current/hermes-wait-tailscale.sh" "$BIN_DIR/hermes-wait-tailscale"
@@ -818,7 +1232,15 @@ atomic_install "$FINAL_RELEASE_DIR/hermes-hub-linux-update.service" "$SERVICE_DI
 atomic_install "$FINAL_RELEASE_DIR/hermes-hub-linux-update.timer" "$SERVICE_DIR/hermes-hub-linux-update.timer" 0644
 atomic_install "$FINAL_RELEASE_DIR/hermes-hub-agent-update.service" "$SERVICE_DIR/hermes-hub-agent-update.service" 0644
 atomic_install "$FINAL_RELEASE_DIR/hermes-hub-agent-update.timer" "$SERVICE_DIR/hermes-hub-agent-update.timer" 0644
+if [ "$BACKUP_BUNDLE_PRESENT" = "true" ]; then
+  atomic_install "$FINAL_RELEASE_DIR/hermes-hub-backup.service" "$SERVICE_DIR/hermes-hub-backup.service" 0644
+  atomic_install "$FINAL_RELEASE_DIR/hermes-hub-backup.timer" "$SERVICE_DIR/hermes-hub-backup.timer" 0644
+fi
 atomic_install "$FINAL_RELEASE_DIR/hermes-power-monitor.service" "$SERVICE_DIR/hermes-power-monitor.service" 0644
+
+if [ "$BACKUP_BUNDLE_PRESENT" = "true" ] && [ "$BACKUP_TIMER_WAS_ENABLED" = "true" ]; then
+  systemctl --user enable hermes-hub-backup.timer
+fi
 
 if [ "$RESTART" = "true" ]; then
   if ! command -v systemctl >/dev/null 2>&1; then
@@ -836,15 +1258,64 @@ if [ "$RESTART" = "true" ]; then
 
   probe_ok=false
   # Chiave via file di config curl (-K), mai in argv (visibile in `ps`).
-  PROBE_AUTH_CONF="$(mktemp "${TMPDIR:-/tmp}/hermes-probe.XXXXXX")"
-  chmod 600 "$PROBE_AUTH_CONF"
-  printf 'header = "Authorization: Bearer %s"\n' "$PROBE_API_KEY" > "$PROBE_AUTH_CONF"
+  PROBE_AUTH_CONF="$(mktemp "$TMP_DIR/gateway-probe-auth.XXXXXX")"
+  if ! write_curl_auth_config "$PROBE_API_KEY" "$PROBE_AUTH_CONF"; then
+    rm -f "$PROBE_AUTH_CONF"
+    echo "ERROR: gateway API key configuration is invalid" >&2
+    exit 1
+  fi
   PROBE_API_KEY=""
   for _ in $(seq 1 "$PROBE_ATTEMPTS"); do
     if curl --fail --silent --show-error \
       --connect-timeout 2 --max-time 5 \
       -K "$PROBE_AUTH_CONF" \
-      "$PROBE_URL" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert isinstance(data, dict)' >/dev/null 2>&1; then
+      "$PROBE_URL" | python3 -c '
+import json
+import sys
+
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+
+def nonempty_string(value):
+    return isinstance(value, str) and bool(value.strip())
+
+auth = data.get("auth") if isinstance(data, dict) else None
+runtime = data.get("runtime") if isinstance(data, dict) else None
+features = data.get("features") if isinstance(data, dict) else None
+endpoints = data.get("endpoints") if isinstance(data, dict) else None
+if (
+    not isinstance(data, dict)
+    or data.get("object") != "hermes.api_server.capabilities"
+    or data.get("platform") != "hermes-agent"
+    or not nonempty_string(data.get("model"))
+    or not isinstance(data.get("jarvis"), dict)
+    or not isinstance(auth, dict)
+    or not nonempty_string(auth.get("type"))
+    or type(auth.get("required")) is not bool
+    or not isinstance(runtime, dict)
+    or not nonempty_string(runtime.get("mode"))
+    or not isinstance(features, dict)
+    or any(features.get(name) is not True for name in (
+        "chat_completions", "chat_completions_streaming", "hermes_native"
+    ))
+    or not isinstance(data.get("bot_mode"), dict)
+    or not isinstance(endpoints, dict)
+):
+    raise SystemExit(1)
+
+required_endpoints = {
+    "chat_completions": ("POST", "/v1/chat/completions"),
+    "responses": ("POST", "/v1/responses"),
+    "runs": ("POST", "/v1/runs"),
+    "hermes_native": ("POST", "/v1/hermes/native"),
+}
+for name, (method, path) in required_endpoints.items():
+    endpoint = endpoints.get(name)
+    if not isinstance(endpoint, dict) or endpoint.get("method") != method or endpoint.get("path") != path:
+        raise SystemExit(1)
+' >/dev/null 2>&1; then
       probe_ok=true
       break
     fi

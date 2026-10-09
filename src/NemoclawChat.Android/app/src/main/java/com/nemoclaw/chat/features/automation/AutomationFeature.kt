@@ -12,6 +12,7 @@ import android.content.ContextWrapper
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.database.Cursor
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -260,14 +261,22 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
+import okhttp3.Response
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
@@ -288,6 +297,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.roundToInt
 import kotlin.random.Random
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 @Composable
 internal fun CronScreen(context: Context, settings: AppSettings) {
@@ -777,19 +788,132 @@ internal suspend fun loadContinuityItems(settings: AppSettings, apiKey: String?)
 
 internal suspend fun publishContinuity(context: Context, settings: AppSettings, device: String, type: String, value: String = "", conversationId: String = "", projectId: String = "", fileUrl: String = "", fileName: String = "", statusValue: String = "available", apiKey: String?): String = withContext(Dispatchers.IO) {
     val payload = JSONObject().put("id", "$type:$device").put("type", type).put("device", device).put("value", value).put("conversation_id", conversationId).put("project_id", projectId).put("file_url", fileUrl).put("file_name", fileName).put("status", statusValue).put("updated_at", System.currentTimeMillis() / 1000.0)
-    try { val result = postJson(resolveHermesUrl(settings, "/v1/hub/state"), payload, apiKey); if (result.first in 200..299) "Stato pubblicato." else { enqueueContinuity(context, payload.toString()); "Offline: operazione accodata." } } catch (ex: Exception) { enqueueContinuity(context, payload.toString()); "Offline: operazione accodata (${ex.message})." }
+    try { val result = postJson(resolveHermesUrl(settings, "/v1/hub/state"), payload, apiKey); if (result.first in 200..299) "Stato pubblicato." else { enqueueContinuity(context, payload.toString()); "Offline: operazione accodata." } } catch (ex: CancellationException) { throw ex } catch (ex: Exception) { enqueueContinuity(context, payload.toString()); "Offline: operazione accodata (${ex.message})." }
 }
 
 internal fun enqueueContinuity(context: Context, payload: String) { val prefs = context.getSharedPreferences("continuity_queue", Context.MODE_PRIVATE); val array = runCatching { JSONArray(prefs.getString("items", "[]")) }.getOrElse { JSONArray() }; array.put(payload); while (array.length() > 100) array.remove(0); prefs.edit { putString("items", array.toString()) } }
 
 internal suspend fun flushContinuityQueue(context: Context, settings: AppSettings, apiKey: String?): String = withContext(Dispatchers.IO) { val prefs = context.getSharedPreferences("continuity_queue", Context.MODE_PRIVATE); val array = runCatching { JSONArray(prefs.getString("items", "[]")) }.getOrElse { JSONArray() }; val remaining = JSONArray(); for (index in 0 until array.length()) { val raw = array.optString(index); val response = runCatching { postJson(resolveHermesUrl(settings, "/v1/hub/state"), JSONObject(raw), apiKey) }.getOrNull(); if (response == null || response.first !in 200..299) remaining.put(raw) }; prefs.edit { putString("items", remaining.toString()) }; if (remaining.length() == 0) "Coda offline sincronizzata." else "${remaining.length()} operazioni ancora in coda." }
 
-internal suspend fun uploadContinuityFile(context: Context, settings: AppSettings, uri: Uri, device: String, apiKey: String?): String = withContext(Dispatchers.IO) {
-    val name = continuityDisplayName(context, uri); val temp = File(context.cacheDir, "continuity-${System.currentTimeMillis()}-${name.replace('/', '_')}")
-    try { context.contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().use { output -> input.copyTo(output) } } ?: return@withContext "File non leggibile."; if (temp.length() > 100L * 1024 * 1024) return@withContext "File oltre 100 MB."; val body = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM).addFormDataPart("file", name, temp.asRequestBody("application/octet-stream".toMediaTypeOrNull())).build(); val request = Request.Builder().url(resolveHermesUrl(settings, "/v1/media/upload")).post(body).apply { if (!apiKey.isNullOrBlank()) header("Authorization", "Bearer $apiKey") }.build(); val response = apiHttpClient.newCall(request).execute(); response.use { val text = it.body.string(); if (!it.isSuccessful) return@withContext "Upload HTTP ${it.code}: ${extractHumanError(text)}"; val root = JSONObject(text); val url = root.optString("media_url", root.optString("url", root.optString("file_url"))); if (url.isBlank()) return@withContext "URL file mancante."; publishContinuity(context, settings, device, "continuity.file", name, fileUrl = url, fileName = name, apiKey = apiKey) } } finally { temp.delete() }
+internal const val MAX_CONTINUITY_FILE_BYTES = 100L * 1024L * 1024L
+internal class ContinuityUploadResponseTooLargeException(cause: IOException) :
+    IOException("Risposta upload troppo grande.", cause)
+
+internal data class ContinuityUploadHttpResponse(val code: Int, val body: String)
+
+internal suspend fun executeContinuityUpload(call: Call): ContinuityUploadHttpResponse =
+    suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { call.cancel() }
+        try {
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (continuation.isActive) continuation.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    val result = try {
+                        response.use { current ->
+                            ContinuityUploadHttpResponse(
+                                current.code,
+                                current.body.byteStream().readUtf8Bounded(MAX_JSON_RESPONSE_BYTES)
+                            )
+                        }
+                    } catch (ex: PayloadTooLargeException) {
+                        ContinuityUploadResponseTooLargeException(ex)
+                    } catch (ex: Exception) {
+                        ex
+                    }
+                    if (continuation.isActive) {
+                        if (result is Exception) continuation.resumeWithException(result)
+                        else continuation.resume(result as ContinuityUploadHttpResponse)
+                    }
+                }
+            })
+        } catch (ex: Exception) {
+            if (continuation.isActive) continuation.resumeWithException(ex)
+        }
+    }
+
+internal suspend fun uploadContinuityRequest(
+    client: OkHttpClient,
+    request: Request,
+    onPublished: suspend (String) -> String
+): String {
+    val coroutineContext = currentCoroutineContext()
+    coroutineContext.ensureActive()
+    val response = executeContinuityUpload(client.newCall(request))
+    coroutineContext.ensureActive()
+    if (response.code !in 200..299) {
+        return "Upload HTTP ${response.code}: ${extractHumanError(response.body)}"
+    }
+    val root = JSONObject(response.body)
+    val url = root.optString("media_url", root.optString("url", root.optString("file_url")))
+    coroutineContext.ensureActive()
+    if (url.isBlank()) return "URL file mancante."
+    return onPublished(url)
 }
 
-internal fun continuityDisplayName(context: Context, uri: Uri): String = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }?.takeIf { it.isNotBlank() } ?: "file"
+internal suspend fun continuityUploadStatus(upload: suspend () -> String): String = try {
+    upload()
+} catch (ex: CancellationException) {
+    throw ex
+} catch (ex: PayloadTooLargeException) {
+    "File oltre 100 MB."
+} catch (ex: ContinuityUploadResponseTooLargeException) {
+    "Errore upload file: risposta troppo grande."
+} catch (ex: Exception) {
+    "Errore upload file."
+}
+
+internal suspend fun <T> withBoundedContinuityTempFile(
+    tempFile: File,
+    openInput: () -> InputStream?,
+    maxBytes: Long = MAX_CONTINUITY_FILE_BYTES,
+    onReady: suspend (File) -> T
+): T? {
+    try {
+        val coroutineContext = currentCoroutineContext()
+        val input = openInput() ?: return null
+        input.use { source ->
+            tempFile.outputStream().use { output ->
+                source.copyToBounded(output, maxBytes) { coroutineContext.ensureActive() }
+            }
+        }
+        coroutineContext.ensureActive()
+        return onReady(tempFile)
+    } finally {
+        tempFile.delete()
+    }
+}
+
+internal suspend fun uploadContinuityFile(context: Context, settings: AppSettings, uri: Uri, device: String, apiKey: String?): String = withContext(Dispatchers.IO) {
+    continuityUploadStatus {
+        val name = continuityDisplayName(context, uri)
+        val temp = File(context.cacheDir, "continuity-${System.currentTimeMillis()}-${name.replace('/', '_')}")
+        withBoundedContinuityTempFile(
+            tempFile = temp,
+            openInput = { context.contentResolver.openInputStream(uri) }
+        ) { stagedFile ->
+            val coroutineContext = currentCoroutineContext()
+            coroutineContext.ensureActive()
+            val body = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
+                .addFormDataPart("file", name, stagedFile.asRequestBody("application/octet-stream".toMediaTypeOrNull()))
+                .build()
+            val request = Request.Builder().url(resolveHermesUrl(settings, "/v1/media/upload")).post(body)
+                .apply { if (!apiKey.isNullOrBlank()) header("Authorization", "Bearer $apiKey") }.build()
+            uploadContinuityRequest(apiHttpClient, request) { url ->
+                currentCoroutineContext().ensureActive()
+                publishContinuity(context, settings, device, "continuity.file", name, fileUrl = url, fileName = name, apiKey = apiKey)
+            }
+        } ?: "File non leggibile."
+    }
+}
+
+internal fun continuityDisplayName(context: Context, uri: Uri): String =
+    continuityDisplayName { context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null) }
+
+internal fun continuityDisplayName(query: () -> Cursor?): String =
+    query()?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }?.takeIf { it.isNotBlank() } ?: "file"
 
 internal data class AuditItem(val id: String, val timestamp: Long, val event: String, val summary: String, val project: String, val run: String, val tool: String, val device: String, val risk: String, val status: String)
 
