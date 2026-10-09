@@ -38,6 +38,10 @@ gpu-manager/character_id/
 - Layout per personaggio `characters/<uuid>/` con `manifest.json` + 11 subdir
   da spec (`originals normalized training references validation
   models/{fl2va,ref2va} previews metrics logs cache`).
+- Trigger token: `HCID_` + 6 hex da `secrets`, mai scelto dall'utente, mai il
+  nome reale. Lezione dai LoRA character pubblici (es. Sydney/Wan2.1: trigger
+  "woman" contamina tutte le donne nella scena — critica della community):
+  token raro e unico, niente parole comuni.
 - Identificatore filesystem = UUID v4. Il nome visualizzato non appare mai nei path.
 - Permessi: dir `0700`, manifest `0600` (verificati su POSIX).
 - Trigger token: `HCID_` + 6 hex maiuscole da `secrets`, UNIQUE in DB con retry.
