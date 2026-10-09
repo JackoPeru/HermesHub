@@ -265,6 +265,9 @@ def train_cmd(toml: Path, output_dir: Path, max_steps: int = MAX_TRAIN_STEPS,
         "--h3_teacher_loss_mag_weight", str(LOSS_MAG_WEIGHT),
         "--h3_teacher_loss_dc_weight", str(LOSS_DC_WEIGHT),
         "--mixed_precision", "bf16", "--gradient_checkpointing",
+        # Attention backend: SDPA nativo torch (flash su sm_120), zero dipendenze
+        # (sageattention/xformers/flash-attn non installati su Blackwell).
+        "--sdpa",
         "--optimizer_type", "adamw8bit", "--blocks_to_swap", str(blocks_to_swap),
         "--output_dir", str(output_dir), "--output_name", "character",
         # Step frequenti per progress reale + eval 100/250/500. save_last alto:
