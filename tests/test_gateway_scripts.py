@@ -119,6 +119,18 @@ def bash_path_preserving_symlink(bash: str, path: Path) -> str:
     return f"/{drive[0].lower()}{absolute.as_posix()[2:]}"
 
 
+def native_sys_path(value: str) -> str:
+    """msys `/c/...` -> formato nativo `C:/...` (no-op fuori Windows).
+
+    readlink in Git Bash restituisce path msys mentre Path.resolve() da quelli
+    Windows: normalizzare un solo lato rompe i confronti, normalizzare
+    entrambi li rende affidabili ovunque.
+    """
+    if os.name == "nt":
+        value = re.sub(r"^/([a-zA-Z])/", lambda m: m.group(1).upper() + ":/", value)
+    return value
+
+
 def load_patcher():
     spec = importlib.util.spec_from_file_location("hermes_gateway_patcher", PATCHER_PATH)
     module = importlib.util.module_from_spec(spec)
@@ -527,7 +539,8 @@ class GatewayScriptTests(unittest.TestCase):
             capture_output=True,
             check=True,
         )
-        return result.stdout.strip()
+        out = result.stdout.strip()
+        return native_sys_path(out)
 
     def _seed_previous_updater_release(self, bash, fixture) -> Path:
         install_dir = Path(fixture["install_dir"])
@@ -2122,7 +2135,7 @@ class GatewayScriptTests(unittest.TestCase):
                         ).stdout.strip()
                         self.assertEqual(original_mode, mode)
             self.assertEqual(
-                bash_path(bash, old_release),
+                native_sys_path(bash_path(bash, old_release)),
                 self._readlink(bash, Path(fixture["install_dir"]) / "current", fixture["environment"]),
             )
 
@@ -2165,7 +2178,7 @@ class GatewayScriptTests(unittest.TestCase):
             ).stdout.rstrip("\n")
             self.assertEqual("previous-launcher-target", restored_target)
             self.assertEqual(
-                bash_path(bash, old_release),
+                native_sys_path(bash_path(bash, old_release)),
                 self._readlink(bash, Path(fixture["install_dir"]) / "current", fixture["environment"]),
             )
 
@@ -2185,7 +2198,7 @@ class GatewayScriptTests(unittest.TestCase):
             self.assertIn("unsupported managed path", result.stderr.lower())
             self.assertTrue(unsupported.is_dir())
             self.assertEqual(
-                bash_path(bash, old_release),
+                native_sys_path(bash_path(bash, old_release)),
                 self._readlink(bash, Path(fixture["install_dir"]) / "current", fixture["environment"]),
             )
             self.assertNotIn("restart hermes-hub.service", Path(fixture["systemctl_log"]).read_text(encoding="utf-8"))
@@ -2233,7 +2246,7 @@ class GatewayScriptTests(unittest.TestCase):
             )
             self.assertEqual(0, is_symlink.returncode, result.stdout + result.stderr)
             self.assertEqual(
-                bash_path(bash, old_release),
+                native_sys_path(bash_path(bash, old_release)),
                 self._readlink(bash, Path(fixture["install_dir"]) / "current", fixture["environment"]),
             )
 

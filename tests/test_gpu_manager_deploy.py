@@ -74,11 +74,40 @@ class TestCharacterTrainingHold(unittest.TestCase):
         })())())
 
     def test_store_error_holds_gpu(self):
-        class BrokenStore:
-            def active_training_jobs(self):
-                raise OSError("offline store")
+        # Store illeggibile: decide il lockfile (niente DB), non il panico.
+        # - lock vivo -> hold (mai guerra di VRAM col trainer);
+        # - nessun lock/stale -> guida normale (non murare chat e media
+        #   per un guasto al db ausiliario character).
+        import sys
+        import tempfile
 
-        self.assertTrue(hold_function(BrokenStore())())
+        sys.path.insert(0, str(REPO / "gpu-manager"))
+        try:
+            from character_id import training as hcid_training
+
+            real_pid_alive = hcid_training.pid_alive
+            with tempfile.TemporaryDirectory() as tmp:
+                os.environ["HCID_ROOT"] = tmp
+
+                class BrokenStore:
+                    def active_training_jobs(self):
+                        raise OSError("offline store")
+
+                try:
+                    # Nessun lock: guida normale.
+                    self.assertFalse(hold_function(BrokenStore())())
+                    # Lock stale (pid morto): guida normale.
+                    hcid_training.write_lock(tmp, {"job_id": "j", "pid": 0})
+                    self.assertFalse(hold_function(BrokenStore())())
+                    # Lock vivo: hold.
+                    hcid_training.write_lock(tmp, {"job_id": "j", "pid": 424242})
+                    hcid_training.pid_alive = lambda pid: pid == 424242
+                    self.assertTrue(hold_function(BrokenStore())())
+                finally:
+                    hcid_training.pid_alive = real_pid_alive
+                    os.environ.pop("HCID_ROOT", None)
+        finally:
+            sys.path.remove(str(REPO / "gpu-manager"))
 
 
 SHELL_SANDBOX = r"""
@@ -128,10 +157,17 @@ mock_ssh() {
   fi
   case "$command" in
     "mkdir -m 700 "*)
-      mkdir -m 700 "$TEST_ROOT/tmp/hermes-gpu-manager-deploy.lock" 2>/dev/null
+      # mkdir -m fallisce su Windows/msys (chmod non supportato) pur creando
+      # la dir: separa creazione atomica (fallisce se esiste: e la mutua
+      # esclusione) dai permessi best-effort.
+      if mkdir "$TEST_ROOT/tmp/hermes-gpu-manager-deploy.lock" 2>/dev/null; then
+        chmod 700 "$TEST_ROOT/tmp/hermes-gpu-manager-deploy.lock" 2>/dev/null || true
+      else
+        return 1
+      fi
       ;;
     'mktemp -d /tmp/hermes-gpu-manager.XXXXXXXX')
-      mkdir -m 700 "$TEST_ROOT/tmp/hermes-gpu-manager.$MOCK_STAGE_NAME"
+      mkdir -p "$TEST_ROOT/tmp/hermes-gpu-manager.$MOCK_STAGE_NAME"
       printf '/tmp/hermes-gpu-manager.%s\n' "$MOCK_STAGE_NAME"
       ;;
     "chmod 700 "*)

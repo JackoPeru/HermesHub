@@ -2527,9 +2527,14 @@ def _character_training_hold() -> bool:
     try:
         from character_id.training import pid_alive, read_lock
 
-        root = str((CONFIG.get("character_id", {}) or {}).get("root")
-                   or "/opt/hermes/character-id")
-        lock = read_lock(root)
+        cfg = globals().get("CONFIG") or {}
+        hcid_root = str((cfg.get("character_id", {}) or {}).get("root") or "")
+        if not hcid_root:
+            import os as _os
+
+            # Hook di test (e override operativo): mai hardcodare solo il default.
+            hcid_root = _os.environ.get("HCID_ROOT", "") or "/opt/hermes/character-id"
+        lock = read_lock(hcid_root)
         if lock and pid_alive(int(lock.get("pid", 0) or 0)):
             return True
     except Exception:  # noqa: BLE001 - neanche il lock si legge: guida normale
