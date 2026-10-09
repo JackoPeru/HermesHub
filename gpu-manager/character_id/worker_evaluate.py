@@ -98,7 +98,7 @@ def main(argv: list[str]) -> int:
 
     env = dict(os.environ)
     env["PYTHONPATH"] = str(Path(TRAINER_SRC) / "src") + os.pathsep + env.get("PYTHONPATH", "")
-    env["HF_HUB_OFFLINE"] = "1"
+    # Rete ON: generate CLI + processor come nel train (pesi da path locali).
     lock = read_lock(root) or {}
     env["CUDA_VISIBLE_DEVICES"] = str(lock.get("gpu", 1))
 

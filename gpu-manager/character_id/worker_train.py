@@ -89,7 +89,9 @@ def main(argv: list[str]) -> int:
 
     env = dict(os.environ)
     env["PYTHONPATH"] = str(Path(TRAINER_SRC) / "src") + os.pathsep + env.get("PYTHONPATH", "")
-    env["HF_HUB_OFFLINE"] = "1"  # pesi gia locali: mai download impliciti durante il train
+    # Rete ON per le cache: il processor Qwen3-VL va preso dall'hub al primo
+    # giro (pochi KB, poi restano in cache). OFF solo per il train lungo
+    # (pesi tutti locali: mai download a sorpresa di GB durante 500 step).
     gpu_index = 1
     backends_stopped: list[str] = []
     chained_eval = False  # True: la GPU resta all'eval, niente restore qui
@@ -137,10 +139,11 @@ def main(argv: list[str]) -> int:
         progress(0.26, "training avviato (500 step)", "training")
         # Recovery onesta: ripartenza pulita (cache presenti via --skip_existing,
         # checkpoint precedenti conservati in out_dir), mai resume presunto.
+        env_train = dict(env, HF_HUB_OFFLINE="1")
         try:
             train_log = open(log_path, "ab")  # noqa: PTH123 - chiusura esplicita sotto
             train_process = subprocess.Popen(
-                train_cmd(toml, out_dir), env=env, cwd=Path(TRAINER_SRC),
+                train_cmd(toml, out_dir), env=env_train, cwd=Path(TRAINER_SRC),
                 stdout=train_log, stderr=subprocess.STDOUT,
             )
         except OSError as exc:
