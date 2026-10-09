@@ -101,8 +101,20 @@ class TestCharacterTrainingHold(unittest.TestCase):
                     self.assertFalse(hold_function(BrokenStore())())
                     # Lock vivo: hold.
                     hcid_training.write_lock(tmp, {"job_id": "j", "pid": 424242})
-                    hcid_training.pid_alive = lambda pid: pid == 424242
+                    from unittest import mock
+                    with mock.patch("os.kill", return_value=None):
+                        self.assertTrue(hold_function(BrokenStore())())
+                    with mock.patch("os.kill", side_effect=PermissionError):
+                        self.assertTrue(hold_function(BrokenStore())())
+                    with mock.patch("os.kill", side_effect=ProcessLookupError):
+                        self.assertFalse(hold_function(BrokenStore())())
+                    # Il reader permissivo nascondeva anche JSON corrotto ed
+                    # errori di accesso: entrambi sono stato ignoto, non idle.
+                    hcid_training.lock_path(tmp).write_text("{broken", encoding="utf-8")
                     self.assertTrue(hold_function(BrokenStore())())
+                    check = hold_function(BrokenStore())
+                    with mock.patch("pathlib.Path.read_text", side_effect=PermissionError):
+                        self.assertTrue(check())
                 finally:
                     hcid_training.pid_alive = real_pid_alive
                     os.environ.pop("HCID_ROOT", None)
@@ -284,6 +296,55 @@ release_deploy_staging
 [[ ! -e "$TEST_ROOT/tmp/hermes-gpu-manager.firststage" ]]
 [[ ! -e "$TEST_ROOT/tmp/hermes-gpu-manager.secondstage" ]]
 """
+        result = run_deploy_shell(body)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(BASH, "Bash is unavailable")
+    def test_full_deploy_exit_cleans_state_after_return_failure_and_signal(self):
+        body = r'''
+TEST_ROOT=$(mktemp -d /tmp/hgm-full-deploy-test.XXXXXXXX)
+[[ "$TEST_ROOT" == /tmp/hgm-full-deploy-test.* ]] || exit 90
+trap 'rm -rf -- "$TEST_ROOT"' EXIT
+export TEST_ROOT
+cat > "$TEST_ROOT/whole.sh" <<'SH'
+source "$1"
+HERMES_GPU_MANAGER_KEY=offline-test-key
+ssh() {
+  local command="${@: -1}"
+  case "$command" in
+    "mkdir -m 700 "*) return 0 ;;
+    'mktemp -d /tmp/hermes-gpu-manager.XXXXXXXX') echo /tmp/hermes-gpu-manager.fixture ;;
+    "chmod 700 "*) return 0 ;;
+    "rm -rf -- "*) echo stage-clean >> "$TEST_ROOT/$SCENARIO.log" ;;
+    "rmdir -- "*) echo lock-clean >> "$TEST_ROOT/$SCENARIO.log" ;;
+    "sudo systemctl restart "*)
+      if [[ "$SCENARIO" == interrupted ]]; then kill -TERM "$BASHPID"; fi ;;
+    *) return 91 ;;
+  esac
+}
+scp() { [[ "$SCENARIO" != copy-failed ]]; }
+install_with_rollback() { BACKUP_COMPLETE=true; LIVE_REPLACEMENT_STARTED=true; }
+rollback() { echo rollback >> "$TEST_ROOT/$SCENARIO.log"; LIVE_REPLACEMENT_STARTED=false; }
+verify_remote() { return 0; }
+sleep() { :; }
+deploy_main fixture-host fixture-user
+SH
+for SCENARIO in success copy-failed interrupted; do
+  export SCENARIO
+  : > "$TEST_ROOT/$SCENARIO.log"
+  set +e
+  bash --noprofile --norc "$TEST_ROOT/whole.sh" "$1" >/dev/null 2>&1
+  code=$?
+  set -e
+  case "$SCENARIO" in
+    success) [[ "$code" == 0 ]] ;;
+    copy-failed) [[ "$code" == 1 ]] ;;
+    interrupted) [[ "$code" == 143 ]]; grep -qx rollback "$TEST_ROOT/$SCENARIO.log" ;;
+  esac
+  grep -qx stage-clean "$TEST_ROOT/$SCENARIO.log"
+  grep -qx lock-clean "$TEST_ROOT/$SCENARIO.log"
+done
+'''
         result = run_deploy_shell(body)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 

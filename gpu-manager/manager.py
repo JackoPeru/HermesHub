@@ -2525,21 +2525,31 @@ def _character_training_hold() -> bool:
     except Exception:  # noqa: BLE001 - store rotto: prova il lockfile
         pass
     try:
-        from character_id.training import pid_alive, read_lock
+        import json as _json
+        import os as _os
+        from character_id.training import lock_path
 
         cfg = globals().get("CONFIG") or {}
         hcid_root = str((cfg.get("character_id", {}) or {}).get("root") or "")
         if not hcid_root:
-            import os as _os
-
             # Hook di test (e override operativo): mai hardcodare solo il default.
             hcid_root = _os.environ.get("HCID_ROOT", "") or "/opt/hermes/character-id"
-        lock = read_lock(hcid_root)
-        if lock and pid_alive(int(lock.get("pid", 0) or 0)):
+        try:
+            lock = _json.loads(lock_path(hcid_root).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return False
+        if not isinstance(lock, dict) or type(lock.get("pid")) is not int:
             return True
-    except Exception:  # noqa: BLE001 - neanche il lock si legge: guida normale
-        pass
-    return False
+        pid = lock["pid"]
+        if pid <= 0:
+            return False
+        try:
+            _os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+    except Exception:  # noqa: BLE001 - stato ignoto: non contendere le GPU
+        return True
 
 
 if __name__ == "__main__":

@@ -571,6 +571,30 @@ class FakeOpenSsh {
         self.assertFalse((self.local / name).exists())
         self.assertEqual([], list(self.local.iterdir()))
 
+    def test_pull_aborts_if_inherited_whatif_prevents_private_acl(self):
+        name = "20261007T031500000000Z-00000001"
+        self.make_snapshot(self.remote, name)
+        self.local.mkdir()
+
+        def ps_literal(value):
+            return "'" + str(value).replace("'", "''") + "'"
+
+        wrapper = self.root / "whatif-wrapper.ps1"
+        wrapper.write_text(
+            f"$WhatIfPreference = $true\n"
+            f". {ps_literal(self.SCRIPT)} -SshHost 'fake-host' "
+            f"-Snapshot {ps_literal(name)} -LocalRoot {ps_literal(self.local)}\n",
+            encoding="utf-8-sig",
+        )
+
+        result = self.run_pull(expected=1, script=wrapper)
+
+        self.assertIn("private acl application was declined", result.stdout.lower() + result.stderr.lower())
+        self.assertFalse((self.local / name).exists())
+        self.assertEqual([], list(self.local.iterdir()))
+        calls = self.log.read_text(encoding="utf-8").splitlines() if self.log.exists() else []
+        self.assertFalse(any(line.startswith("scp|") for line in calls))
+
     def test_pull_retains_seven_valid_tool_snapshots_and_unrelated_directories(self):
         self.local.mkdir()
         for index in range(8):
@@ -609,7 +633,7 @@ class FakeOpenSsh {
 
         source = self.SCRIPT.read_text(encoding="utf-8")
         match = re.search(
-            r"(?ms)^function Invoke-LocalRetention\(\[string\]\$KeepSnapshot\) \{\n.*?^\}",
+            r"(?ms)^function Invoke-LocalRetention\(\[string\]\$KeepSnapshot, \[int\]\$RetentionLimit\) \{\n.*?^\}",
             source,
         )
         self.assertIsNotNone(match, "production retention function not found")
@@ -621,7 +645,6 @@ class FakeOpenSsh {
 
         harness = f"""
 $script:localRoot = {ps_literal(local_root)}
-$script:Retention = 1
 $script:SnapshotPattern = [regex]'^\\d{{8}}T\\d{{12}}Z-[0-9a-f]{{8}}$'
 $script:RemovedTargets = @()
 $script:FakeCandidates = @(
@@ -641,7 +664,7 @@ function Remove-Item {{
 }}
 {match.group(0)}
 $caught = $null
-try {{ Invoke-LocalRetention {ps_literal(keep_name)} }} catch {{ $caught = $_ }}
+try {{ Invoke-LocalRetention -KeepSnapshot {ps_literal(keep_name)} -RetentionLimit 1 }} catch {{ $caught = $_ }}
 if (-not $caught) {{ throw 'Expected retention to reject an outside-root candidate.' }}
 if ($script:RemovedTargets.Count -ne 0) {{ throw 'Remove-Item was called for an unsafe candidate.' }}
 if (-not (Test-Path -LiteralPath {ps_literal(sentinel)})) {{ throw 'Outside-root sentinel was deleted.' }}

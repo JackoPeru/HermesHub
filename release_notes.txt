@@ -1,12 +1,11 @@
-Hermes Hub 0.6.235 (stop affidabile + fine turno onesta)
+Hermes Hub 0.6.236 (protezione GPU e import archivio)
 
-- App: stop sblocca sempre il composer (anche se la rete e morta e il
-  server non risponde); turni caduti senza risposta mostrano un messaggio
-  onesto ("Connessione persa..." / "Turno finito senza risposta...") invece
-  del silenzio o della bolla "sta lavorando" appesa; cleanup di fine turno
-  garantito anche se salvataggio/titolo lanciano.
-- Versioni: Windows/AdminBridge `0.6.235`; Android `versionName 0.6.235`, `versionCode 239`.
-- Asset: `HermesHub-0.6.235-android.apk` (binario Windows invariato).
-- SHA-256 Android: `1e7d1b6059b1d2253b721bf58c77ee5dd39b4bdef7230b59f74f2ce553a09ac5`.
-- Asset: `HermesHub-0.6.235-linux-gateway.tar.gz`.
-- SHA-256 gateway: `a584342b72781863230336be4f1d1ce15403632dc1617643f2f0b10ea9bd3366`.
+- GPU manager: hold fail-closed con store o lock training illeggibile/corrotto; deploy con staging, cleanup e rollback su errore/interruzione; chiave solo via stdin.
+- Deploy GPU: timeout di 60s per probe `/status` aggregati.
+- Windows MSIX: endpoint RFC 3161 corretti (DigiCert HTTP primario, Sectigo fallback); timestamp obbligatorio mantenuto.
+- Android Archivio: risposte import fino a 64 MiB; JSON ordinario resta limitato a 2 MiB.
+- Versioni: Windows/AdminBridge `0.6.236`; Android `versionName 0.6.236`, `versionCode 240`.
+- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.236-android.apk`; MSIX `NemoclawChat.Windows_0.6.236.0_x64.msix`; gateway Linux `HermesHub-0.6.236-linux-gateway.tar.gz`.
+
+- CI: dipendenza Pillow esplicita per i test; analyzer backup corretto, rifiuto ACL interrompe il trasferimento e ripulisce staging.
+- Distribuzione GPU manager separata dal tar gateway: fix gia applicati e verificati sul server; sorgenti e deploy inclusi nel repository.

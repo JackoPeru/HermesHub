@@ -2,6 +2,15 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.236 - 2026-10-09
+
+- GPU manager: hold fail-closed se store o lock del training sono illeggibili o corrotti; deploy con staging e cleanup affidabili, rollback su errore/interruzione e chiave solo via stdin.
+- Deploy GPU: timeout esteso per la verifica `/status`, che aggrega probe backend indipendenti.
+- Windows MSIX: endpoint RFC 3161 corretti (DigiCert HTTP primario, Sectigo fallback); timestamp obbligatorio mantenuto.
+- Android Archivio: import accetta risposte fino a 64 MiB; il limite JSON ordinario resta 2 MiB.
+
+- CI: Pillow esplicito nei test; analyzer backup corretto con interruzione se l'ACL privata viene rifiutata e cleanup staging.
+
 ## 0.6.235 - 2026-10-09
 
 - Chat: stop che sblocca sempre la UI (anche a rete morta), fine turno

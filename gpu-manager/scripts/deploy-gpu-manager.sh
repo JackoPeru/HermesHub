@@ -60,6 +60,10 @@ deploy_exit_cleanup() {
   local exit_code="$?"
   trap - EXIT ERR INT TERM
   set +e
+  if [[ "$LIVE_REPLACEMENT_STARTED" == true ]] && ! rollback; then
+    echo "rollback non verificato; backup conservato in $BACKUP_DIR" >&2
+    exit_code=1
+  fi
   if ! release_deploy_staging; then
     echo 'cleanup staging/lock remoto non verificato' >&2
     [[ "$exit_code" -ne 0 ]] || exit_code=1
@@ -176,7 +180,9 @@ def request(path, token=None, method="GET"):
         "http://127.0.0.1:8643" + path,
         data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=10) as response:
+        # /status aggregates several independently timed backend probes;
+        # a healthy manager can take over 30s while an optional service is down.
+        with urllib.request.urlopen(req, timeout=60 if path == "/status" else 10) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as error:
         return error.code, error.read()
@@ -235,13 +241,14 @@ deploy_main() {
   local DEPLOY_HOST="${1:-${HOST:-192.168.1.6}}"
   local DEPLOY_USER="${2:-${USER:-matteo}}"
   local SCRIPT_DIR SRC_DIR TS
-  local REMOTE_STAGE=''
-  local REMOTE_LOCK_HELD=false
-  local BACKUP_DIR=''
-  local BACKUP_COMPLETE=false
-  local LIVE_REPLACEMENT_STARTED=false
-  local -a SSH_CMD=(ssh "${DEPLOY_USER}@${DEPLOY_HOST}")
-  local -a SCP_CMD=(scp)
+  # EXIT runs after this function returns: transaction state must outlive it.
+  REMOTE_STAGE=''
+  REMOTE_LOCK_HELD=false
+  BACKUP_DIR=''
+  BACKUP_COMPLETE=false
+  LIVE_REPLACEMENT_STARTED=false
+  SSH_CMD=(ssh "${DEPLOY_USER}@${DEPLOY_HOST}")
+  SCP_CMD=(scp)
 
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   SRC_DIR="$(dirname "$SCRIPT_DIR")"

@@ -172,9 +172,10 @@ try {
         }
 
         $signTool = Get-SignTool
-        & $signTool sign /fd SHA256 /sha1 $cert.Thumbprint /tr https://timestamp.digicert.com /td SHA256 $msix.FullName
+        # SignTool /tr requires these RFC 3161 HTTP URLs; HTTPS is rejected as an invalid URL.
+        & $signTool sign /fd SHA256 /sha1 $cert.Thumbprint /tr http://timestamp.digicert.com /td SHA256 $msix.FullName
         if ($LASTEXITCODE -ne 0) {
-            & $signTool sign /fd SHA256 /sha1 $cert.Thumbprint /tr https://timestamp.sectigo.com /td SHA256 $msix.FullName
+            & $signTool sign /fd SHA256 /sha1 $cert.Thumbprint /tr http://timestamp.sectigo.com/rfc3161 /td SHA256 $msix.FullName
             if ($LASTEXITCODE -ne 0) {
                 throw "Firma MSIX con timestamp fallita."
             }

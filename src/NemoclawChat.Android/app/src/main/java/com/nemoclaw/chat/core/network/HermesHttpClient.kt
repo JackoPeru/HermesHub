@@ -165,7 +165,7 @@ internal fun executeHttpGet(
     val request = builder.get().build()
 
     return apiHttpClient.newCall(request).execute().use { response ->
-        val limit = if (url.contains("/v1/hub/conversations", ignoreCase = true)) {
+        val limit = if (request.url.encodedPath.endsWith("/v1/hub/conversations")) {
             MAX_ARCHIVE_JSON_RESPONSE_BYTES
         } else {
             MAX_JSON_RESPONSE_BYTES
@@ -220,6 +220,11 @@ internal fun executeJsonRequest(
     }
 
     return apiHttpClient.newCall(request).execute().use { response ->
-        response.code to response.body.byteStream().readUtf8Bounded()
+        val limit = if (request.url.encodedPath.endsWith("/v1/hub/conversations/import")) {
+            MAX_ARCHIVE_JSON_RESPONSE_BYTES
+        } else {
+            MAX_JSON_RESPONSE_BYTES
+        }
+        response.code to response.body.byteStream().readUtf8Bounded(limit)
     }
 }

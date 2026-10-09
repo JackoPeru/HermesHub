@@ -24,7 +24,7 @@ if ([string]::IsNullOrWhiteSpace($LocalRoot)) {
     throw "LocalRoot is empty; set LOCALAPPDATA or pass -LocalRoot."
 }
 
-function Quote-NativeArgument([string]$Value) {
+function ConvertTo-NativeArgument([string]$Value) {
     if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') {
         return $Value
     }
@@ -67,7 +67,7 @@ function Invoke-OpenSsh([string]$Name, [string[]]$Arguments) {
     }
     $start = [System.Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $command.Source
-    $start.Arguments = (($Arguments | ForEach-Object { Quote-NativeArgument ([string]$_) }) -join " ")
+    $start.Arguments = (($Arguments | ForEach-Object { ConvertTo-NativeArgument ([string]$_) }) -join " ")
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.RedirectStandardOutput = $true
@@ -81,8 +81,12 @@ function Invoke-OpenSsh([string]$Name, [string[]]$Arguments) {
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($remaining)) {
-            try { $process.Kill() } catch { }
-            try { $process.WaitForExit() } catch { }
+            try { $process.Kill() } catch [System.InvalidOperationException] {
+                Write-Verbose "OpenSSH process exited during timeout cleanup."
+            }
+            try { $process.WaitForExit() } catch [System.InvalidOperationException] {
+                Write-Verbose "OpenSSH process exited during final wait."
+            }
             throw "OpenSSH transfer timed out after 15 minutes."
         }
         $process.WaitForExit()
@@ -97,7 +101,13 @@ function Invoke-OpenSsh([string]$Name, [string[]]$Arguments) {
     }
 }
 
-function Set-PrivateAcl([string]$Path, [bool]$Directory) {
+function Set-PrivateAcl {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param([string]$Path, [bool]$Directory)
+
+    if (-not $PSCmdlet.ShouldProcess($Path, "Set private ACL")) {
+        throw "Private ACL application was declined; backup transfer aborted."
+    }
     $acl = Get-Acl -LiteralPath $Path
     $acl.SetAccessRuleProtection($true, $false)
     foreach ($rule in @($acl.Access)) {
@@ -117,7 +127,7 @@ function Set-PrivateAcl([string]$Path, [bool]$Directory) {
     Set-Acl -LiteralPath $Path -AclObject $acl
 }
 
-function Assert-Properties($Object, [string[]]$Expected, [string]$Label) {
+function Assert-Property($Object, [string[]]$Expected, [string]$Label) {
     if ($null -eq $Object) {
         throw "$Label is missing."
     }
@@ -140,7 +150,7 @@ function Test-VerifiedSnapshot([string]$Directory) {
     }
     $manifestText = Get-Content -LiteralPath $manifestPath -Raw
     $manifest = $manifestText | ConvertFrom-Json
-    Assert-Properties $manifest @("format", "version", "created_at", "databases") "Manifest"
+    Assert-Property $manifest @("format", "version", "created_at", "databases") "Manifest"
     if ($manifest.format -ne "hermes-hub-sqlite-backup" -or $manifest.version -ne 1) {
         throw "Unsupported backup manifest format or version."
     }
@@ -162,7 +172,7 @@ function Test-VerifiedSnapshot([string]$Directory) {
     }
     $names = @("manifest.json")
     foreach ($entry in $entries) {
-        Assert-Properties $entry @("snapshot", "source", "label", "size_bytes", "sha256") "Manifest database entry"
+        Assert-Property $entry @("snapshot", "source", "label", "size_bytes", "sha256") "Manifest database entry"
         $name = [string]$entry.snapshot
         $size = 0L
         if ($name -notmatch '^db-\d{3}-[A-Za-z0-9_.-]+$' -or
@@ -201,7 +211,7 @@ function Test-VerifiedSnapshot([string]$Directory) {
     return $true
 }
 
-function Invoke-LocalRetention([string]$KeepSnapshot) {
+function Invoke-LocalRetention([string]$KeepSnapshot, [int]$RetentionLimit) {
     $separators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
     $normalizeDirectory = {
         param([string]$Path)
@@ -226,7 +236,7 @@ function Invoke-LocalRetention([string]$KeepSnapshot) {
         }
     }
     $keep = @($eligible | Where-Object Name -eq $KeepSnapshot)
-    $keep += @($eligible | Where-Object Name -ne $KeepSnapshot | Sort-Object Name -Descending | Select-Object -First ([Math]::Max(0, $Retention - 1)))
+    $keep += @($eligible | Where-Object Name -ne $KeepSnapshot | Sort-Object Name -Descending | Select-Object -First ([Math]::Max(0, $RetentionLimit - 1)))
     $keepNames = @($keep | ForEach-Object Name)
     foreach ($candidate in $eligible) {
         if ($keepNames -notcontains $candidate.Name) {
@@ -282,27 +292,27 @@ if (Test-Path -LiteralPath $destination -PathType Any) {
     } catch {
         throw "Existing local snapshot failed verification: $($_.Exception.Message)"
     }
-    Invoke-LocalRetention $Snapshot
+    Invoke-LocalRetention $Snapshot $Retention
     Write-Output "Snapshot already verified locally: $destination"
     return
 }
 
 $partial = Join-Path $localRoot ("$Snapshot." + [Guid]::NewGuid().ToString("N") + ".partial")
 [System.IO.Directory]::CreateDirectory($partial) | Out-Null
-Set-PrivateAcl $partial $true
 $published = $false
 try {
+    Set-PrivateAcl $partial $true
     $remoteDirectory = "$RemoteRoot/$Snapshot"
     $manifestPath = Join-Path $partial "manifest.json"
     $options = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
-    $manifestResult = Invoke-OpenSsh "scp" ($options + @("$SshHost`:$remoteDirectory/manifest.json", $manifestPath))
+    Invoke-OpenSsh "scp" ($options + @("$SshHost`:$remoteDirectory/manifest.json", $manifestPath)) | Out-Null
     Set-PrivateAcl $manifestPath $false
     if ((Get-Item -LiteralPath $manifestPath).Length -gt 1048576) {
         throw "Backup manifest exceeds 1 MiB."
     }
     $manifestText = Get-Content -LiteralPath $manifestPath -Raw
     $manifest = $manifestText | ConvertFrom-Json
-    Assert-Properties $manifest @("format", "version", "created_at", "databases") "Manifest"
+    Assert-Property $manifest @("format", "version", "created_at", "databases") "Manifest"
     if ($manifest.format -ne "hermes-hub-sqlite-backup" -or $manifest.version -ne 1) {
         throw "Unsupported backup manifest format or version."
     }
@@ -311,7 +321,7 @@ try {
         throw "Backup manifest has no databases."
     }
     foreach ($entry in $entries) {
-        Assert-Properties $entry @("snapshot", "source", "label", "size_bytes", "sha256") "Manifest database entry"
+        Assert-Property $entry @("snapshot", "source", "label", "size_bytes", "sha256") "Manifest database entry"
         $name = [string]$entry.snapshot
         if ($name -notmatch '^db-\d{3}-[A-Za-z0-9_.-]+$') {
             throw "Backup manifest contains an invalid database file name."
@@ -326,14 +336,14 @@ try {
     }
     [System.IO.Directory]::Move($partial, $destination)
     $published = $true
-    Invoke-LocalRetention $Snapshot
+    Invoke-LocalRetention $Snapshot $Retention
     Write-Output "Verified backup published: $destination"
 } finally {
     if (-not $published -and [System.IO.Directory]::Exists($partial)) {
         $resolvedPartial = [System.IO.Path]::GetFullPath($partial)
         $partialParent = [System.IO.Path]::GetDirectoryName($resolvedPartial)
         if ([string]::Equals($partialParent, $localRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-            Remove-Item -LiteralPath $resolvedPartial -Recurse -Force
+            [System.IO.Directory]::Delete($resolvedPartial, $true)
         }
     }
 }
