@@ -341,6 +341,34 @@ internal fun isExternalBotWork(freshTsMs: Long, nowMs: Long, localTurnEndMs: Lon
     return true
 }
 
+/**
+ * Morte di rete contro errore logico: solo la prima merita il messaggio
+ * "stream scollegato, il gateway potrebbe continuare". Pura e testabile.
+ */
+internal fun isTransportFailure(ex: Exception): Boolean {
+    if (ex is java.io.IOException) return true
+    val message = ex.message.orEmpty()
+    return message.contains("connection abort", ignoreCase = true) ||
+        message.contains("software caused connection abort", ignoreCase = true) ||
+        message.contains("connection reset", ignoreCase = true) ||
+        message.contains("broken pipe", ignoreCase = true) ||
+        message.contains("unexpected end of stream", ignoreCase = true) ||
+        message.contains("unable to resolve host", ignoreCase = true) ||
+        message.contains("timeout", ignoreCase = true) ||
+        message.contains("timed out", ignoreCase = true)
+}
+
+/**
+ * Testo finale onesto quando il turno muore senza contenuto: mai silenzio,
+ * mai il placeholder "sta lavorando" lasciato appeso. Pura e testabile.
+ */
+internal fun silentTurnEndMessage(transportDetached: Boolean): String =
+    if (transportDetached) {
+        "Connessione persa senza risposta. Il lavoro potrebbe continuare sul gateway: riapri la chat o tocca Riprova."
+    } else {
+        "Turno finito senza risposta né errore. Tocca Riprova."
+    }
+
 @Composable
 internal fun ChatScreen(
     context: Context,
@@ -1514,6 +1542,7 @@ internal fun ChatScreen(
                         val convId = streamCid
                         val prevId = state.previousResponseId
                         var interrupted = false
+                        var transportFailure = false
                         var lastCheckpointAt = 0L
                         var boundRunIdForTurn: String? = null
                         val rawEvents = mutableListOf<HermesRawEvent>()
@@ -1848,6 +1877,7 @@ internal fun ChatScreen(
                                 }
                             }
                         } catch (ex: Exception) {
+                            transportFailure = isTransportFailure(ex)
                             if (!smartHandled) {
                                 // Throw non-cancel prima/durante il fast path: come sopra,
                                 // senza lasciare status orfani.
@@ -1868,15 +1898,16 @@ internal fun ChatScreen(
                         } finally {
                             val finalState = localState
                             val partialText = finalState.text.trimEnd()
-                            val transportDetached = finalState.error?.contains("connection abort", ignoreCase = true) == true ||
+                            val transportDetached = transportFailure ||
+                                finalState.error?.contains("connection abort", ignoreCase = true) == true ||
                                 finalState.error?.contains("software caused connection abort", ignoreCase = true) == true
                             val finalText = when {
                                 interrupted && partialText.isNotEmpty() -> "$partialText\n\n_Interrotto._"
                                 interrupted -> "Generazione interrotta."
                                 transportDetached && partialText.isNotEmpty() -> "$partialText\n\n_Stream scollegato: Hermes potrebbe continuare il lavoro sul gateway._"
-                                transportDetached -> ""
+                                transportDetached -> silentTurnEndMessage(true)
                                 finalState.error != null && partialText.isNotEmpty() -> "$partialText\n\n_Risposta troncata per errore: ${finalState.error}._"
-                                else -> finalState.text.ifEmpty { finalState.error ?: "" }
+                                else -> finalState.text.ifEmpty { finalState.error ?: silentTurnEndMessage(false) }
                             }
 
                             val serverTerminalRun = finalState.runStatus.lowercase() in setOf("completed", "failed", "cancelled")
@@ -1964,9 +1995,12 @@ internal fun ChatScreen(
                             // Snapshot solo flusso normale: lo smart persiste da se con
                             // i messaggi giusti (mai state.messages globale, che dopo
                             // un cambio chat apparterrebbe all'altra conversazione).
-                            if (smartHandled) {
-                                // Cleanup fast path: solo reset stato.
+                            // clearTurnState e garantito anche se IO/titolo sotto
+                            // lanciano: niente entry orfane = niente busy infinito.
+                            fun clearTurnState() {
                                 if (state.activeConversationId == activeStreamCid) {
+                                    // Ripulisci solo se nessun invio successivo ha preso il posto di
+                                    // questo stream: altrimenti cancelleresti lo stato del nuovo turno.
                                     val current = state.activeStreams[activeStreamCid]
                                     if (current == null || current.job == null || current.job === collectorJob) {
                                         state.streamingState = null
@@ -1975,7 +2009,12 @@ internal fun ChatScreen(
                                 } else {
                                     state.activeStreams.remove(activeStreamCid)
                                 }
+                            }
+                            if (smartHandled) {
+                                // Cleanup fast path: solo reset stato.
+                                clearTurnState()
                             } else {
+                                try {
                                 // Snapshot finale: su chat collegata unisci i messaggi
                                 // remoti arrivati durante il turno (niente turni persi).
                                 val finalMessages = if (preserveRemoteContinuity) {
@@ -2009,19 +2048,14 @@ internal fun ChatScreen(
                                     )
                                 }
                                 if (state.activeConversationId == activeStreamCid) {
-                                    // Ripulisci solo se nessun invio successivo ha preso il posto di
-                                    // questo stream: altrimenti cancelleresti lo stato del nuovo turno.
-                                    val current = state.activeStreams[activeStreamCid]
-                                    if (current == null || current.job == null || current.job === collectorJob) {
-                                        state.activeConversationId = saved.id
-                                        state.previousResponseId = saved.previousResponseId
-                                        state.streamingState = null
-                                        state.activeStreamJob = null
-                                    }
-                                } else {
-                                    state.activeStreams.remove(activeStreamCid)
+                                    state.activeConversationId = saved.id
+                                    state.previousResponseId = saved.previousResponseId
                                 }
-                                if (shouldGenerateTitle && !interrupted && finalState.error == null && finalText.isNotBlank()) {
+                                // Titolo solo su risposte vere: mai dal messaggio onesto
+                            // di fine anomala (niente titoli "Connessione persa").
+                            val abnormalSilentEnd = !interrupted &&
+                                (transportDetached || (finalState.error == null && finalState.text.isBlank()))
+                            if (shouldGenerateTitle && !interrupted && !abnormalSilentEnd && finalState.error == null && finalText.isNotBlank()) {
                                     val generatedTitle = generateConversationTitle(
                                         settings = settings,
                                         firstPrompt = displayText,
@@ -2039,6 +2073,10 @@ internal fun ChatScreen(
                                             )
                                         }.getOrNull()
                                     }
+                                }
+                                } finally {
+                                    // Garantito anche se snapshot/titolo lanciano.
+                                    clearTurnState()
                                 }
                             }
                             // Turno finito senza stop: eventuale coda parte da sola.
@@ -2069,8 +2107,18 @@ internal fun ChatScreen(
                 // Stop VERO: cancella il collector locale (prima non lo faceva:
                 // la generazione continuava e il composer restava bloccato).
                 val cid = state.activeConversationId
+                val jobAtTap = cid?.let { state.activeStreams[it]?.job }
                 state.activeStreams[cid]?.job?.cancel()
                 state.activeStreamJob?.cancel()
+                // Sblocco UI garantito: l'entry viene rimossa qui, non si aspetta
+                // il finally del collector (che su rete morta potrebbe non
+                // arrivare mai). Solo se nessun turno nuovo ha preso il posto.
+                if (cid != null) {
+                    val current = state.activeStreams[cid]
+                    if (current == null || current.job == null || current.job === jobAtTap) {
+                        state.activeStreams.remove(cid)
+                    }
+                }
                 // Stop cancella anche la coda prompt (niente partenze a sorpresa).
                 state.queuedPrompts.removeAll { it.conversationId == cid }
                 // Job media nati in questo turno (invisibili al client): cancellali,

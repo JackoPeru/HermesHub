@@ -346,4 +346,19 @@ class CanonicalBotChatTest {
         assertEquals("Ancora al lavoro · nessun segnale da 89s", staleTurnLabel(89_000L))
         assertEquals("Ancora al lavoro · nessun segnale da 2 min", staleTurnLabel(150_000L))
     }
+
+    @Test
+    fun transportFailureClassified() {
+        assertTrue(isTransportFailure(java.io.IOException("Connection reset by peer")))
+        assertTrue(isTransportFailure(Exception("Read timed out")))
+        assertTrue(isTransportFailure(Exception("software caused connection abort")))
+        assertFalse(isTransportFailure(Exception("HTTP 401: chiave non valida")))
+        assertFalse(isTransportFailure(Exception("Run failed: model error")))
+    }
+
+    @Test
+    fun silentEndNeverSilent() {
+        assertTrue(silentTurnEndMessage(true).contains("Connessione persa"))
+        assertTrue(silentTurnEndMessage(false).contains("Riprova"))
+    }
 }
