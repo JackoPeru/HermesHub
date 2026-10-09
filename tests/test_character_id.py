@@ -625,7 +625,7 @@ class TestTrainingRecipe(unittest.TestCase):
                          "--h3_teacher_loss_mag_weight 0.5",
                          "--h3_teacher_loss_dc_weight 0.3",
                          "--network_dim 16", "--optimizer_type adamw8bit",
-                         "--sdpa",
+                         "--sdpa", "--lr_scheduler cosine",
                          "--blocks_to_swap 48", "--save_every_n_steps 50",
                          # save_last alto: un valore piccolo cancellerebbe 100/250
                          # durante il run (remove_step_no di Musubi).
