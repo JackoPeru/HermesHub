@@ -2517,11 +2517,24 @@ def _character_training_hold() -> bool:
 
     True = job train/evaluate/benchmark non terminali: il trainer possiede le
     GPU (ha scaricato lui i backend e li ripristina lui). Mai eccezioni.
+    Se lo store e illeggibile, fallback sul lockfile (niente DB): lock
+    presente + pid vivo = hold. Mai permissivo verso la GPU, mai cieco.
     """
     try:
         return bool(_character_store is not None and _character_store.active_training_jobs())
-    except Exception:  # noqa: BLE001 - store rotto: il manager guida normale
-        return False
+    except Exception:  # noqa: BLE001 - store rotto: prova il lockfile
+        pass
+    try:
+        from character_id.training import pid_alive, read_lock
+
+        root = str((CONFIG.get("character_id", {}) or {}).get("root")
+                   or "/opt/hermes/character-id")
+        lock = read_lock(root)
+        if lock and pid_alive(int(lock.get("pid", 0) or 0)):
+            return True
+    except Exception:  # noqa: BLE001 - neanche il lock si legge: guida normale
+        pass
+    return False
 
 
 if __name__ == "__main__":
