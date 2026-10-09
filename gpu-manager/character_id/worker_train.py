@@ -96,6 +96,17 @@ def main(argv: list[str]) -> int:
     try:
         progress(0.02, "acquisizione GPU", "training")
         store.set_status(character_id, "training")
+        # Prima si scaricano i backend, POI si misura: con Qwen residente
+        # nessuna GPU passa mai il gate (fail stupido prima di iniziare).
+        write_lock(root, {"job_id": job_id, "character_id": character_id,
+                          "pid": os.getpid(), "pgid": os.getpgid(0),
+                          "gpu": -1, "started": utcnow()})
+        progress(0.04, "scarico backend dalla VRAM")
+        for svc in ("hermes-tabby.service", "hermes-comfyui.service", "hermes-comfyui-direct.service"):
+            code, _ = systemctl("stop", svc)
+            if code == 0:
+                backends_stopped.append(svc)
+        time.sleep(10)
         try:
             gpu_index = pick_gpu()
         except RuntimeError as exc:
@@ -105,14 +116,6 @@ def main(argv: list[str]) -> int:
                           "pid": os.getpid(), "pgid": os.getpgid(0),
                           "gpu": gpu_index, "started": utcnow()})
         store.update_job(job_id, detail=f"gpu{gpu_index} acquisita")
-
-        # Scarica Qwen/Comfy dalla VRAM (registra stato: era tutto su).
-        progress(0.04, "scarico backend dalla VRAM")
-        for svc in ("hermes-tabby.service", "hermes-comfyui.service", "hermes-comfyui-direct.service"):
-            code, _ = systemctl("stop", svc)
-            if code == 0:
-                backends_stopped.append(svc)
-        time.sleep(5)
         free = gpu_free_mb(gpu_index)
         if free < 13000.0:
             raise RuntimeError(f"VRAM insufficiente su gpu{gpu_index}: {free:.0f} MB liberi")
