@@ -270,6 +270,9 @@ def train_cmd(toml: Path, output_dir: Path, max_steps: int = MAX_TRAIN_STEPS,
         # (sageattention/xformers/flash-attn non installati su Blackwell).
         "--sdpa",
         "--optimizer_type", "adamw8bit", "--blocks_to_swap", str(blocks_to_swap),
+        # H2D-only: i blocchi tornano su CPU dopo l'uso (senza: race "expected
+        # cuda after wait" su GPU strette).
+        "--block_swap_h2d_only",
         "--output_dir", str(output_dir), "--output_name", "character",
         # Step frequenti per progress reale + eval 100/250/500. save_last alto:
         # con save_every=50 un save_last piccolo cancellerebbe 100/250 durante
