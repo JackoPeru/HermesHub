@@ -260,8 +260,11 @@ internal const val MIN_FONT_SCALE = 0.85f
 internal const val MAX_FONT_SCALE = 1.25f
 
 internal object AppDefaults {
-    const val gatewayUrl = ""
-    const val localGatewayUrl = ""
+    // Connessione preimpostata di base: fresh install funziona subito.
+    // gatewayUrl = Tailscale (ovunque), localGatewayUrl = LAN casa
+    // (plug-and-play: l'app prova entrambe, vedi GatewayRoots).
+    const val gatewayUrl = "http://100.94.223.14:8642"
+    const val localGatewayUrl = "http://192.168.1.6:8642"
     const val gatewayWsUrl = ""
     const val adminBridgeUrl = ""
     const val provider = "hermes-agent"

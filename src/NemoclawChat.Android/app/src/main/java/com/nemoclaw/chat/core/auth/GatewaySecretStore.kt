@@ -14,6 +14,7 @@ import javax.crypto.spec.GCMParameterSpec
 
 internal const val CURRENT_SETTINGS_PREFS = "chatclaw_settings"
 internal const val LEGACY_SETTINGS_PREFS = "nemoclaw_settings"
+
 private const val GATEWAY_SECRET_PREF_KEY = "gatewaySecretCiphertext"
 private const val GATEWAY_SECRET_KEYSTORE = "AndroidKeyStore"
 private const val GATEWAY_SECRET_ALIAS = "HermesHubGatewayApiKey"
@@ -34,7 +35,10 @@ internal fun loadGatewaySecret(context: Context): String? {
         ?: legacyPrefs.getString(GATEWAY_SECRET_PREF_KEY, null)?.also { legacyValue ->
             prefs.edit { putString(GATEWAY_SECRET_PREF_KEY, legacyValue) }
         }
-        ?: return null
+        // Niente segreto salvato (fresh install): chiave preimpostata di
+        // base dal build (BuildConfig, da local.properties gitignored).
+        // Lo stored vince sempre quando presente; il default non si scrive mai.
+        ?: return defaultGatewayApiKey()
 
     return runCatching {
         val parts = stored.split(':', limit = 2)
@@ -60,6 +64,13 @@ internal fun loadGatewaySecret(context: Context): String? {
         String(cipher.doFinal(encrypted), Charsets.UTF_8).trim().takeIf { it.isNotBlank() }
     }.getOrNull()
 }
+
+/**
+ * Chiave API preimpostata dal build (vuota se non configurata): fresh
+ * install connette subito senza incollare nulla. Mai scritta nelle prefs.
+ */
+internal fun defaultGatewayApiKey(): String? =
+    BuildConfig.HERMES_DEFAULT_API_KEY.trim().takeIf { it.isNotBlank() }
 
 internal fun saveGatewaySecret(context: Context, secret: String?): Boolean {
     val normalized = secret?.trim().takeUnless { it.isNullOrEmpty() }

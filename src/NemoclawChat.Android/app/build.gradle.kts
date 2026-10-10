@@ -29,6 +29,17 @@ fun hermesSigningAvailable(): Boolean {
         !hermesKeystoreProps.getProperty("hermes.keyPassword").isNullOrBlank()
 }
 
+// Chiave API preimpostata (local.properties gitignored, default vuota):
+// escaping per stringa Java, mai in chiaro nel repo.
+fun hermesDefaultApiKeyJavaString(): String {
+    val raw = hermesKeystoreProps.getProperty("hermes.defaultApiKey", "")
+    return raw
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "")
+}
+
 gradle.taskGraph.whenReady {
     val containsReleaseOutput = allTasks.any { task ->
         task.project == project && task.name.endsWith("Release", ignoreCase = true)
@@ -62,6 +73,7 @@ android {
         versionName = "0.6.239"
         resConfigs("en", "it")
         buildConfigField("boolean", "META_DAT_ENABLED", enableMetaDat.toString())
+        buildConfigField("String", "HERMES_DEFAULT_API_KEY", "\"${hermesDefaultApiKeyJavaString()}\"")
         manifestPlaceholders["mwdat_application_id"] = mwdatApplicationId
         manifestPlaceholders["mwdat_client_token"] = mwdatClientToken
     }

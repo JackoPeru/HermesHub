@@ -440,6 +440,24 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn("record_failed_release", updater)
         self.assertIn("Quarantined failed release", updater)
 
+    def test_android_fresh_install_has_preconfigured_connection(self) -> None:
+        app_settings = read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/core/settings/AppSettings.kt"
+        )
+        self.assertIn('gatewayUrl = "http://100.94.223.14:8642"', app_settings)
+        self.assertIn('localGatewayUrl = "http://192.168.1.6:8642"', app_settings)
+        android_project = read("src/NemoclawChat.Android/app/build.gradle.kts")
+        self.assertIn("HERMES_DEFAULT_API_KEY", android_project)
+        self.assertIn("hermes.defaultApiKey", android_project)
+        secret_store = read(
+            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/core/auth/GatewaySecretStore.kt"
+        )
+        self.assertIn("defaultGatewayApiKey()", secret_store)
+        # Il valore vero vive solo in local.properties (mai tracciato: vedi
+        # test_git_tracks_no_forbidden_artifacts_or_secrets), mai nel codice.
+        android_sources = read_android_sources()
+        self.assertNotIn("hermes.defaultApiKey=", android_sources)
+
     def test_git_tracks_no_forbidden_artifacts_or_secrets(self) -> None:
         tracked = (
             subprocess.run(
