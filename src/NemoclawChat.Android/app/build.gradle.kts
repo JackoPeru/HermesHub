@@ -69,8 +69,8 @@ android {
         applicationId = "com.nemoclaw.chat"
         minSdk = if (enableMetaDat) 29 else 26
         targetSdk = 36
-        versionCode = 243
-        versionName = "0.6.239"
+        versionCode = 244
+        versionName = "0.6.240"
         resConfigs("en", "it")
         buildConfigField("boolean", "META_DAT_ENABLED", enableMetaDat.toString())
         buildConfigField("String", "HERMES_DEFAULT_API_KEY", "\"${hermesDefaultApiKeyJavaString()}\"")

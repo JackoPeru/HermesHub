@@ -1,12 +1,8 @@
-Hermes Hub 0.6.239 (audit: robustezza + keystore release dedicato)
+Hermes Hub 0.6.240 (connessione preimpostata di base)
 
-- Android: rete fire-and-forget su scope IO (mai piu sul Main); eventi SSE oltre 2M troncati con avviso invece di turno perso; frame terminali troncati rilevati senza JSON completo; expand/collapse con chiavi stabili; liste con key; rotazione (scelta Accoda/Correggi, dialoghi, filtri); timer banner gated su lifecycle; settings/secret ricaricati al cambio gateway.
-- Android: keystore release dedicato, firma debug rimossa dalle release. ATTENZIONE: firma diversa dalle precedenti, aggiornare richiede disinstallazione + reinstallazione (backup chat prima).
-- Gateway: stream mai rotto da run_id anomalo; split UTF-8 riassemblato; kwargs filtrate sulle chiavi di routing + migrazione file gia patchati.
-- GPU manager: kill con ricontrollo cmdline; lock sul submit; area-cap OOM su tutti i video; docs corretti.
-- Character-ID: claim atomico per le generate; conferma esplicita oltre 4000 step.
-- Script: allowlist host GitHub per gli asset; backup `previous` all'install.
-- Versioni: Windows/AdminBridge `0.6.239`; Android `versionName 0.6.239`, `versionCode 243`.
-- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.239-android.apk`; MSIX `NemoclawChat.Windows_0.6.239.0_x64.msix`; gateway Linux `HermesHub-0.6.239-linux-gateway.tar.gz`.
-- SHA-256 Android: `8dbbd73882ca27ded9ff778e8672d6aa2f5d1b4f9a6221e1835a27a36b96807c`.
-- SHA-256 gateway: `9459c25464ad0b89b4531b10165b77d757006da2ff7014ebae69e87ae0a87d4c`.
+- Android: fresh install con connessione gia pronta — gateway Tailscale + URL LAN casa precompilati e chiave API preimpostata dal build: niente impostazioni vuote dopo reinstallazione, il gateway risulta subito online.
+- Dettagli: lo stored utente vince sempre sulla chiave preimpostata; il default non viene mai scritto nelle prefs; il valore vero vive solo in local.properties (gitignored, mai nel repo).
+- Versioni: Windows/AdminBridge `0.6.240`; Android `versionName 0.6.240`, `versionCode 244` (stessa firma 0.6.239: aggiornamento normale, niente reinstallazione).
+- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.240-android.apk`; MSIX `NemoclawChat.Windows_0.6.240.0_x64.msix`; gateway Linux `HermesHub-0.6.240-linux-gateway.tar.gz`.
+- SHA-256 Android: `eeb2b3fdc9fd2c10cdd950a9c6c0ca435e133de37c57fe61e1b672b38d2e5888`.
+- SHA-256 gateway: `a109975fc7fe2f7498c0544083ec4b046a3343d7c64321a4015599e129d872ac`.

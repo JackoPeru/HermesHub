@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.240 - 2026-10-11
+
+- Android: connessione preimpostata di base — fresh install con gateway Tailscale + LAN casa e chiave API gia configurati, niente schermata vuota dopo reinstallazione (lo stored utente vince sempre; il default non si scrive mai).
+
 ## 0.6.239 - 2026-10-11
 
 - Android: rete fire-and-forget su scope IO (mai piu sul Main); eventi SSE oltre 2M troncati con avviso invece di turno perso; frame terminali troncati rilevati senza JSON completo; expand/collapse con chiavi stabili; liste con key; rotazione (scelta Accoda/Correggi, dialoghi, filtri); timer banner gated su lifecycle; settings/secret ricaricati al cambio gateway; niente piu loop di copia duplicato.
