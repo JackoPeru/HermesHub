@@ -288,13 +288,15 @@ internal fun ArchiveScreen(
     context: Context,
     onOpenConversation: (String?, String) -> Unit
 ) {
-    var refreshKey by remember { mutableIntStateOf(0) }
+    var refreshKey by rememberSaveable { mutableIntStateOf(0) }
     val archive = remember(refreshKey) { loadArchiveItems(context) }
     var query by rememberSaveable { mutableStateOf("") }
-    var filter by remember { mutableStateOf("Tutto") }
-    var status by remember { mutableStateOf("Pronto.") }
-    var pendingDelete by remember { mutableStateOf<ArchiveItem?>(null) }
-    var managingConversationId by remember { mutableStateOf<String?>(null) }
+    var filter by rememberSaveable { mutableStateOf("Tutto") }
+    var status by rememberSaveable { mutableStateOf("Pronto.") }
+    // La conferma eliminazione sopravvive alla rotazione tramite id (l'item
+    // si deriva dalla lista: niente Parcelable, niente binder gonfio).
+    var pendingDeleteId by rememberSaveable { mutableStateOf<String?>(null) }
+    var managingConversationId by rememberSaveable { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val savedConversations = remember(refreshKey) { loadConversations(context) }
     val savedProjects = savedConversations.count { it.kind == "Progetto" }
@@ -427,7 +429,7 @@ internal fun ArchiveScreen(
                 }
             }
         }
-        items(results) { item ->
+        items(results, key = { it.id ?: (it.kind + "|" + it.title) }) { item ->
             ArchiveCard(
                 item = item,
                 onOpen = {
@@ -486,7 +488,7 @@ internal fun ArchiveScreen(
                     if (item.id == null) {
                         status = "Template non eliminabile."
                     } else {
-                        pendingDelete = item
+                        pendingDeleteId = item.id
                     }
                 }
             )
@@ -500,9 +502,9 @@ internal fun ArchiveScreen(
         }
     }
 
-    pendingDelete?.let { item ->
+    results.firstOrNull { it.id != null && it.id == pendingDeleteId }?.let { item ->
         AlertDialog(
-            onDismissRequest = { pendingDelete = null },
+            onDismissRequest = { pendingDeleteId = null },
             properties = DialogProperties(
                 dismissOnBackPress = true,
                 dismissOnClickOutside = false
@@ -523,7 +525,7 @@ internal fun ArchiveScreen(
                 confirmButton = {
                 IconButton(
                     onClick = {
-                        pendingDelete = null
+                        pendingDeleteId = null
                         if (item.id != null) {
                             scope.launch {
                                 val result = withContext(Dispatchers.IO) {
@@ -549,7 +551,7 @@ internal fun ArchiveScreen(
                 }
             },
             dismissButton = {
-                IconButton(onClick = { pendingDelete = null }) {
+                IconButton(onClick = { pendingDeleteId = null }) {
                     Icon(Icons.Rounded.Close, contentDescription = "Annulla eliminazione", tint = Color.White)
                 }
             }

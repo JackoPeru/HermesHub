@@ -28,6 +28,7 @@ from .training import (
     TRAINER_VENV_PY,
     clear_lock,
     pid_alive,
+    read_lock,
     systemctl,
     training_active,
     try_claim_lock,
@@ -335,6 +336,14 @@ def register_character_routes(
             raise HTTPException(422, "max_steps non valido") from None
         if not MIN_TRAIN_STEPS <= max_steps <= MAX_ALLOWED_STEPS:
             raise HTTPException(422, f"max_steps fuori range {MIN_TRAIN_STEPS}..{MAX_ALLOWED_STEPS}")
+        # Fail-closed anti long-run: oltre 4000 step la GPU resta occupata per
+        # molte ore con una singola POST. Richiedi conferma esplicita.
+        if max_steps > 4000 and not (payload or {}).get("confirm_long_run") is True:
+            raise HTTPException(
+                409,
+                "max_steps > 4000 tiene la GPU per molte ore: "
+                "ripeti con {\"confirm_long_run\": true} per conferma esplicita",
+            )
         raw_eval = (payload or {}).get("eval_steps")
         if raw_eval is None:
             eval_steps = list(default_eval_steps(max_steps))
@@ -490,6 +499,9 @@ def register_character_routes(
             spec = resolve_request(manifest, body)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+        # Fast-path informativo (non decisivo): evita build costoso se il
+        # training e gia attivo. Il gate decisivo e il claim atomico prima
+        # della submit (sotto), che chiude la race check-then-act.
         if await _training_busy() is not None:
             raise HTTPException(409, "GPU occupata: training Character ID in corso")
         if submit_cb is None or validate_cb is None:
@@ -539,8 +551,32 @@ def register_character_routes(
         problem = await _run(validate_cb, workflow) if asyncio.iscoroutinefunction(validate_cb) else validate_cb(workflow)
         if problem:
             raise HTTPException(422, f"workflow rifiutato: {problem}")
-        job = await _run(submit_cb, workflow, {"prompt": spec["prompt"], "seed": spec["seed"],
-                                               "character": character_id, "engine": spec["engine"]})
+        # Guard atomica anti-race: claim esclusivo (O_CREAT|O_EXCL,
+        # non-rientrante: mai deadlock, False se occupato) subito prima della
+        # submit. Questo flow non detiene gia il lock, quindi nessun doppio
+        # claim. Se fallisce -> 409, senza aver creato code parallele sulla GPU.
+        _gen_claim_id = f"generate-{uuid.uuid4().hex[:8]}"
+        _gen_claimed = await _run(
+            try_claim_lock, store.root,
+            {"job_id": _gen_claim_id, "character_id": character_id,
+             "pid": os.getpid(), "started": utcnow()},
+            lambda jid: (store.get_job(jid) or {}).get("status")
+            not in ("ready", "failed", "cancelled", None),
+        )
+        if not _gen_claimed:
+            raise HTTPException(409, "GPU occupata: training Character ID in corso")
+        try:
+            job = await _run(submit_cb, workflow, {"prompt": spec["prompt"], "seed": spec["seed"],
+                                                   "character": character_id, "engine": spec["engine"]})
+        finally:
+            # Rilascia solo se il lock e ancora nostro (mai spazzare il claim
+            # di un training che ha rubato uno stale nel frattempo).
+            try:
+                _cur = await _run(read_lock, store.root)
+                if isinstance(_cur, dict) and _cur.get("job_id") == _gen_claim_id:
+                    await _run(clear_lock, store.root)
+            except Exception:  # noqa: BLE001 - best effort, mai rompere il submit
+                pass
         return {"job_id": job["job_id"], "status": "queued", "engine": spec["engine"]}
 
     @app.get("/characters/{character_id}/metrics")

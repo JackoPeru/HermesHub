@@ -30,7 +30,7 @@ ComfyUI: `/opt/hermes/runtimes/comfyui` (venv isolato, torch cu128), checkpoint 
 output job in `/opt/hermes/gpu-manager/outputs/<job_id>/` (+ `metadata.json`).
 Config: `/etc/hermes/gpu-manager.yaml`.
 
-## API (OpenAPI su `/docs`)
+## API (OpenAPI/`/docs` disabilitati di proposito in manager.py: docs_url=None, redoc_url=None, openapi_url=None)
 
 - `GET /status` → desired_mode, current_state, llm_online/llm_loaded/llm_serving, media_online,
   queue_length, current_job, media_progress, active_preset, active_media_model,
@@ -56,7 +56,7 @@ workflow+prompt+negativi+parametri PRIMA del submit e non serve durante l'offlin
   stop ComfyUI → `restart hermes-tabby` → `/v1/models` + VRAM + vera completion di test.
 - Fail-safe: retry `max_retries` con backoff, poi `ERROR` con diagnostica; recovery tenta
   sempre il ripristino Qwen (`restart hermes-tabby` + health check).
-- Boot: reconcile (processi, Tabby, ComfyUI, GPU, job `running`→`queued`), default LLM.
+- Boot: reconcile (processi, Tabby, ComfyUI, GPU). Fresh boot (boot_id cambiato): job `running`+`queued` -> `cancelled` + reset AUTO; restart manager stesso boot: job `running` -> `failed` + resubmit utente (`queued` intatti), default LLM.
 
 ## UI HermesHub
 

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Awaitable, Callable, Mapping
+
+logger = logging.getLogger(__name__)
 
 from ...protocol import (
     CorrelationContext,
@@ -59,12 +62,25 @@ async def correlation_middleware(request: Any, handler: Callable[[Any], Awaitabl
     return response
 
 
+# Byte in attesa di completare un carattere UTF-8 multibyte spezzato tra due
+# write(). Oltre il cap si traslittera (mai crescere all'infinito su input ostile).
+_SSE_PENDING_BYTES_CAP = 65536
+
+
 def _enrich_sse_chunk(response: Any, data: bytes | bytearray) -> bytes:
-    pending = getattr(response, "_hermes_hub_sse_buffer", "")
+    raw_bytes = getattr(response, "_hermes_hub_sse_pending_bytes", b"") + bytes(data)
     try:
-        pending += bytes(data).decode("utf-8")
+        decoded = raw_bytes.decode("utf-8")
     except UnicodeDecodeError:
-        return bytes(data)
+        if len(raw_bytes) > _SSE_PENDING_BYTES_CAP:
+            decoded = raw_bytes.decode("utf-8", errors="replace")
+            response._hermes_hub_sse_pending_bytes = b""
+        else:
+            response._hermes_hub_sse_pending_bytes = raw_bytes
+            return b""
+    else:
+        response._hermes_hub_sse_pending_bytes = b""
+    pending = getattr(response, "_hermes_hub_sse_buffer", "") + decoded
     frames = pending.split("\n\n")
     if len(frames) == 1:
         response._hermes_hub_sse_buffer = pending
@@ -99,18 +115,24 @@ def _enrich_sse_chunk(response: Any, data: bytes | bytearray) -> bytes:
             raw: Any = json.loads(raw_data)
         except Exception:
             raw = raw_data
-        response._hermes_hub_sse_sequence = int(
-            getattr(response, "_hermes_hub_sse_sequence", 0)
-        ) + 1
         context = getattr(response, "_hermes_hub_correlation_context", request_context())
-        event = enrich_sse_event(
-            raw=raw,
-            event_name=event_name,
-            sequence=response._hermes_hub_sse_sequence,
-            context=context,
-            source_type="hermes-agent",
-            run_id=raw.get("run_id") if isinstance(raw, Mapping) else None,
-        )
+        try:
+            next_sequence = int(getattr(response, "_hermes_hub_sse_sequence", 0)) + 1
+            event = enrich_sse_event(
+                raw=raw,
+                event_name=event_name,
+                sequence=next_sequence,
+                context=context,
+                source_type="hermes-agent",
+                run_id=raw.get("run_id") if isinstance(raw, Mapping) else None,
+            )
+        except Exception:
+            # Upstream non conforme (es. run_id fuori formato): mai rompere
+            # lo stream, il frame passa originale e la sequence non si consuma.
+            logger.warning("hermes-hub: arricchimento SSE scartato, frame originale preservato")
+            output.append(frame)
+            continue
+        response._hermes_hub_sse_sequence = next_sequence
         encoded = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
         output.append(
             "\n".join(

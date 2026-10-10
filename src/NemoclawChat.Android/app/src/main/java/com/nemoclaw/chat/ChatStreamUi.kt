@@ -114,7 +114,7 @@ internal fun StreamingBubbleView(
                 if (state.text.startsWith(state.flushedText)) state.text.substring(state.flushedText.length) else ""
             }
             if (!state.isDone && transcript.isNotEmpty()) {
-                AgentTranscript(blocks = transcript, active = true, includeAgentText = true, tailText = liveTail)
+                AgentTranscript(blocks = transcript, active = true, includeAgentText = true, tailText = liveTail, turnKey = state.startedAtNs)
             } else {
                 if (!state.isDone && timeline.isNotEmpty()) {
                     HermesActivityTimeline(timeline, active = true)
@@ -139,7 +139,7 @@ internal fun StreamingBubbleView(
                         else flagTranscriptBlocks(transcriptBlocksOf(timeline, state.thinking, showToolCalls), showToolCalls)
                     }
                     if (flagBlocks.isNotEmpty()) {
-                        HermesActivityDisclosure(flagBlocks)
+                        HermesActivityDisclosure(flagBlocks, state.startedAtNs)
                     }
                 }
             }
@@ -289,9 +289,11 @@ private fun preGenerationStatusLabel(status: String, progressPercent: Int?, elap
 }
 
 @Composable
-internal fun HermesActivityDisclosure(blocks: List<TranscriptBlock>) {
+internal fun HermesActivityDisclosure(blocks: List<TranscriptBlock>, turnKey: Any) {
     val visibleCount = blocks.size
-    var expanded by rememberSaveable(blocks.firstOrNull()?.hashCode(), visibleCount) { mutableStateOf(false) }
+    // Chiave stabile di turno (startedAtNs live, hash contenuto per gli
+    // archiviati): l'expand/collapse non si resetta a ogni nuovo blocco.
+    var expanded by rememberSaveable(turnKey) { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { expanded = !expanded },
@@ -306,7 +308,7 @@ internal fun HermesActivityDisclosure(blocks: List<TranscriptBlock>) {
                 contentDescription = if (expanded) "Chiudi attivita" else "Mostra attivita",
                 tint = AppColors.Muted, modifier = Modifier.size(16.dp))
         }
-        if (expanded) AgentTranscript(blocks = blocks, active = false, includeAgentText = false)
+        if (expanded) AgentTranscript(blocks = blocks, active = false, includeAgentText = false, turnKey = turnKey)
     }
 }
 
@@ -320,13 +322,14 @@ internal fun AgentTranscript(
     blocks: List<TranscriptBlock>,
     active: Boolean,
     includeAgentText: Boolean,
-    tailText: String = ""
+    tailText: String = "",
+    turnKey: Any? = null
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        blocks.forEach { block ->
+        blocks.forEachIndexed { index, block ->
             when (block) {
                 is TranscriptBlock.AgentText -> {
                     if (includeAgentText && block.text.isNotBlank()) {
@@ -336,7 +339,7 @@ internal fun AgentTranscript(
                 }
                 is TranscriptBlock.Thought -> {
                     if (block.text.isNotBlank()) {
-                        ThoughtRow(text = block.text, elapsedSec = block.elapsedSec, active = active)
+                        ThoughtRow(text = block.text, elapsedSec = block.elapsedSec, active = active, index = index, turnKey = turnKey)
                     }
                 }
                 is TranscriptBlock.Tools -> {
@@ -358,9 +361,14 @@ internal fun AgentTranscript(
 }
 
 @Composable
-private fun ThoughtRow(text: String, elapsedSec: Double, active: Boolean) {
+private fun ThoughtRow(text: String, elapsedSec: Double, active: Boolean, index: Int = 0, turnKey: Any? = null) {
     val showShimmer by remember(active) { derivedStateOf { active } }
-    var expanded by remember(text.take(64), elapsedSec >= 1) { mutableStateOf(false) }
+    // Chiave stabile di turno + indice: crescere del testo non richiude.
+    var expanded by if (turnKey != null) {
+        rememberSaveable(turnKey, index) { mutableStateOf(false) }
+    } else {
+        remember(index) { mutableStateOf(false) }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
             modifier = Modifier

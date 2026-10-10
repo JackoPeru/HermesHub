@@ -467,6 +467,7 @@ class GatewayScriptTests(unittest.TestCase):
                 "HERMES_HUB_UPDATE_PROBE_ATTEMPTS": "1",
                 "HERMES_HUB_UPDATE_PROBE_SLEEP_SECONDS": "1",
                 "HERMES_HUB_UPDATE_PROBE_URL": "https://probe.invalid/v1/capabilities",
+                "HERMES_HUB_UPDATE_ASSET_HOSTS": "https://assets.invalid/ https://example.invalid/",
                 "HERMES_HUB_API_KEY": "integration-test-key",
                 "FAKE_GATEWAY_EXPECTED_KEY": "integration-test-key",
                 "FAKE_MANAGER_EXPECTED_KEY": "manager-test-key",
@@ -899,6 +900,12 @@ class GatewayScriptTests(unittest.TestCase):
 
     def test_gateway_patch_upgrades_legacy_responses_progress_callback(self):
         patched, _ = self.patcher._patch_text(UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8"))
+        safe_update = (
+            'payload.update({k: v for k, v in (kwargs or {}).items() '
+            'if k not in {"type", "event", "session_id", "run_id", "sequence", '
+            '"event_id", "request_id", "correlation_id", "protocol_version", '
+            '"source_type"}})'
+        )
         current_callback = textwrap.indent(textwrap.dedent(
             '''
             def _on_tool_progress(event_type, name, preview, args, **kwargs):
@@ -915,9 +922,9 @@ class GatewayScriptTests(unittest.TestCase):
                     "reasoning": (preview or "") if is_reasoning else None,
                     "arguments": args or {},
                 }
-                payload.update(kwargs or {})
+                __SAFE_UPDATE__
                 _stream_q.put(("__hermes_raw_event__", payload))
-            '''
+            '''.replace("__SAFE_UPDATE__", safe_update)
         ).strip(), "            ")
         legacy_callback = textwrap.indent(textwrap.dedent(
             '''
@@ -945,6 +952,39 @@ class GatewayScriptTests(unittest.TestCase):
         self.assertIn("responses reasoning passthrough callback", changes)
         self.assertEqual(1, upgraded.count(current_callback))
         self.assertNotIn(legacy_callback, upgraded)
+
+    def test_sse_payload_update_filters_reserved_routing_keys(self):
+        # I template non emettono piu il merge vulnerabile.
+        patched, _ = self.patcher._patch_text(UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8"))
+        self.assertNotIn("payload.update(kwargs or {})", patched)
+        # File gia patchati con la forma vecchia: migrazione idempotente.
+        safe_update = (
+            "payload.update({k: v for k, v in (kwargs or {}).items() "
+            'if k not in {"type", "event", "session_id", "run_id", "sequence", '
+            '"event_id", "request_id", "correlation_id", "protocol_version", '
+            '"source_type"}})'
+        )
+        self.assertIn(safe_update, patched)
+        legacy_patched = patched.replace(safe_update, "payload.update(kwargs or {})", 1)
+        upgraded, changes = self.patcher._patch_text(legacy_patched)
+        compile(upgraded, "<sse-payload-update-migration>", "exec")
+        self.assertNotIn("payload.update(kwargs or {})", upgraded)
+        self.assertIn(safe_update, upgraded)
+        self.assertTrue(any("sse payload update filtrato" in change for change in changes))
+        # Idempotenza: seconda passata senza modifiche.
+        repassword, rechanges = self.patcher._patch_text(upgraded)
+        self.assertNotIn("payload.update(kwargs or {})", repassword)
+        self.assertFalse(any("sse payload update filtrato" in change for change in rechanges))
+        # Comportamento funzionale del filtro: routing intatto, extra passa.
+        payload = {"type": "hermes.tool.progress", "event": "tool.started", "session_id": "s1"}
+        kwargs = {"type": "evil", "session_id": "evil", "extra": 42}
+        payload.update({k: v for k, v in (kwargs or {}).items() if k not in {
+            "type", "event", "session_id", "run_id", "sequence", "event_id",
+            "request_id", "correlation_id", "protocol_version", "source_type"}})
+        self.assertEqual(
+            {"type": "hermes.tool.progress", "event": "tool.started", "session_id": "s1", "extra": 42},
+            payload,
+        )
 
     def test_agent_helper_forwards_only_real_prompt_progress_and_reasoning(self):
         helper = textwrap.dedent(
@@ -1230,6 +1270,28 @@ class GatewayScriptTests(unittest.TestCase):
             self.assertEqual(timer_contents, timer.read_text(encoding="utf-8"))
             systemctl_log = Path(fixture["systemctl_log"]).read_text(encoding="utf-8")
             self.assertNotIn("enable hermes-hub-backup.timer", systemctl_log)
+
+    def test_updater_rejects_asset_url_outside_github_allowlist(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = self._prepare_updater_fixture(root, bash, probe_ok=True)
+            release_json = root / "release.json"
+            payload = json.loads(release_json.read_text(encoding="utf-8"))
+            evil = "https://evil.invalid/HermesHub-9.8.7-linux-gateway.tar.gz"
+            payload[0]["assets"][0]["browser_download_url"] = evil
+            release_json.write_text(json.dumps(payload), encoding="utf-8")
+            # Simula produzione: nessun host extra consentito.
+            fixture["environment"].pop("HERMES_HUB_UPDATE_ASSET_HOSTS", None)
+
+            result = self._run_updater(bash, fixture, "--no-restart")
+
+            self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("fuori allowlist", result.stdout + result.stderr)
+            curl_urls = Path(fixture["curl_log"]).read_text(encoding="utf-8").splitlines()
+            self.assertNotIn(evil, curl_urls)
 
     def test_updater_rejects_partial_backup_bundle(self):
         bash = find_bash()

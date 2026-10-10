@@ -30,6 +30,7 @@ POST   /characters/{id}/analyze           202 {job_id} (worker tools-venv, CPU)
 ```text
 POST   /characters/{id}/train             202 {job_id, version} (409 se GPU occupata / foto <20)
                                           training solo in AUTO (protegge sessioni DIRECT)
+                                          max_steps 100..7200; oltre 4000 serve "confirm_long_run": true nel body JSON (fail-closed: assente=False -> 409 con richiesta di conferma esplicita)
 POST   /characters/{id}/retrain           = train su versione N+1 (vN mai sovrascritta)
 POST   /characters/{id}/cancel            SIGTERM gruppo (verifica cmdline anti pid-recycling), restore tabby
 POST   /characters/{id}/rollback          {version} (riattiva vN precedente + re-link LoRA)

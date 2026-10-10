@@ -181,6 +181,9 @@ if _state["desired_mode"] not in MODES:
     _state["desired_mode"] = "AUTO"
 
 _lock = asyncio.Lock()
+# Lock dedicato al submit path: check+create backlog atomici. _lock non e
+# adatto (tenuto a lungo da _drive durante le transizioni con sleep/IO).
+_submit_lock = asyncio.Lock()
 _db: sqlite3.Connection | None = None
 
 
@@ -306,30 +309,29 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
     except FileNotFoundError:
         return None, f"workflow template missing: {spec['file']}"
     params = dict(params or {})
-    # Anti-OOM (2026-10-06): clip oltre 8s SOLO a 480p max + 24fps.
-    # I frame oltre gli 8s ad alta risoluzione esauriscono i 30GB di RAM
-    # e uccidono il server. I template sono già fissi a fps 24.0; qui si
-    # scala la risoluzione mantenendo l'aspect. Vale per tutti i video,
-    # anche se il chiamante chiede di più (fail-safe, non negoziabile).
+    # Anti-OOM: cap d'area su TUTTI i video (qualsiasi durata) a 480p max.
+    # Anche i clip <=8s ad alta risoluzione (fino a 2048px) esauriscono i
+    # 30GB di RAM e uccidono il server. I template sono già fissi a fps
+    # 24.0; qui si scala la risoluzione mantenendo l'aspect. Vale per tutti
+    # i video, anche se il chiamante chiede di più (fail-safe, non negoziabile).
     if (PRESETS.get(preset) or {}).get("kind") == "video":
         try:
             _clamp_dur = float(params.get("duration", 0) or 0)
         except (TypeError, ValueError):
             _clamp_dur = 0
-        if _clamp_dur > 8:
-            try:
-                _w0 = float(params.get("width", 1344) or 1344)
-                _h0 = float(params.get("height", 768) or 768)
-            except (TypeError, ValueError):
-                _w0, _h0 = 1344.0, 768.0
-            # Area cap 480x854 (=409920): scala mantenendo l'aspect se
-            # w*h eccede, min 64px per lato (anti-OOM, fail-safe).
-            if _w0 * _h0 > 480 * 854:
-                _scale = (410400.0 / (_w0 * _h0)) ** 0.5
-                params["width"] = max(64, int(_w0 * _scale))
-                params["height"] = max(64, int(_h0 * _scale))
-                log.info("preset %s: clip %.0fs > 8s, risoluzione ridotta a %sx%s (anti-OOM area)",
-                         preset, _clamp_dur, params["width"], params["height"])
+        try:
+            _w0 = float(params.get("width", 1344) or 1344)
+            _h0 = float(params.get("height", 768) or 768)
+        except (TypeError, ValueError):
+            _w0, _h0 = 1344.0, 768.0
+        # Area cap 480x854 (=409920): scala mantenendo l'aspect se
+        # w*h eccede, min 64px per lato (anti-OOM, fail-safe).
+        if _w0 * _h0 > 480 * 854:
+            _scale = (410400.0 / (_w0 * _h0)) ** 0.5
+            params["width"] = max(64, int(_w0 * _scale))
+            params["height"] = max(64, int(_h0 * _scale))
+            log.info("preset %s: clip %.0fs, risoluzione ridotta a %sx%s (anti-OOM area)",
+                     preset, _clamp_dur, params["width"], params["height"])
     default_cfg = "6.0" if (PRESETS.get(preset) or {}).get("kind") == "video" else "1.0"
     default_negative = (
         REPO_DEFAULT_NEGATIVE
@@ -782,6 +784,26 @@ async def vram_free(threshold_mb: float) -> bool:
     return all(g["memory_used_mb"] < threshold_mb for g in gpus)
 
 
+def _is_stray_runtime_cmd(cmd: str) -> bool:
+    """Pure matcher (unit-testable): True se la cmdline e di un runtime nostro.
+
+    Stessa logica di filtro usata da cleanup_stray_cuda: match tabby/comfy,
+    mai il manager stesso. Stringa vuota o sconosciuta = False (mai kill).
+    """
+    if not cmd:
+        return False
+    low = cmd.lower()
+    parts = low.split()
+    if not parts:
+        return False
+    exe = os.path.basename(parts[0])
+    if exe == "gpu-manager" or "gpu-manager" in low:
+        return False
+    is_tabby = exe in ("tabbyapi", "tabbyapi.exe", "llama-mainline", "llama-mainline.exe") or "tabbyapi" in low or "llama-mainline" in low
+    is_comfy = exe in ("comfy", "exllamav3") or "comfy" in low or "exllamav3" in low
+    return bool(is_tabby or is_comfy)
+
+
 async def cleanup_stray_cuda() -> int:
     """Kill leftover CUDA processes from our runtimes only. Never touch others.
 
@@ -802,18 +824,16 @@ async def cleanup_stray_cuda() -> int:
         if not pid or pid == me:
             continue
         cmd = _proc_cmd(pid)
-        low = cmd.lower()
-        if not cmd:
-            continue
-        exe = os.path.basename(low.split()[0]) if low.split() else ""
-        if exe == "gpu-manager" or "gpu-manager" in low:
-            continue
-        is_tabby = exe in ("tabbyapi", "tabbyapi.exe", "llama-mainline", "llama-mainline.exe") or "tabbyapi" in low or "llama-mainline" in low
-        is_comfy = exe in ("comfy", "exllamav3") or "comfy" in low or "exllamav3" in low
-        if not (is_tabby or is_comfy):
+        if not _is_stray_runtime_cmd(cmd):
             continue
         if _pid_service_owned(pid):
             skipped_owned += 1
+            continue
+        # TOCTOU: il pid puo essere riciclato tra check e kill. Rileggi la
+        # cmdline subito prima del kill e procedi solo se matcha ancora.
+        fresh = _proc_cmd(pid)
+        if not _is_stray_runtime_cmd(fresh):
+            log.info("stray cleanup pid=%d skipped: cmdline changed/gone (was %.60s)", pid, cmd[:60])
             continue
         code, _ = await _run_async(["sudo", "-n", "kill", "-9", str(pid)], timeout=15)
         if code == 0:
@@ -2281,32 +2301,34 @@ async def submit_job(request: Request, _: None = Depends(require_key)) -> JSONRe
     except Exception:  # noqa: BLE001
         raise HTTPException(400, "invalid JSON")
     kind = "video" if request.url.path.endswith("/video") else "image"
-    # overshoot limitato accettato: check+create senza lock, N submit concorrenti possono superare max_queued di N
-    max_queued = int(CONFIG["media"].get("max_queued", 10))
-    backlog = len(queued_jobs()) + (1 if _state.get("current_job") else 0)
-    if backlog >= max_queued:
-        raise HTTPException(429, f"media queue full ({backlog}/{max_queued})")
-    if _character_store is not None and _character_store.active_training_jobs():
-        raise HTTPException(409, "GPU occupata: training Character ID in corso")
-    preset = str(body.get("preset", "") or "")
-    params = body.get("parameters", {}) or {}
-    for alias in ("prompt", "input_images", "negative_prompt", "seed", "steps",
-                  "resolution", "duration", "aspect_ratio", "quality", "denoise"):
-        if alias in body and alias not in params:
-            params[alias] = body[alias]
-    if preset:
-        job, problem, code = _submit_preset_job(kind, preset, params)
-        if problem:
-            raise HTTPException(code, problem)
-        assert job is not None
-    else:
-        workflow = body.get("workflow", body.get("prompt", body))
-        if isinstance(workflow, dict) and "prompt" in workflow and isinstance(workflow["prompt"], dict):
-            workflow = workflow["prompt"]
-        problem = validate_workflow(workflow if isinstance(workflow, dict) else {})
-        if problem:
-            raise HTTPException(400, problem)
-        job = create_job(kind, workflow, params=params)
+    # Check+create atomici sotto _submit_lock: senza, N submit concorrenti
+    # superano max_queued di N (overshoot).
+    async with _submit_lock:
+        max_queued = int(CONFIG["media"].get("max_queued", 10))
+        backlog = len(queued_jobs()) + (1 if _state.get("current_job") else 0)
+        if backlog >= max_queued:
+            raise HTTPException(429, f"media queue full ({backlog}/{max_queued})")
+        if _character_store is not None and _character_store.active_training_jobs():
+            raise HTTPException(409, "GPU occupata: training Character ID in corso")
+        preset = str(body.get("preset", "") or "")
+        params = body.get("parameters", {}) or {}
+        for alias in ("prompt", "input_images", "negative_prompt", "seed", "steps",
+                      "resolution", "duration", "aspect_ratio", "quality", "denoise"):
+            if alias in body and alias not in params:
+                params[alias] = body[alias]
+        if preset:
+            job, problem, code = _submit_preset_job(kind, preset, params)
+            if problem:
+                raise HTTPException(code, problem)
+            assert job is not None
+        else:
+            workflow = body.get("workflow", body.get("prompt", body))
+            if isinstance(workflow, dict) and "prompt" in workflow and isinstance(workflow["prompt"], dict):
+                workflow = workflow["prompt"]
+            problem = validate_workflow(workflow if isinstance(workflow, dict) else {})
+            if problem:
+                raise HTTPException(400, problem)
+            job = create_job(kind, workflow, params=params)
     log.info("AUTO: media job received %s", job["job_id"])
     return JSONResponse({"job_id": job["job_id"], "status": "queued",
                          "preset": job.get("preset", "")}, status_code=202)
@@ -2327,7 +2349,8 @@ async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSON
         raise HTTPException(409, "smart fast path disabled")
     if _triage_mod is None:
         raise HTTPException(500, "triage module unavailable")
-    # overshoot limitato accettato: check+create senza lock, N submit concorrenti possono superare max_queued di N
+    # Fast-path informativo (non decisivo): evita triage/LLM costosi a coda
+    # piena. Il gate decisivo e atomico e prima della create sotto _submit_lock.
     max_queued = int(CONFIG["media"].get("max_queued", 10))
     backlog = len(queued_jobs()) + (1 if _state.get("current_job") else 0)
     if backlog >= max_queued:
@@ -2384,11 +2407,20 @@ async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSON
         if not prompt:
             raise HTTPException(502, "prompt-only LLM call failed")
     spec = PRESETS.get(decision.preset) or {}
-    job, problem, code = _submit_preset_job(
-        spec.get("kind", "image"), decision.preset,
-        {"prompt": prompt, "input_images": images,
-         "smart": True, "smart_text": text[:500],
-         "smart_reason": decision.reason})
+    # Gate atomico check+create sotto _submit_lock: ricontrolla backlog e
+    # training dopo triage/LLM (finestra di secondi) per non fare overshoot.
+    async with _submit_lock:
+        max_queued = int(CONFIG["media"].get("max_queued", 10))
+        backlog = len(queued_jobs()) + (1 if _state.get("current_job") else 0)
+        if backlog >= max_queued:
+            raise HTTPException(429, f"media queue full ({backlog}/{max_queued})")
+        if _character_store is not None and _character_store.active_training_jobs():
+            raise HTTPException(409, "GPU occupata: training Character ID in corso")
+        job, problem, code = _submit_preset_job(
+            spec.get("kind", "image"), decision.preset,
+            {"prompt": prompt, "input_images": images,
+             "smart": True, "smart_text": text[:500],
+             "smart_reason": decision.reason})
     if problem or job is None:
         raise HTTPException(code, problem or "submit failed")
     log.info("SMART: %s preset=%s prompt=%.60s",

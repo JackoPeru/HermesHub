@@ -180,6 +180,11 @@ internal class ChatStateHolder {
     var backgroundWork: BackgroundWorkUi? by mutableStateOf(null)
     /** Inizio ms dell'ultimo turno inviato: per cancellare i job media nati dopo. */
     var lastTurnStartMs: Long by mutableLongStateOf(0L)
+    /**
+     * Scelta Accoda/Correggi in attesa: nell'holder (ViewModel-retained),
+     * non in remember locale, cosi sopravvive alla rotazione insieme al draft.
+     */
+    var pendingBusySend: PendingBusySend? by mutableStateOf(null)
 
     val activeStreams: androidx.compose.runtime.snapshots.SnapshotStateMap<String, ActiveStreamState> = androidx.compose.runtime.mutableStateMapOf()
 

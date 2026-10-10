@@ -8,6 +8,24 @@ import org.json.JSONObject
 
 class ChatStreamProtocolTest {
     @Test
+    fun truncatedTerminalFramesAreDetectedWithoutFullJson() {
+        // finish_reason valorizzato ma JSON troncato: terminale.
+        assertTrue(isTerminalSseEvent(null, """{"choices": [{"delta": {}, "finish_reason": "stop"""))
+        assertTrue(isTerminalSseEvent(null, """{"choices": [{"finish_reason": "length"}"""))
+        // Marker di tipo leggibile: terminale.
+        assertTrue(isTerminalSseEvent(null, """{"type": "response.completed", "broken..."""))
+        // finish_reason null/vuoto o spazzatura: NON terminale (watchdog).
+        assertFalse(isTerminalSseEvent(null, """{"choices": [{"finish_reason": null"""))
+        assertFalse(isTerminalSseEvent(null, """{"choices": [{"finish_reason": """""))
+        assertFalse(isTerminalSseEvent(null, "spazzatura senza marcatori"))
+        assertFalse(isTerminalSseEvent(null, ""))
+        // Evento nominale classico invariato.
+        assertTrue(isTerminalSseEvent("response.completed", "{}"))
+        assertTrue(isTerminalSseEvent(null, "[DONE]"))
+        assertFalse(isTerminalSseEvent("message.started", """{"type": "message.started"}"""))
+    }
+
+    @Test
     fun repeatedDeltasAreNeverDropped() {
         assertEquals("haha", mergeTextDelta("ha", "ha"))
         assertEquals("!!", mergeTextDelta("!", "!"))

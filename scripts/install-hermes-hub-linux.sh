@@ -145,7 +145,19 @@ atomic_install() {
   mv -f "$tmp_destination" "$destination"
 }
 
+# Backup del live precedente: cattura il target PRIMA dello switch e
+# conservalo come "previous" per rollback manuale (mai alla cieca).
+prev_target=""
+if [ -L "$INSTALL_DIR/current" ]; then
+  prev_target="$(readlink "$INSTALL_DIR/current" 2>/dev/null || true)"
+fi
 atomic_symlink "$RELEASE_DIR" "$INSTALL_DIR/current"
+if [ -n "$prev_target" ] && [ "$prev_target" != "$RELEASE_DIR" ] && [ -e "$prev_target" ]; then
+  rm -f "$INSTALL_DIR/previous.new.$$"
+  ln -s "$prev_target" "$INSTALL_DIR/previous.new.$$"
+  mv -Tf "$INSTALL_DIR/previous.new.$$" "$INSTALL_DIR/previous"
+  echo "Previous live salvato in $INSTALL_DIR/previous -> $prev_target"
+fi
 atomic_symlink "$INSTALL_DIR/current/hermes-hub-linux.sh" "$HOME/hermes-hub-linux.sh"
 atomic_symlink "$INSTALL_DIR/current/patch-hermes-gateway-native.py" "$HOME/patch-hermes-gateway-native.py"
 atomic_symlink "$INSTALL_DIR/current/hermes-hub-linux-update.sh" "$BIN_DIR/hermes-hub-linux-update"

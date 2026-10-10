@@ -125,7 +125,7 @@ internal suspend fun trySmartMediaSend(
 
 /** Cancella un job smart lato server (fire-and-forget, mai fatale). */
 internal fun cancelSmartJob(managerBase: String, managerKey: String?, jobId: String) {
-    HermesStreamRuntime.scope.launch {
+    HermesStreamRuntime.ioScope.launch {
         runCatching {
             postJson(
                 "$managerBase/jobs/${URLEncoder.encode(jobId, "UTF-8")}/cancel",

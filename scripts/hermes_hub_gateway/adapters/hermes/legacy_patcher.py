@@ -747,7 +747,7 @@ def _patch_modular_openai_routes(text: str) -> tuple[str, list[str]]:
             '                    "arguments": args or {},\n'
             '                    "session_id": session_id,\n'
             '                }\n'
-            '                payload.update(kwargs or {})\n'
+            '                payload.update({k: v for k, v in (kwargs or {}).items() if k not in {"type", "event", "session_id", "run_id", "sequence", "event_id", "request_id", "correlation_id", "protocol_version", "source_type"}})\n'
             '                _stream_q.put_threadsafe(("__hermes_raw_event__", payload))\n'
             '\n'
         )
@@ -789,7 +789,7 @@ def _patch_modular_openai_routes(text: str) -> tuple[str, list[str]]:
             '                    "arguments": args or {},\n'
             '                    "session_id": session_id,\n'
             '                }\n'
-            '                payload.update(kwargs or {})\n'
+            '                payload.update({k: v for k, v in (kwargs or {}).items() if k not in {"type", "event", "session_id", "run_id", "sequence", "event_id", "request_id", "correlation_id", "protocol_version", "source_type"}})\n'
             '                _stream_q.put_threadsafe(("__hermes_raw_event__", payload))\n',
             "modular Responses progress and reasoning callback",
         )
@@ -1038,7 +1038,7 @@ def _patch_legacy_openai_routes(text: str) -> tuple[str, list[str]]:
             '                    "arguments": args or {},\n'
             '                    "estimated": False,\n'
             '                }\n'
-            '                payload.update(kwargs or {})\n'
+            '                payload.update({k: v for k, v in (kwargs or {}).items() if k not in {"type", "event", "session_id", "run_id", "sequence", "event_id", "request_id", "correlation_id", "protocol_version", "source_type"}})\n'
             '                _stream_q.put(("__hermes_raw_event__", payload))\n'
             '\n'
             '            # Start agent in background.  agent_ref is a mutable container\n',
@@ -1076,7 +1076,7 @@ def _patch_legacy_openai_routes(text: str) -> tuple[str, list[str]]:
             '                    "reasoning": (preview or "") if is_reasoning else None,\n'
             '                    "arguments": args or {},\n'
             "                }\n"
-            "                payload.update(kwargs or {})\n"
+            "                payload.update({k: v for k, v in (kwargs or {}).items() if k not in {'type', 'event', 'session_id', 'run_id', 'sequence', 'event_id', 'request_id', 'correlation_id', 'protocol_version', 'source_type'}})\n"
             '                _stream_q.put(("__hermes_raw_event__", payload))\n',
             text,
             count=1,
@@ -1087,6 +1087,8 @@ def _patch_legacy_openai_routes(text: str) -> tuple[str, list[str]]:
 
     responses_reasoning_passthrough = '"""Forward Responses progress metadata and reasoning."""'
     if responses_reasoning_passthrough not in text:
+        # Matcher per file patchati con versioni vecchie (forma vulnerabile):
+        # deve restare com'era per riconoscere il codice da aggiornare.
         legacy_responses_progress = (
             '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
             '                """Pass through Hermes-native tool/progress metadata."""\n'
@@ -1134,7 +1136,7 @@ def _patch_legacy_openai_routes(text: str) -> tuple[str, list[str]]:
             '                    "reasoning": (preview or "") if is_reasoning else None,\n'
             '                    "arguments": args or {},\n'
             '                }\n'
-            '                payload.update(kwargs or {})\n'
+            '                payload.update({k: v for k, v in (kwargs or {}).items() if k not in {"type", "event", "session_id", "run_id", "sequence", "event_id", "request_id", "correlation_id", "protocol_version", "source_type"}})\n'
             '                _stream_q.put(("__hermes_raw_event__", payload))\n',
             "responses reasoning passthrough callback",
         )
@@ -1231,6 +1233,34 @@ def _write_compiled_transaction(updates: list[tuple[Path, str]]) -> dict[Path, P
             temporary.unlink(missing_ok=True)
         for compiled in bytecode:
             compiled.unlink(missing_ok=True)
+
+
+# Chiavi di routing SSE mai sovrascrivibili dai kwargs dei callback agent.
+_SSE_RESERVED_KEYS = (
+    "type", "event", "session_id", "run_id", "sequence", "event_id",
+    "request_id", "correlation_id", "protocol_version", "source_type",
+)
+_SSE_SAFE_UPDATE = (
+    "payload.update({k: v for k, v in (kwargs or {}).items() "
+    'if k not in {"type", "event", "session_id", "run_id", "sequence", '
+    '"event_id", "request_id", "correlation_id", "protocol_version", '
+    '"source_type"}})'
+)
+_SSE_VULNERABLE_UPDATE = "payload.update(kwargs or {})"
+
+
+def _harden_sse_payload_updates(text: str) -> tuple[str, list[str]]:
+    """Migra i callback iniettati da vecchie patch: `payload.update(kwargs)` .
+
+    I kwargs dei callback agent non devono mai sovrascrivere le chiavi di
+    routing SSE (type/event/session_id/...): event-injection. Idempotente
+    (la forma sicura non contiene la stringa vulnerabile).
+    """
+    if _SSE_VULNERABLE_UPDATE not in text:
+        return text, []
+    count = text.count(_SSE_VULNERABLE_UPDATE)
+    text = text.replace(_SSE_VULNERABLE_UPDATE, _SSE_SAFE_UPDATE)
+    return text, [f"sse payload update filtrato ({count} callback)"]
 
 
 def _harden_runtime(text: str) -> tuple[str, list[str]]:
@@ -9626,7 +9656,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
                 '                    "arguments": args or {},\n'
                 '                    "estimated": False,\n'
                 '                }\n'
-                '                payload.update(kwargs or {})\n'
+                '                payload.update({k: v for k, v in (kwargs or {}).items() if k not in {"type", "event", "session_id", "run_id", "sequence", "event_id", "request_id", "correlation_id", "protocol_version", "source_type"}})\n'
                 '                _stream_q.put(("__hermes_raw_event__", payload))\n'
                 '\n'
                 '            # Start agent in background.  agent_ref is a mutable container\n',
@@ -9664,7 +9694,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
                 '                    "reasoning": (preview or "") if is_reasoning else None,\n'
                 '                    "arguments": args or {},\n'
                 "                }\n"
-                "                payload.update(kwargs or {})\n"
+                "                payload.update({k: v for k, v in (kwargs or {}).items() if k not in {'type', 'event', 'session_id', 'run_id', 'sequence', 'event_id', 'request_id', 'correlation_id', 'protocol_version', 'source_type'}})\n"
                 '                _stream_q.put(("__hermes_raw_event__", payload))\n',
                 text,
                 count=1,
@@ -9675,6 +9705,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
 
         responses_reasoning_passthrough = '"""Forward Responses progress metadata and reasoning."""'
         if responses_reasoning_passthrough not in text:
+            # Matcher per file patchati con versioni vecchie (forma vulnerabile).
             legacy_responses_progress = (
                 '            def _on_tool_progress(event_type, name, preview, args, **kwargs):\n'
                 '                """Pass through Hermes-native tool/progress metadata."""\n'
@@ -9722,7 +9753,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
                 '                    "reasoning": (preview or "") if is_reasoning else None,\n'
                 '                    "arguments": args or {},\n'
                 '                }\n'
-                '                payload.update(kwargs or {})\n'
+                '                payload.update({k: v for k, v in (kwargs or {}).items() if k not in {"type", "event", "session_id", "run_id", "sequence", "event_id", "request_id", "correlation_id", "protocol_version", "source_type"}})\n'
                 '                _stream_q.put(("__hermes_raw_event__", payload))\n',
                 "responses reasoning passthrough callback",
             )
@@ -10200,6 +10231,9 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
 
     text, hardening_changes = _harden_runtime(text)
     changes.extend(hardening_changes)
+
+    text, sse_changes = _harden_sse_payload_updates(text)
+    changes.extend(sse_changes)
 
     text, jarvis_changes = _patch_jarvis_v1(text)
     changes.extend(jarvis_changes)

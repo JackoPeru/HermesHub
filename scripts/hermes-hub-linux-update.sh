@@ -960,6 +960,34 @@ if ! is_positive_uint "$ASSET_SIZE"; then
   echo "ERROR: GitHub asset metadata has no valid positive size" >&2
   exit 1
 fi
+# Allowlist host asset: l'URL viene dal JSON GitHub, ma un canale
+# compromesso non deve poter puntare il download fuori dall'infrastruttura
+# release (fail-closed: o GitHub release/download o niente).
+# HERMES_HUB_UPDATE_ASSET_HOSTS: prefissi extra separati da spazi (default
+# vuoto; serve solo ai test con host .invalid finti).
+asset_url_allowed=false
+case "$ASSET_URL" in
+  "https://github.com/"*"/releases/download/"*|\
+  "https://objects.githubusercontent.com/"*|\
+  "https://api.github.com/repos/"*"/releases/assets/"*)
+    asset_url_allowed=true
+    ;;
+esac
+if [ "$asset_url_allowed" != "true" ] && [ -n "${HERMES_HUB_UPDATE_ASSET_HOSTS:-}" ]; then
+  # shellcheck disable=SC2086: split intenzionale su spazi.
+  for asset_prefix in ${HERMES_HUB_UPDATE_ASSET_HOSTS:-}; do
+    case "$ASSET_URL" in
+      "$asset_prefix"*)
+        asset_url_allowed=true
+        break
+        ;;
+    esac
+  done
+fi
+if [ "$asset_url_allowed" != "true" ]; then
+  echo "ERROR: asset URL fuori allowlist GitHub: $ASSET_URL" >&2
+  exit 1
+fi
 if ! python3 - "$ASSET_SIZE" "$MAX_ASSET_MB" <<'PY'
 import sys
 

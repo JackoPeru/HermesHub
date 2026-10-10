@@ -304,6 +304,49 @@ class CorrelationSseGoldenTests(unittest.TestCase):
         self.assertNotEqual("bad id with spaces", context.request_id)
         self.assertNotEqual("corr_client", context.correlation_id)
 
+    def test_nonconforming_run_id_passes_through_without_breaking_stream(self):
+        context = CorrelationContext("req_bad_run", "corr_bad_run")
+
+        class Response:
+            _hermes_hub_correlation_context = context
+
+        response = Response()
+        bad = f"event: tool.progress\ndata: {json.dumps({'type': 'tool.progress', 'run_id': 'bad id!!'})}\n\n".encode()
+        out = _enrich_sse_chunk(response, bad).decode("utf-8")
+        # Il frame passa originale (non arricchito), lo stream non si rompe.
+        self.assertIn("bad id!!", out)
+        self.assertNotIn("protocol_version", out)
+        # La sequence non si consuma sul fallimento: il prossimo buono e 1.
+        good = f"event: tool.progress\ndata: {json.dumps({'type': 'tool.progress', 'run_id': 'run_ok'})}\n\n".encode()
+        out2 = _enrich_sse_chunk(response, good).decode("utf-8")
+        envelope = json.loads(out2.split("data: ", 1)[1].split("\n", 1)[0])
+        parsed = parse_event_envelope(envelope)
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(1, parsed.sequence)
+        self.assertEqual("run_ok", parsed.run_id)
+
+    def test_split_utf8_multibyte_reassembles_across_writes(self):
+        context = CorrelationContext("req_utf8", "corr_utf8")
+
+        class Response:
+            _hermes_hub_correlation_context = context
+
+        response = Response()
+        payload = {"type": "assistant.delta", "delta": "ciao 🌍"}
+        raw = f"event: assistant.delta\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
+        # Spezza a meta del carattere multibyte.
+        cut = raw.index("🌍".encode("utf-8"))
+        first, second = raw[:cut + 2], raw[cut + 2:]
+        self.assertEqual(b"", _enrich_sse_chunk(response, first))
+        out = _enrich_sse_chunk(response, second).decode("utf-8")
+        envelope = json.loads(out.split("data: ", 1)[1].split("\n", 1)[0])
+        parsed = parse_event_envelope(envelope)
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual("ciao 🌍", parsed.payload["delta"])
+        self.assertEqual(1, parsed.sequence)
+
 
 class JarvisLifecycleTests(unittest.TestCase):
     def test_single_worker_latest_frame_voice_priority_and_cleanup_order(self):

@@ -417,8 +417,9 @@ internal fun ChatScreen(
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     var quickPrompt by rememberSaveable { mutableStateOf<String?>(null) }
     // Invio mentre Hermes lavora: scelta Accoda/Correggi per ogni invio.
-    var pendingBusySend by remember { mutableStateOf<PendingBusySend?>(null) }
-    var showSendChoiceDialog by remember { mutableStateOf(false) }
+    // La scelta vive nell'holder (ViewModel, sopravvive alla rotazione), il
+    // flag del dialogo in saveable: a rotazione il dialogo si riapre integro.
+    var showSendChoiceDialog by rememberSaveable { mutableStateOf(false) }
 
     // Svuota la coda prompt quando libero: il prossimo parte da solo via
     // quickPrompt (stesso percorso del tasto invio, niente duplicazioni).
@@ -447,9 +448,11 @@ internal fun ChatScreen(
     // e invia subito il nuovo prompt per raddrizzare l'agente a meta run.
     fun correctNow(choice: PendingBusySend) {
         showSendChoiceDialog = false
-        pendingBusySend = null
+        state.pendingBusySend = null
         val cid = state.activeConversationId ?: return
-        HermesStreamRuntime.scope.launch {
+        // Rete e cancel fuori dal Main (fermo restando che il collector
+        // dedicato resta sullo scope UI): niente ANR sul tap.
+        HermesStreamRuntime.ioScope.launch {
             state.activeStreams[cid]?.job?.cancel()
             state.activeStreamJob?.cancel()
             state.streamingState?.activeRunId?.let { runId ->
@@ -487,7 +490,7 @@ internal fun ChatScreen(
 
     fun enqueueBusySend(choice: PendingBusySend) {
         showSendChoiceDialog = false
-        pendingBusySend = null
+        state.pendingBusySend = null
         val cid = state.activeConversationId ?: return
         if (!canEnqueuePrompt(state.queuedPrompts.toList(), cid)) {
             state.messages.add(
@@ -1434,7 +1437,7 @@ internal fun ChatScreen(
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
         }
-        val busyChoice = pendingBusySend
+        val busyChoice = state.pendingBusySend
         // Live esterno bot: quadratino stop acceso + banner shimmer in fondo.
         val botLiveNow = botLive
         if (botLiveNow?.running == true && !state.sending) {
@@ -1442,7 +1445,7 @@ internal fun ChatScreen(
         }
         if (showSendChoiceDialog && busyChoice != null) {
             AlertDialog(
-                onDismissRequest = { showSendChoiceDialog = false; pendingBusySend = null },
+                onDismissRequest = { showSendChoiceDialog = false; state.pendingBusySend = null },
                 title = { Text("Hermes sta lavorando") },
                 text = { Text("Accoda il prompt (parte da solo alla fine) oppure ferma tutto e correggi subito?") },
                 confirmButton = {
@@ -1452,7 +1455,7 @@ internal fun ChatScreen(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showSendChoiceDialog = false; pendingBusySend = null }) { Text("Annulla") }
+                    TextButton(onClick = { showSendChoiceDialog = false; state.pendingBusySend = null }) { Text("Annulla") }
                 }
             )
         }
@@ -1499,7 +1502,7 @@ internal fun ChatScreen(
                 val sendBusy = state.sending || state.activeStreamJob != null
                 if ((text.isNotEmpty() || state.pendingAttachments.isNotEmpty()) && sendBusy && sendCid != null) {
                     // Turno in corso: l'utente decide per ogni invio (dialog Accoda/Correggi).
-                    pendingBusySend = PendingBusySend(text, state.pendingAttachments.toList())
+                    state.pendingBusySend = PendingBusySend(text, state.pendingAttachments.toList())
                     showSendChoiceDialog = true
                     return@Composer
                 }
@@ -2126,7 +2129,9 @@ internal fun ChatScreen(
                 if (state.activeStreams.size <= 1) {
                     val stopKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() }
                     if (stopKey != null) {
-                        HermesStreamRuntime.scope.launch {
+                        // POST rete fuori dal Main (lo stato immediato sotto
+                        // resta sul chiamante, gia Main).
+                        HermesStreamRuntime.ioScope.launch {
                             cancelManagerJobsSince(
                                 gpuManagerBase(settings.gatewayUrl), stopKey, state.lastTurnStartMs
                             )
@@ -2139,7 +2144,9 @@ internal fun ChatScreen(
                     error = null
                 )
                 if (!activeRunId.isNullOrBlank()) {
-                    HermesStreamRuntime.scope.launch {
+                    // POST rete fuori dal Main; gli SnapshotState scritti qui
+                    // sotto sono thread-safe (la ricomposizione torna su Main).
+                    HermesStreamRuntime.ioScope.launch {
                         val (code, body) = runCatching {
                             stopHermesRun(botSettings, activeRunId, botApiKey, botProfile, botMultiplexEnabled, botAllowCompatAuth)
                         }.getOrElse { 0 to (it.message ?: it.javaClass.simpleName) }
@@ -2299,9 +2306,24 @@ internal fun executeSlashCommand(
 internal fun BotLiveBanner(statusText: String, turnStartMs: Long = 0L, lastSignalMs: Long = 0L) {
     // Timer vivo a 1s mentre il turno corre: l'utente vede che e tutto attivo,
     // non un'etichetta congelata. Mai fasi inventate: solo tempi misurati.
+    // Gate lifecycle come ShimmerText: in background il ticker si ferma.
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(turnStartMs) {
-        while (true) {
+    val bannerLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    var bannerResumed by remember { mutableStateOf(true) }
+    DisposableEffect(bannerLifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> bannerResumed = true
+                Lifecycle.Event.ON_PAUSE -> bannerResumed = false
+                else -> Unit
+            }
+        }
+        bannerLifecycle.addObserver(observer)
+        onDispose { bannerLifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(turnStartMs, bannerResumed) {
+        nowMs = System.currentTimeMillis()
+        while (bannerResumed) {
             kotlinx.coroutines.delay(1_000L)
             nowMs = System.currentTimeMillis()
         }
@@ -2518,7 +2540,8 @@ internal fun ArchivedActivityDisclosure(
         val filtered = compatible.filter { showToolCalls || it.kind != AssistantActivity.Kind.Tool }
         flagTranscriptBlocks(transcriptBlocksOf(filtered, "", showToolCalls), showToolCalls)
     }
-    if (blocks.isNotEmpty()) HermesActivityDisclosure(blocks)
+    // Contenuto congelato: l'hash e una chiave stabile per l'expand/collapse.
+    if (blocks.isNotEmpty()) HermesActivityDisclosure(blocks, blocks.hashCode())
 }
 
 

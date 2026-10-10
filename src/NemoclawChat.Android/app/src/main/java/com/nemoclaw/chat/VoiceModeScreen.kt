@@ -417,7 +417,7 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
 
         if (voiceProfile.showTranscript) {
             Card(modifier = Modifier.align(Alignment.TopStart).padding(18.dp).fillMaxWidth(0.72f).heightIn(max = 420.dp), colors = CardDefaults.cardColors(containerColor = Color(0xDD151515))) {
-                androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { items(history.size) { index -> val message = history[index]; Column(verticalArrangement = Arrangement.spacedBy(2.dp)) { Text(message.author, color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold); Text(message.text, color = Color.White, fontSize = 14.sp) } } }
+                androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { items(history, key = { it.id }) { message -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) { Text(message.author, color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold); Text(message.text, color = Color.White, fontSize = 14.sp) } } }
             }
         }
     }

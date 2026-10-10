@@ -371,7 +371,7 @@ internal fun MessageFooter(text: String, stats: ChatStreamStats?, settings: AppS
     val context = LocalContext.current
     val clipboardManager = remember(context) { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
     val scope = rememberCoroutineScope()
-    var speaking by remember { mutableStateOf(false) }
+    var speaking by rememberSaveable { mutableStateOf(false) }
     val line = remember(stats, filter, showMetrics) {
         if (showMetrics) formatChatStatsLine(stats, filter) else ""
     }

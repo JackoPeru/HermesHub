@@ -271,7 +271,7 @@ internal object ConversationArchiveAutoSync {
             activeClients.incrementAndGet()
             if (eventListenerJob?.isActive == true) return
             val appContext = context.applicationContext
-            eventListenerJob = HermesStreamRuntime.scope.launch {
+            eventListenerJob = HermesStreamRuntime.ioScope.launch {
             while (true) {
                 try {
                     listenToHubEvents(appContext)
@@ -302,7 +302,7 @@ internal object ConversationArchiveAutoSync {
         if (applyingRemote.get()) return
         val appContext = context.applicationContext
         if (uploadQueued.getAndSet(true)) return
-        delayedUploadJob = HermesStreamRuntime.scope.launch {
+        delayedUploadJob = HermesStreamRuntime.ioScope.launch {
             delay(2_000)
             uploadQueued.set(false)
             if (activeClients.get() > 0) pushToHub(appContext)

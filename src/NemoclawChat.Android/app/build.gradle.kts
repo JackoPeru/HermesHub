@@ -3,11 +3,31 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+import java.util.Properties
+
 val enableMetaDat = providers.gradleProperty("enableMetaDat").orNull?.toBooleanStrictOrNull() == true
 val allowStandardReleaseForDevelopment = providers.gradleProperty("allowStandardReleaseForDevelopment")
     .orNull?.toBooleanStrictOrNull() == true
+val hermesAllowDebugSigning = providers.gradleProperty("hermesAllowDebugSigning")
+    .orNull?.toBooleanStrictOrNull() == true
 val mwdatApplicationId = providers.gradleProperty("mwdatApplicationId").orNull ?: "0"
 val mwdatClientToken = providers.gradleProperty("mwdatClientToken").orNull ?: "0"
+
+// Keystore release dedicato (mai il debug keystore condiviso): materiale in
+// local.properties (gitignored). Risoluzione pigra: niente throw in
+// configurazione per task debug/test.
+val hermesKeystoreProps = Properties().apply {
+    val localFile = rootProject.file("local.properties")
+    if (localFile.exists()) localFile.inputStream().use { load(it) }
+}
+fun hermesSigningAvailable(): Boolean {
+    val storeName = hermesKeystoreProps.getProperty("hermes.storeFile", "hermes-release.keystore")
+    val store = rootProject.file(storeName)
+    return store.exists() &&
+        !hermesKeystoreProps.getProperty("hermes.storePassword").isNullOrBlank() &&
+        !hermesKeystoreProps.getProperty("hermes.keyAlias").isNullOrBlank() &&
+        !hermesKeystoreProps.getProperty("hermes.keyPassword").isNullOrBlank()
+}
 
 gradle.taskGraph.whenReady {
     val containsReleaseOutput = allTasks.any { task ->
@@ -18,6 +38,14 @@ gradle.taskGraph.whenReady {
             "La release ufficiale Hermes Hub richiede Meta DAT. " +
                 "Usa scripts/package-android-release.ps1; per una build standard solo sviluppo passa " +
                 "-PallowStandardReleaseForDevelopment=true. L'APK standard non deve essere pubblicato."
+        )
+    }
+    // Fail fast: release firmata senza keystore dedicato, mai fallback
+    // silenzioso al debug (solo CI validation-only con flag esplicito).
+    if (containsReleaseOutput && !allowStandardReleaseForDevelopment && !hermesAllowDebugSigning && !hermesSigningAvailable()) {
+        throw GradleException(
+            "Keystore release Hermes Hub assente: configura hermes.storeFile/storePassword/keyAlias/keyPassword " +
+                "in src/NemoclawChat.Android/local.properties (gitignored). Mai firmare release col debug keystore."
         )
     }
 }
@@ -38,11 +66,31 @@ android {
         manifestPlaceholders["mwdat_client_token"] = mwdatClientToken
     }
 
+    signingConfigs {
+        // Configurazione pigra: il materiale manca in CI/debug, ma allora la
+        // config non viene mai usata (whenReady blocca prima le release).
+        create("hermes") {
+            val storeName = hermesKeystoreProps.getProperty("hermes.storeFile", "hermes-release.keystore")
+            val store = rootProject.file(storeName)
+            if (store.exists()) {
+                storeFile = store
+                storePassword = hermesKeystoreProps.getProperty("hermes.storePassword")
+                keyAlias = hermesKeystoreProps.getProperty("hermes.keyAlias")
+                keyPassword = hermesKeystoreProps.getProperty("hermes.keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            // Mai debug di default: solo sviluppo/CI espliciti usano debug.
+            signingConfig = if (allowStandardReleaseForDevelopment || hermesAllowDebugSigning) {
+                signingConfigs.getByName("debug")
+            } else {
+                signingConfigs.getByName("hermes")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

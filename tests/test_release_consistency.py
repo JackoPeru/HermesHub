@@ -129,6 +129,8 @@ class ReleaseConsistencyTests(unittest.TestCase):
 
         self.assertIn("-PenableMetaDat=true", package_script)
         self.assertNotIn("allowStandardReleaseForDevelopment", package_script)
+        self.assertIn("hermes-release.keystore", package_script)
+        self.assertIn("-PhermesAllowDebugSigning=true", package_script)
         self.assertIn("[switch]$CiValidation", package_script)
         self.assertIn("android-DAT-validation-only.apk", package_script)
         self.assertIn("asset CI validation-only, non pubblicabile", package_script)
@@ -146,7 +148,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
         ):
             self.assertIn(required_guard, package_script)
         self.assertIn(
-            "7be7c380f31c81c050a86ea8cefd4ec3bd41972ddd864a8edb97b1e20c84823f",
+            "2806aca1897c983ef5fe8c2758105e9473e6c682b3ef627ab1d4ec461cf1a5fc",
             package_script,
         )
         self.assertIn(
@@ -159,6 +161,8 @@ class ReleaseConsistencyTests(unittest.TestCase):
         )
 
         self.assertIn("allowStandardReleaseForDevelopment", android_project)
+        self.assertIn("hermesAllowDebugSigning", android_project)
+        self.assertIn('signingConfigs.getByName("hermes")', android_project)
         self.assertIn("containsReleaseOutput", android_project)
         self.assertIn("!enableMetaDat && !allowStandardReleaseForDevelopment", android_project)
         self.assertIn("L'APK standard non deve essere pubblicato", android_project)

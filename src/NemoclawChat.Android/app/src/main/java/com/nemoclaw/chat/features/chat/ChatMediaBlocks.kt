@@ -244,6 +244,7 @@ import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import com.nemoclaw.chat.createVideoPlayerView
+import com.nemoclaw.chat.copyToBounded
 import com.nemoclaw.chat.FullscreenVideoOrientationEffect
 import com.nemoclaw.chat.findActivity
 import kotlinx.coroutines.CoroutineScope
@@ -473,7 +474,9 @@ internal fun DiagramBlock(block: VisualBlock) {
 @Composable
 internal fun GalleryBlock(block: VisualBlock) {
     val context = LocalContext.current
-    val settings = remember { loadSettings(context) }
+    // Lettura fresca a ogni composizione (SharedPreferences in-memory, niente
+    // I/O): niente remember senza chiavi che resterebbe stale dopo Settings.
+    val settings = loadSettings(context)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         block.images.take(12).forEach { image ->
             RemoteGalleryImage(settings, image)
@@ -817,7 +820,8 @@ internal fun DocumentSlimRow(
 @Composable
 internal fun MediaFileBlock(block: VisualBlock) {
     val context = LocalContext.current
-    val settings = remember { loadSettings(context) }
+    // Settings fresche (vedi GalleryBlock); il secret e ricaricato al cambio gateway.
+    val settings = loadSettings(context)
     val allowExternalImage = block.mediaKind == "image"
     val isLocalAttachment = block.localDataUrl.isNotBlank()
     val resolvedMediaUrl = remember(settings.gatewayUrl, block.mediaUrl, allowExternalImage) { resolveMediaUrl(settings, block.mediaUrl, allowExternalImage, allowExternalMedia = true) }
@@ -830,7 +834,7 @@ internal fun MediaFileBlock(block: VisualBlock) {
     }
     val clipboard = remember(context) { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
     val scope = rememberCoroutineScope()
-    val gatewaySecret = remember { loadGatewaySecret(context) }
+    val gatewaySecret = remember(settings.gatewayUrl) { loadGatewaySecret(context) }
     var isDownloading by remember(block.mediaUrl) { mutableStateOf(false) }
     var isOpening by remember(block.mediaUrl) { mutableStateOf(false) }
     var pendingLegacyDownload by remember(block.id) { mutableStateOf<Pair<String, String>?>(null) }
@@ -839,13 +843,16 @@ internal fun MediaFileBlock(block: VisualBlock) {
         isDownloading = true
         android.widget.Toast.makeText(context, "Scaricamento: ${sanitizeDownloadFilename(filename)}", android.widget.Toast.LENGTH_SHORT).show()
         // Scope application-lifetime: lo scroll che ricicla la card non deve
-        // abortire il download a meta scrittura senza esito.
-        HermesStreamRuntime.scope.launch {
+        // abortire il download a meta scrittura senza esito. Rete su IO,
+        // Toast/UI con hop esplicito su Main (mai Toast da background).
+        HermesStreamRuntime.ioScope.launch {
             val message = runCatching {
                 downloadHermesMediaFile(context, settings, url, filename, block.mimeType, loadGatewaySecret(context))
             }.getOrElse { "Download fallito: ${it.message ?: "errore sconosciuto"}" }
-            isDownloading = false
-            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                isDownloading = false
+                android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
     val legacyStoragePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -1137,19 +1144,10 @@ internal suspend fun downloadAndOpenExternalMedia(
                     val (partialFile, completedFile) = files
                     FileOutputStream(partialFile).use { output ->
                         val input = body.byteStream()
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        var total = 0L
-                        while (true) {
+                        // Loop bounded condiviso (niente duplicati): check
+                        // cancellazione prima e dopo ogni read.
+                        input.copyToBounded(output, maxBytes) {
                             if (!continuation.isActive) throw CancellationException("Apertura allegato annullata.")
-                            val read = input.read(buffer)
-                            if (read < 0) break
-                            if (!continuation.isActive) throw CancellationException("Apertura allegato annullata.")
-                            if (read == 0) continue
-                            if (total > maxBytes - read.toLong()) {
-                                throw PayloadTooLargeException("Risposta superiore al limite di $maxBytes byte")
-                            }
-                            output.write(buffer, 0, read)
-                            total += read
                         }
                         if (!continuation.isActive) throw CancellationException("Apertura allegato annullata.")
                         output.fd.sync()

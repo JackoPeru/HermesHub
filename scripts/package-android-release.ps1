@@ -15,7 +15,7 @@ $localPropertiesPath = Join-Path $androidDir "local.properties"
 $apkPath = Join-Path $appDir "build\outputs\apk\release\app-release.apk"
 $mappingPath = Join-Path $appDir "build\outputs\mapping\release\mapping.txt"
 $buildConfigPath = Join-Path $appDir "build\generated\source\buildConfig\release\com\nemoclaw\chat\BuildConfig.java"
-$expectedCertificateSha256 = "7be7c380f31c81c050a86ea8cefd4ec3bd41972ddd864a8edb97b1e20c84823f"
+$expectedCertificateSha256 = "2806aca1897c983ef5fe8c2758105e9473e6c682b3ef627ab1d4ec461cf1a5fc"
 
 function Get-LocalPropertyValue([string]$Path, [string]$Key) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -120,6 +120,10 @@ if ($CiValidation) {
     $metaClientToken = "ci-validation-token-not-for-release"
 }
 else {
+    $keystorePath = Join-Path $androidDir "hermes-release.keystore"
+    if (-not (Test-Path -LiteralPath $keystorePath -PathType Leaf)) {
+        throw "Release Android bloccata: keystore dedicato assente ($keystorePath). Mai firmare release col debug keystore."
+    }
     $metaApplicationId = $env:META_DAT_APPLICATION_ID
     if ([string]::IsNullOrWhiteSpace($metaApplicationId)) {
         $metaApplicationId = Get-LocalPropertyValue -Path $localPropertiesPath -Key "mwdatApplicationId"
@@ -173,7 +177,13 @@ try {
     [Environment]::SetEnvironmentVariable("ORG_GRADLE_PROJECT_mwdatClientToken", $metaClientToken, "Process")
     Push-Location $androidDir
     try {
-        & $gradleCommand -PenableMetaDat=true --no-daemon --console=plain lintRelease testDebugUnitTest assembleRelease
+        $gradleArgs = @("-PenableMetaDat=true", "--no-daemon", "--console=plain", "lintRelease", "testDebugUnitTest", "assembleRelease")
+        if ($CiValidation) {
+            # Validation-only senza keystore privato: firma debug esplicita,
+            # asset marchiato non pubblicabile (mai la via ufficiale).
+            $gradleArgs = @("-PenableMetaDat=true", "-PhermesAllowDebugSigning=true") + $gradleArgs[1..($gradleArgs.Count - 1)]
+        }
+        & $gradleCommand @gradleArgs
         if ($LASTEXITCODE -ne 0) {
             throw "Build Android DAT fallita con exit code $LASTEXITCODE."
         }

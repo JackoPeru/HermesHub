@@ -1606,6 +1606,10 @@ internal fun streamSseAttempt(request: Request): Flow<SseAttemptSignal> = callba
                     val dataBuffer = StringBuilder()
                     var eventName: String? = null
                     var terminalSeen = false
+                    // Oltre il limite l'evento si tronca (una sola segnalazione):
+                    // il turno completa con il testo parziale invece di buttare
+                    // tutto con NetworkFailure generico.
+                    var accumTruncated = false
 
                     fun flushEvent(): Boolean {
                         if (dataBuffer.isEmpty()) return true
@@ -1631,10 +1635,14 @@ internal fun streamSseAttempt(request: Request): Flow<SseAttemptSignal> = callba
                                 val part = line.substring(5).let { if (it.startsWith(" ")) it.drop(1) else it }
                                 val separatorLength = if (dataBuffer.isNotEmpty()) 1 else 0
                                 if (dataBuffer.length + separatorLength + part.length > STREAM_ACCUM_MAX_CHARS) {
-                                    throw PayloadTooLargeException("Evento SSE superiore al limite consentito")
+                                    if (!accumTruncated) {
+                                        accumTruncated = true
+                                        sendSignal(SseAttemptSignal.Event(ChatStreamEvent.Status("Risposta troncata: oltre 2M caratteri in un evento SSE.")))
+                                    }
+                                } else {
+                                    if (separatorLength > 0) dataBuffer.append('\n')
+                                    dataBuffer.append(part)
                                 }
-                                if (separatorLength > 0) dataBuffer.append('\n')
-                                dataBuffer.append(part)
                             }
                         }
                     }
@@ -1675,7 +1683,7 @@ internal fun isTerminalSseEvent(eventName: String?, data: String): Boolean {
     if (eventType.contains("response.completed") || eventType.contains("response.done")) return true
     if (eventType.contains("run.completed") || eventType.contains("run.failed") || eventType.contains("run.cancelled")) return true
     if (eventType.contains("assistant.completed")) return true
-    val root = runCatching { JSONObject(data) }.getOrNull() ?: return false
+    val root = runCatching { JSONObject(data) }.getOrNull() ?: return isTerminalSseEventLenient(data)
     val type = root.optString("type", "").lowercase()
     if (type.contains("response.completed") || type.contains("response.done")) return true
     if (type.contains("run.completed") || type.contains("run.failed") || type.contains("run.cancelled")) return true
@@ -1691,6 +1699,21 @@ internal fun isTerminalSseEvent(eventName: String?, data: String): Boolean {
     return (0 until choices.length()).any { index ->
         choices.optJSONObject(index)?.optString("finish_reason").orEmpty().isNotBlank()
     }
+}
+
+private val TERMINAL_FINISH_REASON_REGEX = Regex(""""finish_reason"\s*:\s*"((?:[^"\\]|\\.)+)"?""")
+private val TERMINAL_TYPE_MARKER_REGEX = Regex(""""type"\s*:\s*"[^"]*(completed|failed|cancelled)[^"]*"""", RegexOption.IGNORE_CASE)
+
+/**
+ * Fallback senza JSON parse: frame troncato ma con marcatori terminali
+ * leggibili (es. finish_reason valorizzato). Solo segnali espliciti, mai
+ * su spazzatura generica (che resta al watchdog).
+ */
+internal fun isTerminalSseEventLenient(data: String): Boolean {
+    if (data.length > 16_384) return false
+    val finish = TERMINAL_FINISH_REASON_REGEX.find(data)?.groupValues?.getOrNull(1).orEmpty()
+    if (finish.isNotBlank() && !finish.equals("null", ignoreCase = true)) return true
+    return TERMINAL_TYPE_MARKER_REGEX.containsMatchIn(data)
 }
 
 private fun buildMultimodalInput(prompt: String, attachments: List<ChatInputAttachment>): Any {
