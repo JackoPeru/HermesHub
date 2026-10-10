@@ -194,6 +194,117 @@ internal data class BotChatContext(
     }
 }
 
+/**
+ * Azioni della sidebar che richiedono la UI della sezione Bot (editor,
+ * conferma eliminazione, gruppi, schermo): la sidebar le accoda, la
+ * sezione le consuma. Il resto (chat, pin, hide, sezioni, auto-screen,
+ * nuova chat, sessioni recenti) la sidebar lo fa da sola.
+ */
+internal sealed interface BotSidebarAction {
+    data class Edit(val botKey: String) : BotSidebarAction
+    data class Duplicate(val botKey: String) : BotSidebarAction
+    data class Delete(val botKey: String) : BotSidebarAction
+    data object ManageGroups : BotSidebarAction
+    data class OpenScreen(val botKey: String) : BotSidebarAction
+}
+
+/** Id conversazione locale per una sessione NON canonica: mai collidere con la forever-chat. */
+internal fun stableBotSessionConversationId(bot: HermesBotItem, sessionId: String): String {
+    val suffix = sessionId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(16)
+    return "${stableBotConversationId(bot)}-s-${suffix.ifBlank { "x" }}"
+}
+
+/** Titolo per una nuova chat pulita: mai "Bot Chat" (registro canonico). */
+internal fun newBotChatTitle(bot: HermesBotItem): String =
+    "Chat con ${bot.displayName.trim().take(60).ifBlank { bot.profile }}".take(80)
+
+/**
+ * Sessioni recenti del bot (non canoniche), dalle piu attive: la
+ * forever-chat "Bot Chat" si apre da "Apri Bot Chat", qui non compare.
+ * Puro e testabile.
+ */
+internal fun selectRecentBotSessions(rows: List<HermesSession>, limit: Int = 20): List<HermesSession> {
+    if (limit <= 0) return emptyList()
+    return rows.filterNot { isCanonicalBotRow(it) }
+        .sortedWith(
+            compareByDescending<HermesSession> { it.raw?.optDouble("last_active", 0.0) ?: 0.0 }
+                .thenByDescending { it.updatedAt }
+                .thenByDescending { it.createdAt }
+                .thenBy { it.id }
+        )
+        .take(limit)
+}
+
+/** Client sessioni con lo stesso scope della risoluzione canonica (profilo/multiplex). */
+private suspend fun botSessionClient(
+    context: Context,
+    settings: AppSettings,
+    bot: HermesBotItem,
+    rosterMultiplex: Boolean
+): HermesSessionClient {
+    val connection = withContext(Dispatchers.IO) { connectionForBot(context.applicationContext, settings, bot) }
+    val effective = settingsForBotConnection(settings, connection)
+    val secret = secretForBotConnection(context, connection)
+    return HermesSessionClient(effective, secret, bot.profile, rosterMultiplex, null)
+}
+
+/** Nuova chat pulita col bot: sessione vuota (mai fork della forever-chat). */
+internal suspend fun createBotChatSession(
+    context: Context,
+    settings: AppSettings,
+    bot: HermesBotItem,
+    rosterMultiplex: Boolean
+): Result<HermesSession> = runCatching {
+    val client = botSessionClient(context, settings, bot, rosterMultiplex)
+    val (code, created) = client.create(title = newBotChatTitle(bot), source = "hermes-hub-android")
+    if (code !in 200..299 || created == null) error("Nuova chat non creata (HTTP $code).")
+    created
+}
+
+/** Sessioni recenti del bot dal server (scope canonico). */
+internal suspend fun listBotRecentSessions(
+    context: Context,
+    settings: AppSettings,
+    bot: HermesBotItem,
+    rosterMultiplex: Boolean,
+    limit: Int = 20
+): Result<List<HermesSession>> = runCatching {
+    val client = botSessionClient(context, settings, bot, rosterMultiplex)
+    val all = mutableListOf<HermesSession>()
+    var offset = 0
+    var code = 200
+    for (page in 0 until 3) {
+        val (pageCode, pageRows) = client.list(limit = 100, offset = offset, includeHidden = true)
+        code = pageCode
+        if (code !in 200..299) error("Sessioni non leggibili (HTTP $code).")
+        if (pageRows.isEmpty()) break
+        all.addAll(pageRows)
+        if (pageRows.size < 100) break
+        offset += 100
+    }
+    selectRecentBotSessions(all, limit)
+}
+
+/** Contesto chat per una sessione arbitraria del bot (nuova o recente). */
+internal suspend fun botSessionContext(
+    context: Context,
+    settings: AppSettings,
+    bot: HermesBotItem,
+    rosterMultiplex: Boolean,
+    session: HermesSession
+): Result<BotChatContext> = runCatching {
+    val connection = withContext(Dispatchers.IO) { connectionForBot(context.applicationContext, settings, bot) }
+    BotChatContext(
+        profile = bot.profile,
+        sessionId = session.id,
+        displayName = bot.displayName,
+        localConversationId = stableBotSessionConversationId(bot, session.id),
+        multiplexEnabled = rosterMultiplex,
+        connectionId = connection.id,
+        endpoint = connection.endpoint
+    )
+}
+
 internal suspend fun loadHermesBotRoster(
     settings: AppSettings,
     apiKey: String?,
@@ -672,7 +783,10 @@ internal fun BotsScreen(
     // Apre la sidebar in modalita bot (lista bot stile desktop).
     onOpenSidebar: () -> Unit = {},
     // Vieta apertura a turno attivo (reset ammazzerebbe stream/binding/coda).
-    canOpenBotChat: () -> Boolean = { true }
+    canOpenBotChat: () -> Boolean = { true },
+    // Azione accodata dalla sidebar (long-press): consumata al roster pronto.
+    pendingAction: BotSidebarAction? = null,
+    onPendingActionConsumed: () -> Unit = {}
 ) {
     var roster by remember(settings.gatewayUrl) { mutableStateOf<HermesBotRoster?>(null) }
     var connections by remember(settings.gatewayUrl) {
@@ -910,6 +1024,54 @@ internal fun BotsScreen(
         showEditor = true
     }
 
+    fun duplicateBot(bot: HermesBotItem) {
+        // Il server non espone la soul in lettura: copia
+        // profilo/nome/descrizione, soul da ricompilare.
+        editorBot = null
+        profileInput = (bot.profile + "-copy").take(64)
+        displayNameInput = "${bot.displayName} (copia)"
+        descriptionInput = bot.description
+        soulInput = ""
+        selectedConnectionId = bot.connectionId
+        showEditor = true
+        Toast.makeText(context, "Soul non copiata: il server non la espone, ricompilala.", Toast.LENGTH_LONG).show()
+    }
+
+    // Azioni accodate dalla sidebar (long-press): consumate quando il
+    // roster e pronto (serve a risolvere il bot per chiave).
+    LaunchedEffect(pendingAction, roster) {
+        val action = pendingAction ?: return@LaunchedEffect
+        val items = roster?.items ?: return@LaunchedEffect
+        fun findBot(key: String): HermesBotItem? = items.firstOrNull { it.identityKey == key }
+        when (action) {
+            is BotSidebarAction.Edit -> findBot(action.botKey)?.let { openEditor(it) }
+                ?: Toast.makeText(context, "Bot non più disponibile.", Toast.LENGTH_SHORT).show()
+            is BotSidebarAction.Duplicate -> findBot(action.botKey)?.let { duplicateBot(it) }
+                ?: Toast.makeText(context, "Bot non più disponibile.", Toast.LENGTH_SHORT).show()
+            is BotSidebarAction.Delete -> {
+                val bot = findBot(action.botKey)
+                if (bot == null) {
+                    Toast.makeText(context, "Bot non più disponibile.", Toast.LENGTH_SHORT).show()
+                } else {
+                    deleteBot = bot
+                    deleteConfirmation = ""
+                }
+            }
+            is BotSidebarAction.ManageGroups -> {
+                status = "Gruppi qui sotto: creali e lanciali da questa scheda."
+                scope.launch { botListState.animateScrollToItem(2) }
+            }
+            is BotSidebarAction.OpenScreen -> {
+                if (findBot(action.botKey) == null) {
+                    Toast.makeText(context, "Bot non più disponibile.", Toast.LENGTH_SHORT).show()
+                } else {
+                    showSectionScreen = true
+                }
+            }
+        }
+        onPendingActionConsumed()
+    }
+
     LaunchedEffect(settings.gatewayUrl, refreshNonce) {
         connections = loadHermesBotConnections(context, settings)
         groups = loadHermesBotGroups(context)
@@ -1032,16 +1194,7 @@ internal fun BotsScreen(
                 },
                 onDuplicate = {
                     menuFor = null
-                    // Il server non espone la soul in lettura: copia
-                    // profilo/nome/descrizione, soul da ricompilare.
-                    editorBot = null
-                    profileInput = (bot.profile + "-copy").take(64)
-                    displayNameInput = "${bot.displayName} (copia)"
-                    descriptionInput = bot.description
-                    soulInput = ""
-                    selectedConnectionId = bot.connectionId
-                    showEditor = true
-                    Toast.makeText(context, "Soul non copiata: il server non la espone, ricompilala.", Toast.LENGTH_LONG).show()
+                    duplicateBot(bot)
                 },
                 onMoveToSection = { name ->
                     menuFor = null

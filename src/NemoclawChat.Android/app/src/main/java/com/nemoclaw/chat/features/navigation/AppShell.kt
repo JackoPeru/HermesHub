@@ -62,8 +62,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.text.BasicTextField
@@ -354,7 +354,10 @@ internal fun HermesSidebar(
     botMode: Boolean = false,
     activeBotKey: String? = null,
     onOpenBotItem: (com.nemoclaw.chat.features.bots.HermesBotItem) -> Unit = {},
-    onManageBots: () -> Unit = {}
+    onManageBots: () -> Unit = {},
+    onBotAction: (com.nemoclaw.chat.features.bots.HermesBotItem, com.nemoclaw.chat.features.bots.BotSidebarAction) -> Unit = { _, _ -> },
+    onNewBotChat: (com.nemoclaw.chat.features.bots.HermesBotItem) -> Unit = {},
+    onOpenBotSession: (com.nemoclaw.chat.features.bots.HermesBotItem, com.nemoclaw.chat.HermesSession) -> Unit = { _, _ -> }
 ) {
     val conversations = remember { loadConversations(context).sortedByDescending { it.updatedAt } }
     Surface(
@@ -371,7 +374,10 @@ internal fun HermesSidebar(
                 activeBotKey = activeBotKey,
                 onClose = onClose,
                 onOpenBotItem = onOpenBotItem,
-                onManageBots = onManageBots
+                onManageBots = onManageBots,
+                onBotAction = onBotAction,
+                onNewBotChat = onNewBotChat,
+                onOpenBotSession = onOpenBotSession
             )
         } else {
         LazyColumn(
@@ -534,6 +540,15 @@ internal fun HermesSidebar(
  * normali, solo la lista dei bot con cui parlare + gestione. La chat
  * resta quella persistente del bot (una per bot).
  */
+private data class BotSidebarLoaded(
+    val bots: List<com.nemoclaw.chat.features.bots.HermesBotItem>,
+    val status: String,
+    val pins: Set<String>,
+    val hidden: Set<String>,
+    val autoScreen: Set<String>,
+    val sections: com.nemoclaw.chat.features.bots.BotSections,
+    val multiplexEnabled: Boolean
+)
 @Composable
 internal fun HermesBotSidebar(
     context: Context,
@@ -541,23 +556,70 @@ internal fun HermesBotSidebar(
     activeBotKey: String?,
     onClose: () -> Unit,
     onOpenBotItem: (com.nemoclaw.chat.features.bots.HermesBotItem) -> Unit,
-    onManageBots: () -> Unit
+    onManageBots: () -> Unit,
+    // Azione che richiede la sezione Bot (editor, eliminazione, gruppi, schermo).
+    onBotAction: (com.nemoclaw.chat.features.bots.HermesBotItem, com.nemoclaw.chat.features.bots.BotSidebarAction) -> Unit = { _, _ -> },
+    // Nuova chat pulita col bot (sessione dedicata, mai la canonica).
+    onNewBotChat: (com.nemoclaw.chat.features.bots.HermesBotItem) -> Unit = {},
+    // Apertura di una sessione recente scelta dal dialogo.
+    onOpenBotSession: (com.nemoclaw.chat.features.bots.HermesBotItem, com.nemoclaw.chat.HermesSession) -> Unit = { _, _ -> }
 ) {
     val appContext = context.applicationContext
     var bots by remember { mutableStateOf(emptyList<com.nemoclaw.chat.features.bots.HermesBotItem>()) }
     var status by remember { mutableStateOf("Carico bot…") }
     var botRefreshNonce by remember { mutableIntStateOf(0) }
+    var rosterMultiplex by remember { mutableStateOf(true) }
+    var menuForKey by remember { mutableStateOf<String?>(null) }
+    var menuPage by remember { mutableIntStateOf(0) }
+    var botPins by remember { mutableStateOf(setOf<String>()) }
+    var botHiddenLocal by remember { mutableStateOf(setOf<String>()) }
+    var botAutoScreen by remember { mutableStateOf(setOf<String>()) }
+    var botSections by remember { mutableStateOf(com.nemoclaw.chat.features.bots.BotSections()) }
+    var newSectionFor by remember { mutableStateOf<com.nemoclaw.chat.features.bots.HermesBotItem?>(null) }
+    var recentFor by remember { mutableStateOf<com.nemoclaw.chat.features.bots.HermesBotItem?>(null) }
+    var recentSessions by remember { mutableStateOf<List<com.nemoclaw.chat.HermesSession>?>(null) }
     LaunchedEffect(botRefreshNonce) {
         status = "Carico bot…"
         val loaded = withContext(Dispatchers.IO) {
             val pins = com.nemoclaw.chat.features.bots.loadBotPins(appContext)
             val hidden = com.nemoclaw.chat.features.bots.loadBotHiddenLocal(appContext)
+            val autoScreen = com.nemoclaw.chat.features.bots.loadBotAutoScreen(appContext)
+            val sections = com.nemoclaw.chat.features.bots.loadBotSections(appContext)
             val result = com.nemoclaw.chat.features.bots.loadAllHermesBotRosters(appContext, settings)
             val visible = result.items.filter { !it.hidden && it.identityKey !in hidden }
-            com.nemoclaw.chat.features.bots.sortBotsForRoster(visible, pins) to result.status
+            BotSidebarLoaded(
+                bots = com.nemoclaw.chat.features.bots.sortBotsForRoster(visible, pins),
+                status = result.status,
+                pins = pins,
+                hidden = hidden,
+                autoScreen = autoScreen,
+                sections = sections,
+                multiplexEnabled = result.multiplexEnabled
+            )
         }
-        bots = loaded.first
-        status = loaded.second
+        bots = loaded.bots
+        status = loaded.status
+        botPins = loaded.pins
+        botHiddenLocal = loaded.hidden
+        botAutoScreen = loaded.autoScreen
+        botSections = loaded.sections
+        rosterMultiplex = loaded.multiplexEnabled
+    }
+    // Sessioni recenti per il dialogo: caricate all'apertura, mai in menu.
+    LaunchedEffect(recentFor) {
+        val bot = recentFor ?: return@LaunchedEffect
+        recentSessions = null
+        recentSessions = runCatching {
+            com.nemoclaw.chat.features.bots.listBotRecentSessions(appContext, settings, bot, rosterMultiplex).getOrThrow()
+        }.getOrElse {
+            Toast.makeText(context, it.message ?: "Sessioni non leggibili.", Toast.LENGTH_LONG).show()
+            recentFor = null
+            null
+        }
+    }
+    fun refreshLocalPins(pins: Set<String>) {
+        botPins = pins
+        bots = com.nemoclaw.chat.features.bots.sortBotsForRoster(bots, pins)
     }
     LazyColumn(
         modifier = Modifier
@@ -607,9 +669,9 @@ internal fun HermesBotSidebar(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .background(if (selected) AppColors.NavIndicator else Color.Transparent)
-                    .selectable(
-                        selected = selected,
+                    .combinedClickable(
                         onClick = { onOpenBotItem(bot) },
+                        onLongClick = { menuForKey = bot.identityKey; menuPage = 0 },
                         role = Role.Button,
                         interactionSource = rowInteraction,
                         indication = LocalIndication.current
@@ -637,6 +699,14 @@ internal fun HermesBotSidebar(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                if (bot.identityKey in botPins) {
+                    Text(
+                        "FISSATO",
+                        color = AppColors.Accent,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
                 if (selected) {
                     Box(
                         modifier = Modifier
@@ -644,6 +714,93 @@ internal fun HermesBotSidebar(
                             .background(AppColors.Accent, CircleShape)
                     )
                 }
+            }
+            // Menu contestuale long-press (una sola istanza per volta).
+            if (menuForKey == bot.identityKey) {
+                com.nemoclaw.chat.features.bots.BotSidebarMenu(
+                    bot = bot,
+                    host = com.nemoclaw.chat.features.bots.BotSidebarMenuHost(
+                        expanded = true,
+                        page = menuPage,
+                        // Doppio-tap coperto dalla guard di AppRoot (toast).
+                        busy = false,
+                        pinned = bot.identityKey in botPins,
+                        hiddenLocal = bot.identityKey in botHiddenLocal,
+                        serverHidden = bot.hidden,
+                        autoScreen = bot.identityKey in botAutoScreen,
+                        sections = botSections.order,
+                        currentSection = botSections.assign[bot.identityKey]?.takeIf { it in botSections.order },
+                        canDelete = !bot.isDefault && !bot.profile.equals("default", true),
+                        onDismiss = { menuForKey = null; menuPage = 0 },
+                        onPage = { menuPage = it },
+                        onOpenChat = { menuForKey = null; onOpenBotItem(bot) },
+                        onOpenScreen = {
+                            menuForKey = null
+                            onBotAction(bot, com.nemoclaw.chat.features.bots.BotSidebarAction.OpenScreen(bot.identityKey))
+                        },
+                        onToggleAutoScreen = {
+                            // Checkable: il menu resta aperto (come desktop).
+                            val next = botAutoScreen.toMutableSet()
+                            if (bot.identityKey in next) next.remove(bot.identityKey) else next.add(bot.identityKey)
+                            botAutoScreen = next
+                            com.nemoclaw.chat.features.bots.setBotAutoScreen(appContext, bot.identityKey, bot.identityKey in next)
+                        },
+                        onTogglePin = {
+                            menuForKey = null
+                            val next = botPins.toMutableSet()
+                            if (bot.identityKey in next) next.remove(bot.identityKey) else next.add(bot.identityKey)
+                            com.nemoclaw.chat.features.bots.setBotPinned(appContext, bot.identityKey, bot.identityKey in next)
+                            refreshLocalPins(next)
+                        },
+                        onToggleHide = {
+                            if (bot.hidden && bot.identityKey !in botHiddenLocal) {
+                                Toast.makeText(context, "Nascosto dal server.", Toast.LENGTH_SHORT).show()
+                            } else {
+                                menuForKey = null
+                                val next = botHiddenLocal.toMutableSet()
+                                if (bot.identityKey in next) next.remove(bot.identityKey) else next.add(bot.identityKey)
+                                botHiddenLocal = next
+                                com.nemoclaw.chat.features.bots.setBotHiddenLocal(appContext, bot.identityKey, bot.identityKey in next)
+                                bots = bots.filterNot { it.identityKey == bot.identityKey }
+                                Toast.makeText(context, "Nascosto: lo ritrovi in Gestisci bot.", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onEdit = {
+                            menuForKey = null
+                            onBotAction(bot, com.nemoclaw.chat.features.bots.BotSidebarAction.Edit(bot.identityKey))
+                        },
+                        onManageGroups = {
+                            menuForKey = null
+                            onBotAction(bot, com.nemoclaw.chat.features.bots.BotSidebarAction.ManageGroups)
+                        },
+                        onDuplicate = {
+                            menuForKey = null
+                            onBotAction(bot, com.nemoclaw.chat.features.bots.BotSidebarAction.Duplicate(bot.identityKey))
+                        },
+                        onNewChat = {
+                            menuForKey = null
+                            onNewBotChat(bot)
+                        },
+                        onRecentSessions = {
+                            menuForKey = null
+                            recentSessions = null
+                            recentFor = bot
+                        },
+                        onMoveToSection = { name ->
+                            menuForKey = null
+                            val assign = botSections.assign.toMutableMap()
+                            if (name == null) assign.remove(bot.identityKey) else assign[bot.identityKey] = name
+                            val nextSections = botSections.copy(assign = assign)
+                            botSections = nextSections
+                            com.nemoclaw.chat.features.bots.saveBotSections(appContext, nextSections)
+                        },
+                        onNewSection = { menuForKey = null; newSectionFor = bot },
+                        onDelete = {
+                            menuForKey = null
+                            onBotAction(bot, com.nemoclaw.chat.features.bots.BotSidebarAction.Delete(bot.identityKey))
+                        }
+                    )
+                )
             }
         }
         item {
@@ -655,6 +812,34 @@ internal fun HermesBotSidebar(
                 onClick = onManageBots
             )
         }
+    }
+    newSectionFor?.let { bot ->
+        com.nemoclaw.chat.features.bots.BotSectionNameDialog(
+            onConfirm = { name ->
+                if (name.isNotEmpty()) {
+                    val existing = botSections.order.firstOrNull { it.equals(name, ignoreCase = true) } ?: name
+                    val order = (botSections.order + existing).distinct()
+                    val assign = botSections.assign.toMutableMap()
+                    assign[bot.identityKey] = existing
+                    val next = com.nemoclaw.chat.features.bots.BotSections(order, assign)
+                    botSections = next
+                    com.nemoclaw.chat.features.bots.saveBotSections(appContext, next)
+                }
+                newSectionFor = null
+            },
+            onDismiss = { newSectionFor = null }
+        )
+    }
+    recentFor?.let { bot ->
+        com.nemoclaw.chat.features.bots.BotRecentSessionsDialog(
+            bot = bot,
+            sessions = recentSessions,
+            onDismiss = { recentFor = null },
+            onOpenSession = { session ->
+                recentFor = null
+                onOpenBotSession(bot, session)
+            }
+        )
     }
 }
 

@@ -1,8 +1,11 @@
 package com.nemoclaw.chat.features.bots
 
+import com.nemoclaw.chat.HermesSession
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.json.JSONObject
 
 class BotMenuHelpersTest {
     private fun item(profile: String, connectionId: String = "primary") = HermesBotItem(
@@ -89,5 +92,58 @@ class BotMenuHelpersTest {
         assertEquals("Nome visualizzato obbligatorio.", validateBotEditor("helper", "", "", "", false))
         // Update senza soul: ok (non sovrascrive).
         assertNull(validateBotEditor("helper", "Helper", "desc", "", false))
+    }
+
+    @Test
+    fun sessionConversationIdNeverCollidesWithCanonical() {
+        val bot = item("helper")
+        val canonical = stableBotConversationId(bot)
+        val a = stableBotSessionConversationId(bot, "sess-aaa")
+        val b = stableBotSessionConversationId(bot, "sess-bbb")
+        assertTrue(a.startsWith(canonical))
+        assertTrue(a != canonical && b != canonical && a != b)
+        // Id strani: sanitizzati, mai vuoti.
+        assertTrue(stableBotSessionConversationId(bot, "!!!").startsWith("$canonical-s-"))
+    }
+
+    @Test
+    fun newChatTitleNeverMatchesCanonicalRegistry() {
+        val bot = item("helper")
+        assertEquals("Chat con helper", newBotChatTitle(bot))
+        assertTrue(!newBotChatTitle(bot).trim().equals("Bot Chat", ignoreCase = true))
+    }
+
+    private fun session(id: String, title: String, lastActive: Double = 0.0) = HermesSession(
+        id = id,
+        title = title,
+        raw = JSONObject().put("last_active", lastActive)
+    )
+
+    @Test
+    fun recentSessionsExcludeCanonicalAndSortByActivity() {
+        val rows = listOf(
+            session("c1", "Bot Chat", lastActive = 9999.0),
+            session("old", "Vecchia", lastActive = 10.0),
+            session("new", "Recente", lastActive = 50.0),
+            session("notitle", "", lastActive = 60.0)
+        )
+        val recent = selectRecentBotSessions(rows)
+        assertEquals(listOf("notitle", "new", "old"), recent.map { it.id })
+    }
+
+    @Test
+    fun recentSessionsRespectsLimit() {
+        val rows = (1..30).map { session("s$it", "Chat $it", lastActive = it.toDouble()) }
+        assertEquals(20, selectRecentBotSessions(rows).size)
+        assertEquals(5, selectRecentBotSessions(rows, limit = 5).size)
+        assertTrue(selectRecentBotSessions(rows, limit = 0).isEmpty())
+    }
+
+    @Test
+    fun recentSessionLabels() {
+        assertEquals("La mia chat", recentSessionLabel(session("a", "La mia chat")))
+        assertEquals("Senza titolo", recentSessionLabel(session("b", "")))
+        assertEquals(0L, recentSessionActiveMs(session("c", "x")))
+        assertEquals(5000L, recentSessionActiveMs(session("d", "x", lastActive = 5.0)))
     }
 }

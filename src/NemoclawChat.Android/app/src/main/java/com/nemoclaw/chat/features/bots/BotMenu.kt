@@ -1,22 +1,28 @@
 package com.nemoclaw.chat.features.bots
 
 import android.content.Context
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.DriveFileMove
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Group
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
@@ -126,9 +132,11 @@ internal fun sanitizeSectionName(raw: String): String =
     raw.trim().replace(Regex("\\s+"), " ").take(40)
 
 // ------------------------------------------------------------- sessioni ---
-// NOTA canonical model: niente binding/sessione-recente. La forever-chat e
-// risolta per nome a ogni apertura (registro title="Bot Chat"); i binding
-// locali forkerebbero. Resta solo la pulizia per-bot eliminati qui sotto.
+// NOTA canonical model: niente binding automatico a sessioni recenti. La
+// forever-chat resta risolta per nome a ogni apertura (registro title="Bot
+// Chat"); i binding locali legacy sono solo potati. "Nuova chat" e
+// "Apri sessione recente" sono azioni ESPLICITE dell'utente (menu bot):
+// creano/aprono sessioni dedicate senza toccare la canonica.
 
 /** Rimuove ogni traccia locale di un bot eliminato (niente orfani). */internal fun removeBotDisplayPrefs(context: Context, identityKey: String) {
     setBotPinned(context, identityKey, false)
@@ -501,4 +509,219 @@ internal fun BotHiddenRow(hiddenCount: Int, showing: Boolean, onToggle: () -> Un
             Text(if (showing) "Nascondi" else "Mostra", color = AppColors.Accent, fontSize = 13.sp)
         }
     }
+}
+
+// --------------------------------------------- menu sidebar (long-press) ---
+
+/** Host del menu contestuale della sidebar: stesse voci della card, piu sessioni. */
+internal data class BotSidebarMenuHost(
+    val expanded: Boolean,
+    val page: Int,
+    val busy: Boolean,
+    val pinned: Boolean,
+    val hiddenLocal: Boolean,
+    val serverHidden: Boolean,
+    val autoScreen: Boolean,
+    val sections: List<String>,
+    val currentSection: String?,
+    val canDelete: Boolean,
+    val onDismiss: () -> Unit,
+    val onPage: (Int) -> Unit,
+    val onOpenChat: () -> Unit,
+    val onOpenScreen: () -> Unit,
+    val onToggleAutoScreen: () -> Unit,
+    val onTogglePin: () -> Unit,
+    val onToggleHide: () -> Unit,
+    val onEdit: () -> Unit,
+    val onManageGroups: () -> Unit,
+    val onDuplicate: () -> Unit,
+    val onNewChat: () -> Unit,
+    val onRecentSessions: () -> Unit,
+    val onMoveToSection: (String?) -> Unit,
+    val onNewSection: () -> Unit,
+    val onDelete: () -> Unit
+)
+
+private val BotDeleteRed = Color(0xFFFF453A)
+
+@Composable
+internal fun BotSidebarMenu(bot: HermesBotItem, host: BotSidebarMenuHost) {
+    DropdownMenu(
+        expanded = host.expanded,
+        onDismissRequest = host.onDismiss
+    ) {
+        if (host.page == 1) {
+            BotMenuItem(
+                label = "‹ ${bot.displayName}",
+                icon = { Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AppColors.Muted) },
+                onClick = { host.onPage(0) }
+            )
+            HorizontalDivider(color = AppColors.Border)
+            host.sections.forEach { name ->
+                BotMenuItem(
+                    label = name,
+                    trailing = if (host.currentSection == name) {
+                        { Icon(Icons.Rounded.Check, contentDescription = "Sezione attuale", tint = AppColors.Accent) }
+                    } else null,
+                    onClick = { host.onMoveToSection(name) }
+                )
+            }
+            BotMenuItem(
+                label = "Nuova sezione…",
+                icon = { Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = AppColors.Muted) },
+                onClick = host.onNewSection
+            )
+            BotMenuItem(label = "Nessuna sezione", onClick = { host.onMoveToSection(null) })
+            return@DropdownMenu
+        }
+        BotMenuItem(
+            label = "Apri Bot Chat",
+            icon = { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, tint = AppColors.Accent) },
+            enabled = !host.busy,
+            onClick = host.onOpenChat
+        )
+        BotMenuItem(
+            label = "Apri schermo",
+            icon = { Icon(Icons.Rounded.Computer, contentDescription = null, tint = Color.White) },
+            onClick = host.onOpenScreen
+        )
+        BotMenuItem(
+            label = "Apri schermo quando il bot lo usa",
+            trailing = if (host.autoScreen) {
+                { Icon(Icons.Rounded.Check, contentDescription = "Attivo", tint = AppColors.Accent) }
+            } else null,
+            onClick = host.onToggleAutoScreen
+        )
+        HorizontalDivider(color = AppColors.Border)
+        BotMenuItem(
+            label = if (host.pinned) "Togli dai fissati" else "Fissa in alto",
+            icon = { Icon(Icons.Rounded.PushPin, contentDescription = null, tint = Color.White) },
+            onClick = host.onTogglePin
+        )
+        BotMenuItem(
+            label = if (host.hiddenLocal) "Mostra" else "Nascondi",
+            icon = {
+                Icon(
+                    if (host.hiddenLocal) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                    contentDescription = null,
+                    tint = Color.White
+                )
+            },
+            onClick = host.onToggleHide
+        )
+        HorizontalDivider(color = AppColors.Border)
+        BotMenuItem(
+            label = "Modifica…",
+            icon = { Icon(Icons.Rounded.Edit, contentDescription = null, tint = Color.White) },
+            onClick = host.onEdit
+        )
+        BotMenuItem(
+            label = "Gestisci gruppi…",
+            icon = { Icon(Icons.Rounded.Group, contentDescription = null, tint = Color.White) },
+            onClick = host.onManageGroups
+        )
+        BotMenuItem(
+            label = "Duplica",
+            icon = { Icon(Icons.Rounded.ContentCopy, contentDescription = null, tint = Color.White) },
+            onClick = host.onDuplicate
+        )
+        BotMenuItem(
+            label = "Nuova chat con questo bot",
+            icon = { Icon(Icons.Rounded.Add, contentDescription = null, tint = Color.White) },
+            enabled = !host.busy,
+            onClick = host.onNewChat
+        )
+        BotMenuItem(
+            label = "Apri sessione recente",
+            icon = { Icon(Icons.Rounded.History, contentDescription = null, tint = Color.White) },
+            enabled = !host.busy,
+            onClick = host.onRecentSessions
+        )
+        BotMenuItem(
+            label = "Sposta in sezione",
+            icon = { Icon(Icons.AutoMirrored.Rounded.DriveFileMove, contentDescription = null, tint = Color.White) },
+            trailing = { Icon(Icons.Rounded.ChevronRight, contentDescription = "Sotto menu", tint = AppColors.Muted) },
+            onClick = { host.onPage(1) }
+        )
+        HorizontalDivider(color = AppColors.Border)
+        BotMenuItem(
+            label = "Elimina",
+            icon = { Icon(Icons.Rounded.Delete, contentDescription = null, tint = BotDeleteRed) },
+            enabled = host.canDelete && !host.busy,
+            onClick = host.onDelete
+        )
+    }
+}
+
+/** Etichetta riga per il dialogo sessioni recenti. Pura e testabile. */
+internal fun recentSessionLabel(session: com.nemoclaw.chat.HermesSession): String {
+    val title = session.title.trim()
+    if (title.isNotEmpty()) return title.take(80)
+    val preview = session.raw?.optString("preview").orEmpty().trim().replace(Regex("\\s+"), " ")
+    if (preview.isNotEmpty()) return preview.take(80)
+    return "Senza titolo"
+}
+
+/** Millisecondi epoch dell'ultima attivita, 0 se assente. Pura e testabile. */
+internal fun recentSessionActiveMs(session: com.nemoclaw.chat.HermesSession): Long {
+    return ((session.raw?.optDouble("last_active", 0.0) ?: 0.0) * 1000).toLong().coerceAtLeast(0)
+}
+
+@Composable
+internal fun BotRecentSessionsDialog(
+    bot: HermesBotItem,
+    sessions: List<com.nemoclaw.chat.HermesSession>?,
+    onDismiss: () -> Unit,
+    onOpenSession: (com.nemoclaw.chat.HermesSession) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sessioni di ${bot.displayName}", color = Color.White) },
+        text = {
+            when {
+                sessions == null -> Text("Carico le sessioni…", color = AppColors.Muted)
+                sessions.isEmpty() -> Text(
+                    "Nessuna altra sessione: resta la Bot Chat canonica.",
+                    color = AppColors.Muted
+                )
+                else -> Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    sessions.forEach { session ->
+                        val activeMs = recentSessionActiveMs(session)
+                        val whenLabel = if (activeMs > 0) {
+                            relativeTimeLabel(System.currentTimeMillis(), activeMs)
+                        } else ""
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { onOpenSession(session) }
+                                .padding(horizontal = 4.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    recentSessionLabel(session),
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                                if (whenLabel.isNotBlank()) {
+                                    Text(whenLabel, color = AppColors.Muted, fontSize = 11.sp)
+                                }
+                            }
+                            Icon(
+                                Icons.Rounded.ChevronRight,
+                                contentDescription = "Apri sessione",
+                                tint = AppColors.Muted
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Chiudi", color = AppColors.Accent) } }
+    )
 }

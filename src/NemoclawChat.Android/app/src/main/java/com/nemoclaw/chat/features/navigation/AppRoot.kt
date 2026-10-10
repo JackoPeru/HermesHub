@@ -234,8 +234,12 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
 import com.nemoclaw.chat.features.bots.BotsScreen
+import com.nemoclaw.chat.HermesSession
 import com.nemoclaw.chat.features.bots.BotChatContext
+import com.nemoclaw.chat.features.bots.BotSidebarAction
 import com.nemoclaw.chat.features.bots.HermesBotItem
+import com.nemoclaw.chat.features.bots.botSessionContext
+import com.nemoclaw.chat.features.bots.createBotChatSession
 import com.nemoclaw.chat.features.bots.loadLastBot
 import com.nemoclaw.chat.features.bots.resolveCanonicalBotContext
 import com.nemoclaw.chat.features.bots.saveLastBot
@@ -382,6 +386,9 @@ internal fun ChatApp() {
     var pendingConversationId by rememberSaveable { mutableStateOf<String?>(null) }
     // Parcelable: sopravvive anche al process death (prima solo ViewModel).
     var pendingBot by rememberSaveable { mutableStateOf<BotChatContext?>(null) }
+    // Azione sidebar (long-press) da consumare nella sezione Bot.
+    // BotSidebarAction non e Parcelable: niente rememberSaveable (solo sessione).
+    var pendingBotAction by remember { mutableStateOf<BotSidebarAction?>(null) }
     var sidebarOpen by rememberSaveable { mutableStateOf(false) }
     var savedDraft by rememberSaveable { mutableStateOf("") }
     // Retained alla rotazione via ViewModel (prima: remember = stato perso).
@@ -539,6 +546,60 @@ internal fun ChatApp() {
             }
         }
     }
+    // Coda comune di ingresso in una chat bot (canonica o sessione dedicata).
+    fun enterBotChat(ctx: BotChatContext) {
+        chatState.resetForNewChat()
+        pendingBot = ctx
+        pendingConversationId = ctx.localConversationId
+        pendingPrompt = ""
+        saveLastBot(context.applicationContext, ctx.connectionId, ctx.profile, ctx.displayName)
+        botSectionVisible = false
+        sidebarOpen = false
+    }
+    // Nuova chat pulita col bot: sessione dedicata appena creata, mai la
+    // forever-chat canonica (che resta intatta per "Apri Bot Chat").
+    fun openNewBotChat(bot: HermesBotItem) {
+        if (sidebarBotOpening) {
+            Toast.makeText(context, "Apertura gia in corso.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!canOpenBot()) return
+        sidebarBotOpening = true
+        chatScope.launch {
+            try {
+                createBotChatSession(context.applicationContext, settings, bot, rosterMultiplex = true)
+                    .mapCatching { created ->
+                        botSessionContext(context.applicationContext, settings, bot, rosterMultiplex = true, created).getOrThrow()
+                    }
+                    .onSuccess { enterBotChat(it) }
+                    .onFailure {
+                        Toast.makeText(context, it.message ?: "Nuova chat non creata.", Toast.LENGTH_LONG).show()
+                    }
+            } finally {
+                sidebarBotOpening = false
+            }
+        }
+    }
+    // Apertura di una sessione recente scelta dal dialogo sidebar.
+    fun openBotSession(bot: HermesBotItem, session: HermesSession) {
+        if (sidebarBotOpening) {
+            Toast.makeText(context, "Apertura gia in corso.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!canOpenBot()) return
+        sidebarBotOpening = true
+        chatScope.launch {
+            try {
+                botSessionContext(context.applicationContext, settings, bot, rosterMultiplex = true, session)
+                    .onSuccess { enterBotChat(it) }
+                    .onFailure {
+                        Toast.makeText(context, it.message ?: "Sessione non apribile.", Toast.LENGTH_LONG).show()
+                    }
+            } finally {
+                sidebarBotOpening = false
+            }
+        }
+    }
     // Riapre l'ultimo bot usato (main page della sezione): risolve la
     // forever-chat condivisa. Ritorna false se nessun ultimo bot
     // (chiamante: mostra il roster).
@@ -650,6 +711,13 @@ internal fun ChatApp() {
                 activeBotKey = pendingBot?.let { "${it.connectionId}::${it.profile}" },
                 onOpenBotItem = { openSidebarBot(it) },
                 onManageBots = { sidebarOpen = false; botSectionVisible = true },
+                onBotAction = { bot, action ->
+                    pendingBotAction = action
+                    sidebarOpen = false
+                    botSectionVisible = true
+                },
+                onNewBotChat = { openNewBotChat(it) },
+                onOpenBotSession = { bot, session -> openBotSession(bot, session) },
                 onNewChat = {
                 chatState.resetForNewChat()
                 pendingBot = null
@@ -749,7 +817,9 @@ internal fun ChatApp() {
                     onOpenScreen = { setSelectedTab(Tab.Screen) },
                     onOpenCron = { setSelectedTab(Tab.Cron) },
                     onOpenSidebar = { sidebarOpen = true },
-                    canOpenBotChat = { canOpenBot() }
+                    canOpenBotChat = { canOpenBot() },
+                    pendingAction = pendingBotAction,
+                    onPendingActionConsumed = { pendingBotAction = null }
                 )
                 }
                 }
