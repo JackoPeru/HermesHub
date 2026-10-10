@@ -80,9 +80,15 @@ internal fun AppSettings.metricFilter(): MetricDisplayFilter = MetricDisplayFilt
 
 internal fun loadSettings(context: Context): AppSettings {
     val prefs = migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
+    // Stringhe vuote salvate (vecchie versioni senza default) guariscono ai
+    // default: blank non e mai un valore valido per questi campi.
+    fun prefOrDefault(key: String, default: String, healBlank: Boolean = false): String {
+        val stored = prefs.getString(key, default) ?: default
+        return if (healBlank && stored.isBlank() && default.isNotBlank()) default else stored
+    }
     val settings = AppSettings(
-        gatewayUrl = prefs.getString("gatewayUrl", AppDefaults.gatewayUrl) ?: AppDefaults.gatewayUrl,
-        localGatewayUrl = prefs.getString("localGatewayUrl", AppDefaults.localGatewayUrl) ?: AppDefaults.localGatewayUrl,
+        gatewayUrl = prefOrDefault("gatewayUrl", AppDefaults.gatewayUrl, healBlank = true),
+        localGatewayUrl = prefOrDefault("localGatewayUrl", AppDefaults.localGatewayUrl, healBlank = true),
         gatewayWsUrl = prefs.getString("gatewayWsUrl", AppDefaults.gatewayWsUrl) ?: AppDefaults.gatewayWsUrl,
         adminBridgeUrl = prefs.getString("adminBridgeUrl", AppDefaults.adminBridgeUrl) ?: AppDefaults.adminBridgeUrl,
         provider = prefs.getString("provider", AppDefaults.provider) ?: AppDefaults.provider,
@@ -95,8 +101,8 @@ internal fun loadSettings(context: Context): AppSettings {
         voiceModel = prefs.getString("voiceModel", AppDefaults.voiceModel) ?: AppDefaults.voiceModel,
         accessMode = prefs.getString("accessMode", AppDefaults.accessMode) ?: AppDefaults.accessMode,
         visualBlocksMode = prefs.getString("visualBlocksMode", AppDefaults.visualBlocksMode) ?: AppDefaults.visualBlocksMode,
-        videoLibraryPath = prefs.getString("videoLibraryPath", AppDefaults.videoLibraryPath) ?: AppDefaults.videoLibraryPath,
-        newsLibraryPath = prefs.getString("newsLibraryPath", AppDefaults.newsLibraryPath) ?: AppDefaults.newsLibraryPath,
+        videoLibraryPath = prefOrDefault("videoLibraryPath", AppDefaults.videoLibraryPath, healBlank = true),
+        newsLibraryPath = prefOrDefault("newsLibraryPath", AppDefaults.newsLibraryPath, healBlank = true),
         activeProjectId = prefs.getString("activeProjectId", AppDefaults.activeProjectId) ?: AppDefaults.activeProjectId,
         activeProjectName = prefs.getString("activeProjectName", AppDefaults.activeProjectName) ?: AppDefaults.activeProjectName,
         activeProjectWorkspacePath = prefs.getString("activeProjectWorkspacePath", "") ?: "",
@@ -277,8 +283,8 @@ internal object AppDefaults {
     const val voiceModel = "hermes-voice"
     const val accessMode = "Tailscale/LAN plug-and-play"
     const val visualBlocksMode = "auto"
-    const val videoLibraryPath = ""
-    const val newsLibraryPath = ""
+    const val videoLibraryPath = "/home/matteo/video"
+    const val newsLibraryPath = "/home/matteo/news"
     const val activeProjectId = ""
     const val activeProjectName = ""
     const val fontScale = 1.0f

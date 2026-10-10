@@ -16,6 +16,13 @@ class DefaultConnectionTest {
     }
 
     @Test
+    fun freshInstallHasPreconfiguredLibraries() {
+        val settings = AppSettings()
+        assertEquals("/home/matteo/video", settings.videoLibraryPath)
+        assertEquals("/home/matteo/news", settings.newsLibraryPath)
+    }
+
+    @Test
     fun defaultApiKeyMirrorsBuildConfig() {
         assertEquals(
             BuildConfig.HERMES_DEFAULT_API_KEY.trim().takeIf { it.isNotBlank() },

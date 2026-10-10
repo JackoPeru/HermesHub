@@ -255,7 +255,20 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertNotIn("http://", read("src/NemoclawChat.Windows/Services/AppSettings.cs"))
         android_defaults = read("src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/MainActivity.kt")
         self.assertNotIn("http://", android_defaults.split("// private object AppDefaults", 1)[0])
-        self.assertNotIn("/home/", public_runtime)
+        # Connessione preimpostata voluta: gli unici path personali ammessi
+        # sono i default librerie (url/chiave mai hardcoded: vedi
+        # test_android_fresh_install_has_preconfigured_connection).
+        home_hits = [line for line in public_runtime.splitlines() if "/home/" in line]
+        self.assertEqual(
+            sorted(home_hits),
+            sorted(
+                [
+                    line
+                    for line in home_hits
+                    if "/home/matteo/video" in line or "/home/matteo/news" in line
+                ]
+            ),
+        )
 
     def test_android_backup_never_exports_credentials(self) -> None:
         backup_rules = read("src/NemoclawChat.Android/app/src/main/res/xml/backup_rules.xml")
@@ -446,6 +459,8 @@ class ReleaseConsistencyTests(unittest.TestCase):
         )
         self.assertIn('gatewayUrl = "http://100.94.223.14:8642"', app_settings)
         self.assertIn('localGatewayUrl = "http://192.168.1.6:8642"', app_settings)
+        self.assertIn('videoLibraryPath = "/home/matteo/video"', app_settings)
+        self.assertIn('newsLibraryPath = "/home/matteo/news"', app_settings)
         android_project = read("src/NemoclawChat.Android/app/build.gradle.kts")
         self.assertIn("HERMES_DEFAULT_API_KEY", android_project)
         self.assertIn("hermes.defaultApiKey", android_project)
