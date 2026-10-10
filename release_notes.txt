@@ -1,11 +1,9 @@
-Hermes Hub 0.6.236 (protezione GPU e import archivio)
+Hermes Hub 0.6.237 (feed agente con transcript espandibile)
 
-- GPU manager: hold fail-closed con store o lock training illeggibile/corrotto; deploy con staging, cleanup e rollback su errore/interruzione; chiave solo via stdin.
-- Deploy GPU: timeout di 60s per probe `/status` aggregati.
-- Windows MSIX: endpoint RFC 3161 corretti (DigiCert HTTP primario, Sectigo fallback); timestamp obbligatorio mantenuto.
-- Android Archivio: risposte import fino a 64 MiB; JSON ordinario resta limitato a 2 MiB.
-- Versioni: Windows/AdminBridge `0.6.236`; Android `versionName 0.6.236`, `versionCode 240`.
-- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.236-android.apk`; MSIX `NemoclawChat.Windows_0.6.236.0_x64.msix`; gateway Linux `HermesHub-0.6.236-linux-gateway.tar.gz`.
-
-- CI: dipendenza Pillow esplicita per i test; analyzer backup corretto, rifiuto ACL interrompe il trasferimento e ripulisce staging.
-- Distribuzione GPU manager separata dal tar gateway: fix gia applicati e verificati sul server; sorgenti e deploy inclusi nel repository.
+- Chat e bot: feed agente in stile transcript — testo dell'agente interleavato in ordine cronologico con pensieri ("Ragionamento · Ns") e raffiche di tool, ognuno espandibile al tocco; a fine turno tutto rientra nel flag "Attivita Hermes" e resta visibile solo la risposta finale.
+- Chat e bot: messaggi archiviati e trascrizioni canoniche mostrano lo stesso transcript derivato (tool consecutivi raggruppati, solo ultimo prefill, filtro tool rispettato).
+- Android: 11 nuovi test sul transcript (interleaving, burst, snapshot, derivation, flag); suite completa e lint verdi.
+- Versioni: Windows/AdminBridge `0.6.237`; Android `versionName 0.6.237`, `versionCode 241`.
+- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.237-android.apk`; MSIX `NemoclawChat.Windows_0.6.237.0_x64.msix`; gateway Linux `HermesHub-0.6.237-linux-gateway.tar.gz`.
+- SHA-256 Android: `6ea578ca7b0536a6b10cee072a01d9650738de88d077a54b7fa92dec555bef60`.
+- SHA-256 gateway: `fe82bb5c7122dd462306da37cd2711c549331f1ad74e94cc54a205f134207c43`.

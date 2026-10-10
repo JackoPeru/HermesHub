@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.237 - 2026-10-10
+
+- Chat e bot: feed agente in stile transcript — testo dell'agente interleavato in ordine cronologico con pensieri ("Ragionamento · Ns") e raffiche di tool, ognuno espandibile al tocco; a fine turno tutto rientra nel flag "Attivita Hermes" e resta visibile solo la risposta finale.
+- Chat e bot: messaggi archiviati e trascrizioni canoniche mostrano lo stesso transcript derivato (tool consecutivi raggruppati, solo ultimo prefill, filtro tool rispettato).
+- Android: 11 nuovi test sul transcript (interleaving, burst, snapshot, derivation, flag).
+
 ## 0.6.236 - 2026-10-09
 
 - GPU manager: hold fail-closed se store o lock del training sono illeggibili o corrotti; deploy con staging e cleanup affidabili, rollback su errore/interruzione e chiave solo via stdin.
