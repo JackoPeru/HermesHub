@@ -14,8 +14,11 @@ RECOMMENDED_MIN_IMAGES = 25
 MAX_IMAGES = 80
 ALLOWED_EXTS = (".jpg", ".jpeg", ".png", ".webp")
 MAX_FILE_BYTES = 15 * 1024 * 1024
-# Lato server M3 rifiuta anche immagini oltre questa risoluzione (anti-OOM).
-MAX_IMAGE_SIDE = 4096
+# Lato server M3 rifiuta immagini oltre questa risoluzione (anti-OOM in
+# decompressione: 8192px = ~200MB RGB, ok per il worker; oltre, solo bombe).
+# Le fotocamere reali arrivano a 4000-8000px: il tetto non deve mangiarsi
+# le foto vere (la normalizzata scende comunque a 1536).
+MAX_IMAGE_SIDE = 8192
 
 # Nomi file: il server rinomina comunque in UUID, conta solo estensione +
 # niente traversal. Spazi/parens/unicode ammessi (foto telefono reali).
