@@ -1,9 +1,9 @@
-Hermes Hub 0.6.237 (feed agente con transcript espandibile)
+Hermes Hub 0.6.238 (menu long-press nella sidebar bot)
 
-- Chat e bot: feed agente in stile transcript — testo dell'agente interleavato in ordine cronologico con pensieri ("Ragionamento · Ns") e raffiche di tool, ognuno espandibile al tocco; a fine turno tutto rientra nel flag "Attivita Hermes" e resta visibile solo la risposta finale.
-- Chat e bot: messaggi archiviati e trascrizioni canoniche mostrano lo stesso transcript derivato (tool consecutivi raggruppati, solo ultimo prefill, filtro tool rispettato).
-- Android: 11 nuovi test sul transcript (interleaving, burst, snapshot, derivation, flag); suite completa e lint verdi.
-- Versioni: Windows/AdminBridge `0.6.237`; Android `versionName 0.6.237`, `versionCode 241`.
-- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.237-android.apk`; MSIX `NemoclawChat.Windows_0.6.237.0_x64.msix`; gateway Linux `HermesHub-0.6.237-linux-gateway.tar.gz`.
-- SHA-256 Android: `6ea578ca7b0536a6b10cee072a01d9650738de88d077a54b7fa92dec555bef60`.
-- SHA-256 gateway: `fe82bb5c7122dd462306da37cd2711c549331f1ad74e94cc54a205f134207c43`.
+- Sidebar bot: tieni premuto un bot per aprire il menu contestuale stile desktop (Apri Bot Chat, Apri schermo, auto-schermo con spunta, Fissa in alto, Nascondi, Modifica, Gestisci gruppi, Duplica, Nuova chat con questo bot, Apri sessione recente, Sposta in sezione, Elimina).
+- Bot: "Nuova chat con questo bot" crea una sessione dedicata pulita senza toccare la forever-chat canonica; "Apri sessione recente" elenca le altre sessioni del bot per titolo e attivita.
+- Bot: Modifica/Duplica/Elimina/Gruppi/Schermo dal menu sidebar aprono la sezione Bot con l'azione gia pronta (stessi dialoghi ed effetti della card).
+- Versioni: Windows/AdminBridge `0.6.238`; Android `versionName 0.6.238`, `versionCode 242`.
+- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.238-android.apk`; MSIX `NemoclawChat.Windows_0.6.238.0_x64.msix`; gateway Linux `HermesHub-0.6.238-linux-gateway.tar.gz`.
+- SHA-256 Android: `5f261f5db04f13cff71946afb54d0f7a907a83fc6ba15b135b58d419d4b06d09`.
+- SHA-256 gateway: `d7cfd94d5b193c3f2d24f9a71db059a3be6fea97c54ec34d33e02de24ff9de19`.

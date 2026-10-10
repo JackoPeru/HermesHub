@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.238 - 2026-10-10
+
+- Sidebar bot: long-press su un bot apre il menu contestuale stile desktop (Apri Bot Chat, Apri schermo, auto-schermo con spunta, Fissa in alto, Nascondi, Modifica, Gestisci gruppi, Duplica, Nuova chat con questo bot, Apri sessione recente, Sposta in sezione, Elimina).
+- Bot: "Nuova chat con questo bot" crea una sessione dedicata pulita senza toccare la forever-chat canonica; "Apri sessione recente" elenca le altre sessioni del bot per titolo e attivita.
+- Bot: Modifica/Duplica/Elimina/Gruppi/Schermo dal menu sidebar aprono la sezione Bot con l'azione gia pronta (stessi dialoghi ed effetti della card).
+- Android: badge FISSATO nella sidebar; test helper sessioni (id, titoli, filtri, limiti).
+
 ## 0.6.237 - 2026-10-10
 
 - Chat e bot: feed agente in stile transcript — testo dell'agente interleavato in ordine cronologico con pensieri ("Ragionamento · Ns") e raffiche di tool, ognuno espandibile al tocco; a fine turno tutto rientra nel flag "Attivita Hermes" e resta visibile solo la risposta finale.
