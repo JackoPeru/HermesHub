@@ -2511,13 +2511,14 @@ internal fun ArchivedActivityDisclosure(
     legacyThinking: String,
     showToolCalls: Boolean
 ) {
-    val timeline = remember(persisted, legacyThinking, showToolCalls) {
+    val blocks = remember(persisted, legacyThinking, showToolCalls) {
         val compatible = if (persisted.isEmpty() && legacyThinking.isNotBlank()) {
             listOf(AssistantActivity(AssistantActivity.Kind.Reasoning, text = legacyThinking))
         } else persisted
-        compatible.filter { showToolCalls || it.kind != AssistantActivity.Kind.Tool }
+        val filtered = compatible.filter { showToolCalls || it.kind != AssistantActivity.Kind.Tool }
+        flagTranscriptBlocks(transcriptBlocksOf(filtered, "", showToolCalls), showToolCalls)
     }
-    if (timeline.isNotEmpty()) HermesActivityDisclosure(timeline)
+    if (blocks.isNotEmpty()) HermesActivityDisclosure(blocks)
 }
 
 

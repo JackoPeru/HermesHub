@@ -241,9 +241,32 @@ data class AssistantActivity(
     enum class Kind { Reasoning, PromptProgress, Tool }
 }
 
+/**
+ * Blocco del transcript agente in ordine cronologico (stile "agent feed"):
+ * testo dell'agente interleavato con pensieri e raffiche di tool. Il testo
+ * finale resta in [StreamingState.text]; i segmenti AgentText servono solo a
+ * mostrare il flusso durante lo streaming.
+ */
+@androidx.compose.runtime.Immutable
+sealed interface TranscriptBlock {
+    @androidx.compose.runtime.Immutable
+    data class AgentText(val text: String) : TranscriptBlock
+
+    @androidx.compose.runtime.Immutable
+    data class Thought(val text: String, val elapsedSec: Double = 0.0) : TranscriptBlock
+
+    @androidx.compose.runtime.Immutable
+    data class Tools(val tools: List<ToolCallState>) : TranscriptBlock
+
+    @androidx.compose.runtime.Immutable
+    data class Prefill(val text: String) : TranscriptBlock
+}
+
 private const val MAX_ACTIVITY_TIMELINE_ENTRIES = 256
 private const val MAX_ACTIVITY_ENTRY_CHARS = 16_384
 private const val MAX_ACTIVITY_TIMELINE_CHARS = 96_000
+private const val MAX_TRANSCRIPT_BLOCKS = 128
+private const val MAX_TRANSCRIPT_CHARS = 96_000
 
 /** Approvazione server-side di un run (Hunter: approval.request). Distinta dal Visual Block locale "approval". */
 @androidx.compose.runtime.Immutable
@@ -268,6 +291,12 @@ data class StreamingState(
     val thinkingElapsedSec: Double = 0.0,
     val toolCalls: List<ToolCallState> = emptyList(),
     val activityTimeline: List<AssistantActivity> = emptyList(),
+    /** Transcript cronologico (testo agente + pensieri + tool). Vuoto = chat semplice. */
+    val transcript: List<TranscriptBlock> = emptyList(),
+    /** Prefisso di [text] gia emesso come blocco AgentText. */
+    val flushedText: String = "",
+    /** Istante di inizio del pensiero corrente (ns), null se nessun pensiero aperto. */
+    val thoughtStartedAtNs: Long? = null,
     val visualBlocks: List<VisualBlock> = emptyList(),
     val visualBlocksVersion: Int? = null,
     val responseId: String? = null,
@@ -326,7 +355,7 @@ data class StreamingState(
                 promptProgressTimeMs = null,
                 status = "Risposta finale ricevuta.",
                 thinkingFrozen = thinkingFrozen || hasThinking
-            ).withActivity("Snapshot finale ricevuto.")
+            ).flushPendingText().withActivity("Snapshot finale ricevuto.")
         }
         is ChatStreamEvent.ThinkingDelta -> copy(
             thinking = mergeTextDelta(thinking, event.delta),
@@ -340,7 +369,8 @@ data class StreamingState(
             promptProgressCachedTokens = null,
             promptProgressTimeMs = null,
             status = "Hermes sta ragionando..."
-        ).withActivity(if (!hasThinking) "Reasoning ricevuto." else null)
+        ).flushPendingText().appendThought(event.delta, isSnapshot = false)
+            .withActivity(if (!hasThinking) "Reasoning ricevuto." else null)
         is ChatStreamEvent.ThinkingSnapshot -> copy(
             thinking = mergeTextSnapshot(thinking, event.text),
             activityTimeline = appendReasoningSnapshotActivity(event.text),
@@ -353,44 +383,50 @@ data class StreamingState(
             promptProgressCachedTokens = null,
             promptProgressTimeMs = null,
             status = "Hermes sta ragionando..."
-        ).withActivity(if (!hasThinking) "Reasoning ricevuto." else null)
+        ).flushPendingText().appendThought(event.text, isSnapshot = true)
+            .withActivity(if (!hasThinking) "Reasoning ricevuto." else null)
         is ChatStreamEvent.ToolCallStart -> copy(
             status = "Tool in esecuzione: ${event.name}",
             toolCalls = if (toolCalls.any { it.id == event.id }) toolCalls
                 else toolCalls + ToolCallState(event.id, event.name)
-        ).withTimelineTool(event.id, event.name) { it }
-        is ChatStreamEvent.ToolCallArgs -> copy(
-            status = "Preparazione tool...",
-            toolCalls = toolCalls.map {
-                if (it.id == event.id) it.copy(
+        ).flushPendingText().withTimelineTool(event.id, event.name) { it }
+            .appendTranscriptTool(event.id, event.name) { it }
+        is ChatStreamEvent.ToolCallArgs -> {
+            val update: (ToolCallState) -> ToolCallState = {
+                it.copy(
                     name = humanToolName(it.name, it.id, event.delta),
                     args = safeToolPayloadSummary(event.delta, result = false).orEmpty(),
                     argsPreview = scrubToolPayloadPreview(event.delta, result = false)
-                ) else it
+                )
             }
-        ).withTimelineTool(event.id, null) {
-            it.copy(
-                name = humanToolName(it.name, it.id, event.delta),
-                args = safeToolPayloadSummary(event.delta, result = false).orEmpty(),
-                argsPreview = scrubToolPayloadPreview(event.delta, result = false)
-            )
+            copy(
+                status = "Preparazione tool...",
+                toolCalls = toolCalls.map { if (it.id == event.id) update(it) else it }
+            ).flushPendingText().withTimelineTool(event.id, null, update).appendTranscriptTool(event.id, null, update)
         }
         is ChatStreamEvent.ToolCallEnd -> copy(
             status = "Tool completato.",
             toolCalls = toolCalls.map {
                 if (it.id == event.id) it.copy(status = "completato") else it
             }
-        ).withTimelineTool(event.id, null) { it.copy(status = "completato") }
-        is ChatStreamEvent.ToolResult -> copy(
-            status = "Risultato tool ricevuto.",
-            toolCalls = upsertToolResult(toolCalls, event)
-        ).withTimelineTool(event.id ?: event.name ?: "tool-result", event.name) {
-            it.copy(
-                name = if (!event.name.isNullOrBlank()) humanToolName(event.name, it.id, "") else it.name,
-                result = safeToolPayloadSummary(event.output, result = true),
-                resultPreview = scrubToolPayloadPreview(event.output, result = true),
-                status = "risultato pronto"
-            )
+        ).flushPendingText()
+            .withTimelineTool(event.id, null) { it.copy(status = "completato") }
+            .appendTranscriptTool(event.id, null) { it.copy(status = "completato") }
+        is ChatStreamEvent.ToolResult -> {
+            val update: (ToolCallState) -> ToolCallState = {
+                it.copy(
+                    name = if (!event.name.isNullOrBlank()) humanToolName(event.name, it.id, "") else it.name,
+                    result = safeToolPayloadSummary(event.output, result = true),
+                    resultPreview = scrubToolPayloadPreview(event.output, result = true),
+                    status = "risultato pronto"
+                )
+            }
+            copy(
+                status = "Risultato tool ricevuto.",
+                toolCalls = upsertToolResult(toolCalls, event)
+            ).flushPendingText()
+                .withTimelineTool(event.id ?: event.name ?: "tool-result", event.name, update)
+                .appendTranscriptTool(event.id ?: event.name ?: "tool-result", event.name, update)
         }
         is ChatStreamEvent.ResponseId -> copy(responseId = event.id).withActivity("Response id: ${event.id}")
         is ChatStreamEvent.RunId -> copy(activeRunId = event.id).withActivity("Run id: ${event.id}")
@@ -447,7 +483,7 @@ data class StreamingState(
             promptProgressTimeMs = event.timeMs,
             status = friendlyActivityStatus(event.label.ifBlank { "Elaborazione prompt" }),
             activityTimeline = appendPromptProgressActivity(event)
-        )
+        ).flushPendingText().appendTranscriptPrefill(event)
         is ChatStreamEvent.Done -> copy(
             text = stripReasoningArtifacts(text),
             stats = event.stats.let { base ->
@@ -604,6 +640,161 @@ private fun StreamingState.withTimelineTool(id: String, name: String?, update: (
         activityTimeline + AssistantActivity(AssistantActivity.Kind.Tool, tool = tool)
     }
     return copy(activityTimeline = boundedTimeline(next))
+}
+
+/**
+ * Congela il testo ricevuto finora come segmento AgentText del transcript.
+ * Lo snapshot finale puo riscrivere il testo: in quel caso i segmenti
+ * precedenti vengono sostituiti da un unico segmento coerente.
+ */
+private fun StreamingState.flushPendingText(): StreamingState {
+    if (text == flushedText) return this
+    val blocks = transcript.toMutableList()
+    if (text.startsWith(flushedText) && flushedText.isNotEmpty()) {
+        val segment = text.substring(flushedText.length)
+        if (segment.isNotBlank()) {
+            blocks += TranscriptBlock.AgentText(takeNewestActivityText(segment))
+        }
+    } else {
+        while (blocks.isNotEmpty() && blocks.last() is TranscriptBlock.AgentText) {
+            blocks.removeAt(blocks.size - 1)
+        }
+        if (text.isNotBlank()) {
+            blocks += TranscriptBlock.AgentText(takeNewestActivityText(text))
+        }
+    }
+    return copy(transcript = boundedTranscript(blocks), flushedText = text, thoughtStartedAtNs = null)
+}
+
+private fun StreamingState.appendThought(text: String, isSnapshot: Boolean): StreamingState {
+    if (text.isEmpty()) return this
+    val nowNs = System.nanoTime()
+    val startNs = thoughtStartedAtNs ?: nowNs
+    val elapsed = (nowNs - startNs) / 1_000_000_000.0
+    val blocks = transcript.toMutableList()
+    val last = blocks.lastOrNull()
+    if (last is TranscriptBlock.Thought) {
+        val merged = if (isSnapshot) mergeTextSnapshot(last.text, text) else mergeTextDelta(last.text, text)
+        blocks[blocks.size - 1] = last.copy(text = takeNewestActivityText(merged), elapsedSec = elapsed)
+    } else {
+        blocks += TranscriptBlock.Thought(takeNewestActivityText(text), elapsed)
+    }
+    return copy(transcript = boundedTranscript(blocks), thoughtStartedAtNs = startNs)
+}
+
+private fun StreamingState.appendTranscriptTool(id: String, name: String?, update: (ToolCallState) -> ToolCallState): StreamingState {
+    val blocks = transcript.toMutableList()
+    val last = blocks.lastOrNull()
+    if (last is TranscriptBlock.Tools) {
+        val tools = last.tools.toMutableList()
+        val index = tools.indexOfLast { it.id == id || (name != null && it.name == name) }
+        if (index >= 0) {
+            tools[index] = update(tools[index])
+        } else {
+            tools += update(ToolCallState(id, name ?: id))
+        }
+        blocks[blocks.size - 1] = last.copy(tools = tools.toList())
+    } else {
+        blocks += TranscriptBlock.Tools(listOf(update(ToolCallState(id, name ?: id))))
+    }
+    return copy(transcript = boundedTranscript(blocks))
+}
+
+private fun StreamingState.appendTranscriptPrefill(event: ChatStreamEvent.PromptProgress): StreamingState {
+    if (event.estimated) return this
+    val details = buildList {
+        if (event.processedTokens != null && event.totalTokens != null && event.totalTokens > 0) add("${event.processedTokens}/${event.totalTokens} tok")
+        if (event.cachedTokens != null && event.cachedTokens > 0) add("cache ${event.cachedTokens}")
+        if (event.timeMs != null && event.timeMs >= 0) add("${String.format(java.util.Locale.US, "%.1f", event.timeMs / 1000.0)}s")
+    }
+    val label = friendlyActivityStatus(event.label.ifBlank { "Elaborazione prompt" })
+    val text = "$label ${event.percent.coerceIn(0, 100)}%" + if (details.isEmpty()) "" else " (${details.joinToString(", ")})"
+    val blocks = transcript.filterNot { it is TranscriptBlock.Prefill }.toMutableList()
+    blocks += TranscriptBlock.Prefill(text)
+    return copy(transcript = boundedTranscript(blocks))
+}
+
+private fun boundedTranscript(items: List<TranscriptBlock>): List<TranscriptBlock> {
+    val bounded = items.map { item ->
+        when (item) {
+            is TranscriptBlock.AgentText -> item.copy(text = takeNewestActivityText(item.text))
+            is TranscriptBlock.Thought -> item.copy(text = takeNewestActivityText(item.text))
+            is TranscriptBlock.Tools -> item.copy(tools = item.tools.map { tool ->
+                tool.copy(
+                    args = takeNewestActivityText(tool.args),
+                    result = tool.result?.let(::takeNewestActivityText)
+                )
+            })
+            is TranscriptBlock.Prefill -> item.copy(text = takeNewestActivityText(item.text))
+        }
+    }.toMutableList()
+    while ((bounded.size > MAX_TRANSCRIPT_BLOCKS || transcriptChars(bounded) > MAX_TRANSCRIPT_CHARS) && bounded.size > 1) {
+        bounded.removeAt(0)
+    }
+    return bounded
+}
+
+private fun transcriptChars(items: List<TranscriptBlock>): Int = items.sumOf { item ->
+    when (item) {
+        is TranscriptBlock.AgentText -> item.text.length
+        is TranscriptBlock.Thought -> item.text.length
+        is TranscriptBlock.Prefill -> item.text.length
+        is TranscriptBlock.Tools -> item.tools.sumOf {
+            it.args.length + (it.result?.length ?: 0) + it.argsPreview.length + it.resultPreview.length
+        }
+    }
+}
+
+/**
+ * Ricostruisce il transcript dai dati persistiti (archivio, bot canonici,
+ * messaggi vecchi senza transcript live): ordine cronologico, tool
+ * consecutivi raggruppati, solo l'ultimo prefill.
+ */
+internal fun transcriptBlocksOf(
+    timeline: List<AssistantActivity>,
+    legacyThinking: String,
+    showToolCalls: Boolean
+): List<TranscriptBlock> {
+    val compatible = if (timeline.isEmpty() && legacyThinking.isNotBlank()) {
+        listOf(AssistantActivity(AssistantActivity.Kind.Reasoning, text = legacyThinking))
+    } else timeline
+    val lastPrefillIndex = compatible.indexOfLast { it.kind == AssistantActivity.Kind.PromptProgress }
+    val blocks = mutableListOf<TranscriptBlock>()
+    for ((index, item) in compatible.withIndex()) {
+        when (item.kind) {
+            AssistantActivity.Kind.Reasoning -> {
+                if (item.text.isNotBlank()) blocks += TranscriptBlock.Thought(item.text)
+            }
+            AssistantActivity.Kind.Tool -> {
+                if (!showToolCalls) continue
+                val tool = item.tool ?: continue
+                val last = blocks.lastOrNull()
+                if (last is TranscriptBlock.Tools) {
+                    blocks[blocks.size - 1] = last.copy(tools = last.tools + tool)
+                } else {
+                    blocks += TranscriptBlock.Tools(listOf(tool))
+                }
+            }
+            AssistantActivity.Kind.PromptProgress -> {
+                if (index == lastPrefillIndex && item.text.isNotBlank()) {
+                    blocks += TranscriptBlock.Prefill(item.text)
+                }
+            }
+        }
+    }
+    return blocks
+}
+
+/** Solo i blocchi che hanno senso dentro il flag finale (niente testo agente). */
+internal fun flagTranscriptBlocks(blocks: List<TranscriptBlock>, showToolCalls: Boolean): List<TranscriptBlock> {
+    return blocks.filter {
+        when (it) {
+            is TranscriptBlock.AgentText -> false
+            is TranscriptBlock.Tools -> showToolCalls && it.tools.isNotEmpty()
+            is TranscriptBlock.Thought -> it.text.isNotBlank()
+            is TranscriptBlock.Prefill -> it.text.isNotBlank()
+        }
+    }
 }
 
 private fun boundedTimeline(items: List<AssistantActivity>): List<AssistantActivity> {

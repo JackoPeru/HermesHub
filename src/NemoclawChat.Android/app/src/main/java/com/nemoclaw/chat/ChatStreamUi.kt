@@ -107,24 +107,41 @@ internal fun StreamingBubbleView(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             val timeline = state.activityTimeline.filter { showToolCalls || it.kind != AssistantActivity.Kind.Tool }
-            if (!state.isDone && timeline.isNotEmpty()) {
-                HermesActivityTimeline(timeline, active = true)
+            val transcript = state.transcript
+            // Coda di testo non ancora congelata in un segmento (arrivata dopo
+            // l'ultima attivita): va mostrata in coda al transcript live.
+            val liveTail = remember(state.text, state.flushedText) {
+                if (state.text.startsWith(state.flushedText)) state.text.substring(state.flushedText.length) else ""
             }
-            if (!state.isDone && timeline.isEmpty()) {
-                FlagRow(
-                    title = preGenerationStatusLabel(state.status, state.promptProgressPercent, 0.0),
-                    value = activityIndicator(state),
-                    shimmer = true
-                )
-            }
+            if (!state.isDone && transcript.isNotEmpty()) {
+                AgentTranscript(blocks = transcript, active = true, includeAgentText = true, tailText = liveTail)
+            } else {
+                if (!state.isDone && timeline.isNotEmpty()) {
+                    HermesActivityTimeline(timeline, active = true)
+                }
+                if (!state.isDone && timeline.isEmpty() && transcript.isEmpty()) {
+                    FlagRow(
+                        title = preGenerationStatusLabel(state.status, state.promptProgressPercent, 0.0),
+                        value = activityIndicator(state),
+                        shimmer = true
+                    )
+                }
 
-            if (state.text.isNotEmpty()) {
-                val streamText = remember(state.text) { collapseRepeatedBlocks(state.text) }
-                MarkdownText(streamText, color = Color.White, fontSize = 15.sp)
-            }
+                if (state.text.isNotEmpty() && (state.isDone || transcript.isEmpty())) {
+                    val streamText = remember(state.text) { collapseRepeatedBlocks(state.text) }
+                    MarkdownText(streamText, color = Color.White, fontSize = 15.sp)
+                }
 
-            if (state.isDone && timeline.isNotEmpty()) {
-                HermesActivityDisclosure(timeline)
+                if (state.isDone) {
+                    val flagBlocks = remember(transcript, showToolCalls) {
+                        val live = flagTranscriptBlocks(transcript, showToolCalls)
+                        if (live.isNotEmpty()) live
+                        else flagTranscriptBlocks(transcriptBlocksOf(timeline, state.thinking, showToolCalls), showToolCalls)
+                    }
+                    if (flagBlocks.isNotEmpty()) {
+                        HermesActivityDisclosure(flagBlocks)
+                    }
+                }
             }
 
             val validBlocks = remember(state.visualBlocks) {
@@ -272,8 +289,9 @@ private fun preGenerationStatusLabel(status: String, progressPercent: Int?, elap
 }
 
 @Composable
-internal fun HermesActivityDisclosure(timeline: List<AssistantActivity>) {
-    var expanded by rememberSaveable(timeline.firstOrNull()?.hashCode(), timeline.size) { mutableStateOf(false) }
+internal fun HermesActivityDisclosure(blocks: List<TranscriptBlock>) {
+    val visibleCount = blocks.size
+    var expanded by rememberSaveable(blocks.firstOrNull()?.hashCode(), visibleCount) { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { expanded = !expanded },
@@ -281,14 +299,125 @@ internal fun HermesActivityDisclosure(timeline: List<AssistantActivity>) {
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text("Attività Hermes", color = AppColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-            Text("${timeline.size}", color = AppColors.Muted, fontSize = 12.sp)
+            Text("$visibleCount", color = AppColors.Muted, fontSize = 12.sp)
             Spacer(Modifier.weight(1f))
             Text(if (expanded) "Nascondi" else "Mostra", color = AppColors.Muted, fontSize = 12.sp)
             Icon(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                 contentDescription = if (expanded) "Chiudi attivita" else "Mostra attivita",
                 tint = AppColors.Muted, modifier = Modifier.size(16.dp))
         }
-        if (expanded) HermesActivityTimeline(timeline, active = false)
+        if (expanded) AgentTranscript(blocks = blocks, active = false, includeAgentText = false)
+    }
+}
+
+/**
+ * Feed agente in ordine cronologico: testo dell'agente interleavato con
+ * pensieri ("Ragionamento · Ns") e raffiche di tool, ognuno espandibile.
+ * A fine turno resta solo dentro il flag: qui si mostra il processo.
+ */
+@Composable
+internal fun AgentTranscript(
+    blocks: List<TranscriptBlock>,
+    active: Boolean,
+    includeAgentText: Boolean,
+    tailText: String = ""
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        blocks.forEach { block ->
+            when (block) {
+                is TranscriptBlock.AgentText -> {
+                    if (includeAgentText && block.text.isNotBlank()) {
+                        val segment = remember(block.text) { collapseRepeatedBlocks(block.text) }
+                        MarkdownText(segment, color = Color.White, fontSize = 15.sp)
+                    }
+                }
+                is TranscriptBlock.Thought -> {
+                    if (block.text.isNotBlank()) {
+                        ThoughtRow(text = block.text, elapsedSec = block.elapsedSec, active = active)
+                    }
+                }
+                is TranscriptBlock.Tools -> {
+                    if (block.tools.isNotEmpty()) {
+                        ToolGroupExpander(block.tools)
+                    }
+                }
+                is TranscriptBlock.Prefill -> {
+                    if (block.text.isNotBlank()) {
+                        PrefillPinnedRow(block.text, active)
+                    }
+                }
+            }
+        }
+        if (includeAgentText && tailText.isNotBlank()) {
+            MarkdownText(tailText, color = Color.White, fontSize = 15.sp)
+        }
+    }
+}
+
+@Composable
+private fun ThoughtRow(text: String, elapsedSec: Double, active: Boolean) {
+    val showShimmer by remember(active) { derivedStateOf { active } }
+    var expanded by remember(text.take(64), elapsedSec >= 1) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 40.dp)
+                .clickable { expanded = !expanded },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (showShimmer) {
+                ShimmerText("Ragionamento", enabled = true)
+                Spacer(modifier = Modifier.weight(1f))
+                Text(
+                    text = if (elapsedSec >= 1) "${String.format(java.util.Locale.US, "%.0f", elapsedSec)}s · in corso" else "in corso",
+                    color = AppColors.Muted,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            } else {
+                val label = if (elapsedSec >= 1) {
+                    "Ragionamento · ${String.format(java.util.Locale.US, "%.0f", elapsedSec)}s"
+                } else {
+                    "Ragionamento"
+                }
+                Text(label, color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text.take(90).replace("\n", " "),
+                    color = AppColors.Faint,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Icon(
+                imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = if (expanded) "Chiudi ragionamento" else "Mostra ragionamento",
+                tint = AppColors.Muted,
+                modifier = Modifier.size(15.dp)
+            )
+        }
+        if (expanded) {
+            Surface(
+                color = AppColors.Composer.copy(alpha = 0.62f),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = text.ifBlank { "—" },
+                    color = AppColors.Muted,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    modifier = Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                )
+            }
+        }
     }
 }
 
