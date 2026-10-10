@@ -1,8 +1,9 @@
-Hermes Hub 0.6.240 (connessione preimpostata di base)
+Hermes Hub 0.6.241 (tutto precompilato + guarigione blank)
 
-- Android: fresh install con connessione gia pronta — gateway Tailscale + URL LAN casa precompilati e chiave API preimpostata dal build: niente impostazioni vuote dopo reinstallazione, il gateway risulta subito online.
-- Dettagli: lo stored utente vince sempre sulla chiave preimpostata; il default non viene mai scritto nelle prefs; il valore vero vive solo in local.properties (gitignored, mai nel repo).
-- Versioni: Windows/AdminBridge `0.6.240`; Android `versionName 0.6.240`, `versionCode 244` (stessa firma 0.6.239: aggiornamento normale, niente reinstallazione).
-- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.240-android.apk`; MSIX `NemoclawChat.Windows_0.6.240.0_x64.msix`; gateway Linux `HermesHub-0.6.240-linux-gateway.tar.gz`.
-- SHA-256 Android: `eeb2b3fdc9fd2c10cdd950a9c6c0ca435e133de37c57fe61e1b672b38d2e5888`.
-- SHA-256 gateway: `a109975fc7fe2f7498c0544083ec4b046a3343d7c64321a4015599e129d872ac`.
+- Android: valori vuoti salvati guariscono ai default — chi aveva impostazioni vuote torna online aggiornando, senza reinstallare.
+- Android: cartelle video/news preimpostate ai path reali del server (`/home/matteo/video`, `/home/matteo/news`).
+- Resta: gateway Tailscale + LAN + chiave API preimpostati dal build.
+- Versioni: Windows/AdminBridge `0.6.241`; Android `versionName 0.6.241`, `versionCode 245` (stessa firma: aggiornamento normale).
+- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.241-android.apk`; MSIX `NemoclawChat.Windows_0.6.241.0_x64.msix`; gateway Linux `HermesHub-0.6.241-linux-gateway.tar.gz`.
+- SHA-256 Android: `b3c03290aec4155f609dbf5c2ee53d68bfed630936cb11bc06d8f4b21a6b0586`.
+- SHA-256 gateway: `67203a469eb7a1fee7be8c7e2959e4e83ad390e767d40c459b3f33e1a5fc4898`.

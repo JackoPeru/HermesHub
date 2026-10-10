@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.241 - 2026-10-11
+
+- Android: valori vuoti salvati guariscono ai default (chi aveva impostazioni vuote torna online senza reinstallare); cartelle video/news preimpostate ai path reali del server.
+
 ## 0.6.240 - 2026-10-11
 
 - Android: connessione preimpostata di base — fresh install con gateway Tailscale + LAN casa e chiave API gia configurati, niente schermata vuota dopo reinstallazione (lo stored utente vince sempre; il default non si scrive mai).
