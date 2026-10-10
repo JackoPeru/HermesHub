@@ -2,10 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
-## Non rilasciato (audit 2026-10-10, su main)
+## 0.6.239 - 2026-10-11
 
 - Android: rete fire-and-forget su scope IO (mai piu sul Main); eventi SSE oltre 2M troncati con avviso invece di turno perso; frame terminali troncati rilevati senza JSON completo; expand/collapse con chiavi stabili; liste con key; rotazione (scelta Accoda/Correggi, dialoghi, filtri); timer banner gated su lifecycle; settings/secret ricaricati al cambio gateway; niente piu loop di copia duplicato.
-- Android: keystore release dedicato (firma debug rimossa dalle release; il prossimo APK richiede reinstallazione).
+- Android: keystore release dedicato (firma debug rimossa dalle release). ATTENZIONE: firma diversa dalle precedenti, aggiornare richiede disinstallazione + reinstallazione (backup chat prima).
 - Gateway: stream mai rotto da run_id anomalo; split UTF-8 riassemblato; kwargs filtrate sulle chiavi di routing + migrazione file gia patchati.
 - GPU manager: kill con ricontrollo cmdline; lock sul submit; area-cap OOM su tutti i video; docs corretti.
 - Character-ID: claim atomico per le generate; conferma esplicita oltre 4000 step.
