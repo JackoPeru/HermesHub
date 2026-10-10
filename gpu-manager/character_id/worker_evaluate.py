@@ -79,13 +79,19 @@ def main(argv: list[str]) -> int:
         systemctl,
     )
 
-    if len(argv) != 5:
-        print("uso: worker_evaluate <root> <character_id> <job_id> <version>", flush=True)
+    if len(argv) not in (5, 6):
+        print("uso: worker_evaluate <root> <character_id> <job_id> <version> [eval_steps_csv]", flush=True)
         return 2
     try:
         version_arg = int(argv[4])
+        if len(argv) == 6:
+            eval_steps = tuple(sorted({int(s) for s in argv[5].split(",") if s.strip()}))
+            if not eval_steps or any(s < 50 or s > 7200 for s in eval_steps) or len(eval_steps) > 8:
+                raise ValueError("eval_steps")
+        else:
+            eval_steps = CHECKPOINT_STEPS
     except ValueError:
-        print(f"version non valida: {argv[4]}", flush=True)
+        print(f"version/eval_steps non validi: {argv[4:]}", flush=True)
         return 2
     root, character_id, job_id, version = argv[1], argv[2], argv[3], version_arg
     store = CharacterStore(root)
@@ -230,7 +236,7 @@ def main(argv: list[str]) -> int:
 
         heartbeat = _start_heartbeat(store, job_id)
 
-        ckpts = {s: ckpt_path(out_dir, "character", s) for s in CHECKPOINT_STEPS}
+        ckpts = {s: ckpt_path(out_dir, "character", s) for s in eval_steps}
         ckpts = {s: p for s, p in ckpts.items() if p.is_file()}
         if not ckpts:
             raise RuntimeError("nessun checkpoint da valutare")

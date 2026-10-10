@@ -19,17 +19,28 @@ TRAINER_SRC = "/opt/hermes/character-id/trainer/src"
 TRAINER_VENV_PY = "/opt/hermes/character-id/trainer/venv/bin/python"
 
 # Ricetta validata upstream (20 immagini, rank 16, ~500 step).
+# V2: stesso recipe, piu epoche (lezione LoRA Sydney: 120 epoche). Gli step
+# si calcolano come epoche * immagini_train (es. 120 * 30 = 3600).
 NETWORK_DIM = 16
 NETWORK_ALPHA = 16
 LEARNING_RATE = 3e-4
 LR_WARMUP_STEPS = 50
 MAX_TRAIN_STEPS = 500
+MIN_TRAIN_STEPS = 100
+MAX_ALLOWED_STEPS = 7200
 SIGMA_MIN = 0.15
 LOSS_MAG_WEIGHT = 0.5
 LOSS_DC_WEIGHT = 0.3
 BLOCKS_TO_SWAP = 48
 CHECKPOINT_STEPS = (100, 250, 500)
 STRENGTH_SWEEP = (0.7, 0.85, 1.0, 1.15)
+
+
+def default_eval_steps(max_steps: int) -> tuple[int, ...]:
+    """Checkpoint da valutare: fissi per 500 step, quarti (griglia 50) oltre."""
+    if max_steps <= 500:
+        return CHECKPOINT_STEPS
+    return tuple(sorted({max(50, round(max_steps * f / 50) * 50) for f in (0.25, 0.5, 0.75, 1.0)}))
 
 # Suite eval fissa (seed fissi, mai cambiare tra checkpoint).
 EVAL_SUITE: tuple[tuple[str, int], ...] = (

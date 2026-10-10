@@ -326,6 +326,27 @@ def register_character_routes(
                                _: None = key_dep) -> dict:
         user_dep(request)
         manifest = _manifest_or_404(character_id)
+        from .training import MAX_ALLOWED_STEPS, MAX_TRAIN_STEPS, MIN_TRAIN_STEPS, default_eval_steps
+
+        # Valida prima la forma della richiesta, poi lo stato (422 prima di 409).
+        try:
+            max_steps = int((payload or {}).get("max_steps", MAX_TRAIN_STEPS))
+        except (TypeError, ValueError):
+            raise HTTPException(422, "max_steps non valido") from None
+        if not MIN_TRAIN_STEPS <= max_steps <= MAX_ALLOWED_STEPS:
+            raise HTTPException(422, f"max_steps fuori range {MIN_TRAIN_STEPS}..{MAX_ALLOWED_STEPS}")
+        raw_eval = (payload or {}).get("eval_steps")
+        if raw_eval is None:
+            eval_steps = list(default_eval_steps(max_steps))
+        else:
+            if not isinstance(raw_eval, list) or not raw_eval or len(raw_eval) > 8:
+                raise HTTPException(422, "eval_steps: lista di 1..8 step")
+            try:
+                eval_steps = sorted({int(s) for s in raw_eval})
+            except (TypeError, ValueError):
+                raise HTTPException(422, "eval_steps non validi") from None
+            if any(s < 50 or s > max_steps for s in eval_steps):
+                raise HTTPException(422, "eval_steps fuori range 50..max_steps")
         if manifest["status"] not in ("ready_to_train", "needs_retrain", "failed", "interrupted", "draft"):
             hint = "usa /retrain per una nuova versione" if manifest["status"] == "ready" else "analizza prima le foto"
             raise HTTPException(409, f"personaggio in stato {manifest['status']}: {hint}")
@@ -361,7 +382,8 @@ def register_character_routes(
             raise HTTPException(409, "GPU occupata: training Character ID in corso")
         try:
             pid, _ = _spawn("character_id.worker_train",
-                            [store.root.as_posix(), character_id, job["id"], str(version)],
+                            [store.root.as_posix(), character_id, job["id"], str(version),
+                             str(max_steps), ",".join(str(s) for s in eval_steps)],
                             trainer_python, f"train-spawn-{job['id'][:8]}.log", character_id)
         except Exception as exc:
             # Spawn fallito: rilascia il claim, mai lock fantasma.
@@ -370,8 +392,10 @@ def register_character_routes(
             await _run(store.set_status, character_id, "ready_to_train")
             clear_lock(store.root)
             raise HTTPException(500, f"avvio worker fallito: {exc}") from exc
-        await _run(store.update_job, job["id"], pid=pid, detail="worker training avviato")
-        return {"job_id": job["id"], "status": "queued", "version": version}
+        await _run(store.update_job, job["id"], pid=pid,
+                   detail=f"worker training avviato ({max_steps} step, eval {eval_steps})")
+        return {"job_id": job["id"], "status": "queued", "version": version,
+                "max_steps": max_steps, "eval_steps": eval_steps}
 
     @app.post("/characters/{character_id}/cancel")
     async def characters_cancel(character_id: str, request: Request, _: None = key_dep) -> dict:

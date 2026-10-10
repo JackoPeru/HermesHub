@@ -40,7 +40,6 @@ def run_logged(cmd: list[str], log_path: Path, env: dict, cwd: Path) -> int:
 def main(argv: list[str]) -> int:
     from character_id.store import CharacterStore
     from character_id.training import (
-        CHECKPOINT_STEPS,
         MAX_TRAIN_STEPS,
         TRAINER_SRC,
         TRAINER_VENV_PY,
@@ -58,15 +57,27 @@ def main(argv: list[str]) -> int:
         write_lock,
     )
 
-    if len(argv) != 5:
-        print("uso: worker_train <root> <character_id> <job_id> <version>", flush=True)
+    if len(argv) not in (5, 6, 7):
+        print("uso: worker_train <root> <character_id> <job_id> <version> [max_steps] [eval_steps_csv]", flush=True)
         return 2
     try:
         version_arg = int(argv[4])
+        steps_arg = int(argv[5]) if len(argv) >= 6 else MAX_TRAIN_STEPS
+        eval_csv = argv[6] if len(argv) == 7 else ""
     except ValueError:
-        print(f"version non valida: {argv[4]}", flush=True)
+        print(f"version/max_steps non validi: {argv[4:]}", flush=True)
+        return 2
+    from character_id.training import MAX_ALLOWED_STEPS, MIN_TRAIN_STEPS, default_eval_steps
+
+    if not MIN_TRAIN_STEPS <= steps_arg <= MAX_ALLOWED_STEPS:
+        print(f"max_steps fuori range {MIN_TRAIN_STEPS}..{MAX_ALLOWED_STEPS}", flush=True)
         return 2
     root, character_id, job_id, version = argv[1], argv[2], argv[3], version_arg
+    max_steps = steps_arg
+    # Watchdog proporzionato: 45s/step stimati + 1h margine (minimo 14h).
+    stall_limit_s = 6 * 3600
+    absolute_limit_s = max(14 * 3600, int(max_steps * 45 + 3600))
+    max_steps = steps_arg
     store = CharacterStore(root)
     manifest = store.get_character(character_id)
     if manifest is None:
@@ -141,14 +152,14 @@ def main(argv: list[str]) -> int:
         if code != 0:
             raise RuntimeError(f"cache testo fallita (exit {code}), vedi log")
 
-        progress(0.26, "training avviato (500 step)", "training")
+        progress(0.26, f"training avviato ({max_steps} step)", "training")
         # Recovery onesta: ripartenza pulita (cache presenti via --skip_existing,
         # checkpoint precedenti conservati in out_dir), mai resume presunto.
         env_train = dict(env, HF_HUB_OFFLINE="1")
         try:
             train_log = open(log_path, "ab")  # noqa: PTH123 - chiusura esplicita sotto
             train_process = subprocess.Popen(
-                train_cmd(toml, out_dir), env=env_train, cwd=Path(TRAINER_SRC),
+                train_cmd(toml, out_dir, max_steps=max_steps), env=env_train, cwd=Path(TRAINER_SRC),
                 stdout=train_log, stderr=subprocess.STDOUT,
             )
         except OSError as exc:
@@ -157,27 +168,27 @@ def main(argv: list[str]) -> int:
         # NOTA: il pid job resta quello del worker (leader del gruppo): /cancel
         # fa killpg su di esso. Il pid musubi e solo informativo nel detail.
         # Progress dai checkpoint (mai simulato: solo step reali su disco).
-        # Watchdog: stall recupero (nessun ckpt per 6h) o tetto 14h -> kill + fail.
+        # Watchdog: stall recupero (nessun ckpt per 6h) o tetto proporzionato.
         last_seen = -1
         last_ckpt_ts = time.monotonic()
         started_ts = time.monotonic()
         while train_process.poll() is None:
             steps = ckpt_steps_in(out_dir)
-            done = [s for s in steps if s in CHECKPOINT_STEPS or s <= MAX_TRAIN_STEPS]
+            done = [s for s in steps if s <= max_steps]
             if done and done[-1] != last_seen:
                 last_seen = done[-1]
                 last_ckpt_ts = time.monotonic()
-                store.update_job(job_id, progress=0.26 + 0.64 * min(1.0, last_seen / MAX_TRAIN_STEPS),
-                                 detail=f"step {last_seen}/{MAX_TRAIN_STEPS}")
+                store.update_job(job_id, progress=0.26 + 0.64 * min(1.0, last_seen / max_steps),
+                                 detail=f"step {last_seen}/{max_steps}")
             now = time.monotonic()
-            if now - started_ts > 14 * 3600 or (last_seen > 0 and now - last_ckpt_ts > 6 * 3600):
+            if now - started_ts > absolute_limit_s or (last_seen > 0 and now - last_ckpt_ts > stall_limit_s):
                 train_process.terminate()
                 try:
                     train_process.wait(timeout=300)
                 except subprocess.TimeoutExpired:
                     train_process.kill()
                 train_log.close()
-                raise RuntimeError("training stallato (watchdog 6h/14h): ucciso, checkpoint conservati")
+                raise RuntimeError("training stallato (watchdog): ucciso, checkpoint conservati")
             time.sleep(30)
         if train_process.returncode != 0:
             train_log.close()
@@ -195,11 +206,12 @@ def main(argv: list[str]) -> int:
 
         eval_job = store.create_job(character_id, "evaluate", version)
         chained_eval = True  # da qui: niente restore/reset, la GPU resta all'eval
+        eval_steps = eval_csv or ",".join(str(s) for s in default_eval_steps(max_steps))
         try:
             eval_log = open(log_path, "ab")  # noqa: PTH123 - il worker esce subito dopo
             subprocess.Popen(
                 [TRAINER_VENV_PY, "-m", "character_id.worker_evaluate",
-                 str(store.root), character_id, eval_job["id"], str(version)],
+                 str(store.root), character_id, eval_job["id"], str(version), eval_steps],
                 env=env, cwd=Path(__file__).resolve().parent.parent,
                 stdout=eval_log, stderr=subprocess.STDOUT,
             )

@@ -59,6 +59,7 @@ from character_id.training import (  # noqa: E402 (sys.path setup sopra)
     ckpt_path,
     ckpt_steps_in,
     dataset_toml,
+    default_eval_steps,
     pid_alive,
     train_cmd,
     training_active,
@@ -286,6 +287,9 @@ class TestApiWiring(unittest.TestCase):
         # M6+: niente piu stub 501, tutto implementato o con 409 onesto.
         self.assertNotIn("status_code=501", self.src)
         self.assertNotIn("not_implemented_yet", self.src)
+        # Train configurabile (V2 stile Sydney: step ed eval espliciti).
+        self.assertIn("max_steps", self.src)
+        self.assertIn("eval_steps", self.src)
 
     def test_m3_routes_present(self):
         for route in (
@@ -671,6 +675,14 @@ class TestTrainingRecipe(unittest.TestCase):
         seeds = [seed for _, seed in EVAL_SUITE]
         self.assertEqual(len(set(seeds)), 8)
         self.assertEqual(tuple(sorted(CHECKPOINT_STEPS)), (100, 250, 500))
+
+    def test_default_eval_steps(self):
+        self.assertEqual(default_eval_steps(500), (100, 250, 500))
+        self.assertEqual(default_eval_steps(300), (100, 250, 500))
+        steps = default_eval_steps(3600)
+        self.assertEqual(len(steps), 4)
+        self.assertEqual(steps[-1], 3600)
+        self.assertTrue(all(s % 50 == 0 for s in steps))
 
     def test_pid_alive(self):
         import os as _os

@@ -117,7 +117,13 @@ Il worker training gira sotto lock manager con stato `h3-character-train`:
 claim esclusivo `O_EXCL` (due POST concorrenti: uno solo vince),
 acquisisce lock, scarica Qwen/Comfy (`sudo -n`, stessa policy del manager),
 verifica VRAM (gate 13 GB), cache+train con la ricetta sopra, watchdog
-stallo 6h/tetto 14h, libera VRAM, ripristina stato.
+proporzionato (stallo 6h, tetto 45s/step + 1h), libera VRAM, ripristina stato.
 Mentre gira, il worker manager e parcheggiato (niente restore che rubino VRAM).
 Job `train` persistito (stati queued…ready/failed/cancelled), pid registrato,
-cancel via terminazione pulita (M12), resume da checkpoint (M13-recovery).
+cancel via terminazione pulita (M12), ripartenza pulita con cache presenti.
+
+## Step configurabili (V2 stile Sydney: ~120 epoche)
+
+`POST .../train {max_steps?, eval_steps?}` (default 500 + quarti):
+step = epoche * immagini_train (es. 120 * 30 = 3600). Range 100..7200,
+eval 1..8 step su griglia 50. Esempio V2: `{"max_steps": 3600}`.
