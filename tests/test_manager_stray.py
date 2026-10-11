@@ -330,5 +330,39 @@ class TestLlmServingProbe(unittest.TestCase):
         self.assertIn('"llm_serving": await llm_serving()', seg)
 
 
+def load_direct_queue_namespace() -> dict:
+    """Carica direct_queue_running via AST (pura, solo json stdlib)."""
+    import json as jsonlib
+
+    src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    wanted = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "direct_queue_running"]
+    assert len(wanted) == 1, "direct_queue_running non trovata in manager.py"
+    mod = ast.Module(body=wanted, type_ignores=[])
+    ns: dict = {"json": jsonlib}
+    exec(compile(mod, "manager_direct_queue", "exec"), ns)  # noqa: S102 - test locale
+    return ns
+
+
+class TestDirectQueueBusy(unittest.TestCase):
+    """watch_direct non stacca mai durante una generazione in corso."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.busy = staticmethod(load_direct_queue_namespace()["direct_queue_running"])
+
+    def test_running_prompt_is_busy(self):
+        self.assertTrue(self.busy('{"queue_running": [["q1", 1, {}]], "queue_pending": []}'))
+
+    def test_empty_queue_is_not_busy(self):
+        self.assertFalse(self.busy('{"queue_running": [], "queue_pending": []}'))
+
+    def test_garbage_is_not_busy(self):
+        self.assertFalse(self.busy("not-json"))
+        self.assertFalse(self.busy(""))
+        self.assertFalse(self.busy("[]"))
+        self.assertFalse(self.busy('{"queue_running": {}}'))
+
+
 if __name__ == "__main__":
     unittest.main()

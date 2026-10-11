@@ -209,8 +209,16 @@ except Exception:
 if not isinstance(status, dict):
     raise SystemExit(1)
 print("desired_mode:", status.get("desired_mode"), "| current_state:", status.get("current_state"),
-      "| llm_online:", status.get("llm_online"), "| media_online:", status.get("media_online"))
-if status.get("llm_serving") is not True:
+      "| llm_online:", status.get("llm_online"), "| media_online:", status.get("media_online"),
+      "| llm_serving:", status.get("llm_serving"))
+if status.get("desired_mode") == "DIRECT":
+    # In DIRECT la LLM e scarica per scelta: la verify richiede il backend
+    # diretto in piedi, non llm_serving (False per disegno).
+    if status.get("current_state") != "DIRECT":
+        raise SystemExit(1)
+    if status.get("media_online") is not True:
+        raise SystemExit(1)
+elif status.get("llm_serving") is not True:
     raise SystemExit(1)
 if "character_training" not in status:
     raise SystemExit(1)

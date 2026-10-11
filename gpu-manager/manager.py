@@ -731,6 +731,29 @@ async def media_online() -> bool:
     return code in (200, 405)
 
 
+def direct_queue_running(body: str) -> bool:
+    """True se la coda Comfy ha un prompt in esecuzione (puro e testabile)."""
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    running = data.get("queue_running")
+    return isinstance(running, list) and len(running) > 0
+
+
+async def direct_queue_busy() -> bool:
+    """Backend DIRECT occupato in generazione? Non solleva mai."""
+    try:
+        code, body = await _http_async("GET", media_base() + "/queue", timeout=10)
+    except Exception:  # noqa: BLE001 - probe must never raise
+        return False
+    if code != 200:
+        return False
+    return direct_queue_running(body)
+
+
 async def systemctl(action: str, unit: str, timeout: int = 180) -> bool:
     code, out = await _run_async(
         ["sudo", "-n", "systemctl", action, unit], timeout=timeout
@@ -1246,8 +1269,10 @@ async def watch_direct() -> None:
     """Parked while the user drives Comfy directly: the manager touches
     nothing. Auto-return to AUTO only when the unit is really gone
     (closed/crashed, 3 consecutive misses): a live unit with a silent
-    backend means Comfy is (re)starting, so wait — never pull the rug
-    during a restart. The user closing it lands on inactive -> fast path."""
+    backend means Comfy is (re)starting or busy generating, so wait — never
+    pull the rug during a restart or a long generation. The user closing
+    it lands on inactive -> fast path. Probe errors ("unknown") never
+    count as misses: only explicit inactive/failed/dead do."""
     try:
         code, out = await _run_async(
             ["systemctl", "show", "-p", "ActiveState", "--value",
@@ -1259,6 +1284,13 @@ async def watch_direct() -> None:
         if await media_online():
             _state["direct_miss"] = 0
             _state.pop("direct_silent_since", None)
+            return
+        # Backend occupato (generazione in corso)? Vivo ma lento: mai
+        # staccare. Solo un backend davvero silente fa partire il timer.
+        if await direct_queue_busy():
+            _state["direct_miss"] = 0
+            _state.pop("direct_silent_since", None)
+            log.info("direct Comfy busy (generation running): staying in DIRECT")
             return
         # Unit alive but backend silent: restart in progress (wait forever) or
         # hung Comfy (deadline below). Never pull the rug on a live unit fast.
@@ -1273,12 +1305,17 @@ async def watch_direct() -> None:
         else:
             log.warning("direct Comfy unit %s but backend silent; waiting (restart?)", unit)
         return
-    misses = int(_state.get("direct_miss") or 0) + 1
-    _state["direct_miss"] = misses
-    if misses >= 3:
-        log.info("direct ComfyUI gone; returning to AUTO")
-        _state["direct_miss"] = 0
-        _set_desired("AUTO")
+    if unit in ("inactive", "failed", "dead"):
+        misses = int(_state.get("direct_miss") or 0) + 1
+        _state["direct_miss"] = misses
+        if misses >= 3:
+            log.info("direct ComfyUI gone; returning to AUTO")
+            _state["direct_miss"] = 0
+            _set_desired("AUTO")
+        return
+    # Probe inconcludente (sudo/systemd hiccup): tieni la posizione,
+    # mai contare un miss su "unknown".
+    log.warning("direct Comfy unit state unknown; holding DIRECT (no miss counted)")
 
 
 # --------------------------------------------------------------- comfyui ---
