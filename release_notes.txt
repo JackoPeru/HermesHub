@@ -1,9 +1,9 @@
-Hermes Hub 0.6.241 (tutto precompilato + guarigione blank)
+Hermes Hub 0.6.242 (stati manager veritieri + stop al dirottamento LLM)
 
-- Android: valori vuoti salvati guariscono ai default — chi aveva impostazioni vuote torna online aggiornando, senza reinstallare.
-- Android: cartelle video/news preimpostate ai path reali del server (`/home/matteo/video`, `/home/matteo/news`).
-- Resta: gateway Tailscale + LAN + chiave API preimpostati dal build.
-- Versioni: Windows/AdminBridge `0.6.241`; Android `versionName 0.6.241`, `versionCode 245` (stessa firma: aggiornamento normale).
-- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.241-android.apk`; MSIX `NemoclawChat.Windows_0.6.241.0_x64.msix`; gateway Linux `HermesHub-0.6.241-linux-gateway.tar.gz`.
-- SHA-256 Android: `b3c03290aec4155f609dbf5c2ee53d68bfed630936cb11bc06d8f4b21a6b0586`.
-- SHA-256 gateway: `67203a469eb7a1fee7be8c7e2959e4e83ad390e767d40c459b3f33e1a5fc4898`.
+- Manager: `llm_loaded` somma la VRAM di tutte le GPU (lo split 6.6+10.8GB risultava scarico: BOOT incastrato, restore a vuoto, flag bugiardi). Ora AUTO/LLM_READY/carico con valori veri.
+- Android: rimossa la forzatura /mode/llm all'apertura della chat — era lei a bloccare tutto su LLM manuale mentre si usava Comfy. Resta il toggle manuale in TopBar.
+- Causa serata: Comfy diretto morto di OOM (28GB RAM) → AUTO corretto → app ha sparato /mode/llm → blocco su LLM. Catena chiusa dai due fix.
+- Versioni: Windows/AdminBridge `0.6.242`; Android `versionName 0.6.242`, `versionCode 246` (stessa firma: aggiornamento normale).
+- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.242-android.apk`; MSIX `NemoclawChat.Windows_0.6.242.0_x64.msix`; gateway Linux `HermesHub-0.6.242-linux-gateway.tar.gz`.
+- SHA-256 Android: `46128815a6670e9db2b04a9065fe7aa425491e55db01d4724eb719c4de3b92fa`.
+- SHA-256 gateway: `b3c1a87032a2ede4a000c82ed29aa7671bb4c199f65c3055cfff9b8576dfb82a`.

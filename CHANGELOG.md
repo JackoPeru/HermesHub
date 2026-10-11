@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.242 - 2026-10-12
+
+- Manager: `llm_loaded` somma la VRAM di tutte le GPU (lo split 6.6+10.8GB risultava scarico, incastrava BOOT e ripeteva restore a vuoto); stati di nuovo veritieri.
+- Android: rimossa la forzatura /mode/llm all'apertura chat (bloccava tutto su LLM manuale mentre si usava Comfy); resta il toggle manuale.
+
 ## 0.6.241 - 2026-10-11
 
 - Android: valori vuoti salvati guariscono ai default (chi aveva impostazioni vuote torna online senza reinstallare); cartelle video/news preimpostate ai path reali del server.

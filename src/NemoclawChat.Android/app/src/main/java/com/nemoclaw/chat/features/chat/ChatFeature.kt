@@ -871,20 +871,12 @@ internal fun ChatScreen(
             }
         }
     }
-    // Preriscalda LLM: se il manager e' in AUTO e il modello e' scarico
-    // (dopo job media), chiedi il caricamento appena apri la chat cosi' e'
-    // pronto quando invii. Silenzioso, una sola volta per apertura.
-    // Il manager richiede Bearer (chiave master gateway), mai anonimo.
+    // Preriscalda LLM: RIMOSSO l'auto-POST /mode/llm all'apertura.
+    // Forzava desired=LLM (manuale, permanente) ogni volta che si apriva la
+    // chat con LLM scarico, anche mentre l'utente lavorava in Comfy manuale:
+    // il toggle manuale in TopBar resta l'unico modo di cambiare modo.
+    // Il manager in AUTO ricarica l'LLM da solo quando serve.
     val managerKey = remember { loadGatewaySecret(context) }
-    LaunchedEffect(settings.gatewayUrl) {
-        runCatching {
-            val base = gpuManagerBase(settings.gatewayUrl)
-            val status = JSONObject(httpGet("$base/status", managerKey))
-            if (status.optString("desired_mode") == "AUTO" && !status.optBoolean("llm_loaded", true)) {
-                postJson("$base/mode/llm", JSONObject(), managerKey, allowCompatAuth = false)
-            }
-        }
-    }
     // Allegati pending persistenti: rientrando in app (o nella conversazione)
     // la foto allegata al prompt e' ancora li'.
     var restoredPendingFor by remember { mutableStateOf<String?>(null) }

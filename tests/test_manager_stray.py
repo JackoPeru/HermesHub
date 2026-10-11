@@ -364,5 +364,37 @@ class TestDirectQueueBusy(unittest.TestCase):
         self.assertFalse(self.busy('{"queue_running": {}}'))
 
 
+def load_vram_total_namespace() -> dict:
+    """Carica vram_total_meets via AST (pura, nessuna dipendenza)."""
+    src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    wanted = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "vram_total_meets"]
+    assert len(wanted) == 1, "vram_total_meets non trovata in manager.py"
+    mod = ast.Module(body=wanted, type_ignores=[])
+    ns: dict = {}
+    exec(compile(mod, "manager_vram_total", "exec"), ns)  # noqa: S102 - test locale
+    return ns
+
+
+class TestVramTotalMeets(unittest.TestCase):
+    """llm_loaded usa la somma (split asimmetrici: visto live 6.6+10.8GB)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.meets = staticmethod(load_vram_total_namespace()["vram_total_meets"])
+
+    def test_uneven_split_counts_as_loaded(self):
+        gpus = [{"memory_used_mb": 6631.0}, {"memory_used_mb": 10865.0}]
+        self.assertTrue(self.meets(gpus, 8000))
+
+    def test_unloaded_is_below_threshold(self):
+        self.assertFalse(self.meets([{"memory_used_mb": 400.0}, {"memory_used_mb": 1550.0}], 8000))
+        self.assertFalse(self.meets([], 8000))
+
+    def test_garbage_never_counts(self):
+        self.assertFalse(self.meets([{"memory_used_mb": "x"}], 8000))
+        self.assertFalse(self.meets([{}], 8000))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -649,15 +649,28 @@ async def llm_online() -> bool:
     return code == 200
 
 
+def vram_total_meets(gpus: list, threshold_mb: float) -> bool:
+    """Somma VRAM usata >= soglia (puro e testabile)."""
+    try:
+        return sum(float(g.get("memory_used_mb", 0) or 0) for g in gpus) >= float(threshold_mb)
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
 async def llm_loaded() -> bool:
-    """True only when Qwen weights are really resident (VRAM), not just listed."""
+    """True only when Qwen weights are really resident (VRAM), not just listed.
+
+    Somma su tutte le GPU: lo split tensoriale varia (visto live 6.6+10.8GB
+    con modello attivo e servente), quindi un gate ALL() per-GPU mente ogni
+    volta che lo split e asimmetrico (BOOT incastrato + restore inutili).
+    """
     if not await llm_online():
         return False
     threshold = float(CONFIG["switching"].get("llm_vram_min_mb", 8000))
     gpus = await asyncio.to_thread(gpu_snapshot)
     if not gpus:
         return False
-    return all(g["memory_used_mb"] >= threshold for g in gpus)
+    return vram_total_meets(gpus, threshold)
 
 
 # Cache della prova di risposta: una completion vera per ogni poll di stato
