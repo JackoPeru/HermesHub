@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.245"
-EXPECTED_ANDROID_VERSION_CODE = 249
+EXPECTED_VERSION = "0.6.246"
+EXPECTED_ANDROID_VERSION_CODE = 250
 
 
 def read(relative_path: str) -> str:
@@ -54,6 +54,31 @@ class ReleaseConsistencyTests(unittest.TestCase):
             read("release_notes.txt").startswith(f"Hermes Hub {EXPECTED_VERSION} ")
         )
         self.assertIn(f"## {EXPECTED_VERSION} -", read("CHANGELOG.md"))
+
+    def test_android_gateway_paths_are_always_versioned(self) -> None:
+        # Regressione 0.6.244: path nudi ({gateway}/chat/completions, /responses,
+        # /capabilities, /models, /audio/..., /hub/...) danno 404. Solo /v1, /api, /health.
+        sources = read_android_sources()
+        bad = sorted(
+            set(
+                re.findall(
+                    r'gatewayUrl\.trimEnd\([^)]*\)\}?/(chat|responses|models|capabilities|audio|hub)/',
+                    sources,
+                )
+            )
+        )
+        self.assertEqual([], bad)
+        for path in (
+            'resolveHermesUrl(settings, "/v1/chat/completions")',
+            'resolveHermesUrl(settings, "/v1/responses")',
+            'resolveHermesUrl(settings, "/v1/capabilities")',
+            'resolveHermesUrl(settings, "/v1/models")',
+            'resolveHermesUrl(settings, "/v1/audio/transcriptions")',
+            'resolveHermesUrl(settings, "/v1/hub/server/action")',
+            'resolveHermesUrl(settings, "/v1/hub/server/maintenance")',
+            'resolveHermesUrl(settings, "/v1/media/upload")',
+        ):
+            self.assertIn(path, sources)
 
     def test_github_repository_defaults_target_hermes_hub(self) -> None:
         expected_slug = "JackoPeru/HermesHub"

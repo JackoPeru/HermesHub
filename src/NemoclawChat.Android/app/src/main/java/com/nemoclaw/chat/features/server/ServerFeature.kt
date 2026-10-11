@@ -422,7 +422,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                         IconButton(onClick = { pendingControlAction = controlService to "start" }) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Avvia servizio", tint = Color.White) }
                         IconButton(onClick = { pendingControlAction = controlService to "stop" }) { Icon(Icons.Rounded.Stop, contentDescription = "Ferma servizio", tint = Color.White) }
                         IconButton(onClick = { pendingControlAction = controlService to "restart" }) { Icon(Icons.Rounded.Refresh, contentDescription = "Riavvia servizio", tint = Color.White) }
-                        IconButton(onClick = { scope.launch { controlOutput = runCatching { httpGet("${settings.gatewayUrl.trimEnd('/')}/hub/server/control?filter=${java.net.URLEncoder.encode(logFilter, "UTF-8")}", loadGatewaySecret(context)) }.getOrElse { it.message ?: "Errore" } } }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna output", tint = Color.White) }
+                        IconButton(onClick = { scope.launch { controlOutput = runCatching { httpGet(resolveHermesUrl(settings, "/v1/hub/server/control") + "?filter=${java.net.URLEncoder.encode(logFilter, "UTF-8")}", loadGatewaySecret(context)) }.getOrElse { it.message ?: "Errore" } } }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna output", tint = Color.White) }
                     }
                     SettingsField("Filtro log", logFilter, { logFilter = it })
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -492,7 +492,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             containerColor = AppColors.Surface,
             title = { Text("Conferma $action", color = Color.White) },
             text = { Text("Eseguire $action su $service? Le sessioni attive possono interrompersi.", color = AppColors.Muted) },
-            confirmButton = { IconButton(onClick = { pendingControlAction = null; scope.launch { controlOutput = runCatching { postJson("${settings.gatewayUrl.trimEnd('/')}/hub/server/action", JSONObject().put("service", service).put("action", action), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } }) { Icon(Icons.Rounded.Check, contentDescription = "Conferma azione server", tint = Color.White) } },
+            confirmButton = { IconButton(onClick = { pendingControlAction = null; scope.launch { controlOutput = runCatching { postJson(resolveHermesUrl(settings, "/v1/hub/server/action"), JSONObject().put("service", service).put("action", action), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } }) { Icon(Icons.Rounded.Check, contentDescription = "Conferma azione server", tint = Color.White) } },
             dismissButton = { IconButton(onClick = { pendingControlAction = null }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
         )
     }
@@ -503,7 +503,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             containerColor = AppColors.Surface,
             title = { Text("Conferma ${maintenanceLabels[operation] ?: operation}", color = Color.White) },
             text = { Text("Eseguire \"${maintenanceLabels[operation] ?: operation}\" sul server? Update, rollback e restore possono interrompere il servizio.", color = AppColors.Muted) },
-            confirmButton = { IconButton(onClick = { pendingMaintenanceAction = null; scope.launch { controlOutput = runCatching { postJson("${settings.gatewayUrl.trimEnd('/')}/hub/server/maintenance", JSONObject().put("operation", operation), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } }) { Icon(Icons.Rounded.Check, contentDescription = "Conferma manutenzione", tint = Color.White) } },
+            confirmButton = { IconButton(onClick = { pendingMaintenanceAction = null; scope.launch { controlOutput = runCatching { postJson(resolveHermesUrl(settings, "/v1/hub/server/maintenance"), JSONObject().put("operation", operation), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } }) { Icon(Icons.Rounded.Check, contentDescription = "Conferma manutenzione", tint = Color.White) } },
             dismissButton = { IconButton(onClick = { pendingMaintenanceAction = null }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
         )
     }

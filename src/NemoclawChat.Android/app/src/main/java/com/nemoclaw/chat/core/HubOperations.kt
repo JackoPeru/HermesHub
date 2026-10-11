@@ -2042,7 +2042,7 @@ internal suspend fun syncRemoteTasks(settings: AppSettings, apiKey: String?): Pa
 
 internal suspend fun supportsResponsesApi(settings: AppSettings, apiKey: String?): Boolean = withContext(Dispatchers.IO) {
     try {
-        val body = httpGet("${settings.gatewayUrl.trimEnd('/')}/capabilities", apiKey)
+        val body = httpGet(resolveHermesUrl(settings, "/v1/capabilities"), apiKey)
         body.isBlank() || body.contains("responses", ignoreCase = true)
     } catch (_: Exception) {
         false
@@ -3869,7 +3869,7 @@ internal suspend fun sendChatRequest(
                     hermesHubChatInstructions()
                 }) + projectContextInstructions(settings)
             )
-            val response = postJson("${settings.gatewayUrl.trimEnd('/')}/responses", payload, apiKey, allowCompatAuth = !(isHermesNative(settings) && settings.strictNativeMode))
+            val response = postJson(resolveHermesUrl(settings, "/v1/responses"), payload, apiKey, allowCompatAuth = !(isHermesNative(settings) && settings.strictNativeMode))
             if (response.first in 200..299) {
                 val text = extractAssistantText(response.second)
                 if (text.isNotBlank()) {

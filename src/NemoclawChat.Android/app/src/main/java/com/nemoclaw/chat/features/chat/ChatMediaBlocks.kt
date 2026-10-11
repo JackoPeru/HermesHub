@@ -875,8 +875,14 @@ internal fun MediaFileBlock(block: VisualBlock) {
         }
     }
 
-    if (block.mediaKind == "image" && canOpen && !isLocalAttachment) {
-        ChatInlineImage(
+    // Un blocco senza estensione (es. /v1/media/<id>) viene inferito come
+    // "document": ma se il mime o l'estensione dicono immagine, mostrala
+    // come immagine (niente card col solo nome file).
+    val imageByMime = block.mimeType.startsWith("image/", ignoreCase = true)
+    val imageByExt = (resolvedMediaUrl ?: block.mediaUrl)
+        .substringAfterLast('.', "").substringBefore('?').lowercase() in
+        setOf("png", "jpg", "jpeg", "webp", "gif", "bmp")
+    if ((block.mediaKind == "image" || imageByMime || imageByExt) && canOpen && !isLocalAttachment) {        ChatInlineImage(
             settings = settings,
             block = block,
             mediaUrl = resolvedMediaUrl,
