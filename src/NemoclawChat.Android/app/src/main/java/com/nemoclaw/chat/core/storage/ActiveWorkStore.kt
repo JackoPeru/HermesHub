@@ -5,13 +5,15 @@ import androidx.core.content.edit
 import org.json.JSONObject
 
 /**
- * Binding persistente tra conversazione e run server attiva.
+ * Binding persistente tra conversazione e lavoro server attivo.
  *
  * Il lavoro dell'agente vive sul gateway: se il client muore (app killata,
  * stream troncato) la run continua grazie a `continue_on_disconnect`. Questo
  * store tiene l'indirizzo per ritrovarla alla riapertura: conversationId ->
- * runId (+ sessioni e obiettivo). Scrittura atomica via apply(); mai dati
- * parziali. Solo il terminale reale (o lo stop utente confermato) cancella.
+ * runId (+ sessioni e obiettivo). Per i turni Responses (senza runId) vale
+ * responseId + partialMessageId (il messaggio parziale da sostituire al
+ * recupero). Scrittura atomica via apply(); mai dati parziali. Solo il
+ * terminale reale (o lo stop utente confermato) cancella.
  */
 data class ActiveWorkBinding(
     val conversationId: String,
@@ -19,7 +21,9 @@ data class ActiveWorkBinding(
     val sessionId: String? = null,
     val serverSessionId: String? = null,
     val goal: String = "",
-    val startedAtMs: Long = 0L
+    val startedAtMs: Long = 0L,
+    val responseId: String? = null,
+    val partialMessageId: String? = null
 )
 
 internal const val ACTIVE_WORK_PREFS = "chatclaw_active_work"
@@ -120,19 +124,24 @@ internal fun encodeActiveWorkBinding(binding: ActiveWorkBinding): JSONObject = J
     .put("serverSessionId", binding.serverSessionId ?: JSONObject.NULL)
     .put("goal", binding.goal)
     .put("startedAtMs", binding.startedAtMs)
+    .put("responseId", binding.responseId ?: JSONObject.NULL)
+    .put("partialMessageId", binding.partialMessageId ?: JSONObject.NULL)
 
 internal fun decodeActiveWorkBinding(obj: JSONObject?): ActiveWorkBinding? {
     if (obj == null) return null
     val conversationId = obj.optString("conversationId").trim()
     val runId = obj.optString("runId").trim()
-    if (conversationId.isEmpty() || runId.isEmpty()) return null
+    val responseId = obj.optString("responseId").trim()
+    if (conversationId.isEmpty() || (runId.isEmpty() && responseId.isEmpty())) return null
     return ActiveWorkBinding(
         conversationId = conversationId,
         runId = runId,
         sessionId = obj.optString("sessionId").takeIf { it.isNotBlank() },
         serverSessionId = obj.optString("serverSessionId").takeIf { it.isNotBlank() },
         goal = obj.optString("goal"),
-        startedAtMs = obj.optLong("startedAtMs")
+        startedAtMs = obj.optLong("startedAtMs"),
+        responseId = responseId.takeIf { it.isNotBlank() },
+        partialMessageId = obj.optString("partialMessageId").takeIf { it.isNotBlank() }
     )
 }
 

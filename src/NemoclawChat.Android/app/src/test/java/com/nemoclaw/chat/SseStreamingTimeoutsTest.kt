@@ -58,29 +58,28 @@ class SseStreamingTimeoutsTest {
     }
 
     @Test
-    fun reattachOnlyOnDeadTransportWithoutContent() {
+    fun reattachOnDeadTransportWithOrWithoutPartialContent() {
         // Caso video lunghi: transport morto, turno vivo, niente contenuto.
-        assertTrue(shouldReattachStoredResponse(null, "resp_abc", false, false))
+        assertTrue(shouldReattachStoredResponse(null, "resp_abc", false))
         assertTrue(
             shouldReattachStoredResponse(
                 "Hermes Responses API: stream parziale, connessione chiusa prima dell'evento terminale",
-                "resp_abc", false, false
+                "resp_abc", false
             )
         )
         assertTrue(
             shouldReattachStoredResponse(
                 "Stream Hermes interrotto: nessun dato per 90s (timeout inattivita).",
-                "resp_abc", false, false
+                "resp_abc", false
             )
         )
-        assertTrue(shouldReattachStoredResponse("gateway non raggiungibile", "resp_abc", false, false))
-        // Con errore reale, terminale, contenuto o senza id: mai.
-        assertFalse(shouldReattachStoredResponse("boom", "resp_abc", false, false))
-        assertFalse(shouldReattachStoredResponse("Hermes Responses API HTTP 500: err", "resp_abc", false, false))
-        assertFalse(shouldReattachStoredResponse("Hermes Responses API: API key rifiutata.", "resp_abc", false, false))
-        assertFalse(shouldReattachStoredResponse(null, "resp_abc", false, true))
-        assertFalse(shouldReattachStoredResponse(null, "resp_abc", true, false))
-        assertFalse(shouldReattachStoredResponse(null, "", false, false))
-        assertFalse(shouldReattachStoredResponse(null, null, false, false))
+        assertTrue(shouldReattachStoredResponse("gateway non raggiungibile", "resp_abc", false))
+        // Con errore reale, terminale o senza id: mai.
+        assertFalse(shouldReattachStoredResponse("boom", "resp_abc", false))
+        assertFalse(shouldReattachStoredResponse("Hermes Responses API HTTP 500: err", "resp_abc", false))
+        assertFalse(shouldReattachStoredResponse("Hermes Responses API: API key rifiutata.", "resp_abc", false))
+        assertFalse(shouldReattachStoredResponse(null, "resp_abc", true))
+        assertFalse(shouldReattachStoredResponse(null, "", false))
+        assertFalse(shouldReattachStoredResponse(null, null, false))
     }
 }

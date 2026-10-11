@@ -24,10 +24,28 @@ class ActiveWorkStoreTest {
             sessionId = "sess_1",
             serverSessionId = "srv_1",
             goal = "costruisci il sito",
-            startedAtMs = 1700000000000L
+            startedAtMs = 1700000000000L,
+            responseId = "resp_1",
+            partialMessageId = "msg_1"
         )
         val decoded = decodeActiveWorkBinding(encodeActiveWorkBinding(binding))
         assertEquals(binding, decoded)
+    }
+
+    @Test
+    fun responseOnlyBindingDecodesForResume() {
+        val binding = ActiveWorkBinding(
+            conversationId = "conv_1",
+            runId = "",
+            goal = "rispondi",
+            startedAtMs = 1700000000000L,
+            responseId = "resp_1",
+            partialMessageId = "msg_1"
+        )
+        val decoded = decodeActiveWorkBinding(encodeActiveWorkBinding(binding))
+        assertEquals(binding, decoded)
+        assertEquals("", decoded!!.runId)
+        assertEquals("resp_1", decoded.responseId)
     }
 
     @Test
@@ -35,6 +53,7 @@ class ActiveWorkStoreTest {
         assertNull(decodeActiveWorkBinding(null))
         assertNull(decodeActiveWorkBinding(JSONObject().put("runId", "r")))
         assertNull(decodeActiveWorkBinding(JSONObject().put("conversationId", "c")))
+        assertNull(decodeActiveWorkBinding(JSONObject().put("conversationId", "c").put("runId", "").put("responseId", "")))
         assertNull(decodeActiveWorkBinding(JSONObject()))
     }
 

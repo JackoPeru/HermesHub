@@ -88,15 +88,14 @@ internal fun isSseInactivityExpired(lastProgressNs: Long, nowNs: Long, timeoutMs
     return nowNs - lastProgressNs >= timeoutMs * 1_000_000L
 }
 
-/** Solo transport morto a turno vivo, senza contenuto e con response_id:
- *  unico caso in cui il reattach via GET ha senso. */
+/** Transport morto a turno vivo con response_id: il reattach via GET ha
+ *  senso anche con contenuto parziale gia mostrato (il merge degli snapshot
+ *  rimuove i duplicati: lo snapshot completo vince sul prefisso). */
 internal fun shouldReattachStoredResponse(
     lastError: String?,
     responseId: String?,
-    hasContent: Boolean,
     sawTerminal: Boolean
-): Boolean = !sawTerminal && !responseId.isNullOrBlank() && !hasContent &&
-    isTransportFailureForReattach(lastError)
+): Boolean = !sawTerminal && !responseId.isNullOrBlank() && isTransportFailureForReattach(lastError)
 
 /**
  * Errori di puro trasporto (il server potrebbe aver continuato grazie al
@@ -114,6 +113,28 @@ internal fun isTransportFailureForReattach(lastError: String?): Boolean {
 
 internal fun isSseInactivityMessage(message: String?): Boolean =
     message?.contains("nessun dato per 90s", ignoreCase = true) == true
+
+/**
+ * URL status di una response (resume dopo kill/rientro). Puro e testabile:
+ * stessa normalizzazione /v1 del resto (profileUrl centrale).
+ */
+internal fun responseStatusUrl(
+    settings: AppSettings,
+    botProfile: String?,
+    botMultiplexEnabled: Boolean,
+    responseId: String
+): String {
+    val base = if (botProfile.isNullOrBlank()) resolveHermesUrl(settings, "/v1/responses")
+    else resolveHermesProfileUrl(settings, botProfile, "/v1/responses", botMultiplexEnabled)
+    return "$base/${java.net.URLEncoder.encode(responseId, "UTF-8")}"
+}
+
+/** Retention run lato hub (~1h): oltre non ha senso riprovare il resume. */
+internal const val RESPONSE_RESUME_MAX_AGE_MS = 55L * 60L * 1000L
+
+/** Binding troppo vecchio per il resume (server ha buttato la response). Puro. */
+internal fun isResponseResumeExpired(startedAtMs: Long, nowMs: Long): Boolean =
+    startedAtMs <= 0L || nowMs - startedAtMs > RESPONSE_RESUME_MAX_AGE_MS
 
 private fun debugHttpLoggingInterceptor(): okhttp3.Interceptor? {
     if (!com.nemoclaw.chat.BuildConfig.DEBUG) return null
@@ -1357,7 +1378,7 @@ fun streamChatRequest(
     }
     suspend fun reattachStoredResponse(): Boolean {
         val responseId = emittedResponseId?.takeIf { it.isNotBlank() } ?: return false
-        val url = profileUrl("/responses") + "/" + responseId
+        val url = responseStatusUrl(settings, botProfile, botMultiplexEnabled, responseId)
         // Cap 55min: oltre scade anche la retention run lato hub (1h).
         repeat(330) {
             coroutineContext.ensureActive()
@@ -1395,14 +1416,11 @@ fun streamChatRequest(
     }
 
     if (!sawTerminal) {
-        // Transport morto a turno vivo e senza contenuto (caso video lunghi):
-        // il detach server-side continua il lavoro. Prima di dichiarare il
-        // turno morto, recupera la risposta archiviata via GET.
-        if (shouldReattachStoredResponse(
-                lastError, emittedResponseId,
-                accumText.isNotEmpty() || sawAnswerText || sawVisualOutput, sawTerminal
-            )
-        ) {
+        // Transport morto a turno vivo (caso video lunghi): il detach
+        // server-side continua il lavoro. Prima di dichiarare il turno
+        // morto, recupera la risposta archiviata via GET — anche con
+        // contenuto parziale gia mostrato (il merge non duplica).
+        if (shouldReattachStoredResponse(lastError, emittedResponseId, sawTerminal)) {
             emit(ChatStreamEvent.Status("Connessione persa a turno vivo: recupero la risposta dal server..."))
             if (reattachStoredResponse()) return@flow
         }
@@ -2697,7 +2715,7 @@ private fun extractReasoningText(value: Any?, insideReasoning: Boolean = false):
     }
 }
 
-private fun parseFullBody(body: String): List<ChatStreamEvent> {
+internal fun parseFullBody(body: String): List<ChatStreamEvent> {
     if (body.isBlank()) return emptyList()
     val out = mutableListOf<ChatStreamEvent>()
     val text = extractAssistantText(body)

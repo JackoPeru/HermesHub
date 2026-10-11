@@ -155,8 +155,23 @@ class ChatStreamProtocolTest {
     }
 
     @Test
-    fun resolveHermesUrlKeepsSingleV1() {
-        val bare = AppSettings(gatewayUrl = "http://100.94.223.14:8642")
+    fun responseStatusUrlIsCorrectAndResumeExpires() {
+        val settings = AppSettings(gatewayUrl = "http://100.94.223.14:8642")
+        assertEquals(
+            "http://100.94.223.14:8642/v1/responses/resp_1",
+            responseStatusUrl(settings, null, false, "resp_1")
+        )
+        assertEquals(
+            "http://100.94.223.14:8642/p/helper/v1/responses/resp+2",
+            responseStatusUrl(settings, "helper", true, "resp 2")
+        )
+        assertFalse(isResponseResumeExpired(1_000L, 2_000L))
+        assertTrue(isResponseResumeExpired(0L, 1_000L))
+        assertTrue(isResponseResumeExpired(1_000L, 1_000L + RESPONSE_RESUME_MAX_AGE_MS + 1L))
+    }
+
+    @Test
+    fun resolveHermesUrlKeepsSingleV1() {        val bare = AppSettings(gatewayUrl = "http://100.94.223.14:8642")
         assertEquals(
             "http://100.94.223.14:8642/v1/chat/completions",
             resolveHermesUrl(bare, "/v1/chat/completions")

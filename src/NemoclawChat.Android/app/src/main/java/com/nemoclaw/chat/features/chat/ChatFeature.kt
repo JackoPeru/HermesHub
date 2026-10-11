@@ -917,10 +917,88 @@ internal fun ChatScreen(
     // Estratto per riuso: al cambio chat, al rientro in foreground (poll) e
     // dopo il ritorno da background (senza questo, la UI restava inchiodata
     // sul checkpoint "sta lavorando" mentre la run era finita da minuti).
+    // Ripresa turni Responses dopo kill/rientro: il server ha continuato per
+    // continue_on_disconnect. Poll leggero (il recheck gira gia ogni 15s):
+    // a completamento sostituisce il messaggio parziale con la risposta vera
+    // (stesso id, niente duplicati), altrimenti riprova al prossimo tick.
+    suspend fun resumeResponseBinding(binding: ActiveWorkBinding) {
+        val cid = state.activeConversationId ?: return
+        val respId = binding.responseId?.takeIf { it.isNotBlank() } ?: return
+        val streaming = state.streamingState
+        if (streaming != null && !streaming.isDone) return
+        if (isResponseResumeExpired(binding.startedAtMs, System.currentTimeMillis())) {
+            withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
+            return
+        }
+        val url = responseStatusUrl(botSettings, botProfile, botMultiplexEnabled, respId)
+        val (code, body) = withContext(Dispatchers.IO) {
+            runCatching { httpGetResponse(url, botApiKey) }.getOrElse { 0 to "" }
+        }
+        // 401/403/404 permanenti: chiave, profilo o response sconosciuta/scaduta.
+        if (code == 401 || code == 403 || code == 404) {
+            withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
+            return
+        }
+        if (code !in 200..299) return
+        val storedStatus = runCatching { JSONObject(body).optString("status") }.getOrNull() ?: return
+        if (storedStatus != "completed" && storedStatus != "failed") return
+        var fullText = ""
+        var fullThinking = ""
+        if (storedStatus == "completed") {
+            for (ev in runCatching { parseFullBody(body) }.getOrDefault(emptyList())) {
+                when (ev) {
+                    is ChatStreamEvent.TextDelta -> fullText = mergeTextDelta(fullText, ev.delta)
+                    is ChatStreamEvent.TextSnapshot -> fullText = mergeTextSnapshot(fullText, ev.text)
+                    is ChatStreamEvent.ThinkingDelta -> fullThinking = mergeTextDelta(fullThinking, ev.delta)
+                    is ChatStreamEvent.ThinkingSnapshot -> fullThinking = mergeTextSnapshot(fullThinking, ev.text)
+                    else -> Unit
+                }
+            }
+        }
+        val replacement = if (storedStatus == "completed" && fullText.isNotBlank()) fullText
+            else "Turno precedente del server: $storedStatus."
+        val idx = state.messages.indexOfFirst { !it.fromUser && it.id == binding.partialMessageId }
+        if (idx >= 0) {
+            val old = state.messages[idx]
+            state.messages[idx] = old.copy(
+                text = replacement,
+                thinking = fullThinking.ifBlank { old.thinking }
+            )
+        } else if (replacement.isNotBlank() &&
+            state.messages.none { !it.fromUser && it.text.contains(replacement.take(WorkLimits.TRUNC_60)) }
+        ) {
+            state.messages.add(ChatMessage("Hermes", replacement, fromUser = false, thinking = fullThinking))
+        }
+        withContext(NonCancellable + Dispatchers.IO) {
+            clearActiveWorkBinding(context, cid)
+            runCatching {
+                val current = loadConversation(context, cid)
+                saveConversationSnapshot(
+                    context = context,
+                    conversationId = cid,
+                    mode = state.mode,
+                    prompt = current?.prompt.orEmpty(),
+                    messages = state.messages.toList(),
+                    source = "Hermes",
+                    preserveRemoteContinuity = true
+                )
+            }
+        }
+    }
+
     suspend fun recheckActiveWork() {
         val cid = state.activeConversationId ?: return
         val binding = withContext(Dispatchers.IO) { loadActiveWorkBinding(context, cid) }
             ?: return
+        if (binding.runId.isBlank() && !binding.responseId.isNullOrBlank()) {
+            // Turno Responses senza run: resume risposta via GET (kill/rientro).
+            resumeResponseBinding(binding)
+            return
+        }
+        if (binding.runId.isBlank()) {
+            withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
+            return
+        }
         if (state.streamingState?.activeRunId == binding.runId && state.sending) return
         val client = HermesRunClient(botSettings, botApiKey, botProfile, botMultiplexEnabled)
         val (code, info) = runCatching { client.status(binding.runId) }.getOrElse { 0 to null }
@@ -1907,6 +1985,7 @@ internal fun ChatScreen(
                             }
 
                             val serverTerminalRun = finalState.runStatus.lowercase() in setOf("completed", "failed", "cancelled")
+                            val cleanDone = !interrupted && finalState.error == null && !transportDetached
                             if (boundRunIdForTurn != null && !interrupted) {
                                 // Mai su stop locale (interrupted): il POST dello stop decide
                                 // (clear), e ri-salvare qui resusciterebbe il binding in gara.
@@ -1934,9 +2013,11 @@ internal fun ChatScreen(
                             // Fast path gestito: messaggi + snapshot gia fatti in
                             // runSmartCompletion, qui solo cleanup sotto.
                             if (!smartHandled) {
+                            var resumeMessageId: String? = null
                             val newMessagesToAppend = mutableListOf<ChatMessage>()
 
                             if (finalState.activityTimeline.isNotEmpty() || finalText.isNotEmpty() || finalState.visualBlocks.isNotEmpty()) {
+                                resumeMessageId = java.util.UUID.randomUUID().toString()
                                 newMessagesToAppend.add(
                                     ChatMessage(
                                         if (interrupted && partialText.isEmpty()) "Stato" else "Hermes",
@@ -1948,7 +2029,8 @@ internal fun ChatScreen(
                                         visualBlocksVersion = finalState.visualBlocksVersion,
                                         visualBlocks = finalState.visualBlocks,
                                         stats = finalState.stats,
-                                        rawEvents = rawEvents.toList()
+                                        rawEvents = rawEvents.toList(),
+                                        id = resumeMessageId!!
                                     )
                                 )
                             }
@@ -1985,6 +2067,32 @@ internal fun ChatScreen(
                             localHistory.addAll(newMessagesToAppend)
                             if (state.activeConversationId == activeStreamCid) {
                                 state.messages.addAll(newMessagesToAppend)
+                            }
+
+                            // Turni Responses senza runId: il server continua per
+                            // continue_on_disconnect. Salva l'indirizzo per il
+                            // resume (kill/rientro) o pulisci a turno pulito.
+                            // Mai su stop utente: niente resurrezioni indesiderate.
+                            val respIdForResume = finalState.responseId?.takeIf { it.isNotBlank() }
+                            if (boundRunIdForTurn == null && respIdForResume != null) {
+                                withContext(NonCancellable + Dispatchers.IO) {
+                                    if (cleanDone || interrupted) {
+                                        clearActiveWorkBinding(context, activeStreamCid)
+                                    } else if (resumeMessageId != null) {
+                                        saveActiveWorkBinding(
+                                            context,
+                                            ActiveWorkBinding(
+                                                conversationId = activeStreamCid,
+                                                runId = "",
+                                                sessionId = sessionIdForTurn ?: state.hermesSessionId,
+                                                goal = displayText.take(WorkLimits.TRUNC_140),
+                                                startedAtMs = System.currentTimeMillis(),
+                                                responseId = respIdForResume,
+                                                partialMessageId = resumeMessageId
+                                            )
+                                        )
+                                    }
+                                }
                             }
                             } // fine append normali (smart: gia fatti in runSmartCompletion)
 
