@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.244 - 2026-10-12
+
+- Android: audit totale endpoint app/server — chat, responses, capabilities, models, trascrizioni vocali e titoli usano sempre `/v1/...` (prima alcuni path nudi davano 404); centralizzato in `profileUrl`/`resolveHermesUrl` cosi non ricapita.
+
 ## 0.6.243 - 2026-10-12
 
 - Android: upload allegati su `/v1/media/upload` (il path senza `/v1` dava 404 e bloccava ogni invio con foto).
