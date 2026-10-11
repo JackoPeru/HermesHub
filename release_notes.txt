@@ -1,9 +1,9 @@
-Hermes Hub 0.6.245 (il turno sopravvive: detach + resume)
+Hermes Hub 0.6.246 (connessioni app/server tutte verificate)
 
-- Android: il timeout 90s non uccide piu il turno — stacca e recupera la risposta completa dal server, anche se avevi gia visto prefill/ragionamento parziale (niente duplicati).
-- Android: se chiudi l'app (o spegni il telefono) a turno vivo, al rientro la risposta recuperata sostituisce il messaggio parziale. Il server continua per `continue_on_disconnect` in tutti i percorsi.
-- Android: binding di resume anche per i turni Responses (prima solo run); pulizia a turno pulito/stop, scadenza 55min (retention server).
-- Versioni: Windows/AdminBridge `0.6.245`; Android `versionName 0.6.245`, `versionCode 249` (stessa firma: aggiornamento normale).
-- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.245-android.apk`; MSIX `NemoclawChat.Windows_0.6.245.0_x64.msix`; gateway Linux `HermesHub-0.6.245-linux-gateway.tar.gz`.
-- SHA-256 Android: `6dd80898355d96449dedd2807468af410eef062dc04c886c1d3ef7326b3ebb8c`.
-- SHA-256 gateway: `86615dd5f9a24eca0a437ee8a83b25d9751dfed5c9cfc1e6664d1d64d22ebac5`.
+- Android: audit totale endpoint contro server live - chat, responses, capabilities, models, trascrizioni vocali, titoli, controllo server usano sempre /v1/ (i path nudi davano 404). Centralizzato in profileUrl/resolveHermesUrl.
+- Android: blocchi media senza estensione ma con mime/estensione immagine si aprono come immagini (niente piu card col solo nome file).
+- Rete anti-regressione in suite: path nudi vietati per costruzione.
+- Versioni: Windows/AdminBridge 0.6.246; Android versionName 0.6.246, versionCode 250 (stessa firma: aggiornamento normale).
+- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.246-android.apk; MSIX NemoclawChat.Windows_0.6.246.0_x64.msix; gateway Linux HermesHub-0.6.246-linux-gateway.tar.gz.
+- SHA-256 Android: `ae81cef427a5b9c9338a50e96fc997b1eeed9a8c6c1538509403de3f4c3dfd0f`.
+- SHA-256 gateway: `b85e7802d4720f8088cd8921b0712f4eec5b1756c65e56a7526fef0389061813`.

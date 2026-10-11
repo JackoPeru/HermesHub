@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.246 - 2026-10-12
+
+- Android: audit totale endpoint contro server live — chat, responses, capabilities, models, trascrizioni, titoli, controllo server usano sempre `/v1/` (i path nudi davano 404); rete anti-regressione in suite.
+- Android: blocchi media senza estensione ma con mime/estensione immagine si aprono come immagini (niente piu card col solo nome file).
+
 ## 0.6.245 - 2026-10-12
 
 - Android: il timeout 90s non uccide piu il turno — stacca e recupera la risposta dal server (anche con risposta parziale, senza duplicati); se chiudi l'app, al rientro la risposta recuperata sostituisce il messaggio parziale.
