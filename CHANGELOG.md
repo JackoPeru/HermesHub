@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.245 - 2026-10-12
+
+- Android: il timeout 90s non uccide piu il turno — stacca e recupera la risposta dal server (anche con risposta parziale, senza duplicati); se chiudi l'app, al rientro la risposta recuperata sostituisce il messaggio parziale.
+- Android: binding di resume anche per i turni Responses (prima solo run); pulizia a turno pulito/stop, scadenza 55min.
+
 ## 0.6.244 - 2026-10-12
 
 - Android: audit totale endpoint app/server — chat, responses, capabilities, models, trascrizioni vocali e titoli usano sempre `/v1/...` (prima alcuni path nudi davano 404); centralizzato in `profileUrl`/`resolveHermesUrl` cosi non ricapita.

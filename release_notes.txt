@@ -1,8 +1,9 @@
-Hermes Hub 0.6.244 (connessioni app/server tutte verificate)
+Hermes Hub 0.6.245 (il turno sopravvive: detach + resume)
 
-- Android: audit totale endpoint contro il server live — chat, responses, capabilities, models, trascrizioni vocali e titoli usano sempre `/v1/...` (i path nudi davano 404). Centralizzato in `profileUrl`/`resolveHermesUrl` cosi non ricapita.
-- Tabella verificata: /v1/chat/completions, /v1/responses, /v1/capabilities, /v1/models, /v1/audio/*, /v1/media/upload, /v1/news|video/library, /api/sessions, /api/jobs, /v1/hub/*, /health* — tutti 2xx/4xx attesi, zero 404 spuri.
-- Versioni: Windows/AdminBridge `0.6.244`; Android `versionName 0.6.244`, `versionCode 248` (stessa firma: aggiornamento normale).
-- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.244-android.apk`; MSIX `NemoclawChat.Windows_0.6.244.0_x64.msix`; gateway Linux `HermesHub-0.6.244-linux-gateway.tar.gz`.
-- SHA-256 Android: `1d0fd32b605ac31b8e8230dfff33255e3da49e0ba8149c24474cf8ff0d12a69b`.
-- SHA-256 gateway: `3b0f626b78ed818718b3e8ecfcec8739c160d5b5cc5721250ee50bd765e17372`.
+- Android: il timeout 90s non uccide piu il turno — stacca e recupera la risposta completa dal server, anche se avevi gia visto prefill/ragionamento parziale (niente duplicati).
+- Android: se chiudi l'app (o spegni il telefono) a turno vivo, al rientro la risposta recuperata sostituisce il messaggio parziale. Il server continua per `continue_on_disconnect` in tutti i percorsi.
+- Android: binding di resume anche per i turni Responses (prima solo run); pulizia a turno pulito/stop, scadenza 55min (retention server).
+- Versioni: Windows/AdminBridge `0.6.245`; Android `versionName 0.6.245`, `versionCode 249` (stessa firma: aggiornamento normale).
+- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.245-android.apk`; MSIX `NemoclawChat.Windows_0.6.245.0_x64.msix`; gateway Linux `HermesHub-0.6.245-linux-gateway.tar.gz`.
+- SHA-256 Android: `6dd80898355d96449dedd2807468af410eef062dc04c886c1d3ef7326b3ebb8c`.
+- SHA-256 gateway: `86615dd5f9a24eca0a437ee8a83b25d9751dfed5c9cfc1e6664d1d64d22ebac5`.
