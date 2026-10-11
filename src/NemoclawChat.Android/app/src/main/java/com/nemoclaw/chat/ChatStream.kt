@@ -1818,6 +1818,19 @@ internal suspend fun buildPromptWithAttachmentToolRefs(
     return AttachmentPreparation(text, remaining, uploaded.size, errors)
 }
 
+/**
+ * Endpoint upload allegati: SOLO /v1/media/upload esiste sul gateway (nudo
+ * 404). resolveHermesUrl gestisce root con/senza /v1; il profilo multiplex
+ * reinserisce /v1 dopo /p/<profile> (come AutomationFeature). Puro e testabile.
+ */
+internal fun attachmentUploadEndpoint(settings: AppSettings, botProfile: String?, botMultiplexEnabled: Boolean): String {
+    return if (botProfile.isNullOrBlank()) {
+        resolveHermesUrl(settings, "/v1/media/upload")
+    } else {
+        resolveHermesProfileUrl(settings, botProfile, "/v1/media/upload", botMultiplexEnabled)
+    }
+}
+
 internal suspend fun uploadAttachmentForTool(
     settings: AppSettings,
     attachment: ChatInputAttachment,
@@ -1826,11 +1839,8 @@ internal suspend fun uploadAttachmentForTool(
     botMultiplexEnabled: Boolean,
     allowCompatAuth: Boolean
 ): UploadedAttachmentRef {
-    val endpoint = if (botProfile.isNullOrBlank()) {
-        "${settings.gatewayUrl.trimEnd('/')}/media/upload"
-    } else {
-        resolveHermesProfileUrl(settings, botProfile, "/media/upload", botMultiplexEnabled)
-    }
+    // Upload media: SOLO /v1/media/upload esiste sul gateway (nudo 404).
+    val endpoint = attachmentUploadEndpoint(settings, botProfile, botMultiplexEnabled)
     val body = attachment.streamingJsonUploadBody()
     val authCandidates = hermesAuthCandidates(apiKey, allowCompatAuth)
     val requestContext = HermesHubProtocol.newCorrelationContext()

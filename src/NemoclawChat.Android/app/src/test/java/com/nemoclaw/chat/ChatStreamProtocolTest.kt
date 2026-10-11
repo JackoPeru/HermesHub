@@ -155,6 +155,30 @@ class ChatStreamProtocolTest {
     }
 
     @Test
+    fun attachmentUploadEndpointAlwaysUsesV1() {
+        val plain = AppSettings(gatewayUrl = "http://100.94.223.14:8642")
+        assertEquals(
+            "http://100.94.223.14:8642/v1/media/upload",
+            attachmentUploadEndpoint(plain, null, false)
+        )
+        val trailingSlash = AppSettings(gatewayUrl = "http://100.94.223.14:8642/")
+        assertEquals(
+            "http://100.94.223.14:8642/v1/media/upload",
+            attachmentUploadEndpoint(trailingSlash, "", false)
+        )
+        val withV1 = AppSettings(gatewayUrl = "http://100.94.223.14:8642/v1")
+        assertEquals(
+            "http://100.94.223.14:8642/v1/media/upload",
+            attachmentUploadEndpoint(withV1, null, false)
+        )
+        val profile = AppSettings(gatewayUrl = "http://100.94.223.14:8642")
+        assertEquals(
+            "http://100.94.223.14:8642/p/helper/v1/media/upload",
+            attachmentUploadEndpoint(profile, "helper", true)
+        )
+    }
+
+    @Test
     fun backendNameIsRemovedFromVisibleStatus() {
         assertEquals("Elaborazione prompt", friendlyActivityStatus("llama.cpp: prefill prompt"))
         assertEquals("Attesa primo token della risposta", friendlyActivityStatus("llama.cpp: attesa primo token"))
