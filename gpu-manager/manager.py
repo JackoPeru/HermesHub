@@ -314,16 +314,17 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
     # 30GB di RAM e uccidono il server. I template sono già fissi a fps
     # 24.0; qui si scala la risoluzione mantenendo l'aspect. Vale per tutti
     # i video, anche se il chiamante chiede di più (fail-safe, non negoziabile).
+    # Base default: 480p landscape 854x480 (area = cap, mai riscalato).
     if (PRESETS.get(preset) or {}).get("kind") == "video":
         try:
             _clamp_dur = float(params.get("duration", 0) or 0)
         except (TypeError, ValueError):
             _clamp_dur = 0
         try:
-            _w0 = float(params.get("width", 1344) or 1344)
-            _h0 = float(params.get("height", 768) or 768)
+            _w0 = float(params.get("width", 854) or 854)
+            _h0 = float(params.get("height", 480) or 480)
         except (TypeError, ValueError):
-            _w0, _h0 = 1344.0, 768.0
+            _w0, _h0 = 854.0, 480.0
         # Area cap 480x854 (=409920): scala mantenendo l'aspect se
         # w*h eccede, min 64px per lato (anti-OOM, fail-safe).
         if _w0 * _h0 > 480 * 854:
@@ -347,8 +348,8 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
         "CFG": _num(params.get("cfg", default_cfg), float(default_cfg), 0, 30),
         "RESOLUTION": _num(params.get("resolution", 1024), 1024, 0, 2048),
         "DENOISE": _num(params.get("denoise", 0.8), 0.8, 0, 1),
-        "WIDTH": _num(params.get("width", 1024 if (PRESETS.get(preset) or {}).get("kind") == "image" else 1344), 1024, 64, 2048),
-        "HEIGHT": _num(params.get("height", 1024 if (PRESETS.get(preset) or {}).get("kind") == "image" else 768), 1024, 64, 2048),
+        "WIDTH": _num(params.get("width", 1024 if (PRESETS.get(preset) or {}).get("kind") == "image" else 854), 1024, 64, 2048),
+        "HEIGHT": _num(params.get("height", 1024 if (PRESETS.get(preset) or {}).get("kind") == "image" else 480), 1024, 64, 2048),
     }
     try:
         duration = float(params.get("duration", 0) or 0)
