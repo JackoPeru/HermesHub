@@ -1,9 +1,7 @@
-Hermes Hub 0.6.242 (stati manager veritieri + stop al dirottamento LLM)
+Hermes Hub 0.6.243 (upload foto sistemato)
 
-- Manager: `llm_loaded` somma la VRAM di tutte le GPU (lo split 6.6+10.8GB risultava scarico: BOOT incastrato, restore a vuoto, flag bugiardi). Ora AUTO/LLM_READY/carico con valori veri.
-- Android: rimossa la forzatura /mode/llm all'apertura della chat — era lei a bloccare tutto su LLM manuale mentre si usava Comfy. Resta il toggle manuale in TopBar.
-- Causa serata: Comfy diretto morto di OOM (28GB RAM) → AUTO corretto → app ha sparato /mode/llm → blocco su LLM. Catena chiusa dai due fix.
-- Versioni: Windows/AdminBridge `0.6.242`; Android `versionName 0.6.242`, `versionCode 246` (stessa firma: aggiornamento normale).
-- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.242-android.apk`; MSIX `NemoclawChat.Windows_0.6.242.0_x64.msix`; gateway Linux `HermesHub-0.6.242-linux-gateway.tar.gz`.
-- SHA-256 Android: `46128815a6670e9db2b04a9065fe7aa425491e55db01d4724eb719c4de3b92fa`.
-- SHA-256 gateway: `b3c1a87032a2ede4a000c82ed29aa7671bb4c199f65c3055cfff9b8576dfb82a`.
+- Android: upload allegati su `/v1/media/upload` — il path senza `/v1` dava 404 e bloccava ogni invio con foto.
+- Versioni: Windows/AdminBridge `0.6.243`; Android `versionName 0.6.243`, `versionCode 247` (stessa firma: aggiornamento normale).
+- Asset ufficiali: APK Android con Meta DAT `HermesHub-0.6.243-android.apk`; MSIX `NemoclawChat.Windows_0.6.243.0_x64.msix`; gateway Linux `HermesHub-0.6.243-linux-gateway.tar.gz`.
+- SHA-256 Android: `8043a63be8fab0b8e890ddfeedb0c6fca9d779f2e66a7c4a8556f67458b8e122`.
+- SHA-256 gateway: `706acc9975ada2bda07c091915573726ed99b1a2abbd9cb31b57eae2845ba1a2`.

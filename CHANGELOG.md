@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.243 - 2026-10-12
+
+- Android: upload allegati su `/v1/media/upload` (il path senza `/v1` dava 404 e bloccava ogni invio con foto).
+
 ## 0.6.242 - 2026-10-12
 
 - Manager: `llm_loaded` somma la VRAM di tutte le GPU (lo split 6.6+10.8GB risultava scarico, incastrava BOOT e ripeteva restore a vuoto); stati di nuovo veritieri.
