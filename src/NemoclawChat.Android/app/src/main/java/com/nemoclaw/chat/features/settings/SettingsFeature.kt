@@ -242,6 +242,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
+import com.nemoclaw.chat.resolveHermesUrl
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -1171,7 +1172,7 @@ internal fun SettingsScreen(
                             }
                         status = "Leggo capabilities Hermes..."
                         scope.launch {
-                            status = runCatching { httpGet("${candidate.gatewayUrl.trimEnd('/')}/capabilities", apiKey) }
+                            status = runCatching { httpGet(resolveHermesUrl(candidate, "/v1/capabilities"), apiKey) }
                                 .getOrElse { "Capabilities non leggibili: ${it.message ?: it.javaClass.simpleName}" }
                         }
                         }) {
@@ -1548,7 +1549,7 @@ internal suspend fun generateConversationTitle(
                 .put("store", false)
                 .put("stream", false)
             val response = postJson(
-                "${settings.gatewayUrl.trimEnd('/')}/responses",
+                resolveHermesUrl(settings, "/v1/responses"),
                 payload,
                 apiKey,
                 allowCompatAuth = true

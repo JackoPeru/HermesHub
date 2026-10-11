@@ -251,6 +251,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
+import com.nemoclaw.chat.resolveHermesUrl
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -460,10 +461,10 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                     IconButton(onClick = {
                         wsProbe = wsProbe.copy(status = "Lettura capabilities...", detail = "Chiamata a /v1/capabilities e /v1/models.")
                         scope.launch {
-                            val capabilities = runCatching { httpGet("${settings.gatewayUrl.trimEnd('/')}/capabilities", loadGatewaySecret(context)) }.getOrElse { it.message ?: it.javaClass.simpleName }
-                            val models = runCatching { httpGet("${settings.gatewayUrl.trimEnd('/')}/models", loadGatewaySecret(context)) }.getOrElse { it.message ?: it.javaClass.simpleName }
+                            val capabilities = runCatching { httpGet(resolveHermesUrl(settings, "/v1/capabilities"), loadGatewaySecret(context)) }.getOrElse { it.message ?: it.javaClass.simpleName }
+                            val models = runCatching { httpGet(resolveHermesUrl(settings, "/v1/models"), loadGatewaySecret(context)) }.getOrElse { it.message ?: it.javaClass.simpleName }
                             wsProbe = GatewayWsProbe(
-                                wsUrl = "${settings.gatewayUrl.trimEnd('/')}/capabilities",
+                wsUrl = resolveHermesUrl(settings, "/v1/capabilities"),
                                 connected = true,
                                 status = "Capabilities lette.",
                                 detail = "Capabilities e models letti da Hermes.",

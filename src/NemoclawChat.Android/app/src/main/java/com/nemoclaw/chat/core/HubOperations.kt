@@ -3924,7 +3924,7 @@ internal suspend fun sendChatRequest(
                     )
                 }
             })
-        val response = postJson("${settings.gatewayUrl.trimEnd('/')}/chat/completions", payload, apiKey, allowCompatAuth = !(isHermesNative(settings) && settings.strictNativeMode), sessionId = serverConversationId)
+        val response = postJson(resolveHermesUrl(settings, "/v1/chat/completions"), payload, apiKey, allowCompatAuth = !(isHermesNative(settings) && settings.strictNativeMode), sessionId = serverConversationId)
         if (response.first in 200..299) {
             val text = extractAssistantText(response.second)
             if (text.isNotBlank()) {

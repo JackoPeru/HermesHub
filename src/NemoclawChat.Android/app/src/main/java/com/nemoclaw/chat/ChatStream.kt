@@ -1017,10 +1017,19 @@ fun streamChatRequest(
     val nativeMode = isHermesNative(settings)
     val serverConversationId = botSessionId?.trim()?.takeIf { it.isNotBlank() }
         ?: hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, conversationId)
-    fun profileUrl(path: String): String = if (botProfile.isNullOrBlank()) {
-        "${settings.gatewayUrl.trimEnd('/')}$path"
-    } else {
-        resolveHermesProfileUrl(settings, botProfile, path, botMultiplexEnabled)
+    fun profileUrl(path: String): String {
+        // Il gateway serve tutto sotto /v1 (o /api, /health): un path nudo
+        // fa 404. Normalizza qui cosi nessun chiamante puo sbagliare.
+        val normalized = (if (path.startsWith("/")) path else "/$path").let {
+            if (it.startsWith("/v1", ignoreCase = true) || it.startsWith("/api/", ignoreCase = true) ||
+                it.startsWith("/health", ignoreCase = true)
+            ) it else "/v1$it"
+        }
+        return if (botProfile.isNullOrBlank()) {
+            resolveHermesUrl(settings, normalized)
+        } else {
+            resolveHermesProfileUrl(settings, botProfile, normalized, botMultiplexEnabled)
+        }
     }
     val attachmentPreparation = buildPromptWithAttachmentToolRefs(settings, prompt, attachments, apiKey, botProfile, botMultiplexEnabled, allowCompatAuth)
     val promptForModel = attachmentPreparation.prompt

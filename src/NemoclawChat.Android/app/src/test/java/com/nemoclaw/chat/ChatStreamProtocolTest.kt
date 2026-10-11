@@ -155,8 +155,37 @@ class ChatStreamProtocolTest {
     }
 
     @Test
-    fun attachmentUploadEndpointAlwaysUsesV1() {
-        val plain = AppSettings(gatewayUrl = "http://100.94.223.14:8642")
+    fun resolveHermesUrlKeepsSingleV1() {
+        val bare = AppSettings(gatewayUrl = "http://100.94.223.14:8642")
+        assertEquals(
+            "http://100.94.223.14:8642/v1/chat/completions",
+            resolveHermesUrl(bare, "/v1/chat/completions")
+        )
+        assertEquals(
+            "http://100.94.223.14:8642/v1/responses",
+            resolveHermesUrl(bare, "/v1/responses")
+        )
+        val withV1 = AppSettings(gatewayUrl = "http://100.94.223.14:8642/v1")
+        assertEquals(
+            "http://100.94.223.14:8642/v1/chat/completions",
+            resolveHermesUrl(withV1, "/v1/chat/completions")
+        )
+        assertEquals(
+            "http://100.94.223.14:8642/v1/capabilities",
+            resolveHermesUrl(bare, "/v1/capabilities")
+        )
+        assertEquals(
+            "http://100.94.223.14:8642/v1/models",
+            resolveHermesUrl(bare, "/v1/models")
+        )
+        assertEquals(
+            "http://100.94.223.14:8642/v1/audio/transcriptions",
+            resolveHermesUrl(bare, "/v1/audio/transcriptions")
+        )
+    }
+
+    @Test
+    fun attachmentUploadEndpointAlwaysUsesV1() {        val plain = AppSettings(gatewayUrl = "http://100.94.223.14:8642")
         assertEquals(
             "http://100.94.223.14:8642/v1/media/upload",
             attachmentUploadEndpoint(plain, null, false)

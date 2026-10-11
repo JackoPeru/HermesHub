@@ -247,6 +247,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
+import com.nemoclaw.chat.resolveHermesUrl
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import com.nemoclaw.chat.createVideoPlayerView
 import com.nemoclaw.chat.FullscreenVideoOrientationEffect
@@ -2198,7 +2199,6 @@ internal fun ChatScreen(
                             scope.launch {
                                 try {
                                     val secret = loadGatewaySecret(context) ?: ""
-                                    val baseUrl = settings.gatewayUrl.trimEnd('/')
 
                                     val requestBody = okhttp3.MultipartBody.Builder()
                                         .setType(okhttp3.MultipartBody.FORM)
@@ -2206,7 +2206,7 @@ internal fun ChatScreen(
                                         .build()
 
                                     val requestBuilder = okhttp3.Request.Builder()
-                                        .url("$baseUrl/audio/transcriptions")
+                                        .url(resolveHermesUrl(settings, "/v1/audio/transcriptions"))
                                         .post(requestBody)
 
                                     HermesHubProtocol.addCorrelationHeaders(
