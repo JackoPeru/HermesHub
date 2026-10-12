@@ -116,7 +116,7 @@ internal fun loadSettings(context: Context): AppSettings {
         visualBlocksMode = prefs.getString("visualBlocksMode", AppDefaults.visualBlocksMode) ?: AppDefaults.visualBlocksMode,
         videoLibraryPath = prefOrDefault("videoLibraryPath", AppDefaults.videoLibraryPath, healBlank = true),
         newsLibraryPath = prefOrDefault("newsLibraryPath", AppDefaults.newsLibraryPath, healBlank = true),
-        imageLibraryPath = prefs.getString("imageLibraryPath", AppDefaults.imageLibraryPath) ?: AppDefaults.imageLibraryPath,
+        imageLibraryPath = prefOrDefault("imageLibraryPath", AppDefaults.imageLibraryPath, healBlank = true),
         extraImageLibraryPaths = parseExtraImageLibraryPaths(prefs.getString("extraImageLibraryPaths", "").orEmpty()),
         activeProjectId = prefs.getString("activeProjectId", AppDefaults.activeProjectId) ?: AppDefaults.activeProjectId,
         activeProjectName = prefs.getString("activeProjectName", AppDefaults.activeProjectName) ?: AppDefaults.activeProjectName,
@@ -304,7 +304,7 @@ internal object AppDefaults {
     const val visualBlocksMode = "auto"
     const val videoLibraryPath = "/home/matteo/video"
     const val newsLibraryPath = "/home/matteo/news"
-    const val imageLibraryPath = ""
+    const val imageLibraryPath = "/home/matteo/.hermes/hub_uploads/denudate"
     val extraImageLibraryPaths: List<String> = emptyList()
     const val activeProjectId = ""
     const val activeProjectName = ""

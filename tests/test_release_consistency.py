@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.253"
-EXPECTED_ANDROID_VERSION_CODE = 257
+EXPECTED_VERSION = "0.6.254"
+EXPECTED_ANDROID_VERSION_CODE = 258
 
 
 def read(relative_path: str) -> str:
@@ -346,7 +346,9 @@ class ReleaseConsistencyTests(unittest.TestCase):
                 [
                     line
                     for line in home_hits
-                    if "/home/matteo/video" in line or "/home/matteo/news" in line
+                    if "/home/matteo/video" in line
+                    or "/home/matteo/news" in line
+                    or "/home/matteo/.hermes/hub_uploads/denudate" in line
                 ]
             ),
         )
@@ -542,6 +544,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn('localGatewayUrl = "http://192.168.1.6:8642"', app_settings)
         self.assertIn('videoLibraryPath = "/home/matteo/video"', app_settings)
         self.assertIn('newsLibraryPath = "/home/matteo/news"', app_settings)
+        self.assertIn('imageLibraryPath = "/home/matteo/.hermes/hub_uploads/denudate"', app_settings)
         android_project = read("src/NemoclawChat.Android/app/build.gradle.kts")
         self.assertIn("HERMES_DEFAULT_API_KEY", android_project)
         self.assertIn("hermes.defaultApiKey", android_project)

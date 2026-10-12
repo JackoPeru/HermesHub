@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.254 - 2026-10-12
+
+- Android: cartella immagini preimpostata su denudate (fresh install e guarigione blank): la sezione Immagini parte gia dalla cartella giusta.
+
 ## 0.6.253 - 2026-10-12
 
 - Android: 403 browse = "cartella non consentita" (non piu "verifica la chiave"); `/.hermes/...` normalizzato in `~/.hermes/...`.
