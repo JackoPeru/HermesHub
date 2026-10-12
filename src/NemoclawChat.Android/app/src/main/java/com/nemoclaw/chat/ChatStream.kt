@@ -2780,15 +2780,18 @@ private fun extractInlineMediaBlocks(text: String): List<VisualBlock> {
 }
 
 private fun createInlineMediaBlock(index: Int, label: String, url: String, explicit: Boolean): VisualBlock {
-        val filename = inferMediaFilename(label, url)
-        val kind = inferMediaKind(filename, url)
+        // L'agente a volte scrive token nudi (es. `![x](349a92b64d7.webp?hub_token=...)`)
+        // invece del proxy completo: sono media_id validi sul gateway.
+        val resolvedUrl = resolveBareMediaToken(url)
+        val filename = inferMediaFilename(label, resolvedUrl)
+        val kind = inferMediaKind(filename, resolvedUrl)
         return VisualBlock(
-            id = "inline-media-${stableInlineId(url, index)}",
+            id = "inline-media-${stableInlineId(resolvedUrl, index)}",
             type = "media_file",
             title = filename.ifBlank { "File multimediale" },
-            mediaUrl = url,
+            mediaUrl = resolvedUrl,
             mediaKind = kind,
-            mimeType = inferMimeType(filename, url),
+            mimeType = inferMimeType(filename, resolvedUrl),
             filename = filename,
             thumbnailUrl = "",
             alt = label.ifBlank { filename.ifBlank { "Media Hermes" } },
@@ -2815,6 +2818,28 @@ private fun stableInlineId(value: String, index: Int): String {
     val hash = value.fold(17) { acc, ch -> acc * 31 + ch.code }
     return "${index}-${hash.toUInt().toString(16)}"
 }
+
+/**
+ * Token mediatico nudo (`xxx.webp`, anche con `?...`) -> proxy gateway.
+ * Solo token senza slash/schema/due-punti: prose, path Windows/Unix e URL
+ * assoluti restano intatti. Puro e testabile.
+ */
+internal fun resolveBareMediaToken(url: String): String {
+    val trimmed = url.trim().trimEnd('.', ',', ';', ':')
+    if (trimmed.isEmpty()) return url
+    if (trimmed.startsWith("/") || trimmed.startsWith("file:", ignoreCase = true) ||
+        trimmed.startsWith("data:") || trimmed.contains("://") || trimmed.contains(':') ||
+        trimmed.contains('\\') || trimmed.any { it.isWhitespace() }
+    ) {
+        return url
+    }
+    if (!BARE_MEDIA_TOKEN_REGEX.matches(trimmed)) return url
+    return "/v1/media/$trimmed"
+}
+
+private val BARE_MEDIA_TOKEN_REGEX = Regex(
+    """(?i)^[^/\s?#]+\.(png|jpg|jpeg|webp|gif|bmp|mp4|m4v|mov|webm|mp3|wav|m4a|flac|ogg)([?#].*)?$"""
+)
 
 private fun inferMediaFilename(label: String, url: String): String {
     val candidate = label.takeIf { it.contains('.') } ?: url.substringAfterLast('/').substringAfterLast('\\')

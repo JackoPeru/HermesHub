@@ -171,6 +171,27 @@ class ChatStreamProtocolTest {
     }
 
     @Test
+    fun bareMediaTokensResolveToGatewayProxy() {
+        assertEquals("/v1/media/349a92b64d7.webp", resolveBareMediaToken("349a92b64d7.webp"))
+        assertEquals(
+            "/v1/media/349a92b64d7.webp?hub_token=abc",
+            resolveBareMediaToken("349a92b64d7.webp?hub_token=abc")
+        )
+        assertEquals("/v1/media/clip.mp4", resolveBareMediaToken("clip.mp4"))
+        // Intoccabili: assoluti, proxy, path, prose, windows.
+        assertEquals("/v1/media/abc.webp", resolveBareMediaToken("/v1/media/abc.webp"))
+        assertEquals(
+            "https://cdn.example/x.png",
+            resolveBareMediaToken("https://cdn.example/x.png")
+        )
+        assertEquals("denudata", resolveBareMediaToken("denudata"))
+        assertEquals("C:\\foto\\x.png", resolveBareMediaToken("C:\\foto\\x.png"))
+        assertEquals("/home/u/x.png", resolveBareMediaToken("/home/u/x.png"))
+        assertEquals("guarda la foto sopra", resolveBareMediaToken("guarda la foto sopra"))
+        assertEquals("", resolveBareMediaToken(""))
+    }
+
+    @Test
     fun resolveHermesUrlKeepsSingleV1() {        val bare = AppSettings(gatewayUrl = "http://100.94.223.14:8642")
         assertEquals(
             "http://100.94.223.14:8642/v1/chat/completions",
