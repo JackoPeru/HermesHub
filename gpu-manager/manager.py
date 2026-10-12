@@ -2521,8 +2521,189 @@ async def cancel_job(job_id: str, _: None = Depends(require_key)) -> dict:
     return get_job(job_id)
 
 
-# Strong reference to the worker task. asyncio holds only weak refs to
-# bare create_task() handles: without this the GC silently collects the
+# ------------------------------------------------------- browse (read-only) ---
+# Sfoglia cartelle immagini per la sezione Immagini (1 livello, solo
+# lettura): l'agent gateway e manifest-pinned, il manager e ridistribuibile.
+# Jail su root consentiti + auth manager key; i byte passano dal proxy
+# /v1/media live del gateway (che ri-applica il suo jail a serve-time).
+
+_BROWSE_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"})
+_BROWSE_MAX_FOLDERS = 500
+_BROWSE_MAX_ITEMS = 1500
+
+
+def _browse_roots() -> list:
+    """Radici sfogliabili (mirror HERMES_MEDIA_ROOTS + librerie utente)."""
+    home = Path.home()
+    candidates = [
+        home / ".hermes" / "hub_uploads",
+        home / "video",
+        home / "news",
+        home / "images",
+        home / ".hermes" / "cache",
+        home / ".hermes" / "media",
+    ]
+    for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):
+        if part.strip():
+            candidates.append(Path(part.strip()).expanduser())
+    unique: list = []
+    seen = set()
+    for root in candidates:
+        try:
+            resolved = root.expanduser().resolve()
+        except OSError:
+            continue
+        key = str(resolved)
+        if key not in seen:
+            seen.add(key)
+            unique.append(resolved)
+    return unique
+
+
+def _browse_jail(path: Path, roots: list) -> "Path | None":
+    """Resolve + jail: path risolto se dentro un root consentito, else None."""
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        return None
+    for root in roots:
+        try:
+            if resolved == root or root in resolved.parents:
+                return resolved
+        except OSError:
+            continue
+    return None
+
+
+def _browse_scan(current: "Path", roots: list) -> tuple:
+    """Un livello: (folders, items). Symlink solo se restano nel jail
+    (il proxy gateway ri-verifica a serve-time: doppia cintura)."""
+    folders: list = []
+    items: list = []
+    try:
+        resolved_current = current.resolve()
+        entries = sorted(current.iterdir(), key=lambda p: p.name.lower())
+    except OSError:
+        return folders, items
+    for entry in entries:
+        if len(folders) >= _BROWSE_MAX_FOLDERS and len(items) >= _BROWSE_MAX_ITEMS:
+            break
+        try:
+            name = entry.name
+            if not name or name.startswith("."):
+                continue
+            if entry.is_symlink():
+                try:
+                    target = entry.resolve()
+                except OSError:
+                    continue
+                if not target.exists():
+                    continue
+                if _browse_jail(target, roots) is None:
+                    continue
+                if target.is_dir():
+                    if len(folders) >= _BROWSE_MAX_FOLDERS:
+                        continue
+                    folders.append({"name": name, "path": str(target)})
+                    continue
+                if not target.is_file() or target.suffix.lower() not in _BROWSE_IMAGE_EXTENSIONS:
+                    continue
+                try:
+                    rel = target.relative_to(resolved_current).as_posix()
+                except ValueError:
+                    continue
+                if len(items) >= _BROWSE_MAX_ITEMS:
+                    continue
+                stat = target.stat()
+                items.append((entry, target, stat, rel))
+                continue
+            if entry.is_dir():
+                if len(folders) >= _BROWSE_MAX_FOLDERS:
+                    continue
+                folders.append({"name": name, "path": str(entry.resolve())})
+                continue
+            if not entry.is_file() or entry.suffix.lower() not in _BROWSE_IMAGE_EXTENSIONS:
+                continue
+            if len(items) >= _BROWSE_MAX_ITEMS:
+                continue
+            items.append((entry, entry, entry.stat(), entry.name))
+        except OSError:
+            continue
+    items.sort(key=lambda quad: quad[2].st_mtime, reverse=True)
+    out = []
+    for entry, target, stat, rel in items[:_BROWSE_MAX_ITEMS]:
+        out.append({
+            "id": rel,
+            "title": entry.stem.replace("_", " ").replace("-", " ").strip() or entry.name,
+            "filename": entry.name,
+            "path": str(target),
+            "root": str(current),
+            "mime_type": _browse_mime(entry.name),
+            "size_bytes": int(stat.st_size),
+            "modified_at": float(stat.st_mtime),
+        })
+    return folders, out
+
+
+def _browse_mime(filename: str) -> str:
+    lower = filename.lower()
+    if lower.endswith(".png"):
+        return "image/png"
+    if lower.endswith(".gif"):
+        return "image/gif"
+    if lower.endswith(".bmp"):
+        return "image/bmp"
+    if lower.endswith(".webp"):
+        return "image/webp"
+    return "image/jpeg"
+
+
+@app.get("/browse")
+async def browse_library(request: Request, _: None = Depends(require_key)) -> dict:
+    raw = (request.query_params.get("path") or "").strip()
+    roots = await asyncio.to_thread(_browse_roots)
+
+    def _resolve_current() -> "Path | None":
+        if not raw:
+            for root in roots:
+                try:
+                    if root.is_dir():
+                        return root
+                except OSError:
+                    continue
+            return roots[0] if roots else None
+        return _browse_jail(Path(raw), roots)
+
+    current = await asyncio.to_thread(_resolve_current)
+    if current is None:
+        raise HTTPException(403, "browse path non consentito")
+    try:
+        is_dir = current.is_dir()
+    except OSError:
+        is_dir = False
+    if not is_dir:
+        raise HTTPException(404, "cartella non trovata")
+    folders, items = await asyncio.to_thread(_browse_scan, current, roots)
+    parent: "str | None" = None
+    try:
+        candidate_parent = current.parent
+        if _browse_jail(candidate_parent, roots) is not None and candidate_parent != current:
+            parent = str(candidate_parent)
+    except OSError:
+        parent = None
+    return {
+        "object": "hermes.media.browse",
+        "status": "ok",
+        "path": str(current),
+        "parent": parent,
+        "folders": folders,
+        "items": items,
+        "count": len(items),
+        "folder_count": len(folders),
+    }
+
+
+# Strong reference to the worker task. asyncio holds only weak refs to# bare create_task() handles: without this the GC silently collects the
 # worker mid-run (observed live: queue stalls, no logs, restart revives).
 _worker_task: "asyncio.Task[None] | None" = None
 

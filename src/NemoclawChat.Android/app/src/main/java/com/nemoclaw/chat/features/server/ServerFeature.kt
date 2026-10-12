@@ -94,6 +94,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Article
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.automirrored.rounded.ManageSearch
@@ -1244,52 +1245,36 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
 internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatPrompt: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var refreshKey by remember { mutableIntStateOf(0) }
-    var status by remember { mutableStateOf("Sincronizzo cartelle immagini Hermes...") }
+    // Radice iniziale: impostazione immagini, senno default del manager.
+    val startPath = remember(settings.imageLibraryPath, settings.extraImageLibraryPaths) {
+        settings.imageLibraryPath.trim().ifBlank {
+            settings.extraImageLibraryPaths.firstOrNull { it.isNotBlank() }.orEmpty()
+        }
+    }
+    var currentPath by rememberSaveable(settings.gatewayUrl, startPath) {
+        mutableStateOf(startPath.ifBlank { null })
+    }
+    var parentPath by remember { mutableStateOf<String?>(null) }
+    var folders by remember { mutableStateOf<List<ImageBrowseFolder>>(emptyList()) }
     var items by remember { mutableStateOf<List<ImageLibraryItem>>(emptyList()) }
-    var selectedFolder by rememberSaveable { mutableStateOf("Tutte") }
+    var status by remember { mutableStateOf("Sfoglio cartella immagini...") }
     var viewerItem by remember { mutableStateOf<ImageLibraryItem?>(null) }
     var isDownloading by remember { mutableStateOf(false) }
     val apiKey = remember { loadGatewaySecret(context) }
 
-    LaunchedEffect(settings.gatewayUrl, settings.imageLibraryPath, settings.extraImageLibraryPaths, refreshKey) {
-        val folders = buildList<String?> {
-            add(null)
-            addAll(settings.extraImageLibraryPaths)
-        }
-        val merged = mutableListOf<ImageLibraryItem>()
-        val errors = mutableListOf<String>()
-        var defaultPath = settings.imageLibraryPath
-        for (folder in folders) {
-            val (found, message, libraryPath) = loadImageLibrary(settings, apiKey, folder)
-            if (folder == null && libraryPath.isNotBlank()) {
-                defaultPath = libraryPath
-            }
-            if (found.isEmpty() && !message.startsWith("Nessuna immagine")) {
-                errors.add(if (folder == null) message else "$message (${folder?.let(::folderLabel) ?: folder})")
-            }
-            merged += found
-        }
-        val distinct = merged.distinctBy { it.folder + "|" + it.id }.sortedByDescending { it.modifiedAt }
-        items = distinct
-        if (defaultPath.isNotBlank() && defaultPath != settings.imageLibraryPath) {
-            runCatching { saveSettings(context, settings.copy(imageLibraryPath = defaultPath)) }
-        }
-        status = when {
-            distinct.isNotEmpty() -> "${distinct.size} immagini in ${folders.size} cartelle"
-            errors.isNotEmpty() -> errors.first()
-            else -> "Nessuna immagine trovata. Genera immagini con Hermes o aggiungi cartelle nelle Impostazioni."
-        }
-        if (selectedFolder != "Tutte" && distinct.none { folderLabel(it.folder) == selectedFolder }) {
-            selectedFolder = "Tutte"
+    LaunchedEffect(settings.gatewayUrl, currentPath, refreshKey) {
+        status = "Sfoglio cartella immagini..."
+        val result = loadImageBrowse(settings, apiKey, currentPath)
+        parentPath = result.parent
+        folders = result.folders
+        items = result.items
+        status = result.status
+        // Prima apertura senza radice: adotta il default del server (una sola volta).
+        if (currentPath == null && result.path.isNotBlank()) {
+            currentPath = result.path
         }
     }
 
-    val folders = remember(items) {
-        listOf("Tutte") + items.map { folderLabel(it.folder) }.distinct()
-    }
-    val displayedItems = remember(items, selectedFolder) {
-        if (selectedFolder == "Tutte") items else items.filter { folderLabel(it.folder) == selectedFolder }
-    }
     val viewing = viewerItem
     if (viewing != null) {
         BackHandler { viewerItem = null }
@@ -1332,6 +1317,11 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
         }
         return
     }
+    // Back fisico: risale di un livello (mai fuori dalla sezione).
+    val parent = parentPath
+    BackHandler(enabled = parent != null) {
+        currentPath = parent
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -1347,41 +1337,77 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text("Hermes Immagini", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                IconButton(onClick = {
-                    onOpenChatPrompt(
-                        "Modalita Immagini Hermes Hub. Usa la cartella immagini monitorata del PC Hermes: ${settings.imageLibraryPath.ifBlank { "quella del server" }}. " +
-                            "Crea o modifica un'immagine e salva sempre il file finale in quella cartella, cosi appare automaticamente nella sezione Immagini. Richiesta: "
-                    )
-                }) {
-                    Icon(Icons.Rounded.Add, contentDescription = "Nuova immagine", tint = Color.White)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = {
+                        status = "Aggiorno cartella..."
+                        refreshKey++
+                    }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna cartella", tint = Color.White) }
+                    IconButton(onClick = {
+                        onOpenChatPrompt(
+                            "Modalita Immagini Hermes Hub. Usa la cartella immagini monitorata del PC Hermes: ${settings.imageLibraryPath.ifBlank { "quella del server" }}. " +
+                                "Crea o modifica un'immagine e salva sempre il file finale in quella cartella, cosi appare automaticamente nella sezione Immagini. Richiesta: "
+                        )
+                    }) {
+                        Icon(Icons.Rounded.Add, contentDescription = "Nuova immagine", tint = Color.White)
+                    }
                 }
             }
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+            // Navigazione: Home (radice) + Su (parent server) + segmenti.
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                folders.forEach { folder ->
-                    VideoFeedChip(folder, selected = selectedFolder == folder) { selectedFolder = folder }
+                VideoFeedChip("Home") { currentPath = startPath.ifBlank { null } }
+                if (parent != null) {
+                    VideoFeedChip("↑ Su") { currentPath = parent }
                 }
-                IconButton(onClick = {
-                    status = "Aggiorno feed immagini..."
-                    refreshKey++
-                }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna feed immagini", tint = Color.White) }
+                val shown = currentPath
+                if (!shown.isNullOrBlank()) {
+                    browseSegments(shown).takeLast(3).forEach { (label, segmentPath) ->
+                        VideoFeedChip(label, selected = segmentPath == shown) { currentPath = segmentPath }
+                    }
+                }
             }
         }
         item {
             Text(status, color = AppColors.Muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        if (displayedItems.isEmpty()) {
+        if (folders.isNotEmpty()) {
+            items(folders, key = { "folder|" + it.path }) { folder ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(AppColors.Panel)
+                        .clickable { currentPath = folder.path }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = AppColors.Accent)
+                    Text(
+                        folder.name,
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Apri cartella", tint = AppColors.Muted)
+                }
+            }
+        }
+        if (items.isEmpty() && folders.isEmpty()) {
             item {
                 Surface(color = AppColors.Panel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, AppColors.Border)) {
                     Text(
                         modifier = Modifier.padding(16.dp),
-                        text = "Nessuna immagine qui. Genera immagini con Hermes o aggiungi cartelle nelle Impostazioni.",
+                        text = "Niente qui. Entra in una cartella o genera immagini con Hermes.",
                         color = AppColors.Muted
                     )
                 }
             }
         }
-        items(displayedItems.chunked(2), key = { row -> row.joinToString("|") { it.folder + "#" + it.id } }) { row ->
+        items(items.chunked(2), key = { row -> row.joinToString("|") { it.folder + "#" + it.id } }) { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)

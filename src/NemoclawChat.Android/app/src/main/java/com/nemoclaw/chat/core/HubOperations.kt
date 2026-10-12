@@ -1013,8 +1013,7 @@ internal suspend fun loadVideoLibrary(settings: AppSettings, apiKey: String?): P
  * Libreria immagini: interroga la cartella indicata (o quella di default del
  * server se path e nullo/vuoto). Ritorna item, messaggio stato e path reale.
  */
-internal suspend fun loadImageLibrary(
-    settings: AppSettings,
+internal suspend fun loadImageLibrary(    settings: AppSettings,
     apiKey: String?,
     path: String? = null
 ): Triple<List<ImageLibraryItem>, String, String> = withContext(Dispatchers.IO) {
@@ -1069,6 +1068,122 @@ internal suspend fun loadImageLibrary(
         Triple(items, status, libraryPath)
     } catch (ex: Exception) {
         Triple(emptyList(), "Errore feed immagini: ${ex.message ?: ex.javaClass.simpleName}", path.orEmpty())
+    }
+}
+
+/** Encode per URL media/proxy: %20 per spazi (unquote server non tratta "+"). Puro. */
+internal fun encodeMediaPathSegment(raw: String): String =
+    URLEncoder.encode(raw, "UTF-8").replace("+", "%20")
+
+/** Cartella del browser immagini (manager /browse, un livello). */
+internal data class ImageBrowseFolder(
+    val name: String,
+    val path: String
+)
+
+internal data class ImageBrowseResult(
+    val path: String,
+    val parent: String?,
+    val folders: List<ImageBrowseFolder>,
+    val items: List<ImageLibraryItem>,
+    val status: String
+)
+
+/** Breadcrumb cumulativo: ("nome", pathCompleto) dalla root al corrente. Puro. */
+internal fun browseSegments(currentPath: String): List<Pair<String, String>> {
+    val normalized = currentPath.trim().replace('\\', '/').trimEnd('/')
+    if (normalized.isEmpty()) return emptyList()
+    val absolute = normalized.startsWith("/")
+    val parts = normalized.split('/').filter { it.isNotBlank() }
+    if (parts.isEmpty()) return emptyList()
+    val out = mutableListOf<Pair<String, String>>()
+    var acc = ""
+    for (part in parts) {
+        acc = if (acc.isEmpty()) (if (absolute) "/$part" else part) else "$acc/$part"
+        out += part to acc
+    }
+    return out
+}
+
+/**
+ * Sfoglia immagini via manager (/browse, un livello, solo immagini):
+ * funziona col gateway attuale (il proxy /v1/media e live). I byte
+ * arrivano dal proxy gateway con ?root= (doppio jail: manager + gateway).
+ */
+internal suspend fun loadImageBrowse(
+    settings: AppSettings,
+    managerKey: String?,
+    path: String? = null
+): ImageBrowseResult = withContext(Dispatchers.IO) {
+    fun empty(status: String, current: String = path.orEmpty(), parent: String? = null) =
+        ImageBrowseResult(current, parent, emptyList(), emptyList(), status)
+    return@withContext try {
+        val base = gpuManagerBase(settings.gatewayUrl)
+        if (base.isBlank()) return@withContext empty("Indirizzo server non configurato.")
+        val query = path?.trim()?.takeIf { it.isNotBlank() }?.let {
+            "?path=${URLEncoder.encode(it, "UTF-8")}"
+        }.orEmpty()
+        val response = httpGetResponse("$base/browse$query", managerKey)
+        if (response.first == 401 || response.first == 403) {
+            return@withContext empty("Sfoglia immagini non autorizzato (HTTP ${response.first}): verifica la chiave API.")
+        }
+        if (response.first == 404) {
+            return@withContext empty("Cartella non trovata sul server.")
+        }
+        if (response.first !in 200..299) {
+            return@withContext empty("Sfoglia immagini HTTP ${response.first}: ${extractHumanError(response.second)}")
+        }
+        val body = response.second
+        if (body.isBlank()) {
+            return@withContext empty("Il manager non ha restituito dati.")
+        }
+        val json = JSONObject(body)
+        if (json.has("error")) {
+            return@withContext empty(extractHumanError(body))
+        }
+        val current = json.optString("path", path.orEmpty())
+        val parent = json.optString("parent").takeIf { it.isNotBlank() }
+        val folders = buildList {
+            val array = json.optJSONArray("folders") ?: JSONArray()
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                val name = obj.optString("name")
+                val folderPath = obj.optString("path")
+                if (name.isBlank() || folderPath.isBlank()) continue
+                add(ImageBrowseFolder(name, folderPath))
+            }
+        }
+        val items = buildList {
+            val array = json.optJSONArray("items") ?: JSONArray()
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                val id = obj.optString("id")
+                val filename = obj.optString("filename")
+                val root = obj.optString("root", current)
+                if (id.isBlank() || filename.isBlank() || root.isBlank()) continue
+                add(
+                    ImageLibraryItem(
+                        id = id,
+                        title = obj.optString("title", filename.substringBeforeLast('.')),
+                        filename = filename,
+                        mediaUrl = "/v1/media/${encodeMediaPathSegment(id)}?root=${encodeMediaPathSegment(root)}",
+                        path = obj.optString("path"),
+                        mimeType = obj.optString("mime_type", "image/*"),
+                        sizeBytes = obj.optLong("size_bytes", 0L),
+                        modifiedAt = (obj.optDouble("modified_at", 0.0) * 1000).toLong(),
+                        folder = current
+                    )
+                )
+            }
+        }
+        val status = if (items.isEmpty() && folders.isEmpty()) {
+            "Cartella vuota: ${current.ifBlank { "root server" }}."
+        } else {
+            "${items.size} immagini, ${folders.size} cartelle in: ${current.ifBlank { "root server" }}"
+        }
+        ImageBrowseResult(current, parent, folders, items, status)
+    } catch (ex: Exception) {
+        empty("Errore sfoglia immagini: ${ex.message ?: ex.javaClass.simpleName}")
     }
 }
 

@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.251"
-EXPECTED_ANDROID_VERSION_CODE = 255
+EXPECTED_VERSION = "0.6.252"
+EXPECTED_ANDROID_VERSION_CODE = 256
 
 
 def read(relative_path: str) -> str:
@@ -108,7 +108,10 @@ class ReleaseConsistencyTests(unittest.TestCase):
             "Tab.Images",
             "ImageScreen(",
             "ImageLibraryItem(",
-            "loadImageLibrary(",
+            "loadImageBrowse(",
+            "ImageBrowseFolder(",
+            "browseSegments(",
+            "encodeMediaPathSegment(",
             "extraImageLibraryPaths",
             "parseExtraImageLibraryPaths(",
             'add_get("/v1/image/library", self._handle_image_library)',
@@ -119,6 +122,19 @@ class ReleaseConsistencyTests(unittest.TestCase):
             else:
                 content = sources
             self.assertIn(marker, content)
+
+    def test_manager_browse_endpoint_is_guarded(self) -> None:
+        manager = read("gpu-manager/manager.py")
+        for marker in (
+            '@app.get("/browse")',
+            "Depends(require_key)",
+            "_browse_roots()",
+            "_browse_jail(",
+            "_browse_scan(",
+            "_BROWSE_IMAGE_EXTENSIONS",
+            "browse path non consentito",
+        ):
+            self.assertIn(marker, manager)
 
     def test_github_repository_defaults_target_hermes_hub(self) -> None:
         expected_slug = "JackoPeru/HermesHub"
