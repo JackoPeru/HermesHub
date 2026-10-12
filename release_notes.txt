@@ -1,8 +1,9 @@
-Hermes Hub 0.6.251 (verdetto gateway veloce)
+Hermes Hub 0.6.252 (browser immagini via manager)
 
-- Android: verdetto gateway veloce - il pallino si decide subito dopo il probe (stato runtime dopo, non blocca), gara root a 2.5s per il dot.
-- Android: verdetto legato all'URL effettivo - cambiando bot sullo stesso gateway niente piu "Verifica gateway..." perenne.
-- Versioni: Windows/AdminBridge 0.6.251; Android versionName 0.6.251, versionCode 255 (stessa firma: aggiornamento normale).
-- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.251-android.apk; MSIX NemoclawChat.Windows_0.6.251.0_x64.msix; gateway Linux HermesHub-0.6.251-linux-gateway.tar.gz.
-- SHA-256 Android: `8f97bfe7d149f5a8d6e18e198bf556992802f7d243adf486e3e5b86427284360`.
-- SHA-256 gateway: `b9228e23e3b46662456b5ef0b796d01ab6122e7d9fd564c01f620b25df78a147`.
+- Android: sezione Immagini come browser - Home/Su/breadcrumb, righe cartelle, griglia solo immagini; i byte arrivano dal proxy /v1/media live.
+- Manager: nuovo GET /browse blindato (solo lettura, un livello, jail sui root media, symlink verificati, auth key).
+- Verificato live: hub_uploads/denudate -> claudia/valentina -> webp serviti (traversal 403, no-auth 401).
+- Versioni: Windows/AdminBridge 0.6.252; Android versionName 0.6.252, versionCode 256 (stessa firma: aggiornamento normale).
+- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.252-android.apk; MSIX NemoclawChat.Windows_0.6.252.0_x64.msix; gateway Linux HermesHub-0.6.252-linux-gateway.tar.gz.
+- SHA-256 Android: `e2902131781a008c990bb6bd7f8f4dea0a9943abcd7c5091ddedb059984b36aa`.
+- SHA-256 gateway: `1d587467b1dac68bcb55d592adb6aea6e7c5d9d3b2ad447bfd587d22664befe9`.

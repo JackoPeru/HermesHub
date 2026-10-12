@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.252 - 2026-10-12
+
+- Android: sezione Immagini come browser — Home/Su/breadcrumb, righe cartelle, griglia solo immagini; funziona col gateway attuale.
+- Manager: nuovo `GET /browse` blindato (solo lettura, un livello, jail sui root media, symlink verificati, auth key) per sfogliare le cartelle immagini.
+- Verificato live: `hub_uploads/denudate` → claudia/valentina → webp serviti dal proxy (traversal 403, no-auth 401).
+
 ## 0.6.251 - 2026-10-12
 
 - Android: verdetto gateway veloce — il pallino si decide subito dopo il probe (stato runtime dopo, non blocca), gara root a 2.5s per il dot.
