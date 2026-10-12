@@ -1,9 +1,9 @@
-Hermes Hub 0.6.249 (sezione Immagini)
+Hermes Hub 0.6.250 (selettore bot in chat)
 
-- Android: nuova sezione Immagini sotto Video - griglia, fullscreen con scarica, filtri per cartella, refresh, pulsante Nuova immagine verso la chat.
-- Android: cartella principale dal server + cartelle extra configurabili (una per riga) nelle Impostazioni.
-- Gateway: nuovo endpoint GET /v1/image/library con ?path= e proxy autenticato (patcher + test).
-- Versioni: Windows/AdminBridge 0.6.249; Android versionName 0.6.249, versionCode 253 (stessa firma: aggiornamento normale).
-- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.249-android.apk; MSIX NemoclawChat.Windows_0.6.249.0_x64.msix; gateway Linux HermesHub-0.6.249-linux-gateway.tar.gz.
-- SHA-256 Android: `f6814148645cb235c338c431b86645304544a93a2fb32e739b11e25adf1553dc`.
-- SHA-256 gateway: `dc465203a8d7c1e839229db225df17878223b2b9ff683c83eebd80f1f1be653a`.
+- Android: selettore bot nel titolo della chat (stile desktop) - tap sul nome, tendina con Hermes + bot disponibili; la chat parla con quel profilo, la scelta persiste al riavvio.
+- Android: sidebar RECENTI filtrata per bot (ogni bot ha le sue chat); aprendo una chat di un altro bot l'identita cambia da sola (sidebar, archivio, progetti, artifacts, ricerca, continuita, deeplink).
+- Android: fix round-trip botIdentityKey + reset chiave stale a roster reale.
+- Versioni: Windows/AdminBridge 0.6.250; Android versionName 0.6.250, versionCode 254 (stessa firma: aggiornamento normale).
+- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.250-android.apk; MSIX NemoclawChat.Windows_0.6.250.0_x64.msix; gateway Linux HermesHub-0.6.250-linux-gateway.tar.gz.
+- SHA-256 Android: `5ae73a861f530997533becf8d69b0d3c3be417373ba9c39b741611a17d9e57ff`.
+- SHA-256 gateway: `0bb089c84eaea51d56ca7873e8dc443c2d9405b61c8959e1f85b163616ea47d7`.
