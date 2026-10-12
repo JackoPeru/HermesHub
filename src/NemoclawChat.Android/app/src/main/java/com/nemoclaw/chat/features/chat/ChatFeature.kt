@@ -668,20 +668,24 @@ internal fun ChatScreen(
 
     val haptics = LocalHapticFeedback.current
     val networkOnline by rememberOnlineState(context)
-    var gatewayAvailable by remember(settings.gatewayUrl, settings.inferenceEndpoint, botConnectionId, botEndpoint) {
+    // Ambito verdetto = URL effettivo: stesso gateway = stesso verdetto,
+    // anche cambiando identita bot (niente grigio perenne allo switch).
+    // Solo un gateway/endpoint diverso riverifica da zero.
+    val probeScopeKey = gatewayProbeScopeKey(botSettings.gatewayUrl, botSettings.inferenceEndpoint)
+    var gatewayAvailable by remember(probeScopeKey) {
         mutableStateOf(false)
     }
     // Tri-stato reale: finche la prima probe non risponde, il pallino e
     // grigio ("Verifica gateway…") e NON rosso. Solo dopo un responso
     // negativo si mostra "Rete non disponibile" col motivo (HTTP/timeout),
     // cosi si capisce se e solo UI o davvero giu.
-    var gatewayProbed by remember(settings.gatewayUrl, settings.inferenceEndpoint, botConnectionId, botEndpoint) {
+    var gatewayProbed by remember(probeScopeKey) {
         mutableStateOf(false)
     }
-    var gatewayProbeDetail by remember(settings.gatewayUrl, settings.inferenceEndpoint, botConnectionId, botEndpoint) {
+    var gatewayProbeDetail by remember(probeScopeKey) {
         mutableStateOf<String?>(null)
     }
-    var gatewayRuntime by remember(settings.gatewayUrl, settings.inferenceEndpoint, botConnectionId, botEndpoint) {
+    var gatewayRuntime by remember(probeScopeKey) {
         mutableStateOf<GatewayRuntimeStatus?>(null)
     }
     PollWhileStarted(networkOnline, botSettings.gatewayUrl, botSettings.inferenceEndpoint, botApiKey, settings.localGatewayUrl, botLoadNonce, baseIntervalMs = 5_000L) {

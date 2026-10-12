@@ -107,4 +107,18 @@ class GatewayRootsTest {
         assertTrue(fastestCacheKeyFor(settings, true).contains("true"))
         assertTrue(fastestCacheKeyFor(settings, false).contains("false"))
     }
+
+    @Test
+    fun probeScopeKeyIgnoresIdentityButNotGateway() {
+        // Stesso gateway + cambio identita = stesso verdetto (niente reset).
+        assertEquals(
+            gatewayProbeScopeKey("http://g:8642", "http://g:8642"),
+            gatewayProbeScopeKey("http://g:8642", "http://g:8642")
+        )
+        assertEquals("http://g:8642|http://g:8642", gatewayProbeScopeKey("  http://g:8642 ", "http://g:8642"))
+        assertTrue(
+            gatewayProbeScopeKey("http://a:8642", "http://a:8642") !=
+                gatewayProbeScopeKey("http://b:8642", "http://b:8642")
+        )
+    }
 }

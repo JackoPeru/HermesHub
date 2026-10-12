@@ -119,6 +119,14 @@ internal fun raceRootsForTransport(onWifi: Boolean, settings: AppSettings): List
 }
 
 /**
+ * Chiave ambito verifica gateway: stesso URL effettivo = stesso verdetto.
+ * Cambiare solo identita bot (stesso gateway primario) non deve mai
+ * resettare il pallino a grigio. Pura e testabile.
+ */
+internal fun gatewayProbeScopeKey(gatewayUrl: String, inferenceEndpoint: String): String =
+    gatewayUrl.trim() + "|" + inferenceEndpoint.trim()
+
+/**
  * Ritorna la root più veloce (prima 2xx su GET {root}/v1/capabilities,
  * pareggio -> configurato). Cache in-memory 60s (chiave con trasporto:
  * cambiando rete si rigareggia subito). Mai eccezioni:
