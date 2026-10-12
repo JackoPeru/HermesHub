@@ -1,9 +1,8 @@
-Hermes Hub 0.6.252 (browser immagini via manager)
+Hermes Hub 0.6.253 (fix messaggi browse immagini)
 
-- Android: sezione Immagini come browser - Home/Su/breadcrumb, righe cartelle, griglia solo immagini; i byte arrivano dal proxy /v1/media live.
-- Manager: nuovo GET /browse blindato (solo lettura, un livello, jail sui root media, symlink verificati, auth key).
-- Verificato live: hub_uploads/denudate -> claudia/valentina -> webp serviti (traversal 403, no-auth 401).
-- Versioni: Windows/AdminBridge 0.6.252; Android versionName 0.6.252, versionCode 256 (stessa firma: aggiornamento normale).
-- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.252-android.apk; MSIX NemoclawChat.Windows_0.6.252.0_x64.msix; gateway Linux HermesHub-0.6.252-linux-gateway.tar.gz.
-- SHA-256 Android: `e2902131781a008c990bb6bd7f8f4dea0a9943abcd7c5091ddedb059984b36aa`.
-- SHA-256 gateway: `1d587467b1dac68bcb55d592adb6aea6e7c5d9d3b2ad447bfd587d22664befe9`.
+- Android: 403 browse = "cartella non consentita" con esempio percorso (non piu "verifica la chiave API", che vale solo per 401).
+- Android: `/.hermes/...` normalizzato in `~/.hermes/...` (il server espande e ri-applica il jail).
+- Versioni: Windows/AdminBridge 0.6.253; Android versionName 0.6.253, versionCode 257 (stessa firma: aggiornamento normale).
+- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.253-android.apk; MSIX NemoclawChat.Windows_0.6.253.0_x64.msix; gateway Linux HermesHub-0.6.253-linux-gateway.tar.gz.
+- SHA-256 Android: `3d6a9ce6d3209529ae6e8a1314722e837ef5c67bccd679510a70912c66d0bea3`.
+- SHA-256 gateway: `146d275770bfaa431efdfd032f3253f9087dd7c78855bb72959ef2f66acdbd47`.

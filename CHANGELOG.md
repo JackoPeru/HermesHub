@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.253 - 2026-10-12
+
+- Android: 403 browse = "cartella non consentita" (non piu "verifica la chiave"); `/.hermes/...` normalizzato in `~/.hermes/...`.
+
 ## 0.6.252 - 2026-10-12
 
 - Android: sezione Immagini come browser — Home/Su/breadcrumb, righe cartelle, griglia solo immagini; funziona col gateway attuale.

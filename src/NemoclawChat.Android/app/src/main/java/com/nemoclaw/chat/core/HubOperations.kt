@@ -1120,12 +1120,23 @@ internal suspend fun loadImageBrowse(
     return@withContext try {
         val base = gpuManagerBase(settings.gatewayUrl)
         if (base.isBlank()) return@withContext empty("Indirizzo server non configurato.")
-        val query = path?.trim()?.takeIf { it.isNotBlank() }?.let {
+        // " /.hermes/..." senza home = quasi sempre "~/.hermes/...": il
+        // server espande ~ e ri-applica il jail (mai un bypass).
+        val wanted = path?.trim()?.takeIf { it.isNotBlank() }?.let {
+            if (it == "/.hermes" || it.startsWith("/.hermes/")) "~" + it.substring(1) else it
+        }
+        val query = wanted?.let {
             "?path=${URLEncoder.encode(it, "UTF-8")}"
         }.orEmpty()
         val response = httpGetResponse("$base/browse$query", managerKey)
-        if (response.first == 401 || response.first == 403) {
-            return@withContext empty("Sfoglia immagini non autorizzato (HTTP ${response.first}): verifica la chiave API.")
+        if (response.first == 401) {
+            return@withContext empty("Sfoglia immagini non autorizzato (HTTP 401): verifica la chiave API.")
+        }
+        if (response.first == 403) {
+            return@withContext empty(
+                "Cartella non consentita sul server (HTTP 403): controlla il percorso " +
+                    "(es. /home/matteo/.hermes/hub_uploads/denudate)."
+            )
         }
         if (response.first == 404) {
             return@withContext empty("Cartella non trovata sul server.")
