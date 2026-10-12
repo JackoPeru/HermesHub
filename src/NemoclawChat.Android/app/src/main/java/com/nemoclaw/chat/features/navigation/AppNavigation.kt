@@ -16,6 +16,7 @@ import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Face
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Notifications
@@ -45,6 +46,7 @@ internal enum class Tab(val label: String, val icon: ImageVector) {
     Hardware("Hardware", Icons.Rounded.Memory),
     Health("Salute", Icons.Rounded.FavoriteBorder),
     Video("Video", Icons.Rounded.PlayCircle),
+    Images("Immagini", Icons.Rounded.Image),
     News("News", Icons.AutoMirrored.Rounded.Article),
     Characters("Personaggi", Icons.Rounded.Face),
     Settings("Impostazioni", Icons.Rounded.Tune),

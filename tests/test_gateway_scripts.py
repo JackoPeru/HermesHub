@@ -986,6 +986,78 @@ class GatewayScriptTests(unittest.TestCase):
             payload,
         )
 
+    def test_image_library_route_lists_images_with_proxy_urls(self):
+        patched, _ = self.patcher._patch_text(UPSTREAM_GATEWAY_FIXTURE.read_text(encoding="utf-8"))
+        for marker in (
+            "def _hermes_hub_image_library_payload",
+            "async def _handle_image_library",
+            'add_get("/v1/image/library", self._handle_image_library)',
+        ):
+            self.assertIn(marker, patched)
+        compile(patched, "<image-library>", "exec")
+        start = patched.index("def _hermes_hub_image_library_payload")
+        end = patched.index("\ndef _hermes_hub_media_roots", start)
+        namespace: dict = {"os": os}
+
+        def _hermes_hub_library_files(root, extensions):
+            from pathlib import Path as _Path
+
+            base = _Path(root).expanduser()
+            found = []
+            if base.is_dir():
+                for candidate in base.rglob("*"):
+                    if candidate.is_file() and candidate.suffix.lower() in extensions:
+                        found.append(candidate)
+            found.sort(key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)
+            return found
+
+        namespace["_hermes_hub_library_files"] = _hermes_hub_library_files
+        exec(
+            compile(
+                "from typing import Optional, Dict, List, Any\n" + patched[start:end],
+                "<image-library-payload>",
+                "exec",
+            ),
+            namespace,
+        )
+        payload_fn = namespace["_hermes_hub_image_library_payload"]
+        import tempfile as _tempfile
+
+        with _tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "a.png").write_bytes(b"\x89PNG\r\n")
+            (root / "b.jpg").write_bytes(b"\xff\xd8")
+            (root / "c.mp4").write_bytes(b"mp4")
+            (root / "d.txt").write_text("no", encoding="utf-8")
+            sub = root / "sub"
+            sub.mkdir()
+            (sub / "e.webp").write_bytes(b"RIFF")
+            environment = os.environ.copy()
+            environment["HERMES_IMAGE_LIBRARY_PATH"] = str(root)
+            old_value = os.environ.get("HERMES_IMAGE_LIBRARY_PATH")
+            os.environ["HERMES_IMAGE_LIBRARY_PATH"] = str(root)
+            try:
+                result = payload_fn(None)
+            finally:
+                if old_value is None:
+                    os.environ.pop("HERMES_IMAGE_LIBRARY_PATH", None)
+                else:
+                    os.environ["HERMES_IMAGE_LIBRARY_PATH"] = old_value
+            self.assertEqual(3, result["count"])
+            names = sorted(item["filename"] for item in result["items"])
+            self.assertEqual(["a.png", "b.jpg", "e.webp"], names)
+            for item in result["items"]:
+                self.assertTrue(item["media_url"].startswith("/v1/media/"), item)
+                self.assertNotIn("?root=", item["media_url"])
+            # ?path= limita alla sottocartella e qualifica il proxy.
+            scoped = payload_fn(types.SimpleNamespace(query={"path": str(sub)}))
+            self.assertEqual(1, scoped["count"])
+            self.assertEqual("e.webp", scoped["items"][0]["filename"])
+            self.assertIn("?root=", scoped["items"][0]["media_url"])
+        # Idempotenza: seconda passata senza modifiche relative.
+        repassword, _ = self.patcher._patch_text(patched)
+        self.assertNotIn("payload.update(kwargs or {})", repassword)
+
     def test_agent_helper_forwards_only_real_prompt_progress_and_reasoning(self):
         helper = textwrap.dedent(
             '''

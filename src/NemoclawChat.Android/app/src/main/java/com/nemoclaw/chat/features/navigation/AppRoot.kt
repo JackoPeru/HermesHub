@@ -968,6 +968,11 @@ internal fun ChatApp() {
                 pendingPrompt = prompt
                 setSelectedTab(Tab.Chat)
                 } }
+                composable(Tab.Images.navRoute) { ImageScreen(context, settings) { prompt ->
+                pendingBot = null
+                pendingPrompt = prompt
+                setSelectedTab(Tab.Chat)
+                } }
                 composable(Tab.News.navRoute) { NewsScreen(context, settings) { prompt ->
                 pendingBot = null
                 pendingPrompt = prompt

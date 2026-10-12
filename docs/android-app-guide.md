@@ -50,7 +50,7 @@ La CI passa `-CiValidation` e produce soltanto `*-DAT-validation-only.apk`, util
 
 - installare l'APK su emulatore o dispositivo supportato;
 - verificare aggiornamento sopra la release precedente;
-- aprire Chat, Voce, Jarvis, Archivio, Server, Video e Impostazioni;
+- aprire Chat, Voce, Jarvis, Archivio, Server, Video, Immagini e Impostazioni;
 - inviare e interrompere uno stream reale;
 - verificare allegato, download, STT e TTS;
 - controllare logcat per crash, ANR, leak e violazioni StrictMode;

@@ -1240,8 +1240,225 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
     }
 }
 
-internal fun createManualVideoItem(rawUrl: String): VideoLibraryItem? {
-    val trimmed = rawUrl.trim()
+@Composable
+internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatPrompt: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var refreshKey by remember { mutableIntStateOf(0) }
+    var status by remember { mutableStateOf("Sincronizzo cartelle immagini Hermes...") }
+    var items by remember { mutableStateOf<List<ImageLibraryItem>>(emptyList()) }
+    var selectedFolder by rememberSaveable { mutableStateOf("Tutte") }
+    var viewerItem by remember { mutableStateOf<ImageLibraryItem?>(null) }
+    var isDownloading by remember { mutableStateOf(false) }
+    val apiKey = remember { loadGatewaySecret(context) }
+
+    LaunchedEffect(settings.gatewayUrl, settings.imageLibraryPath, settings.extraImageLibraryPaths, refreshKey) {
+        val folders = buildList<String?> {
+            add(null)
+            addAll(settings.extraImageLibraryPaths)
+        }
+        val merged = mutableListOf<ImageLibraryItem>()
+        val errors = mutableListOf<String>()
+        var defaultPath = settings.imageLibraryPath
+        for (folder in folders) {
+            val (found, message, libraryPath) = loadImageLibrary(settings, apiKey, folder)
+            if (folder == null && libraryPath.isNotBlank()) {
+                defaultPath = libraryPath
+            }
+            if (found.isEmpty() && !message.startsWith("Nessuna immagine")) {
+                errors.add(if (folder == null) message else "$message (${folder?.let(::folderLabel) ?: folder})")
+            }
+            merged += found
+        }
+        val distinct = merged.distinctBy { it.folder + "|" + it.id }.sortedByDescending { it.modifiedAt }
+        items = distinct
+        if (defaultPath.isNotBlank() && defaultPath != settings.imageLibraryPath) {
+            runCatching { saveSettings(context, settings.copy(imageLibraryPath = defaultPath)) }
+        }
+        status = when {
+            distinct.isNotEmpty() -> "${distinct.size} immagini in ${folders.size} cartelle"
+            errors.isNotEmpty() -> errors.first()
+            else -> "Nessuna immagine trovata. Genera immagini con Hermes o aggiungi cartelle nelle Impostazioni."
+        }
+        if (selectedFolder != "Tutte" && distinct.none { folderLabel(it.folder) == selectedFolder }) {
+            selectedFolder = "Tutte"
+        }
+    }
+
+    val folders = remember(items) {
+        listOf("Tutte") + items.map { folderLabel(it.folder) }.distinct()
+    }
+    val displayedItems = remember(items, selectedFolder) {
+        if (selectedFolder == "Tutte") items else items.filter { folderLabel(it.folder) == selectedFolder }
+    }
+    val viewing = viewerItem
+    if (viewing != null) {
+        BackHandler { viewerItem = null }
+        val fullUrl = remember(settings.gatewayUrl, viewing.mediaUrl) { resolveWorkspaceUrl(settings, viewing.mediaUrl) }
+        val fullBitmap by produceState<Bitmap?>(initialValue = null, fullUrl, apiKey) {
+            value = withContext(Dispatchers.IO) { loadRemoteBitmap(settings, fullUrl, apiKey) }
+        }
+        val loaded = fullBitmap
+        if (loaded != null) {
+            ChatImageViewerDialog(
+                bitmap = loaded,
+                alt = viewing.title.ifBlank { viewing.filename },
+                isDownloading = isDownloading,
+                onClose = { viewerItem = null },
+                onDownload = {
+                    scope.launch {
+                        isDownloading = true
+                        try {
+                            openHermesMediaExternally(
+                                context, settings, fullUrl,
+                                viewing.filename.ifBlank { "hermes-immagine" },
+                                viewing.mimeType.ifBlank { "image/*" }, apiKey
+                            )
+                        } finally {
+                            isDownloading = false
+                        }
+                    }
+                }
+            )
+        } else {
+            Dialog(onDismissRequest = { viewerItem = null }) {
+                Surface(color = AppColors.Panel, shape = RoundedCornerShape(14.dp)) {
+                    Text(
+                        "Caricamento immagine...",
+                        color = AppColors.Muted,
+                        modifier = Modifier.padding(24.dp)
+                    )
+                }
+            }
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 14.dp),
+        contentPadding = PaddingValues(top = 18.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Hermes Immagini", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                IconButton(onClick = {
+                    onOpenChatPrompt(
+                        "Modalita Immagini Hermes Hub. Usa la cartella immagini monitorata del PC Hermes: ${settings.imageLibraryPath.ifBlank { "quella del server" }}. " +
+                            "Crea o modifica un'immagine e salva sempre il file finale in quella cartella, cosi appare automaticamente nella sezione Immagini. Richiesta: "
+                    )
+                }) {
+                    Icon(Icons.Rounded.Add, contentDescription = "Nuova immagine", tint = Color.White)
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                folders.forEach { folder ->
+                    VideoFeedChip(folder, selected = selectedFolder == folder) { selectedFolder = folder }
+                }
+                IconButton(onClick = {
+                    status = "Aggiorno feed immagini..."
+                    refreshKey++
+                }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna feed immagini", tint = Color.White) }
+            }
+        }
+        item {
+            Text(status, color = AppColors.Muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        if (displayedItems.isEmpty()) {
+            item {
+                Surface(color = AppColors.Panel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, AppColors.Border)) {
+                    Text(
+                        modifier = Modifier.padding(16.dp),
+                        text = "Nessuna immagine qui. Genera immagini con Hermes o aggiungi cartelle nelle Impostazioni.",
+                        color = AppColors.Muted
+                    )
+                }
+            }
+        }
+        items(displayedItems.chunked(2), key = { row -> row.joinToString("|") { it.folder + "#" + it.id } }) { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                row.forEach { item ->
+                    ImageFeedCard(
+                        settings = settings,
+                        item = item,
+                        apiKey = apiKey,
+                        onClick = { viewerItem = item },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (row.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+private fun folderLabel(folder: String): String =
+    folder.substringAfterLast('/').substringAfterLast('\\').takeIf { it.isNotBlank() } ?: "Principale"
+
+@Composable
+internal fun ImageFeedCard(
+    settings: AppSettings,
+    item: ImageLibraryItem,
+    apiKey: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val imageUrl = remember(settings.gatewayUrl, item.mediaUrl) { resolveWorkspaceUrl(settings, item.mediaUrl) }
+    val bitmap by produceState<Bitmap?>(initialValue = null, imageUrl, apiKey) {
+        value = withContext(Dispatchers.IO) { loadRemoteBitmap(settings, imageUrl, apiKey) }
+    }
+    Column(modifier = modifier.clickable(onClick = onClick)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(AppColors.Panel),
+            contentAlignment = Alignment.Center
+        ) {
+            val loaded = bitmap
+            if (loaded != null) {
+                Image(
+                    bitmap = loaded.asImageBitmap(),
+                    contentDescription = item.title.ifBlank { item.filename },
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Icon(Icons.Rounded.Image, contentDescription = null, tint = AppColors.Muted, modifier = Modifier.size(40.dp))
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            item.title.ifBlank { item.filename },
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            "${item.sizeBytes.toReadableFileSize()} - ${folderLabel(item.folder)}",
+            color = AppColors.Muted,
+            fontSize = 11.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+internal fun createManualVideoItem(rawUrl: String): VideoLibraryItem? {    val trimmed = rawUrl.trim()
     if (trimmed.isBlank()) return null
     val uri = runCatching { URI(trimmed) }.getOrNull() ?: return null
     val scheme = uri.scheme?.lowercase(java.util.Locale.ROOT)

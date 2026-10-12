@@ -21,6 +21,9 @@ data class AppSettings(
     val visualBlocksMode: String = AppDefaults.visualBlocksMode,
     val videoLibraryPath: String = AppDefaults.videoLibraryPath,
     val newsLibraryPath: String = AppDefaults.newsLibraryPath,
+    val imageLibraryPath: String = AppDefaults.imageLibraryPath,
+    /** Cartelle immagini extra (una per riga nelle impostazioni), oltre quella server. */
+    val extraImageLibraryPaths: List<String> = AppDefaults.extraImageLibraryPaths,
     val activeProjectId: String = AppDefaults.activeProjectId,
     val activeProjectName: String = AppDefaults.activeProjectName,
     val activeProjectWorkspacePath: String = "",
@@ -78,6 +81,14 @@ internal fun AppSettings.metricFilter(): MetricDisplayFilter = MetricDisplayFilt
     acceptanceRate = metricAcceptanceRate
 )
 
+/** Una cartella immagini extra per riga: trim, no vuoti/duplicati, max 8. Puro. */
+internal fun parseExtraImageLibraryPaths(raw: String): List<String> =
+    raw.split('\n').map { it.trim() }.filter { it.isNotBlank() }.distinct().take(8)
+
+/** Serializza la lista per le prefs. Puro. */
+internal fun encodeExtraImageLibraryPaths(paths: List<String>): String =
+    paths.map { it.trim() }.filter { it.isNotBlank() }.distinct().take(8).joinToString("\n")
+
 internal fun loadSettings(context: Context): AppSettings {
     val prefs = migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
     // Stringhe vuote salvate (vecchie versioni senza default) guariscono ai
@@ -103,6 +114,8 @@ internal fun loadSettings(context: Context): AppSettings {
         visualBlocksMode = prefs.getString("visualBlocksMode", AppDefaults.visualBlocksMode) ?: AppDefaults.visualBlocksMode,
         videoLibraryPath = prefOrDefault("videoLibraryPath", AppDefaults.videoLibraryPath, healBlank = true),
         newsLibraryPath = prefOrDefault("newsLibraryPath", AppDefaults.newsLibraryPath, healBlank = true),
+        imageLibraryPath = prefs.getString("imageLibraryPath", AppDefaults.imageLibraryPath) ?: AppDefaults.imageLibraryPath,
+        extraImageLibraryPaths = parseExtraImageLibraryPaths(prefs.getString("extraImageLibraryPaths", "").orEmpty()),
         activeProjectId = prefs.getString("activeProjectId", AppDefaults.activeProjectId) ?: AppDefaults.activeProjectId,
         activeProjectName = prefs.getString("activeProjectName", AppDefaults.activeProjectName) ?: AppDefaults.activeProjectName,
         activeProjectWorkspacePath = prefs.getString("activeProjectWorkspacePath", "") ?: "",
@@ -218,6 +231,8 @@ internal fun saveSettings(context: Context, settings: AppSettings) {
         putString("visualBlocksMode", settings.visualBlocksMode.trim())
         putString("videoLibraryPath", settings.videoLibraryPath.trim())
         putString("newsLibraryPath", settings.newsLibraryPath.trim())
+        putString("imageLibraryPath", settings.imageLibraryPath.trim())
+        putString("extraImageLibraryPaths", encodeExtraImageLibraryPaths(settings.extraImageLibraryPaths))
         putString("activeProjectId", settings.activeProjectId.trim())
         putString("activeProjectName", settings.activeProjectName.trim())
         putString("activeProjectWorkspacePath", settings.activeProjectWorkspacePath.trim())
@@ -285,6 +300,8 @@ internal object AppDefaults {
     const val visualBlocksMode = "auto"
     const val videoLibraryPath = "/home/matteo/video"
     const val newsLibraryPath = "/home/matteo/news"
+    const val imageLibraryPath = ""
+    val extraImageLibraryPaths: List<String> = emptyList()
     const val activeProjectId = ""
     const val activeProjectName = ""
     const val fontScale = 1.0f

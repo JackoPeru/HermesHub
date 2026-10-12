@@ -310,6 +310,8 @@ internal fun SettingsScreen(
     var visualBlocksMode by remember(settings.visualBlocksMode) { mutableStateOf(settings.visualBlocksMode) }
     var videoLibraryPath by remember(settings.videoLibraryPath) { mutableStateOf(settings.videoLibraryPath) }
     var newsLibraryPath by remember(settings.newsLibraryPath) { mutableStateOf(settings.newsLibraryPath) }
+    var imageLibraryPath by remember(settings.imageLibraryPath) { mutableStateOf(settings.imageLibraryPath) }
+    var extraImagePaths by remember(settings.extraImageLibraryPaths) { mutableStateOf(settings.extraImageLibraryPaths.joinToString("\n")) }
     var apiKey by remember(gatewaySecret) { mutableStateOf(gatewaySecret.orEmpty()) }
     var fontScale by remember(settings.fontScale) { mutableFloatStateOf(settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)) }
     var showToolCalls by remember(settings.showToolCalls) { mutableStateOf(settings.showToolCalls) }
@@ -395,6 +397,8 @@ internal fun SettingsScreen(
             visualBlocksMode = visualBlocksMode.trim(),
             videoLibraryPath = videoLibraryPath.trim(),
             newsLibraryPath = newsLibraryPath.trim(),
+            imageLibraryPath = imageLibraryPath.trim(),
+            extraImageLibraryPaths = parseExtraImageLibraryPaths(extraImagePaths),
             activeProjectId = settings.activeProjectId,
             activeProjectName = settings.activeProjectName,
             fontScale = scale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE),
@@ -652,6 +656,13 @@ internal fun SettingsScreen(
                         SettingsPasswordField("API key Hermes", apiKey, { apiKey = it })
                         SettingsField("Cartella video Hermes (dal server)", videoLibraryPath, { }, readOnly = true)
                         SettingsField("Cartella news Hermes", newsLibraryPath, { newsLibraryPath = it })
+                        SettingsField("Cartella immagini Hermes (dal server)", imageLibraryPath, { }, readOnly = true)
+                        SettingsField("Cartelle immagini extra (una per riga)", extraImagePaths, { extraImagePaths = it })
+                        Text(
+                            "Le cartelle immagini dicono all'app dove il server tiene le immagini generate. Quella principale e fissata dal server, le extra le aggiungi tu.",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp
+                        )
                         Text(
                             "Le cartelle dicono all'app dove il server tiene video e news. Quella video e fissata dal server.",
                             color = AppColors.Muted,

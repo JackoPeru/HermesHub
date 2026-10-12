@@ -4522,6 +4522,7 @@ def _patch_modern_capability_endpoints(text: str) -> tuple[str, bool]:
     ("hermes_native", ("POST", "/v1/hermes/native")),
     ("hardware", ("GET", "/v1/hub/hardware")),
     ("video_library", ("GET", "/v1/video/library")),
+    ("image_library", ("GET", "/v1/image/library")),
     ("news_library", ("GET", "/v1/news/library")),
     ("media_proxy", ("GET", "/v1/media/{media_id}")),
     ("hub_memory", ("GET/PATCH", "/v1/hub/memory")),
@@ -4829,6 +4830,7 @@ def _patch_dynamic_http_routes(text: str) -> tuple[str, bool]:
             ("GET", "/v1/hub/audit", self._handle_get_hub_audit),
             ("POST", "/v1/hub/audit", self._handle_post_hub_audit),
             ("GET", "/v1/video/library", self._handle_video_library),
+            ("GET", "/v1/image/library", self._handle_image_library),
             ("GET", "/v1/news/library", self._handle_news_library),
             ("POST", "/v1/media/upload", self._handle_hub_media_upload),
             ("GET", "/v1/media/{media_id:.*}", self._handle_hub_media),
@@ -7807,6 +7809,89 @@ def _hermes_hub_number(value: Any, fallback: float = 0.0) -> float:''',
         )
         changes.append("video library broad extensions")
 
+    if "def _hermes_hub_image_library_payload" not in text:
+        text, _ = _replace_once(
+            text,
+            "\n\ndef _hermes_hub_media_roots() -> List[\"Path\"]:",
+            '''
+
+def _hermes_hub_image_library_payload(request: Optional["web.Request"] = None) -> Dict[str, Any]:
+    import mimetypes as _mimetypes
+    import urllib.parse as _urlparse
+    from pathlib import Path as _Path
+
+    query_path = ""
+    if request is not None:
+        query_path = (request.query.get("path") or request.query.get("library_path") or "").strip()
+    raw = query_path or os.environ.get("HERMES_IMAGE_LIBRARY_PATH") or str(_Path.home() / "images")
+    root_query = f"?root={_urlparse.quote(str(_Path(raw).expanduser()), safe='')}" if query_path else ""
+    roots: List[_Path] = [_Path(raw).expanduser()]
+
+    unique_roots: List[_Path] = []
+    seen_roots = set()
+    for root in roots:
+        try:
+            resolved = root.resolve()
+        except Exception:
+            resolved = root
+        key = str(resolved)
+        if key not in seen_roots:
+            seen_roots.add(key)
+            unique_roots.append(resolved)
+
+    extensions = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+    seen_files = set()
+    items: List[Dict[str, Any]] = []
+    for root in unique_roots:
+        if not root.is_dir():
+            continue
+        try:
+            candidates = sorted(root.rglob("*"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+        except Exception:
+            continue
+        for path in candidates:
+            if not path.is_file() or path.suffix.lower() not in extensions:
+                continue
+            try:
+                stat = path.stat()
+                resolved_file = str(path.resolve())
+                if resolved_file in seen_files:
+                    continue
+                seen_files.add(resolved_file)
+                rel = path.relative_to(root).as_posix()
+            except Exception:
+                continue
+            media_id = _urlparse.quote(rel, safe="")
+            items.append({
+                "id": rel,
+                "title": path.stem.replace("_", " ").replace("-", " ").strip() or path.name,
+                "filename": path.name,
+                "path": str(path),
+                "media_url": f"/v1/media/{media_id}{root_query}",
+                "url": f"/v1/media/{media_id}{root_query}",
+                "mime_type": _mimetypes.guess_type(path.name)[0] or "image/*",
+                "size_bytes": int(stat.st_size),
+                "modified_at": float(stat.st_mtime),
+            })
+
+    return {
+        "object": "hermes.image.library",
+        "status": "ok",
+        "configured": bool(raw),
+        "image_library_path": str(_Path(raw).expanduser()),
+        "library_path": str(_Path(raw).expanduser()),
+        "media_roots": [str(root) for root in unique_roots],
+        "items": items,
+        "count": len(items),
+        "description": "Feed Immagini Hermes Hub: immagini presenti nella cartella monitorata dal server.",
+    }
+
+
+def _hermes_hub_media_roots() -> List["Path"]:''',
+            "image library payload helper",
+        )
+        changes.append("image library payload helper")
+
     if "def _hermes_hub_news_library_payload" not in text:
         text, _ = _replace_once(
             text,
@@ -9098,6 +9183,21 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         )
         changes.append("hub support endpoint handlers")
 
+    if "async def _handle_image_library" not in text:
+        text, _ = _replace_once(
+            text,
+            "    async def _handle_hub_memory(self, request: \"web.Request\") -> \"web.Response\":",
+            "    async def _handle_image_library(self, request: \"web.Request\") -> \"web.Response\":\n"
+            "        auth_error = self._check_auth(request)\n"
+            "        if auth_error is not None:\n"
+            "            return auth_error\n"
+            "        return web.json_response(_hermes_hub_image_library_payload(request))\n"
+            "\n"
+            "    async def _handle_hub_memory(self, request: \"web.Request\") -> \"web.Response\":",
+            "gateway image library endpoint handler",
+        )
+        changes.append("gateway image library endpoint handler")
+
     if "async def _handle_news_library" not in text:
         text, _ = _replace_once(
             text,
@@ -9886,6 +9986,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             r'(^\s+self\._app\.router\.add_get\("/v1/capabilities", self\._handle_capabilities\)\n)',
             r'\1'
             r'            self._app.router.add_get("/v1/video/library", self._handle_video_library)' "\n"
+            r'            self._app.router.add_get("/v1/image/library", self._handle_image_library)' "\n"
             r'            self._app.router.add_get("/v1/news/library", self._handle_news_library)' "\n"
             r'            self._app.router.add_post("/v1/media/upload", self._handle_hub_media_upload)' "\n"
             r'            self._app.router.add_get("/v1/media/{media_id:.*}", self._handle_hub_media)' "\n"
@@ -9927,6 +10028,16 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
                 "router news library endpoint",
             )
             changes.append("router news library endpoint")
+
+        if not _route_registered(text, "GET", "/v1/image/library", "_handle_image_library"):
+            text, _ = _replace_regex_once(
+                text,
+                r'(^\s+self\._app\.router\.add_get\("/v1/video/library", self\._handle_video_library\)\n)',
+                r'\1'
+                r'            self._app.router.add_get("/v1/image/library", self._handle_image_library)' "\n",
+                "router image library endpoint",
+            )
+            changes.append("router image library endpoint")
 
     if not _route_registered(text, "GET", "/v1/hub/conversations", "_handle_get_hub_conversations"):
         text, _ = _replace_regex_once(

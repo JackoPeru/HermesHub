@@ -543,6 +543,18 @@ data class NewsHtmlItem(
     val modifiedAt: Long
 )
 
+data class ImageLibraryItem(
+    val id: String,
+    val title: String,
+    val filename: String,
+    val mediaUrl: String,
+    val path: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val modifiedAt: Long,
+    val folder: String = ""
+)
+
 internal data class UpdateCheckResult(
     val hasUpdate: Boolean,
     val latestVersion: String?,

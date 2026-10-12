@@ -155,8 +155,19 @@ class ChatStreamProtocolTest {
     }
 
     @Test
-    fun responseStatusUrlIsCorrectAndResumeExpires() {
-        val settings = AppSettings(gatewayUrl = "http://100.94.223.14:8642")
+    fun extraImageLibraryPathsRoundTrip() {
+        assertEquals(
+            listOf("/home/matteo/qwen", "/home/matteo/edit"),
+            parseExtraImageLibraryPaths("/home/matteo/qwen\n\n  /home/matteo/edit\n/home/matteo/qwen\n")
+        )
+        assertEquals(emptyList<String>(), parseExtraImageLibraryPaths("  \n "))
+        val paths = listOf("/a", "/b")
+        assertEquals(paths, parseExtraImageLibraryPaths(encodeExtraImageLibraryPaths(paths)))
+        assertEquals("/a\n/b", encodeExtraImageLibraryPaths(listOf("/a", "", "/b")))
+    }
+
+    @Test
+    fun responseStatusUrlIsCorrectAndResumeExpires() {        val settings = AppSettings(gatewayUrl = "http://100.94.223.14:8642")
         assertEquals(
             "http://100.94.223.14:8642/v1/responses/resp_1",
             responseStatusUrl(settings, null, false, "resp_1")
