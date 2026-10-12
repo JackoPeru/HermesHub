@@ -198,6 +198,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -436,7 +438,7 @@ internal fun ChatImageViewerDialog(
         offsetX = 0f
         offsetY = 0f
     }
-    val transformable = androidx.compose.foundation.gestures.rememberTransformableState { zoomChange, panChange, _ ->
+    fun onZoomPan(zoomChange: Float, panChange: Offset) {
         scale = coerceImageZoom(scale * zoomChange)
         if (scale <= 1f) {
             offsetX = 0f
@@ -446,31 +448,19 @@ internal fun ChatImageViewerDialog(
             offsetY += panChange.y
         }
     }
+    fun onDoubleTap() {
+        if (scale > 1.5f) resetZoom() else scale = 2.5f
+    }
     @Composable
     fun zoomableImage(modifier: Modifier = Modifier) {
-        Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = alt,
-            contentScale = ContentScale.Fit,
+        ZoomableImage(
+            bitmap = bitmap,
+            alt = alt,
+            scale = scale,
+            offset = Offset(offsetX, offsetY),
+            onZoomPan = ::onZoomPan,
+            onDoubleTap = ::onDoubleTap,
             modifier = modifier
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onDoubleTap = {
-                            if (scale > 1.5f) {
-                                resetZoom()
-                            } else {
-                                scale = 2.5f
-                            }
-                        }
-                    )
-                }
-                .transformable(transformable)
-                .graphicsLayer(
-                    scaleX = scale,
-                    scaleY = scale,
-                    translationX = offsetX,
-                    translationY = offsetY
-                )
         )
     }
     @Composable
@@ -557,12 +547,216 @@ internal fun ChatImageViewerDialog(
     }
 }
 
+/**
+ * Galleria sfogliabile (sezione Immagini): pager orizzontale tra le foto,
+ * zoom persistente condiviso normale<->fullscreen (reset a ogni foto),
+ * contatore, scarica della foto corrente. Lo swipe e attivo solo a zoom
+ * 1x (zoomato, il trascinamento panora).
+ */
+@Composable
+internal fun ChatImageGalleryDialog(
+    items: List<ImageLibraryItem>,
+    initialIndex: Int,
+    settings: AppSettings,
+    apiKey: String?,
+    isDownloading: Boolean,
+    onClose: () -> Unit,
+    onDownload: ((ImageLibraryItem) -> Unit)?
+) {
+    if (items.isEmpty()) {
+        LaunchedEffect(Unit) { onClose() }
+        return
+    }
+    val pagerState = rememberPagerState(
+        initialPage = initialIndex.coerceIn(items.indices),
+        pageCount = { items.size }
+    )
+    var scale by rememberSaveable { mutableFloatStateOf(1f) }
+    var offsetX by rememberSaveable { mutableFloatStateOf(0f) }
+    var offsetY by rememberSaveable { mutableFloatStateOf(0f) }
+    var fullScreen by rememberSaveable { mutableStateOf(false) }
+    // Zoom per-foto: cambiando foto si riparte da 1x.
+    LaunchedEffect(pagerState.currentPage) {
+        scale = 1f
+        offsetX = 0f
+        offsetY = 0f
+    }
+    fun resetZoom() {
+        scale = 1f
+        offsetX = 0f
+        offsetY = 0f
+    }
+    val currentItem = items[pagerState.currentPage.coerceIn(items.indices)]
+
+    @Composable
+    fun galleryPage(item: ImageLibraryItem, modifier: Modifier = Modifier) {
+        val imageUrl = remember(settings.gatewayUrl, item.mediaUrl) {
+            resolveWorkspaceUrl(settings, item.mediaUrl)
+        }
+        val pageBitmap by produceState<Bitmap?>(initialValue = null, imageUrl, apiKey) {
+            value = withContext(Dispatchers.IO) { loadRemoteBitmap(settings, imageUrl, apiKey) }
+        }
+        val loaded = pageBitmap
+        if (loaded != null) {
+            ZoomableImage(
+                bitmap = loaded,
+                alt = item.title.ifBlank { item.filename },
+                scale = scale,
+                offset = Offset(offsetX, offsetY),
+                onZoomPan = { zoomChange, panChange ->
+                    scale = coerceImageZoom(scale * zoomChange)
+                    if (scale <= 1f) {
+                        offsetX = 0f
+                        offsetY = 0f
+                    } else {
+                        offsetX += panChange.x
+                        offsetY += panChange.y
+                    }
+                },
+                onDoubleTap = { if (scale > 1.5f) resetZoom() else scale = 2.5f },
+                modifier = modifier
+            )
+        } else {
+            Box(modifier = modifier, contentAlignment = Alignment.Center) {
+                Text("Caricamento immagine...", color = AppColors.Muted, fontSize = 13.sp)
+            }
+        }
+    }
+
+    @Composable
+    fun galleryButtons() {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
+            ) {
+                Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = Color.White)
+            }
+            Text(
+                galleryCounterLabel(pagerState.currentPage, items.size),
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape).padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                IconButton(
+                    onClick = { fullScreen = !fullScreen },
+                    modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
+                ) {
+                    Icon(
+                        if (fullScreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
+                        contentDescription = if (fullScreen) "Esci da tutto schermo" else "Tutto schermo",
+                        tint = Color.White
+                    )
+                }
+                if (onDownload != null) {
+                    IconButton(
+                        onClick = { if (!isDownloading) onDownload(currentItem) },
+                        enabled = !isDownloading,
+                        modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
+                    ) {
+                        Icon(Icons.Rounded.Download, contentDescription = "Scarica immagine", tint = Color.White)
+                    }
+                }
+            }
+        }
+    }
+
+    if (fullScreen) {
+        BackHandler { fullScreen = false }
+        Dialog(
+            onDismissRequest = onClose,
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+                HorizontalPager(
+                    state = pagerState,
+                    userScrollEnabled = scale <= 1f,
+                    modifier = Modifier.fillMaxSize()
+                ) { page ->
+                    galleryPage(items[page], modifier = Modifier.fillMaxSize())
+                }
+                Box(modifier = Modifier.align(Alignment.TopCenter)) {
+                    galleryButtons()
+                }
+                if (scale > 1f) {
+                    TextButton(
+                        onClick = { resetZoom() },
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)
+                    ) {
+                        Text("Ripristina zoom", color = Color.White)
+                    }
+                }
+            }
+        }
+        return
+    }
+    Dialog(onDismissRequest = onClose) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color.Black)
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                userScrollEnabled = scale <= 1f,
+                modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)
+            ) { page ->
+                galleryPage(items[page], modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp))
+            }
+            galleryButtons()
+        }
+    }
+}
+
 /** Zoom clamp [1x, 6x]: sotto 1x torna 1x. Puro e testabile. */
 internal fun coerceImageZoom(scale: Float): Float =
     if (!scale.isFinite()) 1f else scale.coerceIn(1f, 6f)
 
-/** Vera se il blocco e' un'immagine inviata dall'utente (file locale, non remota). */
-internal fun isUserLocalImage(block: VisualBlock): Boolean =
+/** Etichetta contatore galleria ("3 / 12", indici sicuri). Pura e testabile. */
+internal fun galleryCounterLabel(index: Int, size: Int): String =
+    if (size <= 0) "" else "${index.coerceIn(0, size - 1) + 1} / $size"
+
+/**
+ * Immagine con zoom condiviso (pinch + pan + doppio tap): lo stato vive
+ * nel chiamante (normale/fullscreen/galleria lo riusano persistente).
+ */
+@Composable
+internal fun ZoomableImage(
+    bitmap: Bitmap,
+    alt: String,
+    scale: Float,
+    offset: Offset,
+    onZoomPan: (zoomChange: Float, pan: Offset) -> Unit,
+    onDoubleTap: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val transformable = androidx.compose.foundation.gestures.rememberTransformableState { zoomChange, panChange, _ ->
+        onZoomPan(zoomChange, panChange)
+    }
+    Image(
+        bitmap = bitmap.asImageBitmap(),
+        contentDescription = alt,
+        contentScale = ContentScale.Fit,
+        modifier = modifier
+            .pointerInput(Unit) { detectTapGestures(onDoubleTap = { onDoubleTap() }) }
+            .transformable(transformable)
+            .graphicsLayer(
+                scaleX = scale,
+                scaleY = scale,
+                translationX = offset.x,
+                translationY = offset.y
+            )
+    )
+}
+
+/** Vera se il blocco e' un'immagine inviata dall'utente (file locale, non remota). */internal fun isUserLocalImage(block: VisualBlock): Boolean =
     block.type.equals("media_file", ignoreCase = true) &&
         block.localDataUrl.isNotBlank() &&
         (block.mediaKind.equals("image", ignoreCase = true) ||

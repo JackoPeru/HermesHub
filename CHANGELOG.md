@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.256 - 2026-10-12
+
+- Android: galleria sfogliabile nel viewer immagini (swipe destra/sinistra tra le foto, contatore, zoom per foto).
+- Android: chiudendo una foto resti dove eri (lista e scroll non si resettano piu).
+
 ## 0.6.255 - 2026-10-12
 
 - Android: viewer immagini con zoom persistente (pinch + doppio tap, resta tra rotazione e tutto-schermo) e pulsante tutto-schermo con zoom sempre attivo.

@@ -89,6 +89,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1258,9 +1259,14 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
     var folders by remember { mutableStateOf<List<ImageBrowseFolder>>(emptyList()) }
     var items by remember { mutableStateOf<List<ImageLibraryItem>>(emptyList()) }
     var status by remember { mutableStateOf("Sfoglio cartella immagini...") }
-    var viewerItem by remember { mutableStateOf<ImageLibraryItem?>(null) }
+    // Foto aperta (id): la lista resta composta sotto il dialogo (niente
+    // early-return), cosi scroll e miniature non si perdono. Al cambio
+    // cartella il viewer si chiude (l'id non apparterra piu alla lista).
+    var viewerId by remember { mutableStateOf<String?>(null) }
     var isDownloading by remember { mutableStateOf(false) }
     val apiKey = remember { loadGatewaySecret(context) }
+    // Scroll issato: sopravvive ad apertura/chiusura viewer.
+    val listState = rememberLazyListState()
 
     LaunchedEffect(settings.gatewayUrl, currentPath, refreshKey) {
         status = "Sfoglio cartella immagini..."
@@ -1274,56 +1280,46 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
             currentPath = result.path
         }
     }
+    // Cambio cartella: chiudi eventuale viewer (foto di un'altra lista).
+    LaunchedEffect(currentPath) {
+        viewerId = null
+    }
 
-    val viewing = viewerItem
-    if (viewing != null) {
-        BackHandler { viewerItem = null }
-        val fullUrl = remember(settings.gatewayUrl, viewing.mediaUrl) { resolveWorkspaceUrl(settings, viewing.mediaUrl) }
-        val fullBitmap by produceState<Bitmap?>(initialValue = null, fullUrl, apiKey) {
-            value = withContext(Dispatchers.IO) { loadRemoteBitmap(settings, fullUrl, apiKey) }
-        }
-        val loaded = fullBitmap
-        if (loaded != null) {
-            ChatImageViewerDialog(
-                bitmap = loaded,
-                alt = viewing.title.ifBlank { viewing.filename },
-                isDownloading = isDownloading,
-                onClose = { viewerItem = null },
-                onDownload = {
-                    scope.launch {
-                        isDownloading = true
-                        try {
-                            openHermesMediaExternally(
-                                context, settings, fullUrl,
-                                viewing.filename.ifBlank { "hermes-immagine" },
-                                viewing.mimeType.ifBlank { "image/*" }, apiKey
-                            )
-                        } finally {
-                            isDownloading = false
-                        }
+    val viewingIndex = viewerId?.let { id -> items.indexOfFirst { it.id == id }.takeIf { it >= 0 } }
+    if (viewingIndex != null) {
+        BackHandler { viewerId = null }
+        ChatImageGalleryDialog(
+            items = items,
+            initialIndex = viewingIndex,
+            settings = settings,
+            apiKey = apiKey,
+            isDownloading = isDownloading,
+            onClose = { viewerId = null },
+            onDownload = { item ->
+                scope.launch {
+                    isDownloading = true
+                    try {
+                        openHermesMediaExternally(
+                            context, settings,
+                            resolveWorkspaceUrl(settings, item.mediaUrl),
+                            item.filename.ifBlank { "hermes-immagine" },
+                            item.mimeType.ifBlank { "image/*" }, apiKey
+                        )
+                    } finally {
+                        isDownloading = false
                     }
                 }
-            )
-        } else {
-            Dialog(onDismissRequest = { viewerItem = null }) {
-                Surface(color = AppColors.Panel, shape = RoundedCornerShape(14.dp)) {
-                    Text(
-                        "Caricamento immagine...",
-                        color = AppColors.Muted,
-                        modifier = Modifier.padding(24.dp)
-                    )
-                }
             }
-        }
-        return
+        )
     }
-    // Back fisico: risale di un livello (mai fuori dalla sezione).
+    // Back fisico: risale di un livello (mai fuori dalla sezione, mai sopra il viewer).
     val parent = parentPath
-    BackHandler(enabled = parent != null) {
+    BackHandler(enabled = parent != null && viewingIndex == null) {
         currentPath = parent
     }
 
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 14.dp),
@@ -1417,7 +1413,7 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
                         settings = settings,
                         item = item,
                         apiKey = apiKey,
-                        onClick = { viewerItem = item },
+                        onClick = { viewerId = item.id },
                         modifier = Modifier.weight(1f)
                     )
                 }

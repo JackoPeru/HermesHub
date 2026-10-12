@@ -32,4 +32,13 @@ class ImageBrowseTest {
         assertEquals(6f, coerceImageZoom(99f))
         assertEquals(2.5f, coerceImageZoom(2.5f))
     }
+
+    @Test
+    fun galleryCounterLabelIsOneBasedAndSafe() {
+        assertEquals("3 / 12", galleryCounterLabel(2, 12))
+        assertEquals("1 / 1", galleryCounterLabel(0, 1))
+        assertEquals("1 / 5", galleryCounterLabel(-3, 5))
+        assertEquals("5 / 5", galleryCounterLabel(99, 5))
+        assertEquals("", galleryCounterLabel(0, 0))
+    }
 }

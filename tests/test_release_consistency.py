@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.255"
-EXPECTED_ANDROID_VERSION_CODE = 259
+EXPECTED_VERSION = "0.6.256"
+EXPECTED_ANDROID_VERSION_CODE = 260
 
 
 def read(relative_path: str) -> str:
@@ -112,6 +112,9 @@ class ReleaseConsistencyTests(unittest.TestCase):
             "ImageBrowseFolder(",
             "browseSegments(",
             "encodeMediaPathSegment(",
+            "ChatImageGalleryDialog(",
+            "HorizontalPager(",
+            "rememberLazyListState",
             "extraImageLibraryPaths",
             "parseExtraImageLibraryPaths(",
             'add_get("/v1/image/library", self._handle_image_library)',

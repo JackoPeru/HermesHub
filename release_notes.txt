@@ -1,7 +1,8 @@
-Hermes Hub 0.6.255 (viewer immagini con zoom)
+Hermes Hub 0.6.256 (galleria sfogliabile)
 
-- Android: zoom persistente nel viewer (pinch + doppio tap 2.5x, resta tra rotazione e passaggio a tutto-schermo) + pulsante tutto-schermo con zoom sempre attivo e "Ripristina zoom".
-- Versioni: Windows/AdminBridge 0.6.255; Android versionName 0.6.255, versionCode 259 (stessa firma: aggiornamento normale).
-- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.255-android.apk; MSIX NemoclawChat.Windows_0.6.255.0_x64.msix; gateway Linux HermesHub-0.6.255-linux-gateway.tar.gz.
-- SHA-256 Android: `bf7f07e1702790fa415401092579441769a9a698cc09f598bff4f4a526fc6f47`.
-- SHA-256 gateway: `e5ed3153f14f47a6c374cf4abd46d7a67815371fccd48b0a85004e95485ddef1`.
+- Android: viewer immagini come galleria - swipe destra/sinistra tra le foto, contatore, zoom per foto (resta tra normale e tutto-schermo).
+- Android: chiudendo una foto resti dove eri (lista, scroll e miniature non si resettano piu).
+- Versioni: Windows/AdminBridge 0.6.256; Android versionName 0.6.256, versionCode 260 (stessa firma: aggiornamento normale).
+- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.256-android.apk; MSIX NemoclawChat.Windows_0.6.256.0_x64.msix; gateway Linux HermesHub-0.6.256-linux-gateway.tar.gz.
+- SHA-256 Android: `1aae73975c4a5b96ef58c3a19a4852af2ca349ee60564f9ef9d19419fa8f36a2`.
+- SHA-256 gateway: `1d450c3ba1d0dbc95ebabade3cae3de543d85f683762b654d065f46098e9d967`.
