@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.248"
-EXPECTED_ANDROID_VERSION_CODE = 252
+EXPECTED_VERSION = "0.6.249"
+EXPECTED_ANDROID_VERSION_CODE = 253
 
 
 def read(relative_path: str) -> str:
@@ -77,9 +77,28 @@ class ReleaseConsistencyTests(unittest.TestCase):
             'resolveHermesUrl(settings, "/v1/hub/server/action")',
             'resolveHermesUrl(settings, "/v1/hub/server/maintenance")',
             'resolveHermesUrl(settings, "/v1/media/upload")',
+            'resolveHermesUrl(settings, "/v1/image/library',
         ):
             self.assertIn(path, sources)
 
+    def test_android_images_section_is_wired(self) -> None:
+        sources = read_android_sources()
+        for marker in (
+            'Images("Immagini"',
+            "Tab.Images",
+            "ImageScreen(",
+            "ImageLibraryItem(",
+            "loadImageLibrary(",
+            "extraImageLibraryPaths",
+            "parseExtraImageLibraryPaths(",
+            'add_get("/v1/image/library", self._handle_image_library)',
+            "def _hermes_hub_image_library_payload",
+        ):
+            if marker.startswith("add_get") or marker.startswith("def _hermes"):
+                content = read("scripts/hermes_hub_gateway/adapters/hermes/legacy_patcher.py")
+            else:
+                content = sources
+            self.assertIn(marker, content)
     def test_github_repository_defaults_target_hermes_hub(self) -> None:
         expected_slug = "JackoPeru/HermesHub"
         obsolete_slug = "app-interazione-nemoclaw"

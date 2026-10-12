@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.249 - 2026-10-12
+
+- Android: nuova sezione Immagini sotto Video — griglia, fullscreen con scarica, filtri per cartella, refresh; cartella principale dal server + cartelle extra configurabili (una per riga) nelle Impostazioni.
+- Gateway: nuovo endpoint `GET /v1/image/library[?path=]` con proxy autenticato (patcher + test).
+
 ## 0.6.248 - 2026-10-12
 
 - Android: audit totale connessioni — Jarvis (intera tab morta) sotto `/v1`; apertura media esterna con fallback token; poll run con 401/403 subito terminali; coda continuity senza veleno 401; health senza chiave; capability mai stale su 401; cancel manager con chiave del bot.
