@@ -488,9 +488,11 @@ internal suspend fun loadServerSnapshot(context: Context, settings: AppSettings,
     )
 
     try {
-        val healthStatus = testGateway(healthUrl, apiKey)
+        // /health e anonimo per disegno server: mai inviare la chiave
+        // (solo rumore in log/proxy, zero benefici).
+        val healthStatus = testGateway(healthUrl, null)
         try {
-            val body = httpGet("${hermesRoot(settings)}/health/detailed", apiKey)
+            val body = httpGet("${hermesRoot(settings)}/health/detailed", null)
             val json = JSONObject(body)
             val syncedVideoPath = json.extractString("video_library_path")
                 ?: json.extractString("videoLibraryPath")

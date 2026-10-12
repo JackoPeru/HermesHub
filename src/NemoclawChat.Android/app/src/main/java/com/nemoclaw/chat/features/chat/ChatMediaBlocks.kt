@@ -1038,44 +1038,64 @@ internal suspend fun openHermesMediaExternally(
     pruneExternalMediaCache(directory)
     val maxBytes = settings.maxAttachmentMb.coerceIn(1, 150).toLong() * 1024L * 1024L
     var lastError = "Nessuna risposta dal server."
+    // Tentativi per URL: Bearer prima (niente segreto in URL/log), poi
+    // ?hub_token= come il download (il gateway lo accetta sui media GET).
+    fun buildGet(url: String, bearer: String?): Request = Request.Builder()
+        .url(url)
+        .get()
+        .header("Accept", "*/*")
+        .header("User-Agent", "HermesHub-Android")
+        .apply { bearer?.let { header("Authorization", "Bearer $it") } }
+        .build()
+    suspend fun attempt(request: Request): Boolean {
+        val safeName = sanitizeDownloadFilename(filename.ifBlank { "hermes-file" })
+        val extension = safeName.substringAfterLast('.', "").takeIf { it.matches(Regex("[A-Za-z0-9]{1,12}")) }
+        return downloadAndOpenExternalMedia(
+            request,
+            directory,
+            maxBytes,
+            extension?.let { ".$it" } ?: ".bin"
+        ) { completed ->
+            val contentUri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                completed
+            )
+            val resolvedMime = mimeType.ifBlank {
+                android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
+            }
+            val intent = Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, resolvedMime).apply {
+                clipData = ClipData.newUri(context.contentResolver, safeName, contentUri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            openAndroidIntent(context, intent)
+        }
+    }
     for (candidateUrl in plugAndPlayUrlCandidates(url)) {
         val plan = externalMediaRequestPlan(settings, candidateUrl, apiKey)
-        val request = Request.Builder()
-            .url(plan.url)
-            .get()
-            .header("Accept", "*/*")
-            .header("User-Agent", "HermesHub-Android")
-            .apply { plan.bearerToken?.let { header("Authorization", "Bearer $it") } }
-            .build()
         try {
-            val safeName = sanitizeDownloadFilename(filename.ifBlank { "hermes-file" })
-            val extension = safeName.substringAfterLast('.', "").takeIf { it.matches(Regex("[A-Za-z0-9]{1,12}")) }
-            return@withContext downloadAndOpenExternalMedia(
-                request,
-                directory,
-                maxBytes,
-                extension?.let { ".$it" } ?: ".bin"
-            ) { completed ->
-                val contentUri = FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.fileprovider",
-                    completed
-                )
-                val resolvedMime = mimeType.ifBlank {
-                    android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
-                }
-                val intent = Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, resolvedMime).apply {
-                    clipData = ClipData.newUri(context.contentResolver, safeName, contentUri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                openAndroidIntent(context, intent)
-            }
+            return@withContext attempt(buildGet(plan.url, plan.bearerToken))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (tooLarge: PayloadTooLargeException) {
             throw tooLarge
         } catch (error: java.io.IOException) {
             lastError = error.message ?: error.javaClass.simpleName
+            // 401 col Bearer: riprova con token in query (stesso fallback del download).
+            val queryUrl = plan.bearerToken
+                ?.let { withHermesMediaQueryToken(settings, candidateUrl, it) }
+                ?.takeIf { it != candidateUrl }
+            if (queryUrl != null && lastError.contains("HTTP 401")) {
+                try {
+                    return@withContext attempt(buildGet(queryUrl, null))
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (tooLarge: PayloadTooLargeException) {
+                    throw tooLarge
+                } catch (retryError: java.io.IOException) {
+                    lastError = retryError.message ?: retryError.javaClass.simpleName
+                }
+            }
         }
     }
     throw java.io.IOException(lastError)

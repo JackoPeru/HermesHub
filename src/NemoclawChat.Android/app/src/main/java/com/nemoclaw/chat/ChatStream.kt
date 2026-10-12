@@ -2043,6 +2043,11 @@ private fun runDetachedAgent(
             continue
         }
         if (statusResponse.first !in 200..299) {
+            // 401/403 permanenti (chiave): inutile riprovare, chiudi subito.
+            if (statusResponse.first == 401 || statusResponse.first == 403) {
+                emit(ChatStreamEvent.Error("Run $runId: chiave rifiutata (HTTP ${statusResponse.first}). Verifica la chiave in Impostazioni."))
+                return@flow
+            }
             consecutiveFailures++
             val message = "Run $runId polling HTTP ${statusResponse.first}"
             if (message != lastStatus) {

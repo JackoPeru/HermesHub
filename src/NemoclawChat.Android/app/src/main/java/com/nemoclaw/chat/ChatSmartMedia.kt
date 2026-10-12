@@ -301,7 +301,14 @@ internal suspend fun runSmartCompletion(
                     }
                 }
                 if (urls.isEmpty()) {
-                    return finishFailed("Fast path completato ma senza file pubblicati.")
+                    // Niente URL pubblicati ma file presenti sul server (publish
+                    // fallita): dillo onestamente invece di "senza file".
+                    val resultCount = root.optJSONArray("result_paths")?.length() ?: 0
+                    return if (resultCount > 0) {
+                        finishFailed("Fast path completato sul server ($resultCount file) ma pubblicazione non riuscita: li trovi nella sezione Video.")
+                    } else {
+                        finishFailed("Fast path completato ma senza file pubblicati.")
+                    }
                 }
                 var resultText = if (smart.kind == "video") {
                     "Video pronto (fast path, ${smart.preset})."

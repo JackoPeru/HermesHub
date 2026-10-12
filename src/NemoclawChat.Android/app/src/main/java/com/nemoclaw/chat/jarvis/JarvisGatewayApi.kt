@@ -31,6 +31,9 @@ internal class JarvisGatewayApi(
 ) {
     private val root = gatewayUrl.trim().trimEnd('/').also {
         require(it.startsWith("http://") || it.startsWith("https://")) { "Configura Hermes API URL." }
+    }.let {
+        // Il gateway serve tutto sotto /v1: root nuda fa 404 su ogni chiamata.
+        if (it.endsWith("/v1", ignoreCase = true)) it else "$it/v1"
     }
 
     suspend fun capabilities(): JarvisCapabilities {

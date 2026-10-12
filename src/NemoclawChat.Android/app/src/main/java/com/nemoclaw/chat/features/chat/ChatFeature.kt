@@ -462,10 +462,12 @@ internal fun ChatScreen(
                 }
             }
             if (state.activeStreams.size <= 1) {
-                val stopKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() }
+                // Stesso endpoint/chiave del turno (bot remoti: i loro job
+                // vivono sul loro manager, mai quello primario).
+                val stopKey = botApiKey?.takeIf { it.isNotBlank() }
                 if (stopKey != null) {
                     cancelManagerJobsSince(
-                        gpuManagerBase(settings.gatewayUrl), stopKey, state.lastTurnStartMs
+                        gpuManagerBase(botSettings.gatewayUrl), stopKey, state.lastTurnStartMs
                     )
                 }
             }
@@ -2228,13 +2230,13 @@ internal fun ChatScreen(
                 // Job media nati in questo turno (invisibili al client): cancellali,
                 // ma solo se non ci sono altri stream attivi a usar le GPU.
                 if (state.activeStreams.size <= 1) {
-                    val stopKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() }
+                    val stopKey = botApiKey?.takeIf { it.isNotBlank() }
                     if (stopKey != null) {
                         // POST rete fuori dal Main (lo stato immediato sotto
                         // resta sul chiamante, gia Main).
                         HermesStreamRuntime.ioScope.launch {
                             cancelManagerJobsSince(
-                                gpuManagerBase(settings.gatewayUrl), stopKey, state.lastTurnStartMs
+                                gpuManagerBase(botSettings.gatewayUrl), stopKey, state.lastTurnStartMs
                             )
                         }
                     }

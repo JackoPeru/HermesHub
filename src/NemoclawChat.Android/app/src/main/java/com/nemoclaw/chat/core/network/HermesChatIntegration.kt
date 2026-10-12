@@ -30,9 +30,19 @@ suspend fun loadHermesCapabilitiesCached(
     if (!forceRefresh && cachedCapabilities != null && cachedCapabilitiesKey == key &&
         now - cachedCapabilitiesAt < CAPABILITIES_CACHE_MS
     ) return@withContext cachedCapabilities
-    val body = runCatching {
-        httpGet("${key.trimEnd('/')}/v1/capabilities", apiKey)
-    }.getOrNull() ?: return@withContext cachedCapabilities?.takeIf { cachedCapabilitiesKey == key }
+    val (code, body) = runCatching {
+        httpGetResponse("${key.trimEnd('/')}/v1/capabilities", apiKey)
+    }.getOrElse { return@withContext cachedCapabilities?.takeIf { cachedCapabilitiesKey == key } }
+    // 401/403: chiave cambiata/rifiutata — MAI decidere su cache stale
+    // (routing Sessions-vs-legacy su dati pre-rotazione).
+    if (code == 401 || code == 403) {
+        if (cachedCapabilitiesKey == key) {
+            cachedCapabilities = null
+        }
+        return@withContext null
+    }
+    // Trasporto: tieni la cache come prima.
+    if (code !in 200..299) return@withContext cachedCapabilities?.takeIf { cachedCapabilitiesKey == key }
     val parsed = parseHermesCapabilities(body) ?: return@withContext null
     cachedCapabilities = parsed
     cachedCapabilitiesAt = now
