@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.248 - 2026-10-12
+
+- Android: audit totale connessioni — Jarvis (intera tab morta) sotto `/v1`; apertura media esterna con fallback token; poll run con 401/403 subito terminali; coda continuity senza veleno 401; health senza chiave; capability mai stale su 401; cancel manager con chiave del bot.
+- Android: fast path onesto quando i file esistono sul server ma non pubblicati.
+
 ## 0.6.247 - 2026-10-12
 
 - Android: URL media nudi scritti dall'agente (`xxx.webp`, anche con query) risolti a `/v1/media/...` — le immagini modificate tornano a mostrarsi invece delle card col solo nome.

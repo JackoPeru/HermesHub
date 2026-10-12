@@ -1,7 +1,14 @@
-Hermes Hub 0.6.247 (immagini modificate di nuovo visibili)
+Hermes Hub 0.6.248 (audit totale connessioni)
 
-- Android: URL media nudi scritti dall'agente (xxx.webp, anche con query) risolti a /v1/media/... - le immagini modificate tornano a mostrarsi invece delle card col solo nome file.
-- Versioni: Windows/AdminBridge 0.6.247; Android versionName 0.6.247, versionCode 251 (stessa firma: aggiornamento normale).
-- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.247-android.apk; MSIX NemoclawChat.Windows_0.6.247.0_x64.msix; gateway Linux HermesHub-0.6.247-linux-gateway.tar.gz.
-- SHA-256 Android: `461642a39ce55452b40c04cb773bc7c76776d17757512e51fe7b92194f1316b9`.
-- SHA-256 gateway: `afb0bf15f2f1e67746ae2a6d7a14172bcbf8b323d02e9c9060fc79156a41309e`.
+- Android: audit totale connessioni app/server con 4 agenti + probe live di ogni endpoint.
+- Jarvis: intera tab morta (path senza /v1) - ora tutto sotto /v1.
+- Media: apertura esterna con fallback ?hub_token= come il download.
+- Run: poll con 401/403 subito terminale invece di retry a vuoto.
+- Continuity: scarti 401/403 invece di coda avvelenata per sempre.
+- Health: niente chiave su endpoint anonimi; capability mai stale dopo 401.
+- Cancel manager con chiave/endpoint del bot (non piu primaria).
+- Fast path onesto quando i file esistono sul server ma non pubblicati.
+- Versioni: Windows/AdminBridge 0.6.248; Android versionName 0.6.248, versionCode 252 (stessa firma: aggiornamento normale).
+- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.248-android.apk; MSIX NemoclawChat.Windows_0.6.248.0_x64.msix; gateway Linux HermesHub-0.6.248-linux-gateway.tar.gz.
+- SHA-256 Android: `04a141956500202c23f2d3e6c2efb568a71a3e1b1b346f23bf70e20e7ddea565`.
+- SHA-256 gateway: `97001adb8fc3d78151dfd88a2c4c0b2190bd7863dcceae004817f707b968fd2a`.
