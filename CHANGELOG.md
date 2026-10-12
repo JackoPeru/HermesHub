@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.247 - 2026-10-12
+
+- Android: URL media nudi scritti dall'agente (`xxx.webp`, anche con query) risolti a `/v1/media/...` — le immagini modificate tornano a mostrarsi invece delle card col solo nome.
+
 ## 0.6.246 - 2026-10-12
 
 - Android: audit totale endpoint contro server live — chat, responses, capabilities, models, trascrizioni, titoli, controllo server usano sempre `/v1/` (i path nudi davano 404); rete anti-regressione in suite.

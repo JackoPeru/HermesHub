@@ -1,9 +1,7 @@
-Hermes Hub 0.6.246 (connessioni app/server tutte verificate)
+Hermes Hub 0.6.247 (immagini modificate di nuovo visibili)
 
-- Android: audit totale endpoint contro server live - chat, responses, capabilities, models, trascrizioni vocali, titoli, controllo server usano sempre /v1/ (i path nudi davano 404). Centralizzato in profileUrl/resolveHermesUrl.
-- Android: blocchi media senza estensione ma con mime/estensione immagine si aprono come immagini (niente piu card col solo nome file).
-- Rete anti-regressione in suite: path nudi vietati per costruzione.
-- Versioni: Windows/AdminBridge 0.6.246; Android versionName 0.6.246, versionCode 250 (stessa firma: aggiornamento normale).
-- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.246-android.apk; MSIX NemoclawChat.Windows_0.6.246.0_x64.msix; gateway Linux HermesHub-0.6.246-linux-gateway.tar.gz.
-- SHA-256 Android: `ae81cef427a5b9c9338a50e96fc997b1eeed9a8c6c1538509403de3f4c3dfd0f`.
-- SHA-256 gateway: `b85e7802d4720f8088cd8921b0712f4eec5b1756c65e56a7526fef0389061813`.
+- Android: URL media nudi scritti dall'agente (xxx.webp, anche con query) risolti a /v1/media/... - le immagini modificate tornano a mostrarsi invece delle card col solo nome file.
+- Versioni: Windows/AdminBridge 0.6.247; Android versionName 0.6.247, versionCode 251 (stessa firma: aggiornamento normale).
+- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.247-android.apk; MSIX NemoclawChat.Windows_0.6.247.0_x64.msix; gateway Linux HermesHub-0.6.247-linux-gateway.tar.gz.
+- SHA-256 Android: `461642a39ce55452b40c04cb773bc7c76776d17757512e51fe7b92194f1316b9`.
+- SHA-256 gateway: `afb0bf15f2f1e67746ae2a6d7a14172bcbf8b323d02e9c9060fc79156a41309e`.
