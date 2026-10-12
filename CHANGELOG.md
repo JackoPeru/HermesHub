@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.257 - 2026-10-12
+
+- Android: fix swipe galleria — il pan dell'immagine non ruba piu i trascinamenti a zoom 1x (solo zoomato panoramano).
+
 ## 0.6.256 - 2026-10-12
 
 - Android: galleria sfogliabile nel viewer immagini (swipe destra/sinistra tra le foto, contatore, zoom per foto).

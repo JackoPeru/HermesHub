@@ -1,8 +1,7 @@
-Hermes Hub 0.6.256 (galleria sfogliabile)
+Hermes Hub 0.6.257 (fix swipe galleria)
 
-- Android: viewer immagini come galleria - swipe destra/sinistra tra le foto, contatore, zoom per foto (resta tra normale e tutto-schermo).
-- Android: chiudendo una foto resti dove eri (lista, scroll e miniature non si resettano piu).
-- Versioni: Windows/AdminBridge 0.6.256; Android versionName 0.6.256, versionCode 260 (stessa firma: aggiornamento normale).
-- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.256-android.apk; MSIX NemoclawChat.Windows_0.6.256.0_x64.msix; gateway Linux HermesHub-0.6.256-linux-gateway.tar.gz.
-- SHA-256 Android: `1aae73975c4a5b96ef58c3a19a4852af2ca349ee60564f9ef9d19419fa8f36a2`.
-- SHA-256 gateway: `1d450c3ba1d0dbc95ebabade3cae3de543d85f683762b654d065f46098e9d967`.
+- Android: fix swipe tra foto - il pan dell'immagine non ruba piu i trascinamenti a zoom 1x (zoomato si panoramano, a 1x si sfoglia).
+- Versioni: Windows/AdminBridge 0.6.257; Android versionName 0.6.257, versionCode 261 (stessa firma: aggiornamento normale).
+- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.257-android.apk; MSIX NemoclawChat.Windows_0.6.257.0_x64.msix; gateway Linux HermesHub-0.6.257-linux-gateway.tar.gz.
+- SHA-256 Android: `94ae99f4c612399b517c86a919c7dc6bdc753a70ac1e4ae4ceaeafda65c3cbf6`.
+- SHA-256 gateway: `ee9eaf62f91bb1fed589970d2331b236a62da3c34cd9ca05cc6938b2d9ef1874`.

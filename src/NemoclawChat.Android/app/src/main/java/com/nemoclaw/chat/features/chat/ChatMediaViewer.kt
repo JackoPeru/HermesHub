@@ -746,7 +746,10 @@ internal fun ZoomableImage(
         contentScale = ContentScale.Fit,
         modifier = modifier
             .pointerInput(Unit) { detectTapGestures(onDoubleTap = { onDoubleTap() }) }
-            .transformable(transformable)
+            // A zoom 1x il pan NON consuma: i trascinamenti orizzontali
+            // arrivano al pager (swipe tra foto); zoomato, panoramano.
+            // Il pinch-zoom resta sempre attivo (canPan blocca solo il pan).
+            .transformable(transformable, canPan = { scale > 1f })
             .graphicsLayer(
                 scaleX = scale,
                 scaleY = scale,
