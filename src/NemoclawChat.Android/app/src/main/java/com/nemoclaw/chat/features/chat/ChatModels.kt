@@ -499,7 +499,9 @@ data class LocalConversation(
     val summary: String = "",
     val parentConversationId: String = "",
     val branchFromMessageId: String = "",
-    val linkedConversationIds: List<String> = emptyList()
+    val linkedConversationIds: List<String> = emptyList(),
+    /** Identita bot proprietaria ("connessione::profilo", "" = Hermes default). */
+    val botIdentityKey: String = ""
 )
 
 data class WorkspaceRequest(

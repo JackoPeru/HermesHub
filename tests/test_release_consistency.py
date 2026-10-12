@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.249"
-EXPECTED_ANDROID_VERSION_CODE = 253
+EXPECTED_VERSION = "0.6.250"
+EXPECTED_ANDROID_VERSION_CODE = 254
 
 
 def read(relative_path: str) -> str:
@@ -81,6 +81,26 @@ class ReleaseConsistencyTests(unittest.TestCase):
         ):
             self.assertIn(path, sources)
 
+    def test_android_chat_identity_is_wired(self) -> None:
+        # Selettore bot nel titolo chat: identita persistita + sidebar filtrata.
+        sources = read_android_sources()
+        for marker in (
+            "activeChatBotKey",
+            "botIdentityKey",
+            "resolveChatIdentity(",
+            "conversationsForIdentity(",
+            "conversationIdentityKey(",
+            "chatIdentityOptions(",
+            "ChatIdentityPicker(",
+            "ChatIdentityTitle(",
+            "chatIdentityKey = activeChatBotKey",
+            "identityPicker = chatIdentityPicker",
+            "openChatConversation(id",
+            "pickChatIdentity(",
+            'putString("activeChatBotKey"',
+        ):
+            self.assertIn(marker, sources)
+
     def test_android_images_section_is_wired(self) -> None:
         sources = read_android_sources()
         for marker in (
@@ -99,6 +119,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
             else:
                 content = sources
             self.assertIn(marker, content)
+
     def test_github_repository_defaults_target_hermes_hub(self) -> None:
         expected_slug = "JackoPeru/HermesHub"
         obsolete_slug = "app-interazione-nemoclaw"

@@ -75,6 +75,7 @@ internal fun loadConversations(context: Context, includeDeleted: Boolean = false
                             linkedConversationIds = obj.optJSONArray("linkedConversationIds")?.toStringList()
                                 ?: obj.optJSONArray("linked_conversation_ids")?.toStringList()
                                 ?: emptyList(),
+                            botIdentityKey = readBotIdentityKey(obj),
                             deletedAt = obj.optLong("deletedAt").takeIf { it > 0 }
                                 ?: obj.optLong("deleted_at").takeIf { it > 0 }
                         )
@@ -173,6 +174,10 @@ internal fun conversationsToJsonArray(conversations: List<LocalConversation>): J
                     .put("parentConversationId", conversation.parentConversationId.ifBlank { JSONObject.NULL })
                     .put("branchFromMessageId", conversation.branchFromMessageId.ifBlank { JSONObject.NULL })
                     .put("linkedConversationIds", JSONArray(conversation.linkedConversationIds))
+                    // Stringa vuota (mai JSONObject.NULL: optString lo
+                    // rileggerebbe come letterale "null" e il filtro
+                    // identita nasconderebbe la chat).
+                    .put("botIdentityKey", conversation.botIdentityKey.trim())
                     .put("messages", writeMessages(conversation.messages))
             )
         }
@@ -182,6 +187,16 @@ internal fun conversationsToJsonArray(conversations: List<LocalConversation>): J
 /** Legge stringhe che possono essere null JSON: optString su JSONObject.NULL rende la stringa "null". */
 private fun JSONObject.optNonNullString(key: String): String =
     optString(key).takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) } ?: ""
+
+/** Chiave identita bot: "" se assente/blank/NULL (mai nascondere chat). */
+private fun readBotIdentityKey(obj: JSONObject): String {
+    val raw = if (obj.has("botIdentityKey") && !obj.isNull("botIdentityKey")) {
+        obj.optString("botIdentityKey")
+    } else {
+        obj.optString("bot_identity_key")
+    }
+    return raw.trim().takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) } ?: ""
+}
 
 internal fun readConversationsFromJsonArray(array: JSONArray): List<LocalConversation> {
     return buildList {
@@ -226,6 +241,7 @@ internal fun readConversationsFromJsonArray(array: JSONArray): List<LocalConvers
                     linkedConversationIds = obj.optJSONArray("linkedConversationIds")?.toStringList()
                         ?: obj.optJSONArray("linked_conversation_ids")?.toStringList()
                         ?: emptyList(),
+                    botIdentityKey = readBotIdentityKey(obj),
                     deletedAt = obj.optLong("deletedAt").takeIf { it > 0 }
                         ?: obj.optLong("deleted_at").takeIf { it > 0 }
                 )

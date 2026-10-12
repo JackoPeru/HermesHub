@@ -31,6 +31,8 @@ data class AppSettings(
     val activeProjectInstructions: String = "",
     val activeProjectMemory: String = "",
     val activeProjectTools: String = "",
+    /** Bot attivo nella chat normale ("connessione::profilo", "" = Hermes default). Persiste al riavvio. */
+    val activeChatBotKey: String = "",
     val fontScale: Float = AppDefaults.fontScale,
     val showToolCalls: Boolean = AppDefaults.showToolCalls,
     val showMessageMetrics: Boolean = AppDefaults.showMessageMetrics,
@@ -123,6 +125,7 @@ internal fun loadSettings(context: Context): AppSettings {
         activeProjectInstructions = prefs.getString("activeProjectInstructions", "") ?: "",
         activeProjectMemory = prefs.getString("activeProjectMemory", "") ?: "",
         activeProjectTools = prefs.getString("activeProjectTools", "") ?: "",
+        activeChatBotKey = prefs.getString("activeChatBotKey", "")?.trim() ?: "",
         fontScale = prefs.getFloat("fontScale", AppDefaults.fontScale).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE),
         showToolCalls = prefs.getBoolean("showToolCalls", AppDefaults.showToolCalls),
         showMessageMetrics = prefs.getBoolean("showMessageMetrics", AppDefaults.showMessageMetrics),
@@ -240,6 +243,7 @@ internal fun saveSettings(context: Context, settings: AppSettings) {
         putString("activeProjectInstructions", settings.activeProjectInstructions.trim())
         putString("activeProjectMemory", settings.activeProjectMemory.trim())
         putString("activeProjectTools", settings.activeProjectTools.trim())
+        putString("activeChatBotKey", settings.activeChatBotKey.trim())
         putFloat("fontScale", settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE))
         putBoolean("showToolCalls", settings.showToolCalls)
         putBoolean("showMessageMetrics", settings.showMessageMetrics)

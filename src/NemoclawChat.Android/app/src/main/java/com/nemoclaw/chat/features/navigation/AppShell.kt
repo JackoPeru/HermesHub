@@ -357,9 +357,17 @@ internal fun HermesSidebar(
     onManageBots: () -> Unit = {},
     onBotAction: (com.nemoclaw.chat.features.bots.HermesBotItem, com.nemoclaw.chat.features.bots.BotSidebarAction) -> Unit = { _, _ -> },
     onNewBotChat: (com.nemoclaw.chat.features.bots.HermesBotItem) -> Unit = {},
-    onOpenBotSession: (com.nemoclaw.chat.features.bots.HermesBotItem, com.nemoclaw.chat.HermesSession) -> Unit = { _, _ -> }
+    onOpenBotSession: (com.nemoclaw.chat.features.bots.HermesBotItem, com.nemoclaw.chat.HermesSession) -> Unit = { _, _ -> },
+    // Identita attiva della chat normale ("conn::profilo", "" = default):
+    // i RECENTI mostrano solo le sue chat. In botMode la lista bot resta.
+    chatIdentityKey: String = "",
+    chatRoster: com.nemoclaw.chat.features.bots.HermesBotRoster? = null
 ) {
     val conversations = remember { loadConversations(context).sortedByDescending { it.updatedAt } }
+    // Filtro per identita (stamp o legacy via roster): ogni bot ha le sue.
+    val identityConversations = remember(conversations, chatIdentityKey, chatRoster) {
+        conversationsForIdentity(conversations, chatIdentityKey, chatRoster)
+    }
     Surface(
         modifier = Modifier
             .width(320.dp)
@@ -484,7 +492,7 @@ internal fun HermesSidebar(
                 SidebarSectionLabel("RECENTI", settings.sidebarRecenti) { onToggleSidebarSection("recenti") }
             }
             if (settings.sidebarRecenti) {
-                if (conversations.isEmpty()) {
+                if (identityConversations.isEmpty()) {
                     item {
                         Column(
                             modifier = Modifier.padding(vertical = 10.dp),
@@ -495,7 +503,7 @@ internal fun HermesSidebar(
                         }
                     }
                 } else {
-                    items(conversations.take(15), key = { it.id }) { conversation ->
+                    items(identityConversations.take(15), key = { it.id }) { conversation ->
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()

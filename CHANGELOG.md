@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.250 - 2026-10-12
+
+- Android: selettore bot nel titolo della chat (stile desktop) — tap sul nome, tendina con Hermes + bot disponibili; la chat parla con quel profilo, la scelta persiste al riavvio.
+- Android: sidebar RECENTI filtrata per bot (ogni bot ha le sue chat); aprendo una chat di un altro bot l'identita cambia da sola (vale anche da archivio/ricerca/continuita/deeplink).
+- Android: fix round-trip `botIdentityKey` (NULL JSON riletto come "null" avrebbe nascosto le chat) + reset chiave stale a roster reale.
+
 ## 0.6.249 - 2026-10-12
 
 - Android: nuova sezione Immagini sotto Video — griglia, fullscreen con scarica, filtri per cartella, refresh; cartella principale dal server + cartelle extra configurabili (una per riga) nelle Impostazioni.

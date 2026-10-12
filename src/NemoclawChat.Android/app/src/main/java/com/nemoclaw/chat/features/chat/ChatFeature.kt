@@ -391,6 +391,11 @@ internal fun ChatScreen(
     onOpenComfy: () -> Unit = {},
     // Selettore [Chat | Bot] in alto alla chat (stato issato in AppRoot).
     chatBotActive: Boolean = false,
+    // Identita bot della chat normale ("" = Hermes default): con
+    // pendingBot null il profilo bot arriva da qui (selettore titolo).
+    chatIdentityKey: String = "",
+    // Picker identita per il titolo (null = titolo statico, es. bot chat).
+    identityPicker: ChatIdentityPicker? = null,
     // True mentre la sezione sta aprendo la chat del bot (niente home
     // generica nel mentre: si mostra l'attesa bot).
     chatBotOpening: Boolean = false,
@@ -415,6 +420,13 @@ internal fun ChatScreen(
         loadGatewaySecret(context)
     }
     val botAllowCompatAuth = !remoteBot
+    // Identita proprietaria dei salvataggi locali (sidebar filtrata per
+    // bot): bot esplicito oppure identita selezionata per la chat normale.
+    val effectiveIdentityKey = if (!botProfile.isNullOrBlank()) {
+        "${botConnectionId?.trim().takeIf { !it.isNullOrBlank() } ?: "primary"}::${botProfile.trim()}"
+    } else {
+        chatIdentityKey.trim()
+    }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     var quickPrompt by rememberSaveable { mutableStateOf<String?>(null) }
     // Invio mentre Hermes lavora: scelta Accoda/Correggi per ogni invio.
@@ -535,11 +547,11 @@ internal fun ChatScreen(
     // pendingConversationId viene nulllato dopo il primo load: fallback su
     // activeConversationId, altrimenti dal 2o turno preserve diventerebbe
     // false e si distruggerebbe il serverConversationId desktop.
-    val preserveRemoteContinuity = remember(botProfile, conversationId, state.activeConversationId) {
+    val preserveRemoteContinuity = remember(botProfile, botSessionId, conversationId, state.activeConversationId) {
         val effective = conversationId?.takeIf { it.isNotBlank() }
             ?: state.activeConversationId?.takeIf { it.isNotBlank() }
         if (effective.isNullOrBlank()) false
-        else if (!botProfile.isNullOrBlank()) !isBotConversationId(effective)
+        else if (!botProfile.isNullOrBlank() && !botSessionId.isNullOrBlank()) !isBotConversationId(effective)
         else isLinkedArchiveId(context, effective)
     }
 
@@ -567,7 +579,7 @@ internal fun ChatScreen(
                     null
                 }
                 state.hermesSessionId = saved.hermesSessionId
-                    ?: if (botProfile.isNullOrBlank()) {
+                    ?: if (botProfile.isNullOrBlank() || botSessionId.isNullOrBlank()) {
                         withContext(Dispatchers.IO) { loadSessionBinding(context, saved.id, botProfile) }
                     } else {
                         // Bot canonico: i binding pre-migrazione (bot-*) sono
@@ -625,7 +637,8 @@ internal fun ChatScreen(
                             prompt = "",
                             messages = transcript,
                             source = "Bot Chat condivisa",
-                            syncAfterSave = false
+                            syncAfterSave = false,
+                            botIdentityKey = effectiveIdentityKey
                         )
                     }
                 }
@@ -982,7 +995,8 @@ internal fun ChatScreen(
                     prompt = current?.prompt.orEmpty(),
                     messages = state.messages.toList(),
                     source = "Hermes",
-                    preserveRemoteContinuity = true
+                    preserveRemoteContinuity = true,
+                    botIdentityKey = effectiveIdentityKey
                 )
             }
         }
@@ -1192,6 +1206,9 @@ internal fun ChatScreen(
             probingGateway = !gatewayProbed,
             probeDetail = gatewayProbeDetail,
             title = topTitle,
+            // Picker in chat normale (anche con identita bot: botSessionId
+            // null); nelle bot chat esplicite il titolo e fisso.
+            identityPicker = if (botSessionId.isNullOrBlank()) identityPicker else null,
             gatewayRuntime = gatewayRuntime,
             managerApiKey = managerKey,
             onNewChat = onNewChat,
@@ -1554,7 +1571,7 @@ internal fun ChatScreen(
             reasoningOptions = reasoningLadder,
             onReasoningChange = {
                 state.chatReasoningEffort = it
-                persistChatOverrides(context, state, preserveRemoteContinuity)
+                persistChatOverrides(context, state, preserveRemoteContinuity, effectiveIdentityKey)
             },
             quickPrompt = quickPrompt,
             onQuickPromptConsumed = { quickPrompt = null },
@@ -1633,15 +1650,18 @@ internal fun ChatScreen(
                                 responseId = prevId,
                                 projectId = settings.activeProjectId,
                                 preserveRemoteContinuity = preserveRemoteContinuity,
-                                syncAfterSave = false
+                                syncAfterSave = false,
+                                botIdentityKey = effectiveIdentityKey
                             )
                         }
                         // Mai rinominare la chat condivisa col desktop: titolo e
                         // rename restano quelli esistenti. Mai rinominare una
                         // bot chat canonica: il titolo esatto "Bot Chat" e
                         // l'identita del registro, cambiarlo forkerebbe.
+                        // Chat normale con identita bot (botSessionId null):
+                        // titolo come le chat normali.
                         val shouldGenerateTitle = initialConversation.title == UNTITLED_CHAT_TITLE &&
-                            !preserveRemoteContinuity && botProfile.isNullOrBlank()
+                            !preserveRemoteContinuity && botSessionId.isNullOrBlank()
                         val persistedStreamCid = initialConversation.id
                         if (persistedStreamCid != streamCid) {
                             state.activeStreams.remove(streamCid)?.let { state.activeStreams[persistedStreamCid] = it }
@@ -1824,7 +1844,8 @@ internal fun ChatScreen(
                                             providerOverride = state.chatProviderOverride,
                                             reasoningEffort = state.chatReasoningEffort,
                                             preserveRemoteContinuity = preserveRemoteContinuity,
-                                            syncAfterSave = false
+                                            syncAfterSave = false,
+                                            botIdentityKey = effectiveIdentityKey
                                         )
                                     }
                                 }
@@ -2150,7 +2171,8 @@ internal fun ChatScreen(
                                         preserveRemoteContinuity = preserveRemoteContinuity,
                                         // Su stop non spingere subito sul gateway: la rete in finally
                                         // allungherebbe lo sblocco del composer; ci pensa l'autosync.
-                                        syncAfterSave = !interrupted
+                                        syncAfterSave = !interrupted,
+                                        botIdentityKey = effectiveIdentityKey
                                     )
                                 }
                                 if (state.activeConversationId == activeStreamCid) {
@@ -2746,7 +2768,7 @@ internal fun ChatModelSessionBar(
     }
 }
 
-private fun persistChatOverrides(context: Context, state: ChatStateHolder, preserveRemoteContinuity: Boolean = false) {
+private fun persistChatOverrides(context: Context, state: ChatStateHolder, preserveRemoteContinuity: Boolean = false, botIdentityKey: String = "") {
     val cid = state.activeConversationId ?: return
     runCatching {
         val current = loadConversation(context, cid) ?: return
@@ -2763,7 +2785,8 @@ private fun persistChatOverrides(context: Context, state: ChatStateHolder, prese
             providerOverride = state.chatProviderOverride,
             reasoningEffort = state.chatReasoningEffort,
             preserveRemoteContinuity = preserveRemoteContinuity,
-            syncAfterSave = false
+            syncAfterSave = false,
+            botIdentityKey = botIdentityKey
         )
     }
 }

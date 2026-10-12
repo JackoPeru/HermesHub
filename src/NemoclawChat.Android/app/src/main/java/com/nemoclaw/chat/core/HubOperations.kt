@@ -3449,7 +3449,11 @@ internal fun saveConversationSnapshot(
     // puntatori di continuazione altrui (serverConversationId e
     // previousResponseId restano quelli esistenti). Vale anche per
     // override e hermesSessionId: la chat condivisa non si ri-brandizza.
-    preserveRemoteContinuity: Boolean = false
+    preserveRemoteContinuity: Boolean = false,
+    // Identita bot proprietaria ("connessione::profilo", "" = default):
+    // stampata sempre (anche con preserveRemoteContinuity) per filtrare
+    // la sidebar per bot.
+    botIdentityKey: String = ""
 ): LocalConversation {
     synchronized(localArchiveLock) {
         val conversations = loadConversations(context, includeDeleted = true).toMutableList()
@@ -3474,7 +3478,8 @@ internal fun saveConversationSnapshot(
                 modelOverride = if (preserveRemoteContinuity) current.modelOverride else modelOverride ?: current.modelOverride,
                 providerOverride = if (preserveRemoteContinuity) current.providerOverride else providerOverride ?: current.providerOverride,
                 reasoningEffort = if (preserveRemoteContinuity) current.reasoningEffort else reasoningEffort ?: current.reasoningEffort,
-                projectId = current.projectId.ifBlank { projectId.orEmpty() }
+                projectId = current.projectId.ifBlank { projectId.orEmpty() },
+                botIdentityKey = botIdentityKey.trim().takeIf { it.isNotBlank() } ?: current.botIdentityKey
             )
         } else {
             LocalConversation(
@@ -3491,7 +3496,8 @@ internal fun saveConversationSnapshot(
                 modelOverride = modelOverride.orEmpty(),
                 providerOverride = providerOverride.orEmpty(),
                 reasoningEffort = reasoningEffort.orEmpty(),
-                projectId = projectId.orEmpty()
+                projectId = projectId.orEmpty(),
+                botIdentityKey = botIdentityKey.trim()
             )
         }
 

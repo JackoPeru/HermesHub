@@ -239,7 +239,9 @@ import com.nemoclaw.chat.features.bots.BotChatContext
 import com.nemoclaw.chat.features.bots.BotSidebarAction
 import com.nemoclaw.chat.features.bots.HermesBotItem
 import com.nemoclaw.chat.features.bots.botSessionContext
+import com.nemoclaw.chat.features.bots.connectionForBot
 import com.nemoclaw.chat.features.bots.createBotChatSession
+import com.nemoclaw.chat.features.bots.loadAllHermesBotRosters
 import com.nemoclaw.chat.features.bots.loadLastBot
 import com.nemoclaw.chat.features.bots.resolveCanonicalBotContext
 import com.nemoclaw.chat.features.bots.saveLastBot
@@ -434,12 +436,126 @@ internal fun ChatApp() {
     // Lato bot attivo = sezione roster visibile o bot chat aperta: la
     // sidebar mostra i bot (desktop), non tab/chat normali.
     val botSideActive = botSectionVisible || pendingBot != null
+    // Scope coroutine UI (dichiarato presto: lo usano identita e sidebar).
+    val chatScope = rememberCoroutineScope()
+    // Identita bot della chat normale (selettore nel titolo, stile
+    // desktop): chiave persistita "connessione::profilo" ("" = default).
+    // Roster issato: refresh su gateway e su richiesta dal picker.
+    var chatRoster by remember(settings.gatewayUrl) { mutableStateOf<com.nemoclaw.chat.features.bots.HermesBotRoster?>(null) }
+    var chatRosterLoading by remember(settings.gatewayUrl) { mutableStateOf(false) }
+    var chatRosterNonce by remember(settings.gatewayUrl) { mutableIntStateOf(0) }
+    LaunchedEffect(settings.gatewayUrl, chatRosterNonce) {
+        chatRosterLoading = true
+        val loaded = withContext(Dispatchers.IO) {
+            runCatching { loadAllHermesBotRosters(context.applicationContext, settings) }.getOrNull()
+        }
+        chatRoster = loaded
+        chatRosterLoading = false
+        // Chiave stale (bot eliminato/altro gateway): torna al default.
+        // Solo con lista reale non vuota: a roster fallito/offline la
+        // chiave si tiene (fail-open, label di fallback).
+        val knownKey = settings.activeChatBotKey.trim()
+        if (knownKey.isNotBlank() && !loaded?.items.isNullOrEmpty() &&
+            resolveChatIdentity(loaded, knownKey) == null
+        ) {
+            val next = settings.copy(activeChatBotKey = "")
+            settings = next
+            withContext(Dispatchers.IO) { saveSettings(context.applicationContext, next) }
+        }
+    }
+    val activeChatBotKey = settings.activeChatBotKey.trim()
+    val activeChatBot = resolveChatIdentity(chatRoster, activeChatBotKey)
+    // Endpoint per bot remoti (registro locale, niente rete).
+    var activeChatBotEndpoint by remember { mutableStateOf("") }
+    LaunchedEffect(activeChatBot, settings.gatewayUrl) {
+        activeChatBotEndpoint = withContext(Dispatchers.IO) {
+            val bot = activeChatBot ?: return@withContext ""
+            runCatching { connectionForBot(context.applicationContext, settings, bot).endpoint }.getOrDefault("")
+        }
+    }
+    val chatIdentityLabel = when {
+        activeChatBot != null -> activeChatBot.displayName.trim().takeIf { it.isNotBlank() } ?: activeChatBot.profile
+        activeChatBotKey.isNotBlank() -> chatIdentityFallbackLabel(activeChatBotKey)
+        else -> "Hermes"
+    }
+    // Cambio identita dal titolo: mai sopra un turno attivo (stesse guard
+    // del selettore [Chat | Bot]). Riapre la piu recente dell'identita,
+    // senno chat nuova. La chiave persiste (riavvio incluso).
+    fun pickChatIdentity(key: String) {
+        val clean = normalizeChatIdentityKey(key)
+        if (clean == activeChatBotKey) return
+        if (chatState.sending || chatState.streamingState != null) {
+            Toast.makeText(context, "Finisci o interrompi il turno prima di cambiare bot.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val next = settings.copy(activeChatBotKey = clean)
+        settings = next
+        chatScope.launch(Dispatchers.IO) { saveSettings(context.applicationContext, next) }
+        pendingBot = null
+        pendingPrompt = ""
+        chatScope.launch(Dispatchers.IO) {
+            val recent = runCatching { loadConversations(context.applicationContext) }.getOrDefault(emptyList())
+            val target = conversationsForIdentity(recent, clean, chatRoster).firstOrNull()?.id
+            withContext(Dispatchers.Main) {
+                if (target == null) chatState.resetForNewChat()
+                pendingConversationId = target
+            }
+        }
+    }
+    // Apertura conversazione con auto-switch di identita: la chat aperta
+    // porta la sua (stamp o legacy via roster). Usata da sidebar,
+    // archivio, progetti, artifacts, ricerca e continuita.
+    fun openChatConversation(id: String?, resetFirst: Boolean = false) {
+        val target = id?.trim().takeIf { !it.isNullOrBlank() } ?: return
+        val current = settings
+        pendingBot = null
+        pendingPrompt = ""
+        if (resetFirst) chatState.resetForNewChat()
+        chatScope.launch(Dispatchers.IO) {
+            val conv = runCatching { loadConversation(context.applicationContext, target) }.getOrNull()
+            val key = if (conv != null) conversationIdentityKey(conv, chatRoster) else current.activeChatBotKey.trim()
+            if (key != current.activeChatBotKey.trim()) {
+                val next = current.copy(activeChatBotKey = key)
+                withContext(Dispatchers.Main) { settings = next }
+                saveSettings(context.applicationContext, next)
+            }
+            withContext(Dispatchers.Main) {
+                pendingConversationId = target
+                setSelectedTab(Tab.Chat)
+                sidebarOpen = false
+            }
+        }
+    }
+    val chatIdentityPicker = ChatIdentityPicker(
+        currentLabel = chatIdentityLabel,
+        activeKey = activeChatBotKey,
+        loading = chatRosterLoading,
+        status = chatRoster?.status.orEmpty(),
+        options = chatIdentityOptions(chatRoster),
+        onPick = { pickChatIdentity(it) },
+        onRefresh = { chatRosterNonce++ }
+    )
     val incoming = IncomingIntentBus.request
     LaunchedEffect(incoming.version) {
         if (incoming.version == 0L) return@LaunchedEffect
         pendingBot = null
         pendingConversationId = incoming.conversationId.ifBlank { null }
         pendingPrompt = incoming.prompt
+        // Deeplink con conversazione: la chat porta la sua identita.
+        val incomingId = incoming.conversationId.trim().takeIf { it.isNotBlank() }
+        if (incomingId != null) {
+            val conv = withContext(Dispatchers.IO) {
+                runCatching { loadConversation(context.applicationContext, incomingId) }.getOrNull()
+            }
+            if (conv != null) {
+                val key = conversationIdentityKey(conv, chatRoster)
+                if (key != settings.activeChatBotKey.trim()) {
+                    val next = settings.copy(activeChatBotKey = key)
+                    settings = next
+                    withContext(Dispatchers.IO) { saveSettings(context.applicationContext, next) }
+                }
+            }
+        }
         if (incoming.uri.isNotBlank()) {
             createAttachmentFromUri(context, incoming.uri.toUri(), settings.maxAttachmentMb)?.let { attachment -> chatState.pendingAttachments.add(attachment) }
         }
@@ -510,7 +626,6 @@ internal fun ChatApp() {
             ConversationArchiveAutoSync.detach()
         }
     }
-    val chatScope = rememberCoroutineScope()
     // Invariante bot-side: BotChatContext porta la SESSIONE CANONICA
     // condivisa col desktop (stessa transcript); pendingConversationId
     // porta l'id stabile locale (cache/snapshot). ChatScreen carica la
@@ -709,6 +824,10 @@ internal fun ChatApp() {
                 onClose = { sidebarOpen = false },
                 botMode = selectedTab == Tab.Chat && botSideActive,
                 activeBotKey = pendingBot?.let { "${it.connectionId}::${it.profile}" },
+                // Filtro RECENTI per identita (chat normale): ogni bot ha
+                // le sue chat; null pendingBot = identita selezionata.
+                chatIdentityKey = activeChatBotKey,
+                chatRoster = chatRoster,
                 onOpenBotItem = { openSidebarBot(it) },
                 onManageBots = { sidebarOpen = false; botSectionVisible = true },
                 onBotAction = { bot, action ->
@@ -725,11 +844,7 @@ internal fun ChatApp() {
                 sidebarOpen = false
                 },
                 onOpenConversation = { id ->
-                pendingBot = null
-                pendingConversationId = id
-                pendingPrompt = ""
-                setSelectedTab(Tab.Chat)
-                sidebarOpen = false
+                openChatConversation(id)
                 },
                 onOpenTab = { tab ->
                 setSelectedTab(tab)
@@ -854,12 +969,16 @@ internal fun ChatApp() {
                 state = chatState,
                 scope = chatScope,
                 conversationId = bot?.localConversationId ?: pendingConversationId,
-                botProfile = bot?.profile,
+                // Bot chat esplicita (pendingBot) oppure identita
+                // selezionata per la chat normale (stesso pipeline).
+                botProfile = bot?.profile ?: activeChatBot?.profile,
                 botSessionId = bot?.sessionId,
-                botDisplayName = bot?.displayName,
-                botMultiplexEnabled = bot?.multiplexEnabled == true,
-                botConnectionId = bot?.connectionId,
-                botEndpoint = bot?.endpoint,
+                botDisplayName = bot?.displayName ?: activeChatBot?.displayName,
+                botMultiplexEnabled = if (bot != null) bot.multiplexEnabled else chatRoster?.multiplexEnabled == true,
+                botConnectionId = bot?.connectionId ?: activeChatBot?.connectionId,
+                botEndpoint = bot?.endpoint ?: activeChatBotEndpoint.takeIf { it.isNotBlank() },
+                chatIdentityKey = activeChatBotKey,
+                identityPicker = chatIdentityPicker,
                 onNewChat = {
                     pendingBot = null
                     pendingConversationId = null
@@ -901,10 +1020,7 @@ internal fun ChatApp() {
                 setSelectedTab(Tab.Chat)
                 },
                 onOpenConversation = { id ->
-                pendingBot = null
-                pendingConversationId = id
-                pendingPrompt = ""
-                setSelectedTab(Tab.Chat)
+                openChatConversation(id)
                 }
                 ) }
                 // Rotta legacy: i bot non sono piu un tab. Tenuta per vecchi
@@ -929,12 +1045,12 @@ internal fun ChatApp() {
                 composable(Tab.Artifacts.navRoute) { ArtifactLibraryScreen(
                 context = context,
                 settings = settings,
-                onOpenConversation = { id -> pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) },
+                onOpenConversation = { id -> openChatConversation(id) },
                 onRegenerate = { prompt -> pendingBot = null; pendingConversationId = null; pendingPrompt = prompt; setSelectedTab(Tab.Chat) }
                 ) }
-                composable(Tab.Search.navRoute) { UniversalSearchScreen(context, settings) { kind, id ->
+                composable(Tab.Search.navRoute) {                 UniversalSearchScreen(context, settings) { kind, id ->
                 when (kind) {
-                "Chat", "Task" -> { pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) }
+                "Chat", "Task" -> openChatConversation(id)
                 "Progetto" -> setSelectedTab(Tab.Projects)
                 "Artifact" -> setSelectedTab(Tab.Artifacts)
                 "Cron" -> setSelectedTab(Tab.Cron)
@@ -945,11 +1061,7 @@ internal fun ChatApp() {
                 composable(Tab.Archive.navRoute) { ArchiveScreen(
                 context = context,
                 onOpenConversation = { id, _ ->
-                chatState.resetForNewChat()
-                pendingBot = null
-                pendingConversationId = id
-                pendingPrompt = ""
-                setSelectedTab(Tab.Chat)
+                openChatConversation(id, resetFirst = true)
                 }
                 ) }
                 composable(Tab.Cron.navRoute) { CronScreen(context, settings) }
@@ -958,7 +1070,7 @@ internal fun ChatApp() {
                 pendingPrompt = prompt
                 setSelectedTab(Tab.Chat)
                 } }
-                composable(Tab.Continuity.navRoute) { ContinuityScreen(context, settings) { id -> pendingBot = null; pendingConversationId = id; pendingPrompt = ""; setSelectedTab(Tab.Chat) } }
+                composable(Tab.Continuity.navRoute) { ContinuityScreen(context, settings) { id -> openChatConversation(id) } }
                 composable(Tab.Audit.navRoute) { AuditScreen(context, settings) }
                 composable(Tab.Server.navRoute) { ServerScreen(context, settings) }
                 composable(Tab.Hardware.navRoute) { HardwareScreen(context, settings) }

@@ -103,6 +103,8 @@ import androidx.compose.material.icons.rounded.AccountCircle
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AttachFile
@@ -299,6 +301,8 @@ internal fun TopBar(
     probeDetail: String? = null,
     title: String = "Hermes Hub",
     managerApiKey: String? = null,
+    // Picker identita bot sul titolo (null = titolo statico).
+    identityPicker: ChatIdentityPicker? = null,
     onNewChat: () -> Unit = {},
     onOpenSidebar: () -> Unit = {},
     onOpenArchive: () -> Unit = {},
@@ -444,7 +448,12 @@ internal fun TopBar(
                     .clickable(role = Role.Button, onClick = onOpenSidebar)
             )
             Column(modifier = Modifier.padding(start = 11.dp).weight(1f)) {
-                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { contentDescription = title })
+                val picker = identityPicker
+                if (picker != null) {
+                    ChatIdentityTitle(picker = picker, title = title)
+                } else {
+                    Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { contentDescription = title })
+                }
                 // Testo troncato con ellipsis (niente scroll orizzontale: rubava
                 // lo swipe chat/bot); versione integrale al TalkBack.
                 val statusText = if (probingGateway) {
@@ -714,4 +723,88 @@ internal fun estimateChatContextUsage(
 internal fun estimateTokenCount(text: String): Int {
     if (text.isBlank()) return 0
     return ((text.length + 3) / 4).coerceAtLeast(1)
+}
+
+/**
+ * Titolo chat con selettore identita bot (stile desktop): tap sul nome =
+ * tendina con Hermes default + bot disponibili. La selezione vive nel
+ * picker issato (AppRoot); qui solo rendering.
+ */
+@Composable
+internal fun ChatIdentityTitle(picker: ChatIdentityPicker, title: String) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            modifier = Modifier
+                .clickable(
+                    role = Role.Button,
+                    onClick = { picker.onRefresh(); open = true }
+                )
+                .semantics { contentDescription = "Cambia bot chat, attivo: $title" },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                title,
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 17.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            Icon(
+                Icons.Rounded.ArrowDropDown,
+                contentDescription = null,
+                tint = AppColors.Muted,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = {
+                    Column {
+                        Text("Hermes")
+                        Text("Profilo predefinito", color = AppColors.Muted, fontSize = 12.sp)
+                    }
+                },
+                trailingIcon = {
+                    if (picker.activeKey.isBlank()) {
+                        Icon(Icons.Rounded.Check, contentDescription = "Attivo", tint = AppColors.Accent)
+                    }
+                },
+                onClick = { open = false; picker.onPick("") }
+            )
+            if (picker.options.isNotEmpty()) HorizontalDivider()
+            picker.options.forEach { option ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(option.label)
+                            if (option.subtitle.isNotBlank()) {
+                                Text(option.subtitle, color = AppColors.Muted, fontSize = 12.sp)
+                            }
+                        }
+                    },
+                    trailingIcon = {
+                        if (option.key == picker.activeKey) {
+                            Icon(Icons.Rounded.Check, contentDescription = "Attivo", tint = AppColors.Accent)
+                        }
+                    },
+                    onClick = { open = false; picker.onPick(option.key) }
+                )
+            }
+            when {
+                picker.loading -> DropdownMenuItem(
+                    text = { Text("Caricamento bot…", color = AppColors.Muted) },
+                    enabled = false,
+                    onClick = {}
+                )
+                picker.options.isEmpty() && picker.status.isNotBlank() -> DropdownMenuItem(
+                    text = { Text(picker.status.take(120), color = AppColors.Muted, fontSize = 12.sp) },
+                    enabled = false,
+                    onClick = {}
+                )
+            }
+        }
+    }
 }
