@@ -23,4 +23,13 @@ class ImageBrowseTest {
         assertEquals("a%20b%2Fc.jpg", encodeMediaPathSegment("a b/c.jpg"))
         assertEquals("denudate", encodeMediaPathSegment("denudate"))
     }
+
+    @Test
+    fun coerceImageZoomClamps() {
+        assertEquals(1f, coerceImageZoom(1f))
+        assertEquals(1f, coerceImageZoom(0.2f))
+        assertEquals(1f, coerceImageZoom(Float.NaN))
+        assertEquals(6f, coerceImageZoom(99f))
+        assertEquals(2.5f, coerceImageZoom(2.5f))
+    }
 }

@@ -103,6 +103,8 @@ import androidx.compose.material.icons.rounded.AccountCircle
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AttachFile
@@ -186,6 +188,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
@@ -194,6 +197,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -404,7 +408,8 @@ internal fun ChatInlineImage(
     }
 }
 
-/** Viewer fullscreen condiviso: stesse gesture e stessi pulsanti per le immagini
+/** Viewer fullscreen condiviso: zoom persistente (pinch + doppio tap),
+ *  pulsante tutto-schermo (zoom resta), stessi pulsanti per le immagini
  *  di Hermes e per quelle inviate dall'utente. Senza onDownload nasconde Scarica. */
 @Composable
 internal fun ChatImageViewerDialog(
@@ -414,29 +419,85 @@ internal fun ChatImageViewerDialog(
     onClose: () -> Unit,
     onDownload: (() -> Unit)?
 ) {
-    Dialog(onDismissRequest = onClose) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color.Black)
+    // Zoom persistente: sopravvive a ricomposizioni, rotazione e passaggio
+    // normale <-> fullscreen (stesso stato issato qui).
+    var scale by rememberSaveable { mutableFloatStateOf(1f) }
+    var offsetX by rememberSaveable { mutableFloatStateOf(0f) }
+    var offsetY by rememberSaveable { mutableFloatStateOf(0f) }
+    var fullScreen by rememberSaveable { mutableStateOf(false) }
+    // Nuova immagine: reset zoom (stessa istanza = rotazione, si tiene).
+    LaunchedEffect(bitmap) {
+        scale = 1f
+        offsetX = 0f
+        offsetY = 0f
+    }
+    fun resetZoom() {
+        scale = 1f
+        offsetX = 0f
+        offsetY = 0f
+    }
+    val transformable = androidx.compose.foundation.gestures.rememberTransformableState { zoomChange, panChange, _ ->
+        scale = coerceImageZoom(scale * zoomChange)
+        if (scale <= 1f) {
+            offsetX = 0f
+            offsetY = 0f
+        } else {
+            offsetX += panChange.x
+            offsetY += panChange.y
+        }
+    }
+    @Composable
+    fun zoomableImage(modifier: Modifier = Modifier) {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = alt,
+            contentScale = ContentScale.Fit,
+            modifier = modifier
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = {
+                            if (scale > 1.5f) {
+                                resetZoom()
+                            } else {
+                                scale = 2.5f
+                            }
+                        }
+                    )
+                }
+                .transformable(transformable)
+                .graphicsLayer(
+                    scaleX = scale,
+                    scaleY = scale,
+                    translationX = offsetX,
+                    translationY = offsetY
+                )
+        )
+    }
+    @Composable
+    fun viewerButtons(onToggleFullScreen: (() -> Unit)?) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = alt,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
             ) {
-                IconButton(
-                    onClick = onClose,
-                    modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
-                ) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = Color.White)
+                Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = Color.White)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (onToggleFullScreen != null) {
+                    IconButton(
+                        onClick = onToggleFullScreen,
+                        modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
+                    ) {
+                        Icon(
+                            if (fullScreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
+                            contentDescription = if (fullScreen) "Esci da tutto schermo" else "Tutto schermo",
+                            tint = Color.White
+                        )
+                    }
                 }
                 if (onDownload != null) {
                     IconButton(
@@ -450,7 +511,55 @@ internal fun ChatImageViewerDialog(
             }
         }
     }
+    if (fullScreen) {
+        BackHandler { fullScreen = false }
+        Dialog(
+            onDismissRequest = onClose,
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            ) {
+                zoomableImage(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .align(Alignment.Center)
+                )
+                Box(modifier = Modifier.align(Alignment.TopCenter)) {
+                    viewerButtons(onToggleFullScreen = { fullScreen = false })
+                }
+                if (scale > 1f) {
+                    TextButton(
+                        onClick = { resetZoom() },
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)
+                    ) {
+                        Text("Ripristina zoom", color = Color.White)
+                    }
+                }
+            }
+        }
+        return
+    }
+    Dialog(onDismissRequest = onClose) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color.Black)
+        ) {
+            zoomableImage(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)
+            )
+            viewerButtons(onToggleFullScreen = { fullScreen = true })
+        }
+    }
 }
+
+/** Zoom clamp [1x, 6x]: sotto 1x torna 1x. Puro e testabile. */
+internal fun coerceImageZoom(scale: Float): Float =
+    if (!scale.isFinite()) 1f else scale.coerceIn(1f, 6f)
 
 /** Vera se il blocco e' un'immagine inviata dall'utente (file locale, non remota). */
 internal fun isUserLocalImage(block: VisualBlock): Boolean =

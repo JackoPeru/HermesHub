@@ -1,7 +1,7 @@
-Hermes Hub 0.6.254 (immagini: cartella denudate preimpostata)
+Hermes Hub 0.6.255 (viewer immagini con zoom)
 
-- Android: cartella immagini preimpostata su /home/matteo/.hermes/hub_uploads/denudate (fresh install e guarigione blank): la sezione Immagini parte gia dalla cartella giusta, con claudia/valentina navigabili.
-- Versioni: Windows/AdminBridge 0.6.254; Android versionName 0.6.254, versionCode 258 (stessa firma: aggiornamento normale).
-- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.254-android.apk; MSIX NemoclawChat.Windows_0.6.254.0_x64.msix; gateway Linux HermesHub-0.6.254-linux-gateway.tar.gz.
-- SHA-256 Android: `3a03249d0edd7498aada1978c4005d4907a3890886aa4fe5fd34ef00a515928a`.
-- SHA-256 gateway: `59daab535374aa16e57a698a7d1e36b528e5646df3f832e5d66073b6d0e80ba9`.
+- Android: zoom persistente nel viewer (pinch + doppio tap 2.5x, resta tra rotazione e passaggio a tutto-schermo) + pulsante tutto-schermo con zoom sempre attivo e "Ripristina zoom".
+- Versioni: Windows/AdminBridge 0.6.255; Android versionName 0.6.255, versionCode 259 (stessa firma: aggiornamento normale).
+- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.255-android.apk; MSIX NemoclawChat.Windows_0.6.255.0_x64.msix; gateway Linux HermesHub-0.6.255-linux-gateway.tar.gz.
+- SHA-256 Android: `bf7f07e1702790fa415401092579441769a9a698cc09f598bff4f4a526fc6f47`.
+- SHA-256 gateway: `e5ed3153f14f47a6c374cf4abd46d7a67815371fccd48b0a85004e95485ddef1`.

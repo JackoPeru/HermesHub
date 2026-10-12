@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.255 - 2026-10-12
+
+- Android: viewer immagini con zoom persistente (pinch + doppio tap, resta tra rotazione e tutto-schermo) e pulsante tutto-schermo con zoom sempre attivo.
+
 ## 0.6.254 - 2026-10-12
 
 - Android: cartella immagini preimpostata su denudate (fresh install e guarigione blank): la sezione Immagini parte gia dalla cartella giusta.
