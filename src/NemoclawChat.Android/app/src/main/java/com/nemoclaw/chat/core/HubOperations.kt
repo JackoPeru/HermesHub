@@ -1135,7 +1135,7 @@ internal suspend fun loadImageBrowse(
         if (response.first == 403) {
             return@withContext empty(
                 "Cartella non consentita sul server (HTTP 403): controlla il percorso " +
-                    "(es. /home/matteo/.hermes/hub_uploads/denudate)."
+                    "(es. ~/.hermes/hub_uploads/denudate)."
             )
         }
         if (response.first == 404) {

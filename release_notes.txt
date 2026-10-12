@@ -4,5 +4,5 @@ Hermes Hub 0.6.253 (fix messaggi browse immagini)
 - Android: `/.hermes/...` normalizzato in `~/.hermes/...` (il server espande e ri-applica il jail).
 - Versioni: Windows/AdminBridge 0.6.253; Android versionName 0.6.253, versionCode 257 (stessa firma: aggiornamento normale).
 - Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.253-android.apk; MSIX NemoclawChat.Windows_0.6.253.0_x64.msix; gateway Linux HermesHub-0.6.253-linux-gateway.tar.gz.
-- SHA-256 Android: `3d6a9ce6d3209529ae6e8a1314722e837ef5c67bccd679510a70912c66d0bea3`.
+- SHA-256 Android: `f98d9a401cd52847f6688cabbea61721126b435dde190980e290f3557c2acade`.
 - SHA-256 gateway: `146d275770bfaa431efdfd032f3253f9087dd7c78855bb72959ef2f66acdbd47`.
