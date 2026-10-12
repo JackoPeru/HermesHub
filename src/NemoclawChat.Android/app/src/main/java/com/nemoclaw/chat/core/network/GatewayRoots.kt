@@ -124,7 +124,11 @@ internal fun raceRootsForTransport(onWifi: Boolean, settings: AppSettings): List
  * cambiando rete si rigareggia subito). Mai eccezioni:
  * fallback alla root configurata.
  */
-internal suspend fun fastestGatewayRoot(settings: AppSettings, onWifi: Boolean): String {
+internal suspend fun fastestGatewayRoot(
+    settings: AppSettings,
+    onWifi: Boolean,
+    raceTimeoutMs: Long = 4_000L
+): String {
     try {
         val candidates = raceRootsForTransport(onWifi, settings)
         if (candidates.isEmpty()) return settings.gatewayUrl
@@ -138,11 +142,12 @@ internal suspend fun fastestGatewayRoot(settings: AppSettings, onWifi: Boolean):
         }
 
         val configured = settings.gatewayUrl.trim().trimEnd('/')
+        val timeout = raceTimeoutMs.coerceIn(500L, 10_000L)
         val timed = coroutineScope {
             candidates.map { root ->
                 async(Dispatchers.IO) {
                     val start = System.nanoTime()
-                    val ok = withTimeoutOrNull(4_000L) { probeRootOk(root) } ?: false
+                    val ok = withTimeoutOrNull(timeout) { probeRootOk(root) } ?: false
                     val elapsed = System.nanoTime() - start
                     Triple(root, ok, elapsed)
                 }

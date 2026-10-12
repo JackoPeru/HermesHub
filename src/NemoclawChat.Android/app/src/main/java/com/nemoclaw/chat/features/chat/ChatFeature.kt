@@ -694,9 +694,11 @@ internal fun ChatScreen(
             return@PollWhileStarted true
         }
         // Percorso più veloce solo per probe dot + bot primario: mai hot path chat/invii.
+        // Gara corta (2.5s): in LAN vince in ms, fuori vince il remoto dopo
+        // il fail veloce del locale. Il verdetto non deve mai restare grigio.
         val isPrimary = botSettings.gatewayUrl == settings.gatewayUrl
         val probeSettings = if (!settings.localGatewayUrl.isBlank() && isPrimary) {
-            val probeRoot = fastestGatewayRoot(settings, isWifiTransport(context))
+            val probeRoot = fastestGatewayRoot(settings, isWifiTransport(context), raceTimeoutMs = 2_500L)
             if (probeRoot.isBlank()) botSettings else botSettings.copy(gatewayUrl = probeRoot)
         } else {
             botSettings
@@ -704,6 +706,8 @@ internal fun ChatScreen(
         val (available, detail) = withContext(Dispatchers.IO) {
             probeHermesGatewayDetailed(probeSettings, botApiKey)
         }
+        // Verdetto SUBITO dopo il probe (grigio al massimo ~7s): lo stato
+        // runtime (etichetta versione) arriva dopo e non blocca il pallino.
         gatewayAvailable = available
         gatewayProbeDetail = detail
         gatewayProbed = true
