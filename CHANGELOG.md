@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.251 - 2026-10-12
+
+- Android: verdetto gateway veloce — il pallino si decide subito dopo il probe (stato runtime dopo, non blocca), gara root a 2.5s per il dot.
+- Android: verdetto legato all'URL effettivo — cambiando bot sullo stesso gateway niente piu "Verifica gateway…" perenne.
+
 ## 0.6.250 - 2026-10-12
 
 - Android: selettore bot nel titolo della chat (stile desktop) — tap sul nome, tendina con Hermes + bot disponibili; la chat parla con quel profilo, la scelta persiste al riavvio.
