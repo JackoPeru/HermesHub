@@ -2532,26 +2532,58 @@ _BROWSE_MAX_FOLDERS = 500
 _BROWSE_MAX_ITEMS = 1500
 
 
+def _browse_home() -> "Path | None":
+    """Home senza expanduser (solleva RuntimeError senza HOME in env)."""
+    home = os.environ.get("HOME", "").strip()
+    if home:
+        return Path(home)
+    try:
+        import pwd
+        return Path(pwd.getpwuid(os.getuid()).pw_dir)
+    except Exception:
+        return None
+
+
+def _browse_expand(path: Path, home: "Path | None") -> "Path | None":
+    """Espande solo '~' iniziale contro home nota; ~utente delegato, fail-closed."""
+    text = str(path).replace("\\", "/")
+    if text == "~" or text.startswith("~/"):
+        if home is None:
+            return None
+        return Path(str(home) + text[1:])
+    if text.startswith("~"):
+        try:
+            return Path(text).expanduser()
+        except Exception:
+            return None
+    return path
+
+
 def _browse_roots() -> list:
     """Radici sfogliabili (mirror HERMES_MEDIA_ROOTS + librerie utente)."""
-    home = Path.home()
-    candidates = [
-        home / ".hermes" / "hub_uploads",
-        home / "video",
-        home / "news",
-        home / "images",
-        home / ".hermes" / "cache",
-        home / ".hermes" / "media",
-    ]
+    try:
+        home: "Path | None" = Path.home()
+    except Exception:
+        home = _browse_home()
+    candidates = []
+    if home is not None:
+        candidates += [
+            home / ".hermes" / "hub_uploads",
+            home / "video",
+            home / "news",
+            home / "images",
+            home / ".hermes" / "cache",
+            home / ".hermes" / "media",
+        ]
     for part in os.environ.get("HERMES_MEDIA_ROOTS", "").split(os.pathsep):
         if part.strip():
-            candidates.append(Path(part.strip()).expanduser())
+            candidates.append(Path(part.strip()))
     unique: list = []
     seen = set()
     for root in candidates:
         try:
             resolved = root.expanduser().resolve()
-        except OSError:
+        except Exception:
             continue
         key = str(resolved)
         if key not in seen:
@@ -2560,17 +2592,22 @@ def _browse_roots() -> list:
     return unique
 
 
-def _browse_jail(path: Path, roots: list) -> "Path | None":
+def _browse_jail(path: Path, roots: list, home: "Path | None" = None) -> "Path | None":
     """Resolve + jail: path risolto se dentro un root consentito, else None."""
+    if home is None:
+        home = _browse_home()
+    expanded = _browse_expand(path, home)
+    if expanded is None:
+        return None
     try:
-        resolved = path.expanduser().resolve()
-    except OSError:
+        resolved = expanded.resolve()
+    except Exception:
         return None
     for root in roots:
         try:
             if resolved == root or root in resolved.parents:
                 return resolved
-        except OSError:
+        except Exception:
             continue
     return None
 
@@ -2580,10 +2617,11 @@ def _browse_scan(current: "Path", roots: list) -> tuple:
     (il proxy gateway ri-verifica a serve-time: doppia cintura)."""
     folders: list = []
     items: list = []
+    home = _browse_home()
     try:
         resolved_current = current.resolve()
         entries = sorted(current.iterdir(), key=lambda p: p.name.lower())
-    except OSError:
+    except Exception:
         return folders, items
     for entry in entries:
         if len(folders) >= _BROWSE_MAX_FOLDERS and len(items) >= _BROWSE_MAX_ITEMS:
@@ -2595,11 +2633,11 @@ def _browse_scan(current: "Path", roots: list) -> tuple:
             if entry.is_symlink():
                 try:
                     target = entry.resolve()
-                except OSError:
+                except Exception:
                     continue
                 if not target.exists():
                     continue
-                if _browse_jail(target, roots) is None:
+                if _browse_jail(target, roots, home) is None:
                     continue
                 if target.is_dir():
                     if len(folders) >= _BROWSE_MAX_FOLDERS:
@@ -2627,7 +2665,7 @@ def _browse_scan(current: "Path", roots: list) -> tuple:
             if len(items) >= _BROWSE_MAX_ITEMS:
                 continue
             items.append((entry, entry, entry.stat(), entry.name))
-        except OSError:
+        except Exception:
             continue
     items.sort(key=lambda quad: quad[2].st_mtime, reverse=True)
     out = []

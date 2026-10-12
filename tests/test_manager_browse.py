@@ -13,6 +13,8 @@ _PURE_NAMES = {
     "_BROWSE_IMAGE_EXTENSIONS",
     "_BROWSE_MAX_FOLDERS",
     "_BROWSE_MAX_ITEMS",
+    "_browse_home",
+    "_browse_expand",
     "_browse_roots",
     "_browse_jail",
     "_browse_scan",
@@ -70,6 +72,36 @@ class TestBrowseJail(unittest.TestCase):
 
     def test_absolute_outside_denied(self):
         self.assertIsNone(self.jail(Path("/etc/hostname"), [Path("/tmp/xyz-hermes")]))
+
+    def test_tilde_expands_against_known_home(self):
+        import tempfile
+
+        ns = load_browse_namespace()
+        expand = staticmethod(ns["_browse_expand"])
+        home_fn = staticmethod(ns["_browse_home"])
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            got = self.jail(
+                Path("~/.hermes/hub_uploads/denudate"),
+                [home / ".hermes" / "hub_uploads"],
+                home=home,
+            )
+            self.assertEqual(home / ".hermes" / "hub_uploads" / "denudate", got)
+            # Home ignota: fail-closed (None), mai RuntimeError.
+            self.assertIsNone(expand(Path("~/.hermes/x"), None))
+            self.assertIsNone(
+                self.jail(Path("~/.hermes/x"), [home / ".hermes"], home=Path("/nonexistent-home-xyz"))
+            )
+            # Fallback HOME: env esplicita vince, mai eccezioni.
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            try:
+                self.assertEqual(home, home_fn())
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
 
 
 class TestBrowseScan(unittest.TestCase):
