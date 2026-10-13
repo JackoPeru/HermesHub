@@ -1367,15 +1367,6 @@ fun streamChatRequest(
     }
 
     val totalMs = (System.nanoTime() - start) / 1_000_000.0
-    if (lastError != null) {
-        flushDeltaBatches()
-        if (sawActivity && !lastError.orEmpty().contains("parziale", ignoreCase = true)) {
-            emit(ChatStreamEvent.Error("Stream Hermes interrotto dopo una risposta parziale. $lastError"))
-        } else if (!sawActivity) {
-            emit(ChatStreamEvent.Error(lastError ?: "Errore stream Hermes."))
-        }
-        return@flow
-    }
     suspend fun reattachStoredResponse(): Boolean {
         val responseId = emittedResponseId?.takeIf { it.isNotBlank() } ?: return false
         val url = responseStatusUrl(settings, botProfile, botMultiplexEnabled, responseId)
@@ -1413,6 +1404,24 @@ fun streamChatRequest(
             return true
         }
         return false
+    }
+
+    if (lastError != null) {
+        flushDeltaBatches()
+        // Transport morto a turno vivo (watchdog 90s incluso): prima di
+        // dichiarare il turno morto, recupera via GET come nel ramo pulito.
+        // Il server continua per continue_on_disconnect: il collector resta
+        // in ascolto invece di chiudere la chat.
+        if (shouldReattachStoredResponse(lastError, emittedResponseId, sawTerminal)) {
+            emit(ChatStreamEvent.Status("Connessione persa a turno vivo: recupero la risposta dal server..."))
+            if (reattachStoredResponse()) return@flow
+        }
+        if (sawActivity && !lastError.orEmpty().contains("parziale", ignoreCase = true)) {
+            emit(ChatStreamEvent.Error("Stream Hermes interrotto dopo una risposta parziale. $lastError"))
+        } else if (!sawActivity) {
+            emit(ChatStreamEvent.Error(lastError ?: "Errore stream Hermes."))
+        }
+        return@flow
     }
 
     if (!sawTerminal) {

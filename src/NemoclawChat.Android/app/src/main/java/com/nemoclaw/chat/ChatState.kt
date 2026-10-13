@@ -185,6 +185,15 @@ internal class ChatStateHolder {
      * non in remember locale, cosi sopravvive alla rotazione insieme al draft.
      */
     var pendingBusySend: PendingBusySend? by mutableStateOf(null)
+    /**
+     * True solo se l'ultima cancellazione dello stream e stata chiesta
+     * dall'utente (pulsante stop / Correggi): distingue lo stop volontario
+     * dal kill di processo (telefono spento), dove il turno deve invece
+     * staccarsi e restare recuperabile. Solo memoria (mai persistito):
+     * a processo morto vale false = detach. Consumato alla lettura.
+     */
+    @Volatile
+    var userStopRequested: Boolean = false
 
     val activeStreams: androidx.compose.runtime.snapshots.SnapshotStateMap<String, ActiveStreamState> = androidx.compose.runtime.mutableStateMapOf()
 
@@ -216,6 +225,9 @@ internal class ChatStateHolder {
         }
 
     fun resetForNewChat() {
+        // Cambio chat intenzionale: le cancellazioni qui sotto NON sono stop
+        // utente (il server continua, il binding resta per il rientro).
+        userStopRequested = false
         activeStreams.values.forEach { it.job?.cancel() }
         activeStreams.clear()
         messages.clear()

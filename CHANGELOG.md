@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.258 - 2026-10-12
+
+- Android: turni staccati — a stream morto (watchdog 90s incluso) la chat recupera la risposta via GET invece di chiudere il turno; kill telefono = detach (binding tenuto), solo lo stop utente chiude davvero; nuovo banner "Hermes continua sul server" con ricontrollo.
+
 ## 0.6.257 - 2026-10-12
 
 - Android: fix swipe galleria — il pan dell'immagine non ruba piu i trascinamenti a zoom 1x (solo zoomato panoramano).

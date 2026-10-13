@@ -131,6 +131,7 @@ import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Save
@@ -459,9 +460,11 @@ internal fun ChatScreen(
 
     // "Correggi ora": ferma tutto (come lo stop, ma senza svuotare la coda)
     // e invia subito il nuovo prompt per raddrizzare l'agente a meta run.
+    // Azione utente: niente resurrezione del turno ucciso.
     fun correctNow(choice: PendingBusySend) {
         showSendChoiceDialog = false
         state.pendingBusySend = null
+        state.userStopRequested = true
         val cid = state.activeConversationId ?: return
         // Rete e cancel fuori dal Main (fermo restando che il collector
         // dedicato resta sullo scope UI): niente ANR sul tap.
@@ -1112,13 +1115,20 @@ internal fun ChatScreen(
     }
     // Ripresa: ricontrolla il binding mentre la chat e aperta (rientro da
     // background, poll STARTED-only). Solo se esiste un binding: una lettura
-    // prefs, niente rete altrimenti.
+    // prefs, niente rete altrimenti. Lo stato alimenta il banner "segue
+    // lavoro staccato" (turno vivo sul server dopo kill/rete morta).
+    var detachedFollowUp by remember { mutableStateOf(false) }
     PollWhileStarted(state.activeConversationId, baseIntervalMs = 15_000L) {
         val cid = state.activeConversationId
-        if (cid.isNullOrBlank()) return@PollWhileStarted true
+        if (cid.isNullOrBlank()) {
+            detachedFollowUp = false
+            return@PollWhileStarted true
+        }
         val hasBinding = withContext(Dispatchers.IO) { loadActiveWorkBinding(context, cid) } != null
+        detachedFollowUp = hasBinding
         if (!hasBinding) return@PollWhileStarted true
         recheckActiveWork()
+        detachedFollowUp = withContext(Dispatchers.IO) { loadActiveWorkBinding(context, cid) } != null
         true
     }
     var wasStreaming by remember { mutableStateOf(false) }
@@ -1283,6 +1293,19 @@ internal fun ChatScreen(
                             if (state.backgroundWork?.runId == backgroundWork.runId) state.backgroundWork = null
                         }
                     }
+                }
+            )
+        }
+        // Turno staccato senza run banner (Responses senza runId, kill/rete
+        // morta): il server continua, la chat ricontrolla. Mai silenzio.
+        if (detachedFollowUp && backgroundWork == null && !state.sending && state.streamingState == null) {
+            DetachedFollowBanner(
+                onRecheck = { scope.launch { recheckActiveWork() } },
+                onDismiss = {
+                    scope.launch(Dispatchers.IO) {
+                        state.activeConversationId?.let { clearActiveWorkBinding(context, it) }
+                    }
+                    detachedFollowUp = false
                 }
             )
         }
@@ -1962,7 +1985,15 @@ internal fun ChatScreen(
                                 )
                             }
                         } catch (_: CancellationException) {
-                            interrupted = true
+                            // Stop utente vs morte esterna (kill/processo): solo lo
+                            // stop volontario chiude il turno; il kill stacca e
+                            // resta recuperabile (binding tenuto nel finally).
+                            val userStop = state.userStopRequested
+                            state.userStopRequested = false
+                            interrupted = userStop
+                            if (!userStop) {
+                                transportFailure = true
+                            }
                             if (!smartHandled) {
                                 // Stop prima/durante il fast path (F7: anche con smartJob
                                 // ancora null): via lo stato, allegati ripristinati
@@ -2242,6 +2273,8 @@ internal fun ChatScreen(
                 val activeRunId = state.streamingState?.activeRunId
                 // Stop VERO: cancella il collector locale (prima non lo faceva:
                 // la generazione continuava e il composer restava bloccato).
+                // Azione utente: il turno ucciso non deve resuscitare.
+                state.userStopRequested = true
                 val cid = state.activeConversationId
                 val jobAtTap = cid?.let { state.activeStreams[it]?.job }
                 state.activeStreams[cid]?.job?.cancel()
@@ -2841,6 +2874,61 @@ internal fun BackgroundWorkBanner(
                 modifier = Modifier.size(48.dp)
             ) {
                 Icon(Icons.Rounded.Stop, contentDescription = "Ferma lavoro", tint = Color.White)
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(4.dp))
+}
+
+/**
+ * Turno staccato (kill/rete morta, server continua per
+ * continue_on_disconnect): la chat segue il recupero in vista invece di
+ * lasciare il turno morto in silenzio. Ricontrolla ora o ignora.
+ */
+@Composable
+internal fun DetachedFollowBanner(
+    onRecheck: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Surface(
+        color = AppColors.Elevated,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, AppColors.Border),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(
+                Icons.Rounded.CloudSync,
+                contentDescription = null,
+                tint = AppColors.Accent,
+                modifier = Modifier.size(20.dp)
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "Hermes continua sul server",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    "Turno staccato: ricontrollo la risposta…",
+                    color = AppColors.Muted,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            TextButton(onClick = onRecheck) {
+                Text("Ricontrolla", color = Color.White, fontWeight = FontWeight.SemiBold)
+            }
+            IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Rounded.Close, contentDescription = "Ignora", tint = AppColors.Muted)
             }
         }
     }

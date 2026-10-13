@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.257"
-EXPECTED_ANDROID_VERSION_CODE = 261
+EXPECTED_VERSION = "0.6.258"
+EXPECTED_ANDROID_VERSION_CODE = 262
 
 
 def read(relative_path: str) -> str:
@@ -80,6 +80,19 @@ class ReleaseConsistencyTests(unittest.TestCase):
             'resolveHermesUrl(settings, "/v1/image/library',
         ):
             self.assertIn(path, sources)
+
+    def test_android_detached_turns_stay_resumable(self) -> None:
+        # Kill/rete morta: niente stop server implicito, reattach prima
+        # dell'errore, banner di follow. Mai sessione chiusa.
+        sources = read_android_sources()
+        for marker in (
+            "userStopRequested",
+            "DetachedFollowBanner(",
+            "detachedFollowUp",
+            "Connessione persa a turno vivo: recupero la risposta dal server",
+            "continue_on_disconnect",
+        ):
+            self.assertIn(marker, sources)
 
     def test_android_chat_identity_is_wired(self) -> None:
         # Selettore bot nel titolo chat: identita persistita + sidebar filtrata.
