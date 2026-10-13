@@ -1960,7 +1960,10 @@ def _hermes_hub_transcribe_file(path, beam_size=None):
         if auth_error is not None:
             media_token = request.query.get("hub_token") or request.query.get("api_key") or request.query.get("token")
             accepted_api_keys = _hermes_hub_api_keys(self._api_key)
-            if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):
+            # Confronto su bytes: compare_digest su str con non-ASCII solleva
+            # TypeError (500); il token arriva dal client, mai fidarsi.
+            media_token_bytes = media_token.encode() if media_token else b""
+            if not media_token or not any(hmac.compare_digest(media_token_bytes, api_key.encode()) for api_key in accepted_api_keys):
                 return auth_error
         media_id = request.match_info.get("media_id", "")
         loop = asyncio.get_running_loop()
@@ -9237,7 +9240,9 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "            # Autenticazione obbligatoria anche per i peer tailnet: nessun bypass.\n"
             "            media_token = request.query.get(\"hub_token\") or request.query.get(\"api_key\") or request.query.get(\"token\")\n"
             "            accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n"
-            "            if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):\n"
+            "            # Confronto su bytes: compare_digest su str con non-ASCII solleva TypeError (500).\n"
+            "            media_token_bytes = media_token.encode() if media_token else b\"\"\n"
+            "            if not media_token or not any(hmac.compare_digest(media_token_bytes, api_key.encode()) for api_key in accepted_api_keys):\n"
             "                return auth_error\n"
             "        media_id = request.match_info.get(\"media_id\", \"\")\n"
             "        loop = asyncio.get_running_loop()\n"
