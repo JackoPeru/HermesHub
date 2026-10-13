@@ -1230,7 +1230,7 @@ internal fun SettingsScreen(
                             AlertDialog(
                                 onDismissRequest = { showResetConfirm = false },
                                 title = { Text("Ripristinare tutto?") },
-                                 text = { Text("Verranno rimossi API key (Keystore), profilo voce e impostazioni. L'operazione non si può annullare.") },
+                                 text = { Text("Verranno rimossi API key e secret connessioni bot (Keystore), impostazioni, profilo voce, archivio conversazioni e task locali. I backup esterni non vengono toccati. L'operazione non si può annullare.") },
                                 confirmButton = {
                                     TextButton(onClick = {
                                         showResetConfirm = false

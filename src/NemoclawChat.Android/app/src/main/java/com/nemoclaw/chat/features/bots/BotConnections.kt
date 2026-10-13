@@ -280,3 +280,29 @@ internal fun connectionForBot(context: Context, settings: AppSettings, bot: Herm
 
 internal fun secretForBotConnection(context: Context, connection: HermesBotConnection): String? =
     if (connection.isPrimary) loadGatewaySecret(context) else loadGatewayConnectionSecret(context, connection.id)
+
+/** Id secondari da cancellare nel reset (puro/testabile: esclude il primario). */
+internal fun connectionIdsForReset(registry: HermesBotConnectionRegistry): List<String> =
+    registry.items.filterNot { it.isPrimary }.map { it.id }
+
+/**
+ * Reset privacy: cancella i secret delle connessioni secondarie e svuota
+ * registry + gruppi locali. Mai backup esterni (file export intatti).
+ */
+internal fun clearHermesBotConnections(context: Context, settings: AppSettings) {
+    val registry = runCatching { loadHermesBotConnections(context, settings) }
+        .getOrDefault(HermesBotConnectionRegistry(emptyList(), emptyList()))
+    for (id in connectionIdsForReset(registry)) {
+        runCatching { com.nemoclaw.chat.deleteGatewayConnectionSecret(context, id) }
+    }
+    runCatching {
+        context.applicationContext
+            .getSharedPreferences(CONNECTIONS_PREFS, Context.MODE_PRIVATE)
+            .edit { clear() }
+    }
+    runCatching {
+        context.applicationContext
+            .getSharedPreferences(GROUPS_PREFS, Context.MODE_PRIVATE)
+            .edit { clear() }
+    }
+}

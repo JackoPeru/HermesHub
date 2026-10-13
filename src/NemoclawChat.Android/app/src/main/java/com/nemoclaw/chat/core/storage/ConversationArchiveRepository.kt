@@ -46,9 +46,9 @@ internal fun loadConversations(context: Context, includeDeleted: Boolean = false
                             prompt = obj.optString("prompt"),
                             updatedAt = obj.optLong("updatedAt"),
                             messages = readMessages(obj.optJSONArray("messages") ?: JSONArray()),
-                            previousResponseId = obj.optString("previousResponseId").takeIf { it.isNotBlank() },
-                            serverConversationId = obj.optString("serverConversationId").takeIf { it.isNotBlank() },
-                            hermesSessionId = obj.optString("hermesSessionId").takeIf { it.isNotBlank() },
+                            previousResponseId = obj.optNullableId("previousResponseId"),
+                            serverConversationId = obj.optNullableId("serverConversationId"),
+                            hermesSessionId = obj.optNullableId("hermesSessionId"),
                             modelOverride = obj.optNonNullString("modelOverride"),
                             providerOverride = obj.optNonNullString("providerOverride"),
                             reasoningEffort = obj.optNonNullString("reasoningEffort"),
@@ -130,6 +130,30 @@ internal fun saveConversations(context: Context, conversations: List<LocalConver
     }
 }
 
+/**
+ * Reset privacy: svuota archivio conversazioni + task locali.
+ * Mai backup esterni (file export intatti).
+ */
+internal fun clearLocalArchiveAndTasks(context: Context) {
+    synchronized(localArchiveLock) {
+        runCatching {
+            context.applicationContext
+                .getSharedPreferences(CURRENT_ARCHIVE_PREFS, Context.MODE_PRIVATE)
+                .edit(commit = true) { clear() }
+        }
+        runCatching {
+            context.applicationContext
+                .getSharedPreferences(LEGACY_ARCHIVE_PREFS, Context.MODE_PRIVATE)
+                .edit(commit = true) { clear() }
+        }
+    }
+    runCatching {
+        context.applicationContext
+            .getSharedPreferences("chatclaw_tasks", Context.MODE_PRIVATE)
+            .edit(commit = true) { clear() }
+    }
+}
+
 internal fun conversationsToJsonArray(conversations: List<LocalConversation>): JSONArray {
     val array = JSONArray()
     val deletedCutoff = System.currentTimeMillis() - DELETED_CONVERSATION_RETENTION_MS
@@ -188,6 +212,10 @@ internal fun conversationsToJsonArray(conversations: List<LocalConversation>): J
 private fun JSONObject.optNonNullString(key: String): String =
     optString(key).takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) } ?: ""
 
+/** Legge id nullable (previousResponseId/serverConversationId/hermesSessionId): NULL/blank/"null" -> null. */
+internal fun JSONObject.optNullableId(key: String): String? =
+    optString(key).takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+
 /** Chiave identita bot: "" se assente/blank/NULL (mai nascondere chat). */
 private fun readBotIdentityKey(obj: JSONObject): String {
     val raw = if (obj.has("botIdentityKey") && !obj.isNull("botIdentityKey")) {
@@ -212,9 +240,9 @@ internal fun readConversationsFromJsonArray(array: JSONArray): List<LocalConvers
                     prompt = obj.optString("prompt"),
                     updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
                     messages = readMessages(obj.optJSONArray("messages") ?: JSONArray()),
-                    previousResponseId = obj.optString("previousResponseId").takeIf { it.isNotBlank() },
-                    serverConversationId = obj.optString("serverConversationId").takeIf { it.isNotBlank() },
-                    hermesSessionId = obj.optString("hermesSessionId").takeIf { it.isNotBlank() },
+                    previousResponseId = obj.optNullableId("previousResponseId"),
+                    serverConversationId = obj.optNullableId("serverConversationId"),
+                    hermesSessionId = obj.optNullableId("hermesSessionId"),
                     modelOverride = obj.optNonNullString("modelOverride"),
                     providerOverride = obj.optNonNullString("providerOverride"),
                     reasoningEffort = obj.optNonNullString("reasoningEffort"),

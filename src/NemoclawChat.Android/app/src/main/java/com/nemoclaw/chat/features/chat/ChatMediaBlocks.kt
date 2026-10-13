@@ -1391,7 +1391,7 @@ internal fun authHeaders(apiKey: String?): Map<String, String> {
     return mapOf("Authorization" to "Bearer $token", "User-Agent" to "HermesHub-Android")
 }
 
-internal fun loadVideoThumbnail(settings: AppSettings, url: String, apiKey: String?): Bitmap? {
+internal fun loadVideoThumbnail(settings: AppSettings, url: String, apiKey: String?, maxWidth: Int = 900): Bitmap? {
     val retriever = MediaMetadataRetriever()
     return try {
         if (url.startsWith("http://", true) || url.startsWith("https://", true)) {
@@ -1401,7 +1401,8 @@ internal fun loadVideoThumbnail(settings: AppSettings, url: String, apiKey: Stri
         }
         val frame = retriever.getFrameAtTime(1_000_000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
             ?: retriever.frameAtTime
-        frame?.scaleBitmapToMaxWidth(900)
+        // Celle piccole: maxWidth ridotto (default 900 per fullscreen/inline).
+        frame?.scaleBitmapToMaxWidth(maxWidth.coerceAtLeast(48))
     } catch (_: Exception) {
         null
     } finally {
@@ -1475,8 +1476,23 @@ internal fun resolveMediaUrl(settings: AppSettings, value: String, allowExternal
 
 internal const val REMOTE_BITMAP_MAX_BYTES = 10L * 1024 * 1024
 internal const val REMOTE_BITMAP_MAX_DIMENSION = 2048
+// Larghezza massima miniature nelle card feed (celle piccole: evita OOM full-res).
+internal const val FEED_THUMBNAIL_MAX_DIM = 256
 
-internal fun loadRemoteBitmap(settings: AppSettings, url: String, apiKey: String?): Bitmap? {
+/**
+ * Campionamento potenza di 2 per miniature: dimezza finche' entrambi i lati
+ * stanno entro maxDim. Pura/testabile. Input non validi -> 1 (nessun sampling).
+ */
+internal fun thumbnailSampleSize(srcWidth: Int, srcHeight: Int, maxDim: Int): Int {
+    if (srcWidth <= 0 || srcHeight <= 0 || maxDim <= 0) return 1
+    var sample = 1
+    while ((srcWidth / sample) > maxDim || (srcHeight / sample) > maxDim) {
+        sample *= 2
+    }
+    return sample.coerceAtLeast(1)
+}
+
+internal fun loadRemoteBitmap(settings: AppSettings, url: String, apiKey: String?, maxDim: Int = REMOTE_BITMAP_MAX_DIMENSION): Bitmap? {
     val parsed = runCatching { url.toUri() }.getOrNull()
     val needsHermesAuth = parsed != null && shouldAuthenticateHermesUrl(settings, url)
     val candidates = if (needsHermesAuth) hermesAuthCandidates(apiKey) else listOf<String?>(null)
@@ -1489,7 +1505,7 @@ internal fun loadRemoteBitmap(settings: AppSettings, url: String, apiKey: String
                 listOf(gatewayUrl)
             }
             for ((index, attemptUrl) in urls.distinct().withIndex()) {
-                val loaded = loadRemoteBitmapAttempt(attemptUrl, token.takeIf { index == 0 })
+                val loaded = loadRemoteBitmapAttempt(attemptUrl, token.takeIf { index == 0 }, maxDim)
                 if (loaded != null) return loaded
             }
         }
@@ -1504,7 +1520,7 @@ internal fun isKnownHermesGatewayHost(host: String?): Boolean {
     }
 }
 
-internal fun loadRemoteBitmapAttempt(url: String, bearerToken: String?): Bitmap? {
+internal fun loadRemoteBitmapAttempt(url: String, bearerToken: String?, maxDim: Int = REMOTE_BITMAP_MAX_DIMENSION): Bitmap? {
     var connection: HttpURLConnection? = null
     return try {
         connection = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -1540,11 +1556,8 @@ internal fun loadRemoteBitmapAttempt(url: String, bearerToken: String?): Bitmap?
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
-        var sample = 1
-        while ((bounds.outWidth / sample) > REMOTE_BITMAP_MAX_DIMENSION ||
-               (bounds.outHeight / sample) > REMOTE_BITMAP_MAX_DIMENSION) {
-            sample *= 2
-        }
+        // Miniature card: sampling potenza di 2 verso maxDim (default full 2048).
+        val sample = thumbnailSampleSize(bounds.outWidth, bounds.outHeight, maxDim)
 
         val decode = BitmapFactory.Options().apply { inSampleSize = sample }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decode)

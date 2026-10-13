@@ -346,6 +346,8 @@ private fun buildLocalBackupPayload(context: Context): ByteArray {
         .put("conversations", conversations)
         .put("tasks", parseJsonArray(sharedPreferencesJson(context, "chatclaw_tasks").optString("items", "[]")))
         .put("workspace", sharedPreferencesJson(context, "chatclaw_workspace_requests"))
+    // Mai esportare query (?key=/hub_token) nei campi URL: spoglia i parametri.
+    sanitizeBackupUrlsInObject(backup)
     return backup.toString(2).toByteArray(Charsets.UTF_8)
 }
 
@@ -408,6 +410,86 @@ internal fun isSensitiveBackupKey(key: String): Boolean {
     val normalized = key.lowercase(Locale.ROOT).filter(Char::isLetterOrDigit)
     return listOf("apikey", "token", "secret", "password", "credential", "authorization")
         .any(normalized::contains)
+}
+
+/**
+ * Spoglia i query parameter da un URL ("https://x/y?key=1" -> "https://x/y").
+ * Pura/testabile. Taglia da '?' o '#'; chiamare solo su campi URL (il sanitizer
+ * decide quali campi toccare, i testi liberi con "?" non arrivano mai qui).
+ */
+internal fun stripUrlQuery(value: String): String {
+    if (value.isBlank()) return value
+    val query = value.indexOf('?')
+    if (query >= 0) return value.substring(0, query)
+    val fragment = value.indexOf('#')
+    if (fragment >= 0) return value.substring(0, fragment)
+    return value
+}
+
+/** True se la chiave indica un campo URL da sanificare nel backup. Pura/testabile. */
+internal fun isBackupUrlKey(key: String): Boolean {
+    val normalized = key.lowercase(Locale.ROOT)
+    return normalized.contains("url") || normalized.contains("uri") ||
+        normalized.contains("endpoint") || normalized.contains("gateway") ||
+        normalized.contains("href")
+}
+
+/**
+ * Sanifica ricorsivamente un oggetto backup: ogni campo URL perde query/fragment.
+ * I blob stringificati ("items"/"conversations" con JSON dentro) vengono parsati,
+ * sanificati e riserializzati, cosi' nessun ?key=/hub_token resta nel backup.
+ * Pura sul JSON (muta l'istanza passata, ritorna la stessa per concatenazione).
+ */
+internal fun sanitizeBackupUrlsInObject(obj: JSONObject): JSONObject {
+    val keys = mutableListOf<String>()
+    val it = obj.keys()
+    while (it.hasNext()) keys += it.next()
+    for (key in keys) {
+        if (obj.isNull(key)) continue
+        when (val value = obj.opt(key)) {
+            is String -> {
+                val trimmed = value.trim()
+                // Blob JSON stringificato: sanifica dentro e riserializza.
+                if ((key == "items" || key == "conversations") && trimmed.startsWith("[")) {
+                    runCatching { JSONArray(trimmed) }.getOrNull()?.let { parsed ->
+                        sanitizeBackupUrlsInArray(parsed)
+                        obj.put(key, parsed.toString())
+                        continue
+                    }
+                }
+                if (key == "items" && trimmed.startsWith("{")) {
+                    runCatching { JSONObject(trimmed) }.getOrNull()?.let { parsed ->
+                        sanitizeBackupUrlsInObject(parsed)
+                        obj.put(key, parsed.toString())
+                        continue
+                    }
+                }
+                val looksLikeUrl = value.contains("://")
+                if (isBackupUrlKey(key) || (looksLikeUrl && (value.contains("?") || value.contains("#")))) {
+                    obj.put(key, stripUrlQuery(value))
+                }
+            }
+            is JSONObject -> sanitizeBackupUrlsInObject(value)
+            is JSONArray -> sanitizeBackupUrlsInArray(value)
+        }
+    }
+    return obj
+}
+
+/** Sanifica ricorsivamente un array backup (oggetti annidati + stringhe URL). Pura sul JSON. */
+internal fun sanitizeBackupUrlsInArray(array: JSONArray): JSONArray {
+    for (i in 0 until array.length()) {
+        when (val value = array.opt(i)) {
+            is JSONObject -> sanitizeBackupUrlsInObject(value)
+            is JSONArray -> sanitizeBackupUrlsInArray(value)
+            is String -> {
+                if (value.contains("://") && (value.contains("?") || value.contains("#"))) {
+                    array.put(i, stripUrlQuery(value))
+                }
+            }
+        }
+    }
+    return array
 }
 
 // ---------------------------------------------------------------------------

@@ -239,6 +239,7 @@ import com.nemoclaw.chat.features.bots.BotChatContext
 import com.nemoclaw.chat.features.bots.BotSidebarAction
 import com.nemoclaw.chat.features.bots.HermesBotItem
 import com.nemoclaw.chat.features.bots.botSessionContext
+import com.nemoclaw.chat.features.bots.clearHermesBotConnections
 import com.nemoclaw.chat.features.bots.connectionForBot
 import com.nemoclaw.chat.features.bots.createBotChatSession
 import com.nemoclaw.chat.features.bots.loadAllHermesBotRosters
@@ -465,8 +466,8 @@ internal fun ChatApp() {
     }
     val activeChatBotKey = settings.activeChatBotKey.trim()
     val activeChatBot = resolveChatIdentity(chatRoster, activeChatBotKey)
-    // Endpoint per bot remoti (registro locale, niente rete).
-    var activeChatBotEndpoint by remember { mutableStateOf("") }
+    // Endpoint per bot remoti (registro locale, niente rete): saveable per la rotazione.
+    var activeChatBotEndpoint by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(activeChatBot, settings.gatewayUrl) {
         activeChatBotEndpoint = withContext(Dispatchers.IO) {
             val bot = activeChatBot ?: return@withContext ""
@@ -1102,11 +1103,17 @@ internal fun ChatApp() {
                 },
                 onReset = {
                 val reset = AppSettings()
+                // Snapshot per il wipe secondario (il reset azzera il gateway primario).
+                val snapshotForWipe = settings
                 settings = reset
                 chatScope.launch {
                 withContext(Dispatchers.IO) {
                 saveSettings(context, reset)
                 saveGatewaySecret(context, null)
+                // Reset completo: secret connessioni bot + registry/gruppi + archivio/task.
+                // Mai backup esterni (file export intatti).
+                runCatching { clearHermesBotConnections(context.applicationContext, snapshotForWipe) }
+                runCatching { clearLocalArchiveAndTasks(context.applicationContext) }
                 }
                 gatewaySecretRevision++
                 }

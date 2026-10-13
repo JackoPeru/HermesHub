@@ -1438,7 +1438,8 @@ internal fun ImageFeedCard(
 ) {
     val imageUrl = remember(settings.gatewayUrl, item.mediaUrl) { resolveWorkspaceUrl(settings, item.mediaUrl) }
     val bitmap by produceState<Bitmap?>(initialValue = null, imageUrl, apiKey) {
-        value = withContext(Dispatchers.IO) { loadRemoteBitmap(settings, imageUrl, apiKey) }
+        // Card piccola: decodifica campionata a 256px (il fullscreen usa il full).
+        value = withContext(Dispatchers.IO) { loadRemoteBitmap(settings, imageUrl, apiKey, FEED_THUMBNAIL_MAX_DIM) }
     }
     Column(modifier = modifier.clickable(onClick = onClick)) {
         Box(
@@ -1592,7 +1593,8 @@ internal fun VideoThumbnail(settings: AppSettings, item: VideoLibraryItem, apiKe
     }
     val bitmap by produceState<Bitmap?>(initialValue = null, videoUrl, thumbUrl, apiKey) {
         value = withContext(Dispatchers.IO) {
-            thumbUrl?.let { loadRemoteBitmap(settings, it, apiKey) } ?: loadVideoThumbnail(settings, videoUrl, apiKey)
+            // Card piccola: miniature campionate a 256px (il fullscreen usa il full).
+            thumbUrl?.let { loadRemoteBitmap(settings, it, apiKey, FEED_THUMBNAIL_MAX_DIM) } ?: loadVideoThumbnail(settings, videoUrl, apiKey, FEED_THUMBNAIL_MAX_DIM)
         }
     }
     Box(
