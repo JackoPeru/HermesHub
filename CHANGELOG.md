@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.259 - 2026-10-13
+
+- Sicurezza gateway: media sempre con token (fine bypass tailnet), `?root=` solo dentro i media roots, cap upload 64MB con rifiuto oltre limite.
+- Sicurezza manager: reboot con ticket single-use, kill solo basename esatto, cleanup ancorata a /opt/hermes, display takeover solo utente.
+- App: miniature a 256px (niente piu OOM galleria), letture NULL sicure, reset pulisce secret/archivio, bot remoto senza chiave bloccato, URL redatti nei backup, resume con profilo e single-flight.
+- Release: file .sha256 accanto agli asset, check monotonicita versionCode, 58 nuovi test comportamentali.
+
 ## 0.6.258 - 2026-10-12
 
 - Android: turni staccati — a stream morto (watchdog 90s incluso) la chat recupera la risposta via GET invece di chiudere il turno; kill telefono = detach (binding tenuto), solo lo stop utente chiude davvero; nuovo banner "Hermes continua sul server" con ricontrollo.
