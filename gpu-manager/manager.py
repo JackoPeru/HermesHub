@@ -420,6 +420,27 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
     return workflow, ""
 
 
+# Ancora fail-closed per la cleanup: solo sotto /opt/hermes si cancella.
+_CLEANUP_ANCHOR = Path("/opt/hermes")
+
+
+def _is_under_anchor(candidate: Path, anchor: Path) -> bool:
+    """True se candidate risolto e sotto anchor (puro, fail-closed)."""
+    try:
+        cand = Path(candidate).resolve()
+        anch = Path(anchor).resolve()
+        try:
+            return cand.is_relative_to(anch)  # type: ignore[attr-defined]
+        except AttributeError:
+            try:
+                cand.relative_to(anch)
+                return True
+            except ValueError:
+                return False
+    except Exception:  # noqa: BLE001 - dubbio = fuori anchor
+        return False
+
+
 def cleanup_old_artifacts(max_age_days: int = 7) -> int:
     """Delete staged inputs and job output dirs older than the retention.
     Prevents slow disk exhaustion from accumulated media artifacts."""
@@ -430,15 +451,33 @@ def cleanup_old_artifacts(max_age_days: int = 7) -> int:
         Path(str(CONFIG["media"].get("input_dir", "/opt/hermes/runtimes/comfyui/app/input"))),
         Path(MEDIA_OUTPUT_DIR),
     ]
-    for root in roots:
-        input_root = root == roots[0]
+    # Ancora fail-closed: canonicalizza e abortisci prima di cancellare.
+    try:
+        resolved = [Path(r).resolve() for r in roots]
+    except Exception as exc:  # noqa: BLE001
+        log.error("artifact cleanup rifiutato: resolve fallito: %r", exc)
+        return 0
+    for r in resolved:
+        if not _is_under_anchor(r, _CLEANUP_ANCHOR):
+            log.error("artifact cleanup rifiutato: root fuori anchor: %s", str(r))
+            return 0
+    for root in resolved:
+        input_root = root == resolved[0]
         try:
             entries = list(root.iterdir())
         except OSError:
             continue
         for entry in entries:
             try:
-                if entry.stat().st_mtime > cutoff:
+                # Mai seguire symlink: skip immediato via lstat.
+                if entry.is_symlink():
+                    continue
+                try:
+                    mtime = entry.lstat().st_mtime
+                except OSError as exc:
+                    log.warning("artifact cleanup: skip %s: %s", entry, exc)
+                    continue
+                if mtime > cutoff:
                     continue
                 if input_root and not (
                     entry.is_file()
@@ -447,12 +486,27 @@ def cleanup_old_artifacts(max_age_days: int = 7) -> int:
                 ):
                     # Only our staged job inputs; never touch anything else.
                     continue
-                if entry.is_dir() and not entry.is_symlink():
-                    shutil.rmtree(entry, ignore_errors=True)
+                if entry.is_dir():
+                    # Ricontrolla symlink prima di rmtree (TOCTOU).
+                    if entry.is_symlink():
+                        continue
+                    try:
+                        # Mai ignore_errors=True: fallisci rumoroso per-entry.
+                        shutil.rmtree(entry)
+                    except OSError as exc:
+                        log.warning("artifact cleanup: rmtree fallita %s: %s", entry, exc)
+                        continue
                 else:
-                    entry.unlink(missing_ok=True)
+                    if entry.is_symlink():
+                        continue
+                    try:
+                        entry.unlink(missing_ok=True)
+                    except OSError as exc:
+                        log.warning("artifact cleanup: unlink fallita %s: %s", entry, exc)
+                        continue
                 removed += 1
-            except OSError:
+            except OSError as exc:
+                log.warning("artifact cleanup: skip %s: %s", entry, exc)
                 continue
     if removed:
         log.info("artifact cleanup removed %d stale entries", removed)
@@ -821,24 +875,69 @@ async def vram_free(threshold_mb: float) -> bool:
     return all(g["memory_used_mb"] < threshold_mb for g in gpus)
 
 
+# Nomi backend noti come avviati nel file/services: confronto esatto sul
+# basename, mai substring (fail-closed: sconosciuto = mai kill).
+_STRAY_BACKEND_BINS = frozenset({
+    "tabbyapi", "tabbyapi.exe",
+    "llama-mainline", "llama-mainline.exe",
+    "exllamav3", "exllamav3.exe",
+    "comfy", "comfy.exe",
+    "ffmpeg", "ffmpeg.exe",
+})
+# Interpreti che lanciano i backend (ComfyUI: `python main.py`).
+_STRAY_INTERPRETERS = frozenset({
+    "python", "python.exe",
+    "python3", "python3.exe",
+    "python3.11", "python3.12",
+    "uvicorn", "uvicorn.exe",
+})
+# Script backend noti quando l'eseguibile e un interprete.
+_STRAY_BACKEND_SCRIPTS = frozenset({
+    "main.py",
+    "server.py",
+    "tabbyapi",
+    "comfy",
+    "exllamav3",
+})
+
+
 def _is_stray_runtime_cmd(cmd: str) -> bool:
     """Pure matcher (unit-testable): True se la cmdline e di un runtime nostro.
 
-    Stessa logica di filtro usata da cleanup_stray_cuda: match tabby/comfy,
-    mai il manager stesso. Stringa vuota o sconosciuta = False (mai kill).
+    Solo basename esatto contro allowlist (mai substring): l'eseguibile
+    diretto deve essere un bin backend noto, oppure un interprete
+    python/uvicorn con script backend noto tra gli argomenti. Mai il
+    manager stesso. Stringa vuota o sconosciuta = False (mai kill).
     """
     if not cmd:
         return False
-    low = cmd.lower()
+    low = cmd.lower().strip()
+    if not low:
+        return False
     parts = low.split()
     if not parts:
         return False
-    exe = os.path.basename(parts[0])
-    if exe == "gpu-manager" or "gpu-manager" in low:
+    # Mai il manager stesso (es. `python manager.py` o `gpu-manager`).
+    bases = [os.path.basename(p) for p in parts]
+    if "gpu-manager" in bases or "manager.py" in bases:
         return False
-    is_tabby = exe in ("tabbyapi", "tabbyapi.exe", "llama-mainline", "llama-mainline.exe") or "tabbyapi" in low or "llama-mainline" in low
-    is_comfy = exe in ("comfy", "exllamav3") or "comfy" in low or "exllamav3" in low
-    return bool(is_tabby or is_comfy)
+    b0 = os.path.basename(parts[0])
+    # Eseguibile backend diretto: confronto esatto.
+    if b0 in _STRAY_BACKEND_BINS:
+        return True
+    # Interprete: stray solo con script backend noto tra gli argomenti.
+    if b0 in _STRAY_INTERPRETERS:
+        for tok in parts[1:]:
+            if not tok or tok.startswith("-"):
+                continue
+            b = os.path.basename(tok).split(":")[0]
+            if b in _STRAY_BACKEND_SCRIPTS:
+                return True
+        return False
+    # Script backend lanciato diretto (es. `./main.py`).
+    if b0 in _STRAY_BACKEND_SCRIPTS:
+        return True
+    return False
 
 
 async def cleanup_stray_cuda() -> int:
@@ -858,7 +957,8 @@ async def cleanup_stray_cuda() -> int:
     me = os.getpid()
     for proc in await asyncio.to_thread(gpu_compute_procs):
         pid = int(proc.get("pid", 0) or 0)
-        if not pid or pid == me:
+        # Mai PID 1 / se stesso (fail-closed).
+        if not pid or pid == 1 or pid == me:
             continue
         cmd = _proc_cmd(pid)
         if not _is_stray_runtime_cmd(cmd):
@@ -869,6 +969,9 @@ async def cleanup_stray_cuda() -> int:
         # TOCTOU: il pid puo essere riciclato tra check e kill. Rileggi la
         # cmdline subito prima del kill e procedi solo se matcha ancora.
         fresh = _proc_cmd(pid)
+        # Ricontrolla PID protetti dopo il re-read (fail-closed).
+        if pid == 1 or pid == os.getpid():
+            continue
         if not _is_stray_runtime_cmd(fresh):
             log.info("stray cleanup pid=%d skipped: cmdline changed/gone (was %.60s)", pid, cmd[:60])
             continue
@@ -2325,23 +2428,66 @@ async def mode_direct(request: Request, _: None = Depends(require_key)) -> dict:
     return _set_desired("DIRECT")
 
 
-@app.post("/system/reboot")
-async def system_reboot(request: Request, _: None = Depends(require_key)) -> dict:
-    """Reboot the whole server. Fire-and-forget: the response is returned
-    before the reboot is issued so the caller sees the acknowledgement."""
-    _require_user_control(request)
-    log.warning("remote full-server reboot requested via API")
+# Ticket single-use per /system/reboot: in memoria, validi 120s, consumati
+# all'uso, mai nei log (fail-closed: senza ticket valido niente reboot).
+_REBOOT_TICKET_TTL_S = 120.0
+_reboot_tickets: dict[str, float] = {}
+
+
+def _reboot_mint_ticket(now: float | None = None) -> str:
+    """Crea ticket 32hex per reboot (puro/testabile, mai loggato)."""
+    at = time.time() if now is None else float(now)
+    # Purga scaduti per non crescere senza limite.
+    for stale in [k for k, exp in _reboot_tickets.items() if exp <= at]:
+        _reboot_tickets.pop(stale, None)
+    ticket = secrets.token_hex(16)
+    _reboot_tickets[ticket] = at + float(_REBOOT_TICKET_TTL_S)
+    return ticket
+
+
+def _reboot_consume_ticket(ticket: str, now: float | None = None) -> bool:
+    """Consuma ticket reboot: True solo se valido e non scaduto (single-use)."""
+    at = time.time() if now is None else float(now)
     try:
-        subprocess.Popen(
-            ["sh", "-c", "sleep 2; exec sudo -n /usr/sbin/shutdown -r now 'Hermes Hub remote reboot'"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    except Exception as exc:  # noqa: BLE001
-        log.warning("reboot spawn failed: %r", exc)
-        raise HTTPException(500, "reboot spawn failed")
-    return {"rebooting": True}
+        exp = _reboot_tickets.pop(str(ticket), None)
+    except Exception:  # noqa: BLE001 - dubbio = rifiuto
+        return False
+    if exp is None:
+        return False
+    try:
+        return float(exp) > float(at)
+    except (TypeError, ValueError):
+        return False
+
+
+@app.post("/system/reboot")
+async def system_reboot(request: Request, _: None = Depends(require_key)) -> dict | JSONResponse:
+    """Reboot con ticket single-use: senza ticket valido risponde 409 con
+    ticket fresco (120s); con ticket valido esegue. Fire-and-forget."""
+    _require_user_control(request)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 - body assente = primo passo
+        body = {}
+    ticket = str((body or {}).get("ticket") or "")
+    # Secondo passo: ticket valido e non scaduto -> consuma ed esegui.
+    if ticket and _reboot_consume_ticket(ticket):
+        # Mai loggare il ticket (segreto single-use).
+        log.warning("remote full-server reboot requested via API")
+        try:
+            subprocess.Popen(
+                ["sh", "-c", "sleep 2; exec sudo -n /usr/sbin/shutdown -r now 'Hermes Hub remote reboot'"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("reboot spawn failed: %r", exc)
+            raise HTTPException(500, "reboot spawn failed")
+        return {"rebooting": True}
+    # Primo passo (o ticket scaduto/riusato): emetti ticket fresco, 409.
+    fresh = _reboot_mint_ticket()
+    return JSONResponse(status_code=409, content={"ticket": fresh, "expires_in": int(_REBOOT_TICKET_TTL_S)})
 
 
 @app.post("/jobs/image")

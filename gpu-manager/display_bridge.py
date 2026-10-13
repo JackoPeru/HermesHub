@@ -317,6 +317,22 @@ def consume_ticket(ticket: str) -> Optional[str]:
     return viewer_id
 
 
+def _require_user_control(request) -> None:
+    """Solo l'utente (non-locale) controlla il display: delega al manager.
+
+    Il manager gira come __main__: display_bridge vi accede gia cosi per
+    CONFIG (vedi _manager_config). Stesso pattern, fail-closed (500 senza
+    manager: niente controllo).
+    """
+    main = sys.modules.get("__main__")
+    fn = getattr(main, "_require_user_control", None)
+    if callable(fn):
+        return fn(request)
+    if HTTPException is not None:
+        raise HTTPException(500, "user control non disponibile")
+    raise RuntimeError("user control non disponibile")
+
+
 # --------------------------------------------------------------------------
 # FastAPI surface (registered by manager.py; no-ops without fastapi).
 # --------------------------------------------------------------------------
@@ -387,9 +403,12 @@ if _FASTAPI:
         ticket, viewer_id, ttl = mint_ticket()
         return {"ticket": ticket, "viewer_id": viewer_id, "expires_in": ttl}
 
+    # Letture (status/ticket/frame): solo Bearer, resta cosi (nessun cambio
+    # di controllo). Controllo (takeover/release): Bearer + utente non-locale.
     @router.post("/display/takeover")
-    async def display_takeover(request: Request) -> dict:
+    async def display_takeover(request: Request, _: None = Depends(_require_user_control)) -> dict:
         _require_key(request)
+        _require_user_control(request)
         try:
             payload = await request.json()
         except Exception:
@@ -403,8 +422,9 @@ if _FASTAPI:
         return {"holder": str(getattr(lease, "holder", "")), "viewer_id": str(getattr(lease, "viewer_id", ""))}
 
     @router.post("/display/release")
-    async def display_release(request: Request) -> dict:
+    async def display_release(request: Request, _: None = Depends(_require_user_control)) -> dict:
         _require_key(request)
+        _require_user_control(request)
         try:
             payload = await request.json()
         except Exception:
