@@ -5830,20 +5830,7 @@ def _patch_source_texts(
         )
         changes.append("hermes hub api key aliases")
 
-    if 'os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "150")' in text:
-        text = text.replace(
-            'os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "150")',
-            'os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "0")',
-        )
-        changes.append("unlimited hub upload default")
-
-    if "if not payload or len(payload) > max_bytes:" in text:
-        text = text.replace(
-            "if not payload or len(payload) > max_bytes:",
-            "if not payload or (max_bytes > 0 and len(payload) > max_bytes):",
-            1,
-        )
-        changes.append("unlimited hub upload guard")
+    # Fail-closed: eventuali limiti upstream restano applicati (nessun default illimitato).
 
     if "def _hermes_hub_save_upload" not in text:
         text, _ = _replace_once(
@@ -5887,9 +5874,18 @@ def _hermes_hub_save_upload(filename: str, mime_type: str, data_url: str) -> Dic
     meta, encoded = raw.split(",", 1)
     detected_mime = meta[5:].split(";", 1)[0].strip() or str(mime_type or "application/octet-stream")
     mime = str(mime_type or detected_mime or "application/octet-stream")
-    payload = _base64.b64decode(encoded, validate=False)
     max_bytes = int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "0")) * 1024 * 1024
-    if not payload or (max_bytes > 0 and len(payload) > max_bytes):
+    if max_bytes <= 0:
+        # Fail-closed: senza limite configurato usa il default di 64MB.
+        max_bytes = 64 * 1024 * 1024
+    estimated = (len(encoded) * 3) // 4
+    if not encoded or estimated > max_bytes + 3:
+        raise ValueError("upload empty or over max size")
+    try:
+        payload = _base64.b64decode(encoded, validate=True)
+    except Exception as exc:
+        raise ValueError(f"invalid base64 upload: {exc}") from exc
+    if not payload or len(payload) > max_bytes:
         raise ValueError("upload empty or over max size")
 
     root = _hermes_hub_upload_root()
@@ -6847,7 +6843,13 @@ def _hermes_hub_resolve_media_path(media_id: str, extra_root: Optional[str] = No
         return None
     roots = _hermes_hub_media_roots()
     if extra_root:
-        roots.insert(0, _Path(str(extra_root).strip()).expanduser())
+        try:
+            # Consenti solo root uguale o contenuta nei media roots; ignora il resto (fail-closed).
+            requested = _Path(str(extra_root).strip()).expanduser().resolve()
+            if any(requested == root.resolve() or root.resolve() in requested.parents for root in roots):
+                roots.insert(0, requested)
+        except Exception:
+            pass
     for root in roots:
         try:
             candidate = (root / decoded).resolve()
@@ -7172,7 +7174,13 @@ def _hermes_hub_resolve_media_path(media_id: str, extra_root: Optional[str] = No
         return None
     roots = _hermes_hub_media_roots()
     if extra_root:
-        roots.insert(0, _Path(str(extra_root).strip()).expanduser())
+        try:
+            # Consenti solo root uguale o contenuta nei media roots; ignora il resto (fail-closed).
+            requested = _Path(str(extra_root).strip()).expanduser().resolve()
+            if any(requested == root.resolve() or root.resolve() in requested.parents for root in roots):
+                roots.insert(0, requested)
+        except Exception:
+            pass
     for root in roots:
         try:
             candidate = (root / decoded).resolve()
@@ -7758,7 +7766,13 @@ def _hermes_hub_number(value: Any, fallback: float = 0.0) -> float:''',
             '        return None\n'
             '    roots = _hermes_hub_media_roots()\n'
             '    if extra_root:\n'
-            '        roots.insert(0, _Path(str(extra_root).strip()).expanduser())\n'
+            '        try:\n'
+            '            # Consenti solo root uguale o contenuta nei media roots; ignora il resto (fail-closed).\n'
+            '            requested = _Path(str(extra_root).strip()).expanduser().resolve()\n'
+            '            if any(requested == root.resolve() or root.resolve() in requested.parents for root in roots):\n'
+            '                roots.insert(0, requested)\n'
+            '        except Exception:\n'
+            '            pass\n'
             '    for root in roots:\n',
             1,
         )
@@ -9220,13 +9234,11 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             "    async def _handle_hub_media(self, request: \"web.Request\") -> \"web.StreamResponse\":\n"
             "        auth_error = self._check_auth(request)\n"
             "        if auth_error is not None:\n"
-            "            if _hermes_hub_is_tailnet_peer(request):\n"
-            "                auth_error = None\n"
-            "            else:\n"
-            "                media_token = request.query.get(\"hub_token\") or request.query.get(\"api_key\") or request.query.get(\"token\")\n"
-            "                accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n"
-            "                if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):\n"
-            "                    return auth_error\n"
+            "            # Autenticazione obbligatoria anche per i peer tailnet: nessun bypass.\n"
+            "            media_token = request.query.get(\"hub_token\") or request.query.get(\"api_key\") or request.query.get(\"token\")\n"
+            "            accepted_api_keys = _hermes_hub_api_keys(self._api_key)\n"
+            "            if not media_token or not any(hmac.compare_digest(media_token, api_key) for api_key in accepted_api_keys):\n"
+            "                return auth_error\n"
             "        media_id = request.match_info.get(\"media_id\", \"\")\n"
             "        loop = asyncio.get_running_loop()\n"
             "        try:\n"

@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import base64
 import copy
 import hmac
 import os
+import re
 import subprocess
 import tempfile
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from unittest import mock
 
 import sys
@@ -262,6 +264,219 @@ class GeneratedMediaAuthTests(unittest.TestCase):
         patched_again, _ = _patch_text(self.generated)
         self.assertEqual(self.generated, patched_again)
         compile(patched_again, "<already-patched-gateway>", "exec")
+
+
+PATCHER_SOURCE_PATH = ROOT / "scripts" / "hermes_hub_gateway" / "adapters" / "hermes" / "legacy_patcher.py"
+
+MEDIA_HANDLER_NAMES = {
+    "_handle_hub_media",
+    "_handle_hub_media_upload",
+    "_handle_image_library",
+    "_handle_news_library",
+}
+
+
+class GeneratedMediaGuardrailsTests(unittest.TestCase):
+    """Guardrail fail-closed per i media generati (nessun segreto nei log)."""
+
+    @classmethod
+    def setUpClass(cls):
+        clean = FIXTURE.read_text(encoding="utf-8")
+        cls.generated, _ = _patch_text(clean)
+        compile(cls.generated, str(FIXTURE), "exec")
+        cls.tree = ast.parse(cls.generated)
+        cls.patcher_source = PATCHER_SOURCE_PATH.read_text(encoding="utf-8")
+
+    def _media_handler_nodes(self):
+        return [
+            node
+            for node in ast.walk(self.tree)
+            if isinstance(node, ast.AsyncFunctionDef) and node.name in MEDIA_HANDLER_NAMES
+        ]
+
+    def test_generated_media_handlers_have_no_tailnet_bypass(self):
+        handlers = self._media_handler_nodes()
+        self.assertTrue(handlers, "codice generato senza handler media")
+        for node in handlers:
+            with self.subTest(handler=node.name):
+                segment = ast.get_source_segment(self.generated, node) or ""
+                self.assertNotIn("_hermes_hub_is_tailnet_peer", segment)
+
+    def test_patcher_templates_have_no_tailnet_auth_bypass(self):
+        # Nel patcher resta solo la definizione dell'helper, nessuna chiamata di bypass.
+        self.assertNotIn("if _hermes_hub_is_tailnet_peer(request):", self.patcher_source)
+        self.assertNotIn("auth_error = None", self.patcher_source)
+        self.assertNotIn("auth_error=None", self.patcher_source)
+
+    def _generated_functions(self, names):
+        module = ast.parse(self.generated)
+        found = [
+            copy.deepcopy(node)
+            for node in module.body
+            if isinstance(node, ast.FunctionDef) and node.name in names
+        ]
+        self.assertEqual(
+            len(names),
+            len(found),
+            f"funzioni mancanti nel codice generato: {sorted(names)}",
+        )
+        namespace = {
+            "Any": Any,
+            "Dict": Dict,
+            "List": List,
+            "Optional": Optional,
+            "Path": Path,
+            "asyncio": asyncio,
+            "base64": base64,
+            "hmac": hmac,
+            "os": os,
+            "re": re,
+            "time": time,
+            "web": _Web,
+            "_hermes_hub_env_int": lambda _name, default, *_bounds: default,
+        }
+        exec(
+            compile(ast.fix_missing_locations(ast.Module(body=found, type_ignores=[])), "<generated-media-guardrails>", "exec"),
+            namespace,
+        )
+        return namespace
+
+    def test_extra_root_outside_media_roots_is_ignored(self):
+        namespace = self._generated_functions(
+            {
+                "_hermes_hub_api_keys",
+                "_hermes_hub_is_tailnet_peer",
+                "_hermes_hub_media_roots",
+                "_hermes_hub_resolve_media_path",
+                "_hermes_hub_bounded_media_matches",
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "root"
+            root.mkdir()
+            inner = root / "inner.txt"
+            inner.write_text("dentro", encoding="utf-8")
+            outside = Path(tmp) / "fuori"
+            outside.mkdir()
+            (outside / "secret.txt").write_text("fuori", encoding="utf-8")
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "HERMES_MEDIA_ROOTS": str(root),
+                    "HERMES_HUB_UPLOAD_PATH": str(root),
+                    "HERMES_VIDEO_LIBRARY_PATH": str(root),
+                    "HERMES_NEWS_LIBRARY_PATH": str(root),
+                },
+            ):
+                resolver = namespace["_hermes_hub_resolve_media_path"]
+                # Root esterna ignorata: i file sotto i roots restano raggiungibili.
+                self.assertEqual(inner, resolver("inner.txt", extra_root=str(outside)))
+                # ...ma nulla fuori dai roots diventa raggiungibile.
+                self.assertIsNone(resolver("secret.txt", extra_root=str(outside)))
+                # Root uguale a un media root resta accettata.
+                self.assertEqual(inner, resolver("inner.txt", extra_root=str(root)))
+
+    def test_patcher_resolver_variants_contain_extra_root(self):
+        positions = [
+            match.start()
+            for match in re.finditer(r"roots\.insert\(0", self.patcher_source)
+        ]
+        self.assertGreaterEqual(len(positions), 4, "attese almeno 4 varianti con roots.insert")
+        for pos in positions:
+            with self.subTest(offset=pos):
+                window = self.patcher_source[max(0, pos - 600) : pos]
+                self.assertIn("in requested.parents", window)
+
+    def test_generated_save_upload_rejects_over_cap_and_invalid_base64(self):
+        namespace = self._generated_functions(
+            {
+                "_hermes_hub_env_int",
+                "_hermes_hub_upload_root",
+                "_hermes_hub_safe_upload_name",
+                "_hermes_hub_save_upload",
+            }
+        )
+        save_upload = namespace["_hermes_hub_save_upload"]
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {
+                "HERMES_HUB_UPLOAD_PATH": str(Path(tmp) / "uploads"),
+                "HERMES_HUB_JSON_UPLOAD_MAX_MB": "1",
+                "HERMES_HUB_MAX_UPLOAD_MB": "1",
+            }
+            with mock.patch.dict(os.environ, env):
+                big = base64.b64encode(b"x" * (2 * 1024 * 1024)).decode("ascii")
+                with self.assertRaises(ValueError):
+                    save_upload(
+                        "grande.bin",
+                        "application/octet-stream",
+                        "data:application/octet-stream;base64," + big,
+                    )
+                with self.assertRaises(ValueError):
+                    save_upload(
+                        "rotto.bin",
+                        "application/octet-stream",
+                        "data:application/octet-stream;base64,!!!non-base64!!!",
+                    )
+                ok = save_upload(
+                    "piccolo.txt",
+                    "text/plain",
+                    "data:text/plain;base64," + base64.b64encode(b"ciao").decode("ascii"),
+                )
+                self.assertEqual(4, ok["size_bytes"])
+
+    def test_generated_save_upload_default_cap_is_finite(self):
+        namespace = self._generated_functions(
+            {
+                "_hermes_hub_env_int",
+                "_hermes_hub_upload_root",
+                "_hermes_hub_safe_upload_name",
+                "_hermes_hub_save_upload",
+            }
+        )
+        save_upload = namespace["_hermes_hub_save_upload"]
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {
+                "HERMES_HUB_UPLOAD_PATH": str(Path(tmp) / "uploads"),
+                "HERMES_HUB_JSON_UPLOAD_MAX_MB": "0",
+                "HERMES_HUB_MAX_UPLOAD_MB": "0",
+            }
+            with mock.patch.dict(os.environ, env):
+                # Con limite non configurato il default resta finito: 2MB rifiutati...
+                big = base64.b64encode(b"y" * (2 * 1024 * 1024)).decode("ascii")
+                with self.assertRaises(ValueError):
+                    save_upload(
+                        "grande.bin",
+                        "application/octet-stream",
+                        "data:application/octet-stream;base64," + big,
+                    )
+                # ...e gli upload leciti passano.
+                ok = save_upload(
+                    "piccolo.txt",
+                    "text/plain",
+                    "data:text/plain;base64," + base64.b64encode(b"ok").decode("ascii"),
+                )
+                self.assertEqual(2, ok["size_bytes"])
+
+    def test_patcher_save_upload_variants_enforce_finite_default(self):
+        # Solo le definizioni reali (parentesi letterale), non i riferimenti nelle regex.
+        marker = "def _hermes_hub_save_upload("
+        positions = [
+            match.start()
+            for match in re.finditer(re.escape(marker), self.patcher_source)
+        ]
+        self.assertGreaterEqual(len(positions), 2, "attese almeno due varianti di save_upload")
+        for pos in positions:
+            with self.subTest(offset=pos):
+                window = self.patcher_source[pos : pos + 2600]
+                self.assertTrue(
+                    "64 * 1024 * 1024" in window
+                    or '_hermes_hub_env_int("HERMES_HUB_JSON_UPLOAD_MAX_MB", 64, 1, 1024)' in window,
+                    "default finito assente",
+                )
+                self.assertIn("validate=True", window)
+                self.assertIn("(len(encoded) * 3) // 4", window)
+                self.assertNotIn("validate=False", window)
+                self.assertNotIn("(max_bytes > 0 and", window)
 
 
 if __name__ == "__main__":
