@@ -1716,9 +1716,30 @@ internal data class TtsRequestResult(
     val errorBody: String = ""
 )
 
+/** Limite onesto TTS: una request sola per lettura, niente chunking silenzioso.
+ *  Oltre si rifiuta ("testo troppo lungo, seleziona una parte"): il playback
+ *  fire-and-forget su singolo MediaPlayer globale rende la concatenazione
+ *  di chunk WAV troppo invasiva (header da ricucire + completamenti a catena). */
+internal const val MAX_TTS_TEXT_CHARS = 4000
+
+/** Valida il testo TTS: ritorna il testo pulito o lancia IllegalArgumentException. Pura e testabile. */
+internal fun validateTtsText(text: String, maxChars: Int = MAX_TTS_TEXT_CHARS): String {
+    val clean = text.trim()
+    require(clean.isNotBlank()) { "Testo vuoto." }
+    require(clean.length <= maxChars) {
+        "Testo troppo lungo (${clean.length} caratteri, max $maxChars): seleziona una parte."
+    }
+    return clean
+}
+
 internal suspend fun speakChatMessage(context: Context, settings: AppSettings, text: String, apiKey: String?): Unit = withContext(Dispatchers.IO) {
-    val cleanText = text.trim()
-    if (cleanText.isBlank()) return@withContext
+    // Testo vuoto = uscita silenziosa (come prima); solo il troppo-lungo e un errore onesto.
+    if (text.trim().isBlank()) return@withContext
+    val cleanText = try {
+        validateTtsText(text)
+    } catch (ex: IllegalArgumentException) {
+        throw java.io.IOException(ex.message)
+    }
     val payload = JSONObject()
         .put("input", cleanText)
         .put("voice", "if_sara")
@@ -3952,10 +3973,13 @@ internal fun importArchiveFromClipboard(context: Context): String {
         return "Nessuna chat riconosciuta negli appunti."
     }
     val current = loadConversations(context)
+    val seenIds = current.map { it.id }.toMutableSet()
     val seen = current.map { "${it.title}\n${it.prompt}" }.toMutableSet()
     val merged = current.toMutableList()
     var added = 0
     imported.forEach { conversation ->
+        // Dedup su id e su title+prompt: re-import dello stesso export non duplica.
+        if (!seenIds.add(conversation.id)) return@forEach
         if (seen.add("${conversation.title}\n${conversation.prompt}")) {
             merged.add(conversation)
             added++
@@ -3981,24 +4005,33 @@ internal fun exportArchiveText(context: Context): String {
     }
 }
 
+// Kind ammessi in import da appunti: tutto il resto e' normalizzato a Chat (fail-closed).
+internal val ARCHIVE_IMPORT_KINDS = setOf("Chat", "Task", "Progetto", "Artifact")
+
 internal fun parseArchiveExportText(text: String): List<LocalConversation> {
     val blocks = Regex("(?m)^## ").split(text).drop(1)
     val now = System.currentTimeMillis()
     return blocks.mapIndexedNotNull { index, block ->
         val lines = block.lines()
-        val title = lines.firstOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: return@mapIndexedNotNull null
+        // Titolo obbligatorio e limitato: blocchi senza titolo sono scartati (niente conversazioni corrotte).
+        val title = lines.firstOrNull()?.trim()?.takeIf { it.isNotBlank() }?.take(180) ?: return@mapIndexedNotNull null
         var kind = "Chat"
         var prompt = ""
+        var botIdentityKey = ""
         val messages = mutableListOf<ChatMessage>()
         var currentAuthor: String? = null
         val currentText = StringBuilder()
 
         fun flushMessage() {
-            val author = currentAuthor ?: return
+            val author = currentAuthor?.trim()?.takeIf { it.isNotBlank() } ?: run {
+                currentAuthor = null
+                currentText.clear()
+                return
+            }
             messages.add(
                 ChatMessage(
-                    author = author,
-                    text = currentText.toString().trimEnd(),
+                    author = author.take(40),
+                    text = currentText.toString().trimEnd().take(20_000),
                     fromUser = author.equals("Tu", ignoreCase = true) || author.equals("User", ignoreCase = true)
                 )
             )
@@ -4009,8 +4042,14 @@ internal fun parseArchiveExportText(text: String): List<LocalConversation> {
         lines.drop(1).forEach { rawLine ->
             val line = rawLine.trimEnd()
             when {
-                line.startsWith("Tipo: ") -> kind = line.removePrefix("Tipo: ").trim().ifBlank { "Chat" }
-                line.startsWith("Prompt: ") -> prompt = line.removePrefix("Prompt: ").trim()
+                // Nota: niente spazio obbligatorio dopo ":": trimEnd puo averlo rimosso su righe vuote.
+                line.startsWith("Tipo:") -> {
+                    val raw = line.removePrefix("Tipo:").trim()
+                    kind = raw.takeIf { it in ARCHIVE_IMPORT_KINDS } ?: "Chat"
+                }
+                line.startsWith("Prompt:") -> prompt = line.removePrefix("Prompt:").trim().take(20_000)
+                // Campo opzionale non-breaking: se assente resta "" (compatibile con export attuale).
+                line.startsWith("Bot:") -> botIdentityKey = line.removePrefix("Bot:").trim().take(256)
                 else -> {
                     val match = Regex("^([^:]{1,40}):\\s?(.*)$").matchEntire(line)
                     if (match != null) {
@@ -4024,6 +4063,8 @@ internal fun parseArchiveExportText(text: String): List<LocalConversation> {
             }
         }
         flushMessage()
+        // Blocco malformato (senza prompt e senza messaggi): scartato invece di creare record vuoti.
+        if (prompt.isBlank() && messages.isEmpty()) return@mapIndexedNotNull null
         LocalConversation(
             id = "import_${now}_$index",
             title = title,
@@ -4031,7 +4072,8 @@ internal fun parseArchiveExportText(text: String): List<LocalConversation> {
             description = "Importato da export testo.",
             prompt = prompt,
             updatedAt = now - index,
-            messages = messages
+            messages = messages,
+            botIdentityKey = botIdentityKey
         )
     }
 }

@@ -296,6 +296,8 @@ internal fun ArchiveScreen(
     // La conferma eliminazione sopravvive alla rotazione tramite id (l'item
     // si deriva dalla lista: niente Parcelable, niente binder gonfio).
     var pendingDeleteId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Conferma copia archivio: riversa tutti i testi negli appunti, serve consenso esplicito.
+    var confirmCopyArchive by rememberSaveable { mutableStateOf(false) }
     var managingConversationId by rememberSaveable { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val savedConversations = remember(refreshKey) { loadConversations(context) }
@@ -337,10 +339,7 @@ internal fun ArchiveScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        IconButton(onClick = {
-                            copyArchiveToClipboard(context)
-                            status = "Archivio copiato negli appunti."
-                        }) {
+                        IconButton(onClick = { confirmCopyArchive = true }) {
                             Icon(Icons.Rounded.ContentCopy, contentDescription = "Esporta archivio negli appunti", tint = Color.White)
                         }
                         IconButton(onClick = {
@@ -553,6 +552,43 @@ internal fun ArchiveScreen(
             dismissButton = {
                 IconButton(onClick = { pendingDeleteId = null }) {
                     Icon(Icons.Rounded.Close, contentDescription = "Annulla eliminazione", tint = Color.White)
+                }
+            }
+        )
+    }
+
+    // Conferma PRIMA di riversare tutto l'archivio negli appunti (fail-closed: niente copia senza consenso).
+    if (confirmCopyArchive) {
+        AlertDialog(
+            onDismissRequest = { confirmCopyArchive = false },
+            properties = DialogProperties(
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false
+            ),
+            containerColor = AppColors.Surface,
+            title = {
+                Text("Copia archivio?", color = Color.White, fontWeight = FontWeight.SemiBold)
+            },
+            text = {
+                Text(
+                    "Copia tutto l'archivio negli appunti? Include tutti i testi.",
+                    color = AppColors.Muted
+                )
+            },
+            confirmButton = {
+                IconButton(
+                    onClick = {
+                        confirmCopyArchive = false
+                        copyArchiveToClipboard(context)
+                        status = "Archivio copiato negli appunti."
+                    }
+                ) {
+                    Icon(Icons.Rounded.ContentCopy, contentDescription = "Conferma copia archivio", tint = Color.White)
+                }
+            },
+            dismissButton = {
+                IconButton(onClick = { confirmCopyArchive = false }) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Annulla copia archivio", tint = Color.White)
                 }
             }
         )

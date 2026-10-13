@@ -1,6 +1,5 @@
 package com.nemoclaw.chat
 
-import android.annotation.SuppressLint
 import android.Manifest
 import android.app.Activity
 import android.app.NotificationChannel
@@ -31,6 +30,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.view.WindowManager
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
@@ -2006,7 +2006,6 @@ internal fun VideoReactionButton(label: String, icon: ImageVector, selected: Boo
 
 @Composable
 internal fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPrompt: (String) -> Unit) {
-    val scope = rememberCoroutineScope()
     var refreshKey by remember { mutableIntStateOf(0) }
     var status by remember { mutableStateOf("Articoli HTML creati da Hermes.") }
     var selectedHtmlId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -2049,14 +2048,11 @@ internal fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPromp
                 }
             }
             Spacer(modifier = Modifier.height(14.dp))
+            // Un solo GET per refresh: basta il bump di refreshKey, il
+            // LaunchedEffect sopra ricarica (niente doppio load diretto).
             IconButton(onClick = {
                 status = "Sincronizzo articoli Hermes..."
-                scope.launch {
-                    val htmlStatus = loadNewsLibrary(settings, loadGatewaySecret(context))
-                    htmlItems = htmlStatus.first
-                    status = htmlStatus.second
-                    refreshKey++
-                }
+                refreshKey++
             }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna news", tint = Color.White) }
         }
         item {
@@ -2157,14 +2153,37 @@ internal fun NewsHtmlCard(item: NewsHtmlItem, onClick: () -> Unit) {
     }
 }
 
-@SuppressLint("SetJavaScriptEnabled")
+// Articoli statici: niente JS, niente bridge, fail-closed sui link.
 internal fun createNewsWebView(context: Context): WebView = WebView(context).apply {
-    settings.javaScriptEnabled = true
-    settings.domStorageEnabled = true
+    settings.javaScriptEnabled = false
+    settings.domStorageEnabled = false
+    settings.allowFileAccess = false
+    settings.allowContentAccess = false
     settings.loadWithOverviewMode = true
     settings.useWideViewPort = true
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+    }
     webViewClient = object : WebViewClient() {
-        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = false
+        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+            // Fail-closed: URL nullo o schema non http(s) mai caricati in WebView.
+            val target = request.url ?: return true
+            if (!target.scheme.equals("http", ignoreCase = true) &&
+                !target.scheme.equals("https", ignoreCase = true)
+            ) {
+                return true
+            }
+            // Resta in WebView solo per stesso host della pagina caricata.
+            val currentHost = runCatching { (view.url ?: "").toUri().host }.getOrNull()
+            if (currentHost != null && target.host.equals(currentHost, ignoreCase = true)) return false
+            // Link esterni nel browser di sistema.
+            runCatching {
+                view.context.startActivity(
+                    Intent(Intent.ACTION_VIEW, target).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+            return true
+        }
     }
 }
 

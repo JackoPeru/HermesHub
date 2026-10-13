@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.Build
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
@@ -76,12 +77,31 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.net.URLDecoder
 
 private class ScreenJsBridge(val onState: (String) -> Unit) {
     @JavascriptInterface
     fun onState(payload: String) {
         onState(payload)
     }
+}
+
+// Controllo puro testabile: true = path asset da bloccare (fail-closed).
+// Normalizza con URL-decode ricorsivo (max 2x) cosi %2e, %5c e doppie
+// codifiche (%252e) non aggirano il controllo; poi cerca ".." come
+// segmento, backslash e path assoluti.
+internal fun isBlockedAssetPath(rawPath: String): Boolean {
+    if (rawPath.isBlank()) return true
+    var path = rawPath
+    repeat(2) {
+        val decoded = runCatching { URLDecoder.decode(path, "UTF-8") }.getOrNull() ?: return@repeat
+        if (decoded == path) return@repeat
+        path = decoded
+    }
+    if ('\\' in path) return true
+    if (path.startsWith("/")) return true
+    if (path.split('/').any { it == ".." }) return true
+    return false
 }
 
 /**
@@ -149,8 +169,9 @@ internal fun ScreenViewer(
                     ): WebResourceResponse? {
                         val url = request?.url ?: return null
                         if (url.scheme != "https" || url.host != "appassets.androidplatform.net") return null
-                        var path = url.path?.removePrefix("/assets/") ?: return null
-                        if (".." in path || path.isBlank()) return null
+                        val path = url.path?.removePrefix("/assets/") ?: return null
+                        // Fail-closed: traversal anche codificato (%2e, backslash, assoluti).
+                        if (isBlockedAssetPath(path)) return null
                         val mime = when (path.substringAfterLast('.', "").lowercase()) {
                             "html" -> "text/html"
                             "js" -> "text/javascript"
@@ -174,8 +195,13 @@ internal fun ScreenViewer(
                 val webSettings = this.settings
                 webSettings.javaScriptEnabled = true
                 webSettings.domStorageEnabled = true
-                webSettings.mediaPlaybackRequiresUserGesture = false
-                webSettings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                // Bridge JS mantenuto (serve al viewer), ma superficie ridotta e fail-closed.
+                webSettings.allowFileAccess = false
+                webSettings.allowUniversalAccessFromFileURLs = false
+                webSettings.mediaPlaybackRequiresUserGesture = true
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    webSettings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                }
                 webSettings.loadWithOverviewMode = true
                 webSettings.useWideViewPort = true
                 webSettings.builtInZoomControls = true
