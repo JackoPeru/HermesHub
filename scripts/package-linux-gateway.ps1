@@ -118,6 +118,7 @@ try {
     Write-Output "Linux gateway asset: $archive"
     $sha = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
     Write-Output "Linux gateway SHA-256: $sha"
+    Set-Content -LiteralPath "$archive.sha256" -Value $sha -Encoding Ascii -NoNewline
 }
 finally {
     if (Test-Path -LiteralPath $resolvedStage) {

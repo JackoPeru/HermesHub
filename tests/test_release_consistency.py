@@ -610,6 +610,39 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertNotIn("STARTUP_ATTEMPTS", controller)
         self.assertNotIn("STARTUP_RETRY_DELAY", controller)
 
+    def test_android_version_code_never_decreases_in_git_history(self) -> None:
+        # Play-Store monotonicita: nessun versionCode mai committato puo
+        # superare quello atteso (downgrade = update rifiutato).
+        log = (
+            subprocess.run(
+                ["git", "log", "-p", "--follow", "--", "src/NemoclawChat.Android/app/build.gradle.kts"],
+                cwd=ROOT,
+                capture_output=True,
+                check=True,
+            )
+            .stdout.decode("utf-8", errors="replace")
+        )
+        codes = [int(match) for match in re.findall(r"^[+-]\s*versionCode\s*=\s*(\d+)", log, re.MULTILINE)]
+        self.assertGreater(len(codes), 0)
+        self.assertLessEqual(max(codes), EXPECTED_ANDROID_VERSION_CODE)
+
+    def test_release_notes_assets_exist_as_build_files(self) -> None:
+        # Ogni asset citato in release_notes.txt per la versione corrente
+        # deve esistere come file di build in artifacts/ o release-assets/.
+        notes = read("release_notes.txt")
+        expected_assets = {
+            f"HermesHub-{EXPECTED_VERSION}-android.apk",
+            f"HermesHub-{EXPECTED_VERSION}-linux-gateway.tar.gz",
+            f"NemoclawChat.Windows_{EXPECTED_VERSION}.0_x64.msix",
+        }
+        for asset in sorted(expected_assets):
+            self.assertIn(asset, notes)
+        names: set[str] = set()
+        for root in (ROOT / "artifacts", ROOT / "release-assets"):
+            if root.is_dir():
+                names.update(path.name for path in root.rglob("*") if path.is_file())
+        self.assertEqual([], sorted(a for a in expected_assets if a not in names))
+
 
 if __name__ == "__main__":
     unittest.main()

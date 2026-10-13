@@ -203,8 +203,11 @@ try {
     if (-not (Test-Path -LiteralPath $target -PathType Leaf) -or (Get-Item -LiteralPath $target).Length -ne $sourceLength) {
         throw "Copia dell'asset MSIX incompleta: $target"
     }
+    $targetHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath "$target.sha256" -Value $targetHash -Encoding Ascii -NoNewline
 
     Write-Output "MSIX pronto: $target"
+    Write-Output "SHA-256: $targetHash"
     if (-not $SkipSigning) {
         Write-Output "Cert installato in CurrentUser\\TrustedPeople e CurrentUser\\Root: CN=AppPublisher"
     }

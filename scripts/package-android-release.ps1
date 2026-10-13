@@ -299,6 +299,7 @@ if ($sourceHash -ne $partialHash) {
     throw "Copia APK incompleta: hash sorgente e staging diversi."
 }
 Move-Item -LiteralPath $partial -Destination $target -Force
+Set-Content -LiteralPath "$target.sha256" -Value $sourceHash -Encoding Ascii -NoNewline
 
 if ($CiValidation) {
     Write-Output "APK DAT CI validation-only pronto: $target"
