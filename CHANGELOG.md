@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.261 - 2026-10-13
+
+- Android: WebView news senza JS/bridge, screen bridge blindato (no file/mixed, asset jail con decode); copia archivio con conferma, import validato.
+- Android: sidebar ricaricata a ogni apertura, deep-link con cap e MIME allowlist, TTS con rifiuto onesto oltre 4000 char, note vocali max 10min/100MB, news con singolo GET.
+- Server: SQLite sotto lock, training wall-clock 12h, workflow raw con cap 480p/3600, retention release/backup (5), digest su bytes.
+- Test: 16 nuovi (528 python + 480 android verdi).
+
 ## 0.6.260 - 2026-10-13
 
 - Android: riavvio server col flusso ticket single-use (compatibile col manager precedente a 200 diretto).
