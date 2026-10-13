@@ -1,11 +1,8 @@
-Hermes Hub 0.6.259 (audit totale: sicurezza + resilienza)
+Hermes Hub 0.6.260 (riavvio con ticket)
 
-- Sicurezza gateway: media sempre con token (fine bypass tailnet), ?root= solo dentro i media roots, cap upload 64MB con rifiuto oltre limite.
-- Sicurezza manager: reboot con ticket single-use, kill solo basename esatto, cleanup ancorata a /opt/hermes, display takeover solo utente.
-- App: miniature a 256px (niente piu OOM galleria), letture NULL sicure ovunque, reset pulisce secret/archivio, bot remoto senza chiave bloccato, URL redatti nei backup, resume con profilo e single-flight.
-- Release: file .sha256 accanto agli asset, check monotonicita versionCode, 58 nuovi test comportamentali.
-- Versioni: Windows/AdminBridge 0.6.259; Android versionName 0.6.259, versionCode 263 (stessa firma: aggiornamento normale).
-- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.259-android.apk; MSIX NemoclawChat.Windows_0.6.259.0_x64.msix; gateway Linux HermesHub-0.6.259-linux-gateway.tar.gz.
-- SHA-256 Android: `0cb3e3f8434b750eb83933331374eadba34a8b0402dfbee60e07dd88146a2afd`.
-- SHA-256 gateway: `db0ec72fd438e1abac24aef788907961607a68bd0f6aef9d847f5c499dddacff`.
-- SHA-256 MSIX: `e01ac9c8cc27c46f7af00099cc764f015556d92d2d1ecce7fa0f82ed084393c2`.
+- Android: riavvio server col flusso ticket single-use del manager aggiornato (200 diretto col manager precedente: compatibile in entrambe le direzioni).
+- Versioni: Windows/AdminBridge 0.6.260; Android versionName 0.6.260, versionCode 264 (stessa firma: aggiornamento normale).
+- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.260-android.apk; MSIX NemoclawChat.Windows_0.6.260.0_x64.msix; gateway Linux HermesHub-0.6.260-linux-gateway.tar.gz.
+- SHA-256 Android: `80fc6131a7cde37b873401f1a33299cda458feaa5ec1eb81139b8b4340329f03`.
+- SHA-256 gateway: `af7453308892484391502ac120714174b8fc6f44048e42f1326f0fc9793b0800`.
+- SHA-256 MSIX: `c9c7e5e849cf93bfd0bf5d9875e7f6f0e949e3a1af5ada9d0ebe585eecd4710f`.

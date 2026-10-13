@@ -2495,9 +2495,30 @@ internal fun ProfileScreen(
         scope.launch {
             rebootBusy = true
             rebootStatus = try {
-                val (code, _) = postJson("$managerBase/system/reboot", JSONObject(), loadGatewaySecret(context), allowCompatAuth = false)
+                val key = loadGatewaySecret(context)
+                val (code, body) = postJson("$managerBase/system/reboot", JSONObject(), key, allowCompatAuth = false)
                 if (code == 200) {
                     "Comando di riavvio inviato. Il server tornerà online tra circa un minuto."
+                } else if (code == 409) {
+                    // Manager aggiornato: vuole il ticket single-use (secondo
+                    // POST = conferma, gia data nel dialogo). Manager vecchio:
+                    // 409 senza ticket = messaggio onesto, niente retry.
+                    val ticket = extractRebootTicket(body)
+                    if (ticket.isNullOrBlank()) {
+                        "Riavvio rifiutato (HTTP 409): risposta manager non valida."
+                    } else {
+                        val (code2, _) = postJson(
+                            "$managerBase/system/reboot",
+                            JSONObject().put("ticket", ticket),
+                            key,
+                            allowCompatAuth = false
+                        )
+                        if (code2 == 200) {
+                            "Comando di riavvio inviato. Il server tornerà online tra circa un minuto."
+                        } else {
+                            "Riavvio rifiutato (HTTP $code2). Ticket scaduto: riprova."
+                        }
+                    }
                 } else {
                     "Riavvio rifiutato (HTTP $code). Verifica che hermes-gpu-manager sia aggiornato."
                 }
@@ -2980,8 +3001,15 @@ internal fun WellbeingBarChart(
     }
 }
 
-internal fun gpuManagerBase(gatewayUrl: String): String {
-    val trimmed = gatewayUrl.trim().trimEnd('/')
+/**
+ * Ticket single-use da risposta 409 di /system/reboot (manager aggiornato):
+ * 32+ hex, mai loggato in chiaro dal chiamante. Puro e testabile.
+ */
+internal fun extractRebootTicket(body: String): String? =
+    runCatching { JSONObject(body).optString("ticket").trim() }.getOrNull()
+        ?.takeIf { it.matches(Regex("[0-9a-fA-F]{32,}")) }
+
+internal fun gpuManagerBase(gatewayUrl: String): String {    val trimmed = gatewayUrl.trim().trimEnd('/')
     val noPath = trimmed.substringBefore("/v1").substringBefore("/api")
     return if (Regex(":[0-9]+$").containsMatchIn(noPath)) {
         noPath.replace(Regex(":[0-9]+$"), ":8643")

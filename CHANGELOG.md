@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.260 - 2026-10-13
+
+- Android: riavvio server col flusso ticket single-use (compatibile col manager precedente a 200 diretto).
+
 ## 0.6.259 - 2026-10-13
 
 - Sicurezza gateway: media sempre con token (fine bypass tailnet), `?root=` solo dentro i media roots, cap upload 64MB con rifiuto oltre limite.

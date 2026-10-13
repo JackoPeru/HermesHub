@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.259"
-EXPECTED_ANDROID_VERSION_CODE = 263
+EXPECTED_VERSION = "0.6.260"
+EXPECTED_ANDROID_VERSION_CODE = 264
 
 
 def read(relative_path: str) -> str:
@@ -80,6 +80,16 @@ class ReleaseConsistencyTests(unittest.TestCase):
             'resolveHermesUrl(settings, "/v1/image/library',
         ):
             self.assertIn(path, sources)
+
+    def test_android_reboot_uses_ticket(self) -> None:
+        # Manager aggiornato chiede ticket single-use (409); l'app lo
+        # gestisce restando compatibile col manager precedente (200 diretto).
+        sources = read_android_sources()
+        for marker in (
+            "extractRebootTicket(",
+            'put("ticket", ticket)',
+        ):
+            self.assertIn(marker, sources)
 
     def test_android_detached_turns_stay_resumable(self) -> None:
         # Kill/rete morta: niente stop server implicito, reattach prima
