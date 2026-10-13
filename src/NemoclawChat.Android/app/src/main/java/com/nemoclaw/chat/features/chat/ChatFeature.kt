@@ -385,6 +385,12 @@ internal fun isRemoteBotMissingSecret(botConnectionId: String?, apiKey: String?)
 internal fun remoteBotMissingSecretMessage(): String =
     "Connessione remota senza chiave salvata: invio bloccato. Riconfigura la chiave della connessione e riprova."
 
+/** Durata max nota vocale: 10 minuti (stop nativo MediaRecorder). */
+internal const val VOICE_NOTE_MAX_DURATION_MS = 10 * 60 * 1000
+
+/** Dimensione max nota vocale: 100 MB (stop nativo MediaRecorder). */
+internal const val VOICE_NOTE_MAX_FILE_BYTES = 100L * 1024L * 1024L
+
 @Composable
 internal fun ChatScreen(
     context: Context,
@@ -1489,6 +1495,20 @@ internal fun ChatScreen(
                 recorder.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
                 recorder.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
                 recorder.setOutputFile(tempFile.absolutePath)
+                // Limiti nativi: niente registrazioni infinite (stop onesto al limite).
+                recorder.setMaxDuration(VOICE_NOTE_MAX_DURATION_MS)
+                recorder.setMaxFileSize(VOICE_NOTE_MAX_FILE_BYTES)
+                recorder.setOnInfoListener { _, what, _ ->
+                    if (what == android.media.MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED ||
+                        what == android.media.MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED
+                    ) {
+                        // Il recorder nativo si e gia fermato: avvisa e lascia
+                        // all'utente lo Stop per trascrivere il parziale.
+                        scope.launch {
+                            Toast.makeText(context, "Limite registrazione raggiunto (10 min / 100 MB): tocca Stop per trascrivere.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
                 recorder.prepare()
                 recorder.start()
                 voiceRecordStartMs = System.currentTimeMillis()

@@ -393,6 +393,13 @@ internal fun ChatApp() {
     // BotSidebarAction non e Parcelable: niente rememberSaveable (solo sessione).
     var pendingBotAction by remember { mutableStateOf<BotSidebarAction?>(null) }
     var sidebarOpen by rememberSaveable { mutableStateOf(false) }
+    // Contatore aperture drawer: passato come refreshToken alla sidebar per
+    // ricaricare le conversazioni a ogni apertura (niente voci fantasma).
+    var sidebarGeneration by rememberSaveable { mutableIntStateOf(0) }
+    fun openSidebar() {
+        sidebarGeneration++
+        sidebarOpen = true
+    }
     var savedDraft by rememberSaveable { mutableStateOf("") }
     // Retained alla rotazione via ViewModel (prima: remember = stato perso).
     val chatViewModel: ChatViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
@@ -558,7 +565,8 @@ internal fun ChatApp() {
             }
         }
         if (incoming.uri.isNotBlank()) {
-            createAttachmentFromUri(context, incoming.uri.toUri(), settings.maxAttachmentMb)?.let { attachment -> chatState.pendingAttachments.add(attachment) }
+            // Cap per-intent 25MB anche se MainActivity ha validato: difesa in profondita.
+            createAttachmentFromUri(context, incoming.uri.toUri(), minOf(settings.maxAttachmentMb, 25))?.let { attachment -> chatState.pendingAttachments.add(attachment) }
         }
         setSelectedTab(tabForIncomingRoute(incoming.tab))
         // Deeplink "bots": Chat con sezione Bot attiva (non piu un tab).
@@ -806,7 +814,7 @@ internal fun ChatApp() {
             topBar = {
                 SectionTopBar(
                     tab = selectedTab,
-                    onOpenSidebar = { sidebarOpen = true },
+                    onOpenSidebar = { openSidebar() },
                     onBackToChat = { setSelectedTab(Tab.Chat) }
                 )
             },
@@ -829,6 +837,7 @@ internal fun ChatApp() {
                 // le sue chat; null pendingBot = identita selezionata.
                 chatIdentityKey = activeChatBotKey,
                 chatRoster = chatRoster,
+                refreshToken = sidebarGeneration,
                 onOpenBotItem = { openSidebarBot(it) },
                 onManageBots = { sidebarOpen = false; botSectionVisible = true },
                 onBotAction = { bot, action ->
@@ -932,7 +941,7 @@ internal fun ChatApp() {
                     },
                     onOpenScreen = { setSelectedTab(Tab.Screen) },
                     onOpenCron = { setSelectedTab(Tab.Cron) },
-                    onOpenSidebar = { sidebarOpen = true },
+                    onOpenSidebar = { openSidebar() },
                     canOpenBotChat = { canOpenBot() },
                     pendingAction = pendingBotAction,
                     onPendingActionConsumed = { pendingBotAction = null }
@@ -990,7 +999,7 @@ internal fun ChatApp() {
                 pendingPrompt = ""
                 pendingConversationId = null
                 },
-                onOpenSidebar = { sidebarOpen = true },
+                onOpenSidebar = { openSidebar() },
                 onSwitchTab = { tab -> setSelectedTab(tab) },
                 chatBotActive = bot != null,
                 chatBotOpening = sidebarBotOpening,

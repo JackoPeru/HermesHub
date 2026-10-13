@@ -361,9 +361,12 @@ internal fun HermesSidebar(
     // Identita attiva della chat normale ("conn::profilo", "" = default):
     // i RECENTI mostrano solo le sue chat. In botMode la lista bot resta.
     chatIdentityKey: String = "",
-    chatRoster: com.nemoclaw.chat.features.bots.HermesBotRoster? = null
+    chatRoster: com.nemoclaw.chat.features.bots.HermesBotRoster? = null,
+    // Contatore incrementato a ogni apertura drawer (AppRoot): forza il
+    // ricaricamento delle conversazioni, niente fantasmi dopo delete in archivio.
+    refreshToken: Int = 0
 ) {
-    val conversations = remember { loadConversations(context).sortedByDescending { it.updatedAt } }
+    val conversations = remember(refreshToken) { loadConversations(context).sortedByDescending { it.updatedAt } }
     // Filtro per identita (stamp o legacy via roster): ogni bot ha le sue.
     val identityConversations = remember(conversations, chatIdentityKey, chatRoster) {
         conversationsForIdentity(conversations, chatIdentityKey, chatRoster)

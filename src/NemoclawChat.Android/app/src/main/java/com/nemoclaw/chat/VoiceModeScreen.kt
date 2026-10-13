@@ -901,6 +901,13 @@ internal suspend fun synthesizeVoiceFile(
     voice: String = "if_sara",
     speed: Double = 1.08
 ): File = withContext(Dispatchers.IO) {
+    // Stesso limite onesto di speakChatMessage: i segmenti accodati sono
+    // gia corti, il rifiuto scatta solo su testo singolo enorme.
+    try {
+        validateTtsText(text)
+    } catch (ex: IllegalArgumentException) {
+        throw java.io.IOException(ex.message)
+    }
     val payload = JSONObject()
         .put("input", text.trim())
         .put("voice", voice.takeIf { it in SupportedVoiceNames } ?: "if_sara")
@@ -958,6 +965,12 @@ internal suspend fun synthesizeAndPlayVoiceStream(
     speed: Double = 1.08,
     onPlaybackStarted: () -> Unit
 ): Unit = withContext(Dispatchers.IO) {
+    // Stesso limite onesto di speakChatMessage (flusso streaming compreso).
+    try {
+        validateTtsText(text)
+    } catch (ex: IllegalArgumentException) {
+        throw java.io.IOException(ex.message)
+    }
     val payload = JSONObject()
         .put("input", text.trim())
         .put("voice", voice.takeIf { it in SupportedVoiceNames } ?: "if_sara")
