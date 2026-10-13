@@ -196,6 +196,44 @@ record_failed_release() {
   mv -f "$tmp_failed" "$FAILED_RELEASE_FILE"
 }
 
+# Retention release: tiene solo le ultime N voci (default 5) di una dir
+# (releases/, backups/). Non tocca mai i target vivi di current/previous né
+# la release appena installata ($3, facoltativa). Fail-closed: dir assente =
+# no-op, percorsi sospetti = skip, errori = warn senza fallire l'update.
+prune_keep_dir() {
+  local dir="$1" keep="${2:-5}" pinned="${3:-}"
+  local live_current="" live_previous="" entry resolved
+  [ -d "$dir" ] || return 0
+  case "$keep" in ''|*[!0-9]*) keep=5 ;; esac
+  if [ -L "$INSTALL_DIR/current" ]; then
+    live_current="$(readlink -f "$INSTALL_DIR/current" 2>/dev/null || true)"
+  fi
+  if [ -L "$INSTALL_DIR/previous" ]; then
+    live_previous="$(readlink -f "$INSTALL_DIR/previous" 2>/dev/null || true)"
+  fi
+  # Solo directory, dalla piu recente: le prime $keep restano sempre.
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    if [ "$keep" -gt 0 ]; then
+      keep=$((keep - 1))
+      continue
+    fi
+    resolved="$(readlink -f "$entry" 2>/dev/null || true)"
+    if [ -n "$resolved" ] && { [ "$resolved" = "$live_current" ] || [ "$resolved" = "$live_previous" ]; }; then
+      echo "prune: tengo release viva: $entry" >&2
+      continue
+    fi
+    if [ -n "$pinned" ] && { [ "$entry" = "$pinned" ] || [ "$resolved" = "$pinned" ]; }; then
+      continue
+    fi
+    case "$entry" in
+      "$dir"/*) rm -rf -- "$entry" && echo "prune: rimossa vecchia release: $entry" >&2 || echo "WARN: prune fallita: $entry" >&2 ;;
+      *) echo "WARN: prune rifiuta percorso sospetto: $entry" >&2 ;;
+    esac
+  done < <(ls -1dt -- "$dir"/*/ 2>/dev/null)
+  return 0
+}
+
 resolve_probe_key() {
   local key="${HERMES_HUB_API_KEY:-${HERMES_API_KEY:-}}"
   if [ -z "$key" ] && [ -s "$HERMES_ENV_FILE" ]; then
@@ -1370,6 +1408,12 @@ fi
 COMMITTED=true
 rm -f "$FAILED_RELEASE_FILE"
 clear_update_pending
+
+# Retention dopo install riuscita: pota releases/ e backups/ agli ultimi N
+# (HERMES_HUB_UPDATE_KEEP_RELEASES, default 5). Mai current/previous/deploy
+# corrente (protetti dentro prune_keep_dir). Best-effort: mai fallire l'update.
+prune_keep_dir "$INSTALL_DIR/releases" "${HERMES_HUB_UPDATE_KEEP_RELEASES:-5}" "$FINAL_RELEASE_DIR" || true
+prune_keep_dir "$INSTALL_DIR/backups" "${HERMES_HUB_UPDATE_KEEP_RELEASES:-5}" || true
 
 echo "Installed: $LATEST_VERSION"
 echo "Launcher: $HOME/hermes-hub-linux.sh"

@@ -18,6 +18,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 import uuid
@@ -93,6 +94,9 @@ DEFAULT_CONFIG = {
         # Interprete del trainer venv (torch cu128 + musubi, GPU).
         "trainer_python": "/opt/hermes/character-id/trainer/venv/bin/python",
         "workflows_dir": "/opt/hermes/media-workflows",
+        # Wall-clock massimo di un training (ore): oltre, il worker cancella
+        # il job e libera le GPU. Default generoso: non rompe i run esistenti.
+        "max_wallclock_hours": 12,
     },
 }
 
@@ -185,6 +189,12 @@ _lock = asyncio.Lock()
 # adatto (tenuto a lungo da _drive durante le transizioni con sleep/IO).
 _submit_lock = asyncio.Lock()
 _db: sqlite3.Connection | None = None
+# Lock globale per il db condiviso: la connessione e creata con
+# check_same_thread=False ed e usata da route e worker su thread diversi
+# (anche via asyncio.to_thread). Ogni uso del db condiviso avviene sotto
+# `with _db_lock:` con blocchi brevi, mai oltre await (fail-closed: niente
+# accessi concorrenti non protetti, niente deadlock da annidamento).
+_db_lock = threading.Lock()
 
 
 WORKFLOWS_DIR = "/opt/hermes/media-workflows"
@@ -216,6 +226,12 @@ ALLOWED_NODE_CLASSES = frozenset({
     "MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo",
     "H3MultiStream",
 })
+
+# Cap anti-OOM per i workflow raw/custom (stessa soglia dei preset video:
+# area 480p 854x480, lunghezza max 3600 come i job). I workflow raw che
+# eccedono sono rifiutati con errore onesto, mai riscalati in silenzio.
+_WORKFLOW_MAX_AREA = 480 * 854
+_WORKFLOW_MAX_LENGTH = 3600
 
 # Placeholders filled by trusted server-side values only; caller params
 # must never override these.
@@ -515,42 +531,48 @@ def cleanup_old_artifacts(max_age_days: int = 7) -> int:
 
 def _db_conn() -> sqlite3.Connection:
     global _db
-    if _db is None:
-        Path(str(CONFIG["db_path"])).parent.mkdir(parents=True, exist_ok=True)
-        _db = sqlite3.connect(str(CONFIG["db_path"]), check_same_thread=False)
-        _db.execute("PRAGMA journal_mode=WAL")
-        _db.execute("PRAGMA busy_timeout=5000")
-        _db.execute(
-            "CREATE TABLE IF NOT EXISTS jobs ("
-            "id TEXT PRIMARY KEY, kind TEXT, status TEXT, workflow TEXT, "
-            "progress REAL, result_paths TEXT, error TEXT, retries INTEGER, "
-            "created REAL, updated REAL)"
-        )
-        for col in ("preset TEXT DEFAULT ''", "backend TEXT DEFAULT ''",
-                    "model TEXT DEFAULT ''", "params TEXT DEFAULT '{}'",
-                    "vram_peak_mb REAL DEFAULT 0", "phase TEXT DEFAULT ''"):
-            try:
-                _db.execute(f"ALTER TABLE jobs ADD COLUMN {col}")
-            except sqlite3.OperationalError:
-                pass
-        _db.execute(
-            "CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)"
-        )
-        _db.commit()
-        row = _db.execute("SELECT value FROM kv WHERE key='desired_mode'").fetchone()
-        if row and row[0] in MODES:
-            _state["desired_mode"] = row[0]
+    # Init sotto lock: la connessione e condivisa tra route e worker.
+    # I chiamanti acquisiscono `with _db_lock:` SOLO dopo aver ottenuto la
+    # connessione (mai annidato qui dentro: Lock non rientrante).
+    with _db_lock:
+        if _db is None:
+            Path(str(CONFIG["db_path"])).parent.mkdir(parents=True, exist_ok=True)
+            _db = sqlite3.connect(str(CONFIG["db_path"]), check_same_thread=False)
+            _db.execute("PRAGMA journal_mode=WAL")
+            _db.execute("PRAGMA busy_timeout=5000")
+            _db.execute(
+                "CREATE TABLE IF NOT EXISTS jobs ("
+                "id TEXT PRIMARY KEY, kind TEXT, status TEXT, workflow TEXT, "
+                "progress REAL, result_paths TEXT, error TEXT, retries INTEGER, "
+                "created REAL, updated REAL)"
+            )
+            for col in ("preset TEXT DEFAULT ''", "backend TEXT DEFAULT ''",
+                        "model TEXT DEFAULT ''", "params TEXT DEFAULT '{}'",
+                        "vram_peak_mb REAL DEFAULT 0", "phase TEXT DEFAULT ''"):
+                try:
+                    _db.execute(f"ALTER TABLE jobs ADD COLUMN {col}")
+                except sqlite3.OperationalError:
+                    pass
+            _db.execute(
+                "CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)"
+            )
+            _db.commit()
+            row = _db.execute("SELECT value FROM kv WHERE key='desired_mode'").fetchone()
+            if row and row[0] in MODES:
+                _state["desired_mode"] = row[0]
+    assert _db is not None
     return _db
 
 
 def _persist_desired() -> None:
     db = _db_conn()
-    db.execute(
-        "INSERT INTO kv(key,value) VALUES('desired_mode',?) "
-        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (_state["desired_mode"],),
-    )
-    db.commit()
+    with _db_lock:
+        db.execute(
+            "INSERT INTO kv(key,value) VALUES('desired_mode',?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (_state["desired_mode"],),
+        )
+        db.commit()
 
 
 def set_state(new_state: str, note: str = "") -> None:
@@ -1089,21 +1111,23 @@ def create_job(kind: str, workflow: dict, preset: str = "", backend: str = "",
     jid = uuid.uuid4().hex[:12]
     now = time.time()
     db = _db_conn()
-    db.execute(
-        "INSERT INTO jobs(id,kind,status,workflow,progress,result_paths,error,retries,"
-        "created,updated,preset,backend,model,params,vram_peak_mb)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (jid, kind, "queued", json.dumps(workflow), 0.0, "[]", "", 0, now, now,
-         preset, backend, model, json.dumps(params or {}), 0),
-    )
-    db.commit()
+    with _db_lock:
+        db.execute(
+            "INSERT INTO jobs(id,kind,status,workflow,progress,result_paths,error,retries,"
+            "created,updated,preset,backend,model,params,vram_peak_mb)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (jid, kind, "queued", json.dumps(workflow), 0.0, "[]", "", 0, now, now,
+             preset, backend, model, json.dumps(params or {}), 0),
+        )
+        db.commit()
     log.info("job %s %s preset=%s queued", jid, kind, preset or "-")
     return get_job(jid)
 
 
 def get_job(jid: str) -> dict | None:
     db = _db_conn()
-    row = db.execute("SELECT * FROM jobs WHERE id=?", (jid,)).fetchone()
+    with _db_lock:
+        row = db.execute("SELECT * FROM jobs WHERE id=?", (jid,)).fetchone()
     return job_row(row) if row else None
 
 
@@ -1121,13 +1145,15 @@ def update_job(jid: str, **fields) -> None:
         return
     sets = ", ".join(f"{k}=?" for k in fields)
     db = _db_conn()
-    db.execute(f"UPDATE jobs SET {sets} WHERE id=?", (*fields.values(), jid))
-    db.commit()
+    with _db_lock:
+        db.execute(f"UPDATE jobs SET {sets} WHERE id=?", (*fields.values(), jid))
+        db.commit()
 
 
 def queued_jobs() -> list[dict]:
     db = _db_conn()
-    rows = db.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY created").fetchall()
+    with _db_lock:
+        rows = db.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY created").fetchall()
     return [job_row(r) for r in rows]
 
 
@@ -1139,6 +1165,33 @@ def validate_workflow(workflow: dict) -> str:
             return f"node {key!r} lacks class_type/inputs"
         if node.get("class_type") not in ALLOWED_NODE_CLASSES:
             return f"node {key!r} class {node.get('class_type')!r} is not allowed"
+    # Caps dei preset estese ai workflow raw: area oltre 480p e length oltre
+    # il max dei job sono rifiutate con errore onesto (mai riscalate in
+    # silenzio). Logica inline e pura: nessun helper esterno, resta testabile
+    # via AST-exec come le altre funzioni pure.
+    for key, node in workflow.items():
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        width = inputs.get("width")
+        height = inputs.get("height")
+        try:
+            area = float(width) * float(height)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            area = 0.0
+        if area != area:  # NaN
+            area = 0.0
+        if width is not None and height is not None and area > _WORKFLOW_MAX_AREA:
+            return (f"node {key!r} {width}x{height} oltre area max 854x480: "
+                    "riduci la risoluzione al preset")
+        length = inputs.get("length")
+        if length is not None:
+            try:
+                length_num = float(length)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                length_num = 0.0
+            if length_num == length_num and length_num > _WORKFLOW_MAX_LENGTH:
+                return f"node {key!r} length {length} oltre max {_WORKFLOW_MAX_LENGTH}"
     return ""
 
 
@@ -1468,7 +1521,9 @@ async def run_media_job(job: dict) -> bool:
     if (get_job(jid) or {}).get("status") not in ("queued", "running"):
         return False
     try:
-        row = _db_conn().execute("SELECT workflow FROM jobs WHERE id=?", (jid,)).fetchone()
+        db = _db_conn()
+        with _db_lock:
+            row = db.execute("SELECT workflow FROM jobs WHERE id=?", (jid,)).fetchone()
         workflow = json.loads(row[0]) if row else None
         if not isinstance(workflow, dict):
             raise ValueError("unreadable workflow")
@@ -1608,9 +1663,10 @@ async def finish_media_job(jid: str, prompt_id: str, entry: dict, vram_peak: flo
             params = dict(params)
             params["media_urls"] = urls
             db = _db_conn()
-            db.execute("UPDATE jobs SET params=? WHERE id=?",
-                       (json.dumps(params), jid))
-            db.commit()
+            with _db_lock:
+                db.execute("UPDATE jobs SET params=? WHERE id=?",
+                           (json.dumps(params), jid))
+                db.commit()
     return True
 
 
@@ -1726,6 +1782,9 @@ async def drive_auto_once() -> None:
     """One reconciliation step. Called in a loop; never raises."""
     now = time.monotonic()
     _state["last_drive_ts"] = now
+    # Wall-clock prima dell'hold: i training scaduti vanno cancellati ora,
+    # cosi l'hold sotto vede lo stato post-cancel e libera le GPU.
+    _enforce_training_wallclock()
     if _character_training_hold():
         # Il trainer possiede le GPU (lock+job attivi): il worker resta
         # parcheggiato, niente restore LLM/media che ruberebbero VRAM.
@@ -1996,18 +2055,21 @@ async def reconcile_boot() -> None:
         boot_now = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
     except OSError:
         boot_now = ""
-    prev_boot = db.execute("SELECT value FROM kv WHERE key='boot_id'").fetchone()
+    prev_boot = None
+    with _db_lock:
+        prev_boot = db.execute("SELECT value FROM kv WHERE key='boot_id'").fetchone()
     # Solo un boot_id STORICO diverso prova un reboot vero. Senza riga
     # storica (primo avvio col nuovo codice) si preserva: a installazione
     # fresca il desired viene comunque dal default AUTO di config.
     fresh_boot = bool(boot_now) and bool(prev_boot) and prev_boot[0] != boot_now
     if boot_now:
-        db.execute(
-            "INSERT INTO kv(key,value) VALUES('boot_id',?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (boot_now,),
-        )
-        db.commit()
+        with _db_lock:
+            db.execute(
+                "INSERT INTO kv(key,value) VALUES('boot_id',?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (boot_now,),
+            )
+            db.commit()
     if fresh_boot:
         # Real (re)boot: policy is AUTO + empty media queue, always.
         # A mere manager process restart keeps the desired mode instead,
@@ -2016,9 +2078,11 @@ async def reconcile_boot() -> None:
         _state["desired_mode"] = "AUTO"
         _persist_desired()
         log.info("boot: desired forced to AUTO, cancelling stale jobs + ComfyUI queue")
-        for (jid,) in db.execute(
-            "SELECT id FROM jobs WHERE status IN ('running','queued')"
-        ).fetchall():
+        with _db_lock:
+            stale_ids = db.execute(
+                "SELECT id FROM jobs WHERE status IN ('running','queued')"
+            ).fetchall()
+        for (jid,) in stale_ids:
             update_job(jid, status="cancelled",
                        error="cancelled by reboot, manager reset to AUTO")
             log.info("job %s cancelled after reboot", jid)
@@ -2031,9 +2095,11 @@ async def reconcile_boot() -> None:
         # A process restart orphans in-flight tracking (prompt ids live in
         # memory): requeue running rows as failed so users resubmit instead
         # of waiting forever. Queued rows are untouched (no duplicates).
-        for (jid,) in db.execute(
-            "SELECT id FROM jobs WHERE status='running'"
-        ).fetchall():
+        with _db_lock:
+            running_ids = db.execute(
+                "SELECT id FROM jobs WHERE status='running'"
+            ).fetchall()
+        for (jid,) in running_ids:
             update_job(jid, status="failed",
                        error="manager restarted, tracking lost, resubmit")
             log.info("job %s failed after manager restart", jid)
@@ -2171,8 +2237,9 @@ def _submit_preset_job(kind_hint: str, preset: str, params: dict) -> tuple[dict 
         update_job(job["job_id"], status="failed", error=problem)
         return None, problem, 400
     db = _db_conn()
-    db.execute("UPDATE jobs SET workflow=? WHERE id=?", (json.dumps(workflow), job["job_id"]))
-    db.commit()
+    with _db_lock:
+        db.execute("UPDATE jobs SET workflow=? WHERE id=?", (json.dumps(workflow), job["job_id"]))
+        db.commit()
     return get_job(job["job_id"]), "", 202
 
 
@@ -2634,8 +2701,9 @@ async def list_jobs(request: Request, _: None = Depends(require_key)) -> dict:
     except (TypeError, ValueError):
         limit = 100
     db = _db_conn()
-    total = db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-    rows = db.execute("SELECT * FROM jobs ORDER BY created DESC LIMIT ?", (limit,)).fetchall()
+    with _db_lock:
+        total = db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+        rows = db.execute("SELECT * FROM jobs ORDER BY created DESC LIMIT ?", (limit,)).fetchall()
     return {"jobs": [job_row(r) for r in rows], "total": total, "limit": limit}
 
 
@@ -2925,6 +2993,9 @@ if _register_character_routes is not None:
             return True, ""
 
         def _hcid_submit(workflow: dict, params: dict) -> dict:
+            # Punto di creazione job: prima libera i training scaduti
+            # (wall-clock), poi accoda. Mai superare il limite in silenzio.
+            _enforce_training_wallclock()
             return create_job("video", workflow, preset="character",
                               backend="minimax-h3", params=params)
 
@@ -3010,6 +3081,66 @@ async def _reap_dead_character_jobs() -> None:
             await systemctl("start", "hermes-tabby.service")
         except Exception as exc:  # noqa: BLE001 - un job non ferma il reaper
             log.warning("reaper character fallito su un job: %s", exc)
+
+
+def _character_wallclock_limit_s() -> float:
+    """Limite wall-clock training in secondi (default generoso 12h, puro)."""
+    try:
+        hours = float((CONFIG.get("character_id", {}) or {}).get("max_wallclock_hours", 12))
+    except (TypeError, ValueError, AttributeError):
+        hours = 12.0
+    if hours <= 0:
+        hours = 12.0
+    return hours * 3600.0
+
+
+def _training_over_wallclock(created_at: object, now_s: float, max_hours: float = 12) -> bool:
+    """True se il training supera il wall-clock (puro, testabile via AST-exec)."""
+    try:
+        age = float(now_s) - float(created_at)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    try:
+        limit = float(max_hours) * 3600.0
+    except (TypeError, ValueError):
+        limit = 12.0 * 3600.0
+    return age > limit
+
+
+def _enforce_training_wallclock() -> None:
+    """Cancella i training oltre il wall-clock e libera le GPU (mai solleva).
+
+    Chiamata dal worker e prima di creare job: un training oltre il limite
+    viene cancellato con log onesto, mai lasciato occupare le GPU in eterno.
+    """
+    if _character_store is None:
+        return
+    try:
+        jobs = _character_store.active_training_jobs()
+    except Exception:  # noqa: BLE001 - stato ignoto: non contendere le GPU
+        return
+    try:
+        limit = _character_wallclock_limit_s()
+    except Exception:  # noqa: BLE001 - config illeggibile: default generoso
+        limit = 12.0 * 3600.0
+    now = time.time()
+    for job in jobs or []:
+        try:
+            age = now - float((job or {}).get("created_at", 0) or 0)
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if age <= limit:
+            continue
+        jid = str((job or {}).get("id", ""))
+        if not jid:
+            continue
+        log.warning("character job %s superato wall-clock (%.1fh), cancel", jid, age / 3600.0)
+        try:
+            _character_store.update_job(jid, status="cancelled", progress=1.0,
+                                        detail="superato wall-clock, cancel",
+                                        error="wall-clock superato")
+        except Exception as exc:  # noqa: BLE001 - un job non ferma l'enforcement
+            log.warning("wall-clock cancel fallito su %s: %s", jid, exc)
 
 
 def _character_training_hold() -> bool:

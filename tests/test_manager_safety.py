@@ -273,5 +273,136 @@ class TestDisplayAcl(unittest.TestCase):
         self.assertIn('sys.modules.get("__main__")', src)
 
 
+def _all_defs(tree: ast.Module) -> dict[str, ast.AST]:
+    """Tutte le def (anche annidate come _hcid_submit), per nome."""
+    found: dict[str, ast.AST] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            found.setdefault(node.name, node)
+    return found
+
+
+class TestDbLock(unittest.TestCase):
+    """FIX1: ogni uso del db condiviso sotto `with _db_lock:` (fail-closed)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
+        cls.tree = ast.parse(cls.src)
+        cls.funcs = _all_defs(cls.tree)
+
+    def test_lock_globale_threading(self):
+        self.assertIn("import threading", self.src)
+        self.assertIn("_db_lock = threading.Lock()", self.src)
+
+    def test_init_conn_sotto_lock(self):
+        seg = ast.get_source_segment(self.src, self.funcs["_db_conn"])
+        assert seg is not None
+        self.assertIn("with _db_lock:", seg)
+
+    def test_ogni_execute_sotto_lock(self):
+        senza = []
+        for name, node in self.funcs.items():
+            seg = ast.get_source_segment(self.src, node)
+            if seg and ".execute(" in seg and "_db_lock" not in seg:
+                senza.append(name)
+        self.assertEqual([], senza)
+
+    def test_helper_crud_sotto_lock(self):
+        for name in ("_persist_desired", "create_job", "get_job", "update_job", "queued_jobs"):
+            with self.subTest(helper=name):
+                seg = ast.get_source_segment(self.src, self.funcs[name])
+                assert seg is not None
+                self.assertIn("with _db_lock:", seg)
+
+
+class TestTrainingWallclock(unittest.TestCase):
+    """FIX2: default 12h generoso + enforcement con cancel onesto."""
+
+    def test_default_dodici_ore(self):
+        ns, _, _ = _load({"DEFAULT_CONFIG"})
+        self.assertEqual(12, ns["DEFAULT_CONFIG"]["character_id"]["max_wallclock_hours"])
+
+    def test_limite_default_e_override(self):
+        ns, _, _ = _load({"_character_wallclock_limit_s"}, {"CONFIG": {}})
+        self.assertEqual(12 * 3600.0, ns["_character_wallclock_limit_s"]())
+        ns2, _, _ = _load(
+            {"_character_wallclock_limit_s"},
+            {"CONFIG": {"character_id": {"max_wallclock_hours": 2}}},
+        )
+        self.assertEqual(2 * 3600.0, ns2["_character_wallclock_limit_s"]())
+        ns3, _, _ = _load(
+            {"_character_wallclock_limit_s"},
+            {"CONFIG": {"character_id": {"max_wallclock_hours": "rotto"}}},
+        )
+        self.assertEqual(12 * 3600.0, ns3["_character_wallclock_limit_s"]())
+
+    def test_predicato_puro(self):
+        ns, _, _ = _load({"_training_over_wallclock"})
+        over = staticmethod(ns["_training_over_wallclock"])
+        self.assertTrue(over(1000.0, 1000.0 + 13 * 3600, 12))
+        self.assertFalse(over(1000.0, 1000.0 + 3600, 12))
+        self.assertFalse(over("rotto", 1000.0, 12))
+        self.assertFalse(over(None, 1000.0, 12))
+
+    def test_enforce_cancella_con_log_onesto(self):
+        src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
+        funcs = _all_defs(ast.parse(src))
+        seg = ast.get_source_segment(src, funcs["_enforce_training_wallclock"])
+        assert seg is not None
+        self.assertIn("superato wall-clock", seg)
+        self.assertIn("cancel", seg)
+        self.assertIn('status="cancelled"', seg)
+
+    def test_worker_e_submit_chiamano_enforce(self):
+        src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
+        funcs = _all_defs(ast.parse(src))
+        for name in ("drive_auto_once", "_hcid_submit"):
+            with self.subTest(punto=name):
+                seg = ast.get_source_segment(src, funcs[name])
+                assert seg is not None
+                self.assertIn("_enforce_training_wallclock", seg)
+
+
+class TestWorkflowCapsRaw(unittest.TestCase):
+    """FIX3: i workflow raw rispettano area 480p e length max (rifiuto onesto)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.ns, _, _ = _load(
+            {"validate_workflow", "_WORKFLOW_MAX_AREA", "_WORKFLOW_MAX_LENGTH",
+             "ALLOWED_NODE_CLASSES"},
+        )
+        cls.valid = staticmethod(cls.ns["validate_workflow"])
+
+    def test_costanti_come_preset(self):
+        self.assertEqual(480 * 854, self.ns["_WORKFLOW_MAX_AREA"])
+        self.assertEqual(3600, self.ns["_WORKFLOW_MAX_LENGTH"])
+
+    def test_area_480p_pass(self):
+        wf = {"1": {"class_type": "EmptyLatentImage",
+                    "inputs": {"width": 854, "height": 480, "batch_size": 1}}}
+        self.assertEqual("", self.valid(wf))
+
+    def test_area_oltre_rifiutata_onesta(self):
+        wf = {"1": {"class_type": "EmptyLatentImage",
+                    "inputs": {"width": 2048, "height": 2048, "batch_size": 1}}}
+        err = self.valid(wf)
+        self.assertNotEqual("", err)
+        self.assertIn("854x480", err)
+
+    def test_length_oltre_max_rifiutata(self):
+        wf = {"1": {"class_type": "MiniMaxH3ImageToVideo",
+                    "inputs": {"width": 854, "height": 480, "length": 5000}}}
+        err = self.valid(wf)
+        self.assertNotEqual("", err)
+        self.assertIn("3600", err)
+
+    def test_valori_non_numerici_mai_crash(self):
+        wf = {"1": {"class_type": "EmptyLatentImage",
+                    "inputs": {"width": "{{WIDTH}}", "height": 480}}}
+        self.assertEqual("", self.valid(wf))
+
+
 if __name__ == "__main__":
     unittest.main()

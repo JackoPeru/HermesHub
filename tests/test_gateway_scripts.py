@@ -1481,6 +1481,57 @@ class GatewayScriptTests(unittest.TestCase):
             self.assertIn(f"Installed: {version}", result.stdout)
             self.assertIn("Restarted and verified: hermes-hub.service", result.stdout)
 
+    def test_updater_prunes_old_releases_and_backups_to_five(self):
+        # Retention dopo install riuscita: releases/ e backups/ potate agli
+        # ultimi 5, ma current/previous/deploy corrente mai cancellati.
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self._prepare_updater_fixture(Path(temporary), bash, probe_ok=True)
+            install_dir = Path(fixture["install_dir"])
+            old_release = self._seed_previous_updater_release(bash, fixture)
+            now = time.time()
+            # La seed e la piu vecchia ma resta il target di previous: deve
+            # sopravvivere per protezione live, non per conteggio.
+            ancient = now - 90 * 86400
+            os.utime(old_release, (ancient, ancient))
+            for index in range(6):
+                stale = install_dir / "releases" / f"0.0.{index}-stale"
+                stale.mkdir(parents=True)
+                (stale / "VERSION").write_text(f"0.0.{index}\n", encoding="utf-8")
+                old = now - (30 - index) * 86400
+                os.utime(stale, (old, old))
+            backups = install_dir / "backups"
+            backups.mkdir(parents=True, exist_ok=True)
+            for index in range(7):
+                entry = backups / f"bak-{index}"
+                entry.mkdir()
+                (entry / "sentinel").write_text("x", encoding="utf-8")
+                old = now - (30 - index) * 86400
+                os.utime(entry, (old, old))
+            result = self._run_updater(bash, fixture)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            version = str(fixture["version"])
+            current_target = self._readlink(bash, install_dir / "current", fixture["environment"])
+            self.assertIn(f"/releases/{version}-", current_target.replace("\\", "/"))
+            previous_target = self._readlink(bash, install_dir / "previous", fixture["environment"])
+            self.assertEqual(old_release.resolve(), Path(previous_target))
+            # 8 release (seed + 6 stali + nuova): le 5 piu recenti + la seed
+            # protetta da previous restano, le 2 stali piu vecchie vanno.
+            release_dirs = sorted(d for d in (install_dir / "releases").iterdir() if d.is_dir())
+            self.assertEqual(6, len(release_dirs))
+            self.assertTrue(old_release.is_dir())
+            self.assertFalse((install_dir / "releases" / "0.0.0-stale").exists())
+            self.assertFalse((install_dir / "releases" / "0.0.1-stale").exists())
+            self.assertTrue((install_dir / "releases" / "0.0.5-stale").is_dir())
+            # 7 backup: restano gli ultimi 5.
+            backup_dirs = sorted(d for d in backups.iterdir() if d.is_dir())
+            self.assertEqual(
+                [f"bak-{index}" for index in (2, 3, 4, 5, 6)],
+                [d.name for d in backup_dirs],
+            )
+
     def test_updater_rejects_invalid_capabilities_and_rolls_back_release(self):
         bash = find_bash()
         if not bash:
