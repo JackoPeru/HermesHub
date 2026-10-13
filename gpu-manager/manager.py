@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import subprocess
@@ -2526,9 +2527,8 @@ def _reboot_consume_ticket(ticket: str, now: float | None = None) -> bool:
     except (TypeError, ValueError):
         return False
 
-
-@app.post("/system/reboot")
-async def system_reboot(request: Request, _: None = Depends(require_key)) -> dict | JSONResponse:
+@app.post("/system/reboot", response_model=None)
+async def system_reboot(request: Request, _: None = Depends(require_key)) -> dict:
     """Reboot con ticket single-use: senza ticket valido risponde 409 con
     ticket fresco (120s); con ticket valido esegue. Fire-and-forget."""
     _require_user_control(request)
