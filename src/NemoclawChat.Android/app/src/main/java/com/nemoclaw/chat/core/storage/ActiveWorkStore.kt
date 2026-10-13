@@ -23,7 +23,11 @@ data class ActiveWorkBinding(
     val goal: String = "",
     val startedAtMs: Long = 0L,
     val responseId: String? = null,
-    val partialMessageId: String? = null
+    val partialMessageId: String? = null,
+    // Profilo/multiplex per il routing /p/<profilo>/v1/...: default retrocompatibili,
+    // i binding legacy senza questi campi restano validi (profilo ignoto = null).
+    val profile: String? = null,
+    val multiplex: Boolean = false
 )
 
 internal const val ACTIVE_WORK_PREFS = "chatclaw_active_work"
@@ -126,24 +130,60 @@ internal fun encodeActiveWorkBinding(binding: ActiveWorkBinding): JSONObject = J
     .put("startedAtMs", binding.startedAtMs)
     .put("responseId", binding.responseId ?: JSONObject.NULL)
     .put("partialMessageId", binding.partialMessageId ?: JSONObject.NULL)
+    .put("profile", binding.profile ?: JSONObject.NULL)
+    .put("multiplex", binding.multiplex)
 
 internal fun decodeActiveWorkBinding(obj: JSONObject?): ActiveWorkBinding? {
     if (obj == null) return null
     val conversationId = obj.optString("conversationId").trim()
     val runId = obj.optString("runId").trim()
-    val responseId = obj.optString("responseId").trim()
+    val responseId = obj.optNullSafeString("responseId")
     if (conversationId.isEmpty() || (runId.isEmpty() && responseId.isEmpty())) return null
     return ActiveWorkBinding(
         conversationId = conversationId,
         runId = runId,
-        sessionId = obj.optString("sessionId").takeIf { it.isNotBlank() },
-        serverSessionId = obj.optString("serverSessionId").takeIf { it.isNotBlank() },
+        sessionId = obj.optNullSafeString("sessionId").takeIf { it.isNotBlank() },
+        serverSessionId = obj.optNullSafeString("serverSessionId").takeIf { it.isNotBlank() },
         goal = obj.optString("goal"),
         startedAtMs = obj.optLong("startedAtMs"),
         responseId = responseId.takeIf { it.isNotBlank() },
-        partialMessageId = obj.optString("partialMessageId").takeIf { it.isNotBlank() }
+        partialMessageId = obj.optNullSafeString("partialMessageId").takeIf { it.isNotBlank() },
+        // Legacy senza profilo: null = profilo ignoto (mai cancellare su 404).
+        profile = obj.optNullSafeString("profile").takeIf { it.isNotBlank() },
+        multiplex = obj.optBoolean("multiplex", false)
     )
 }
+
+/**
+ * Legge stringhe che possono essere null JSON: optString su JSONObject.NULL
+ * rende il letterale "null" (mai un valore valido: torna "").
+ */
+private fun JSONObject.optNullSafeString(key: String): String =
+    optString(key).trim().takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) } ?: ""
+
+/**
+ * Profilo effettivo per il client run: vince il binding persistito (routing
+ * /p/<profilo>/...), fallback al profilo corrente. Pura, testabile.
+ */
+internal fun resolveWorkProfile(bindingProfile: String?, currentProfile: String?): String? {
+    if (!bindingProfile.isNullOrBlank()) return bindingProfile
+    if (!currentProfile.isNullOrBlank()) return currentProfile
+    return null
+}
+
+/**
+ * Multiplex effettivo: se il binding porta un profilo, vale il suo flag
+ * (persistito insieme), altrimenti quello corrente. Pura, testabile.
+ */
+internal fun resolveWorkMultiplex(bindingProfile: String?, bindingMultiplex: Boolean, currentMultiplex: Boolean): Boolean =
+    if (!bindingProfile.isNullOrBlank()) bindingMultiplex else currentMultiplex
+
+/**
+ * Su 404 cancella il binding solo a profilo noto (URL affidabile): a profilo
+ * ignoto il 404 puo' venire dal routing sbagliato, quindi tieni e riprova.
+ * Pura, testabile.
+ */
+internal fun shouldClearBindingOn404(profile: String?): Boolean = !profile.isNullOrBlank()
 
 internal fun saveActiveWorkBinding(context: Context, binding: ActiveWorkBinding) {
     synchronized(activeWorkLock) {

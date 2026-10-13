@@ -259,6 +259,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -370,6 +371,19 @@ internal fun silentTurnEndMessage(transportDetached: Boolean): String =
     } else {
         "Turno finito senza risposta né errore. Tocca Riprova."
     }
+
+/**
+ * Fail-closed bot remoto: connessione secondaria senza secret salvato = invio vietato.
+ * Pura/testabile: true solo se remota E chiave assente/blank (mai NPE su apiKey null).
+ */
+internal fun isRemoteBotMissingSecret(botConnectionId: String?, apiKey: String?): Boolean {
+    val remote = !botConnectionId.isNullOrBlank() && !botConnectionId.equals("primary", true)
+    return remote && apiKey.isNullOrBlank()
+}
+
+/** Messaggio onesto per invio bloccato fail-closed (chiave connessione remota assente). */
+internal fun remoteBotMissingSecretMessage(): String =
+    "Connessione remota senza chiave salvata: invio bloccato. Riconfigura la chiave della connessione e riprova."
 
 @Composable
 internal fun ChatScreen(
@@ -739,9 +753,12 @@ internal fun ChatScreen(
     // tiene banner+stop accesi fino a scadenza finestra (240s).
     var localTurnEndMs by remember(botProfile, botSessionId) { mutableLongStateOf(0L) }
     var botLive by remember(botProfile, botSessionId, botLoadNonce) { mutableStateOf<BotLiveActivity?>(null) }
-    // Poll fitto mentre il turno e attivo (2s), rilassato in idle (5s):
-    // su relay il giro e lungo, dimezzare la staleness si sente.
-    PollWhileStarted(botProfile, botSessionId, botMultiplexEnabled, botEndpoint, botApiKey, botSettings.gatewayUrl, baseIntervalMs = if (botLive?.running == true) 2_000L else 5_000L) {
+    // Poll a intervallo costante (5s): l'intervallo dinamico 2s/5s era chiave
+    // del LaunchedEffect in PollWhileStarted e restartava il poll a ogni
+    // transizione running<->idle (reset failure + immediate=true = raffica).
+    // La cadenza veloce vive dentro il blocco: a turno attivo il giro e
+    // corto di suo, senza restart continuo. Backoff nextPollDelay invariato.
+    PollWhileStarted(botProfile, botSessionId, botMultiplexEnabled, botEndpoint, botApiKey, botSettings.gatewayUrl, baseIntervalMs = 5_000L) {
         val profile = botProfile
         val session = botSessionId
         if (profile.isNullOrBlank() || session.isNullOrBlank() || !gatewayAvailable) {
@@ -947,6 +964,9 @@ internal fun ChatScreen(
     // continue_on_disconnect. Poll leggero (il recheck gira gia ogni 15s):
     // a completamento sostituisce il messaggio parziale con la risposta vera
     // (stesso id, niente duplicati), altrimenti riprova al prossimo tick.
+    // Single-flight resume: LaunchedEffect + PollWhileStarted chiamano
+    // recheckActiveWork in concorrenza, il secondo giro fa skip (niente doppie GET).
+    val recheckMutex = remember { Mutex() }
     suspend fun resumeResponseBinding(binding: ActiveWorkBinding) {
         val cid = state.activeConversationId ?: return
         val respId = binding.responseId?.takeIf { it.isNotBlank() } ?: return
@@ -956,15 +976,22 @@ internal fun ChatScreen(
             withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
             return
         }
-        val url = responseStatusUrl(botSettings, botProfile, botMultiplexEnabled, respId)
+        val url = responseStatusUrl(
+            botSettings,
+            resolveWorkProfile(binding.profile, botProfile),
+            resolveWorkMultiplex(binding.profile, binding.multiplex, botMultiplexEnabled),
+            respId
+        )
         val (code, body) = withContext(Dispatchers.IO) {
             runCatching { httpGetResponse(url, botApiKey) }.getOrElse { 0 to "" }
         }
-        // 401/403/404 permanenti: chiave, profilo o response sconosciuta/scaduta.
-        if (code == 401 || code == 403 || code == 404) {
+        // 401/403 permanenti: chiave o profilo errati. 404 solo a profilo noto:
+        // a profilo ignoto l'URL puo' essere sbagliato, tieni e riprova.
+        if (code == 401 || code == 403 || (code == 404 && shouldClearBindingOn404(resolveWorkProfile(binding.profile, botProfile)))) {
             withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
             return
         }
+        if (code == 404) return
         if (code !in 200..299) return
         val storedStatus = runCatching { JSONObject(body).optString("status") }.getOrNull() ?: return
         if (storedStatus != "completed" && storedStatus != "failed") return
@@ -1014,6 +1041,9 @@ internal fun ChatScreen(
     }
 
     suspend fun recheckActiveWork() {
+        // Single-flight: se un altro giro e' dentro, skip senza accodare.
+        if (!recheckMutex.tryLock()) return
+        try {
         val cid = state.activeConversationId ?: return
         val binding = withContext(Dispatchers.IO) { loadActiveWorkBinding(context, cid) }
             ?: return
@@ -1027,9 +1057,15 @@ internal fun ChatScreen(
             return
         }
         if (state.streamingState?.activeRunId == binding.runId && state.sending) return
-        val client = HermesRunClient(botSettings, botApiKey, botProfile, botMultiplexEnabled)
+        // Routing dal binding persistito (fallback al corrente per i legacy):
+        // senza, il rehydrate interroga l'URL sbagliato e il 404 cancella tutto.
+        val effProfile = resolveWorkProfile(binding.profile, botProfile)
+        val effMultiplex = resolveWorkMultiplex(binding.profile, binding.multiplex, botMultiplexEnabled)
+        val client = HermesRunClient(botSettings, botApiKey, effProfile, effMultiplex)
         val (code, info) = runCatching { client.status(binding.runId) }.getOrElse { 0 to null }
         if (code == 404) {
+            // Profilo ignoto = URL forse sbagliato: tieni e riprova al prossimo tick.
+            if (!shouldClearBindingOn404(effProfile)) return
             withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
             return
         }
@@ -1108,6 +1144,9 @@ internal fun ChatScreen(
                     )
                 }
             }
+        }
+        } finally {
+            recheckMutex.unlock()
         }
     }
     LaunchedEffect(state.activeConversationId) {
@@ -1608,6 +1647,18 @@ internal fun ChatScreen(
             onQuickPromptConsumed = { quickPrompt = null },
             onSend = {
                 var text = state.draft.trim()
+                // Fail-closed bot remoto: senza secret salvato non inviare mai (niente NPE su null).
+                if (isRemoteBotMissingSecret(botConnectionId, botApiKey)) {
+                    state.messages.add(
+                        ChatMessage(
+                            "Hermes Hub",
+                            remoteBotMissingSecretMessage(),
+                            fromUser = false,
+                            isAction = true
+                        )
+                    )
+                    return@Composer
+                }
         if (archivedBotWithoutContext) {
                     state.messages.add(
                         ChatMessage(
@@ -1813,9 +1864,14 @@ internal fun ChatScreen(
                                         runId = event.id,
                                         sessionId = sessionIdForTurn ?: state.hermesSessionId,
                                         goal = displayText.take(WorkLimits.TRUNC_140),
-                                        startedAtMs = System.currentTimeMillis()
+                                        startedAtMs = System.currentTimeMillis(),
+                                        // Profilo/multiplex persistiti: il rehydrate riusa
+                                        // lo stesso routing /p/<profilo>/... (niente 404 spuri).
+                                        profile = botProfile?.takeIf { it.isNotBlank() },
+                                        multiplex = botMultiplexEnabled
                                     )
-                                    withContext(Dispatchers.IO) { saveActiveWorkBinding(context, binding) }
+                                    // NonCancellable: cancel tra emit e save = run orfana.
+                                    withContext(NonCancellable + Dispatchers.IO) { saveActiveWorkBinding(context, binding) }
                                     maybeStartBackgroundWork(context, settings, binding, botProfile, botMultiplexEnabled) {
                                         notificationsPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                                     }
@@ -2065,7 +2121,10 @@ internal fun ChatScreen(
                                         runId = boundRunIdForTurn!!,
                                         sessionId = sessionIdForTurn ?: state.hermesSessionId,
                                         goal = displayText.take(WorkLimits.TRUNC_140),
-                                        startedAtMs = System.currentTimeMillis()
+                                        startedAtMs = System.currentTimeMillis(),
+                                        // Stesso routing del turno: rehydrate senza 404 spuri.
+                                        profile = botProfile?.takeIf { it.isNotBlank() },
+                                        multiplex = botMultiplexEnabled
                                     )
                                     withContext(NonCancellable + Dispatchers.IO) { saveActiveWorkBinding(context, keepBinding) }
                                     maybeStartBackgroundWork(context, settings, keepBinding, botProfile, botMultiplexEnabled, requestNotificationsPermission = null)
@@ -2150,7 +2209,10 @@ internal fun ChatScreen(
                                                 goal = displayText.take(WorkLimits.TRUNC_140),
                                                 startedAtMs = System.currentTimeMillis(),
                                                 responseId = respIdForResume,
-                                                partialMessageId = resumeMessageId
+                                                partialMessageId = resumeMessageId,
+                                                // Stesso routing per il resume Responses.
+                                                profile = botProfile?.takeIf { it.isNotBlank() },
+                                                multiplex = botMultiplexEnabled
                                             )
                                         )
                                     }

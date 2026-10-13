@@ -37,7 +37,15 @@ internal class HermesWorkService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pollers = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
-    private data class Tracked(val conversationId: String, val goal: String, val profile: String?, val multiplex: Boolean)
+    private data class Tracked(
+        val conversationId: String,
+        val goal: String,
+        val profile: String?,
+        val multiplex: Boolean,
+        // Sessione del binding: tenuta per non perderla nel restore (il poll
+        // run usa runId, ma il re-attach non deve mai droppare indirizzi).
+        val sessionId: String? = null
+    )
     private val tracked = ConcurrentHashMap<String, Tracked>()
     private val notifiedApprovals = ConcurrentHashMap<String, String>()
 
@@ -59,11 +67,15 @@ internal class HermesWorkService : Service() {
                 if (restoredRunId.isBlank() || restoredCid.isBlank()) continue
                 val already = tracked[restoredRunId]
                 if (already == null) {
+                    // Rehydrate con profilo/multiplex/sessione persistiti: senza,
+                    // clientFor sbaglia URL (/p/<profilo> mancante) e il 404
+                    // cancellerebbe un binding valido. Legacy senza profilo = null.
                     tracked[restoredRunId] = Tracked(
                         restoredCid,
                         binding.goal,
-                        null,
-                        false
+                        binding.profile?.takeIf { it.isNotBlank() },
+                        binding.multiplex,
+                        binding.sessionId?.takeIf { it.isNotBlank() }
                     )
                 }
             }
@@ -147,7 +159,22 @@ internal class HermesWorkService : Service() {
                     val infoSnapshot = info
                     when {
                         code == 404 -> {
-                            val cidSnapshot = tracked[runId]?.conversationId
+                            // Profilo ignoto = URL forse sbagliato: mai cancellare,
+                            // logga e riprova (il binding valido sopravvive).
+                            val metaOn404 = tracked[runId]
+                            if (!shouldClearBindingOn404(metaOn404?.profile)) {
+                                consecutiveErrors++
+                                Log.w(TAG, "poll runId=$runId code=404 profilo ignoto, tengo binding e riprovo backoff=${backoffMs}ms")
+                                maybeScheduleDozeFallback(runId)
+                                delay(backoffMs)
+                                backoffMs = (backoffMs * 2).coerceAtMost(POLL_MAX_MS)
+                                if (consecutiveErrors > 40) {
+                                    Log.w(TAG, "poll runId=$runId code=404 troppi errori, esco senza cancellare")
+                                    break
+                                }
+                                continue
+                            }
+                            val cidSnapshot = metaOn404?.conversationId
                             notifyFinished(runId, cidSnapshot, "Run non trovato", "Il gateway non la conosce più.")
                             untrack(runId, clearBinding = true)
                             break
