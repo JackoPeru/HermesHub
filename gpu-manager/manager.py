@@ -740,6 +740,21 @@ def set_state(new_state: str, note: str = "") -> None:
           severity=("error" if new_state == "ERROR" else "info"),
           data={"from": old, "to": new_state, "note": note})
     if new_state == "ERROR":
+        # Fallback sempre-operativo (richiesta utente 0.6.278): qualunque
+        # errore riporta la modalita' desiderata su AUTO, cosi' il recovery
+        # comincia da LLM_READY (agente/chat sempre operativa) invece di
+        # insistere su media/direct rotte: mai piantato per colpa del desired.
+        if str(_state.get("desired_mode", "")).upper() != "AUTO":
+            old_desired = _state.get("desired_mode")
+            _state["desired_mode"] = "AUTO"
+            _state["media_cooldown_until"] = 0.0
+            try:
+                _persist_desired()
+            except Exception:  # noqa: BLE001 - persist opzionale, non blocca
+                pass
+            log.warning("ERROR fallback: desired %s -> AUTO (note=%s)", old_desired, note)
+            _emit("error", "fallback: desired reset to AUTO",
+                  severity="error", data={"old_desired": str(old_desired), "note": note})
         _emit("error", f"{old}->ERROR", severity="error",
               data={"from": old, "note": note})
 
@@ -2462,11 +2477,20 @@ async def drive_auto_once() -> None:
     # Supervisore di recupero (Fase 1): complementa _drive, mai lo sostituisce.
     # Prima di _drive cosi una sua azione viene riconciliata nello stesso tick;
     # dopo i gate training/hold sopra, cosi non tocca le GPU del trainer.
-    await _supervisor_step()
+    try:
+        await _supervisor_step()
+    except Exception as exc:  # noqa: BLE001 - il supervisor non uccide il worker
+        log.warning("supervisor step failed: %r", exc, exc_info=True)
     try:
         await _drive()
     except Exception as exc:  # noqa: BLE001 - worker must survive everything
-        log.warning("worker step failed: %r", exc)
+        # Qualunque errore non gestito entra ERROR (fallback AUTO + LLM ready
+        # dal recovery): il worker non muore mai e resta riconciliabile.
+        log.warning("worker step failed: %r", exc, exc_info=True)
+        try:
+            set_state("ERROR", f"worker step failed: {exc!r}"[:160])
+        except Exception:  # noqa: BLE001 - mai bloccare il loop del worker
+            pass
         await asyncio.sleep(5)
 
 
@@ -2592,27 +2616,22 @@ async def _drive() -> None:
             await reconcile_boot()
             return
         if state == "ERROR":
-            # Recover from any mode, throttled: a stuck ERROR used to need a
-            # human restart. Prefer the desired path, fall back to LLM so the
-            # chat survives a broken media stack.
+            # Recovery da qualunque modalita': il fallback entra AUTO e cerca
+            # SEMPRE prima LLM_READY (fallback always-operational): la chat
+            # ritorna operativa prima di ogni retry media/direct, che poi
+            # l'AUTO flow rianima da solo con le code.
             now = time.monotonic()
             if now - float(_state.get("error_retry_ts") or 0.0) < 120:
                 return
             _state["error_retry_ts"] = now
-            _emit("error", "error recovery tick", severity="error",
-                  data={"desired": desired, "last_error": _state.get("last_error", "")[:160]})
-            if desired == "LLM" or (desired == "AUTO" and not queued_jobs()):
-                await restore_llm_with_retries("error-recovery")
-            elif desired == "DIRECT":
-                log.warning("error-recovery: retrying direct Comfy for desired=DIRECT")
-                if not await transition_to_direct():
-                    log.warning("error-recovery: direct failed, falling back to LLM")
-                    await restore_llm_with_retries("error-direct-failed")
-            else:
-                log.warning("error-recovery: attempting media path for desired=%s", desired)
-                if not await transition_to_media():
-                    log.warning("error-recovery: media failed, falling back to LLM")
-                    await restore_llm_with_retries("error-media-failed")
+            if desired != "AUTO":
+                _state["desired_mode"] = "AUTO"
+                _persist_desired()
+                desired = "AUTO"
+            _emit("error", "error recovery tick: restoring LLM first",
+                  severity="error",
+                  data={"last_error": _state.get("last_error", "")[:160]})
+            await restore_llm_with_retries("error-recovery")
             return
         if desired == "DIRECT":
             if state != "DIRECT":
