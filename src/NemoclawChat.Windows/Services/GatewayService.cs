@@ -226,6 +226,10 @@ public static class GatewayService
     // limite base. Cap dedicato piu' generoso solo per gli endpoint archivio.
     private const int MaxHubArchiveResponseBytes = 32 * 1024 * 1024;
     private const int MaxErrorResponseBytes = 64 * 1024;
+
+    // Watchdog SSE: se il server non spedisce righe per oltre 90 secondi la
+    // connessione mezz'aperta viene abortita e ristabilita dal sync service.
+    private const int SseIdleWatchdogMs = 90 * 1000;
     private static readonly TimeSpan RuntimeInfoPollTimeout = TimeSpan.FromSeconds(5);
     private static readonly string[] PlugAndPlayGatewayHosts = [];
     private static readonly JsonSerializerOptions CaseInsensitiveJsonOptions = new()
@@ -1789,30 +1793,72 @@ public static class GatewayService
             : new HubOperationResult(false, $"Archivio server non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}");
     }
 
-    public static async Task<HubConversationsResult> LoadHubConversationsAsync(
+        public static async Task<HubConversationsResult> LoadHubConversationsAsync(
         AppSettings settings,
         CancellationToken cancellationToken = default)
     {
         try
         {
             await EnsureReachableGatewayAsync(settings, cancellationToken);
-            var response = await SendBufferedAsync(
-                token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, "/v1/hub/conversations"), token),
-                cancellationToken: cancellationToken,
-                maxBytes: MaxHubArchiveResponseBytes);
-            if (!response.IsSuccessStatusCode)
+            var items = new List<ConversationRecord>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            string? cursor = null;
+            for (var page = 0; page < 64; page++)
             {
-                return new HubConversationsResult([], $"Archivio server non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}");
+                var requestPath = "/v1/hub/conversations";
+                if (!string.IsNullOrEmpty(cursor))
+                {
+                    requestPath = $"{requestPath}?cursor={Uri.EscapeDataString(cursor)}";
+                }
+                var response = await SendBufferedAsync(
+                    token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, requestPath), token),
+                    cancellationToken: cancellationToken,
+                    maxBytes: MaxHubArchiveResponseBytes);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return new HubConversationsResult([], $"Archivio server non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}");
+                }
+
+                using var doc = JsonDocument.Parse(response.Body);
+                var (truncated, nextCursor) = ReadArchivePaging(doc);
+                AppendHubConversationItems(doc, items, seen);
+                if (!truncated || string.IsNullOrEmpty(nextCursor))
+                {
+                    break;
+                }
+                cursor = nextCursor;
             }
 
-            using var doc = JsonDocument.Parse(response.Body);
-            var items = new List<ConversationRecord>();
+            return new HubConversationsResult(items.OrderByDescending(item => item.UpdatedAt).ToArray(), $"Archivio server: {items.Count} chat.", true);
+        }
+        catch (Exception ex)
+        {
+            return new HubConversationsResult([], $"Archivio server non disponibile: {ex.Message}");
+        }
+    }
+
+    private static (bool Truncated, string? NextCursor) ReadArchivePaging(JsonDocument doc)
+    {
+        var truncated = doc.RootElement.TryGetProperty("truncated", out var truncatedElement) &&
+                        truncatedElement.ValueKind == JsonValueKind.True;
+        string? nextCursor = null;
+        if (doc.RootElement.TryGetProperty("next_cursor", out var cursorElement) &&
+            cursorElement.ValueKind == JsonValueKind.String)
+        {
+            nextCursor = cursorElement.GetString();
+        }
+        return (truncated, nextCursor);
+    }
+
+    private static void AppendHubConversationItems(JsonDocument doc, List<ConversationRecord> items, HashSet<string> seen)
+    {
             if (doc.RootElement.TryGetProperty("items", out var array) && array.ValueKind == JsonValueKind.Array)
             {
                 foreach (var item in array.EnumerateArray())
                 {
                     var id = ExtractString(item, "id", "conversationId", "conversation_id");
                     if (string.IsNullOrWhiteSpace(id)) continue;
+                    if (!seen.Add(id)) continue;
                     var updated = ExtractDouble(item, "updatedAt");
                     var deleted = ExtractDouble(item, "deletedAt");
                     if (deleted <= 0)
@@ -1882,12 +1928,6 @@ public static class GatewayService
                 }
             }
 
-            return new HubConversationsResult(items.OrderByDescending(item => item.UpdatedAt).ToArray(), $"Archivio server: {items.Count} chat.", true);
-        }
-        catch (Exception ex)
-        {
-            return new HubConversationsResult([], $"Archivio server non disponibile: {ex.Message}");
-        }
     }
 
     private static List<string> ExtractStringArray(JsonElement root, params string[] keys)
@@ -2045,9 +2085,38 @@ public static class GatewayService
 
                 await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
                 using var reader = new StreamReader(stream, Encoding.UTF8);
+                using var idleSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    var line = await reader.ReadLineAsync(cancellationToken);
+                    // Watchdog: a half-open connection must not stall the sync channel
+                    // forever; an idle timeout aborts the read so the outer loop
+                    // retries candidates and the sync service reconnects shortly.
+                    var lineTask = reader.ReadLineAsync(idleSource.Token).AsTask();
+                    var idleDelay = Task.Delay(SseIdleWatchdogMs, cancellationToken);
+                    var first = await Task.WhenAny(lineTask, idleDelay).ConfigureAwait(false);
+                    string? line = null;
+                    if (ReferenceEquals(first, lineTask))
+                    {
+                        line = await lineTask.ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        var outerCancelled = cancellationToken.IsCancellationRequested;
+                        idleSource.Cancel();
+                        try
+                        {
+                            await lineTask.ConfigureAwait(false);
+                        }
+                        catch (Exception)
+                        {
+                            // Expected: the watchdog aborted the pending read.
+                        }
+                        if (outerCancelled)
+                        {
+                            throw new OperationCanceledException(cancellationToken);
+                        }
+                        throw new TimeoutException("Event stream inattivo: watchdog riconnessione.");
+                    }
                     if (line is null)
                     {
                         break;
@@ -2059,7 +2128,7 @@ public static class GatewayService
                 }
                 return;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
@@ -2632,9 +2701,16 @@ public static class GatewayService
             return false;
         }
 
-        return body.Contains("invalid api key", StringComparison.OrdinalIgnoreCase) ||
-               body.Contains("invalid_api_key", StringComparison.OrdinalIgnoreCase) ||
-               body.Contains("invalidapikey", StringComparison.OrdinalIgnoreCase);
+        var invalid = body.Contains("invalid api key", StringComparison.OrdinalIgnoreCase) ||
+                      body.Contains("invalid_api_key", StringComparison.OrdinalIgnoreCase) ||
+                      body.Contains("invalidapikey", StringComparison.OrdinalIgnoreCase);
+        if (invalid)
+        {
+            // Chiave esplicitamente rifiutata: scarta la cache vault così la
+            // prossima richiesta rilegge il valore vero (o il vuoto).
+            GatewayCredentialStore.InvalidateCachedSecret();
+        }
+        return invalid;
     }
 
     internal static bool IsRecoverablePreviousResponseError(string? message)
@@ -2691,58 +2767,11 @@ public static class GatewayService
         return last ?? new BufferedHermesResponse(0, "No Response", string.Empty, null);
     }
 
-    private static async Task<string> ReadBoundedStringAsync(
+    private static Task<string> ReadBoundedStringAsync(
         HttpContent content,
         int maxBytes,
-        CancellationToken cancellationToken)
-    {
-        if (content.Headers.ContentLength is long contentLength && contentLength > maxBytes)
-        {
-            throw new InvalidOperationException($"Risposta gateway oltre il limite di {maxBytes / 1024} KB.");
-        }
-
-        await using var input = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        using var buffer = new MemoryStream(Math.Min(
-            maxBytes,
-            (int)Math.Max(0, content.Headers.ContentLength ?? 0)));
-        var chunk = new byte[16 * 1024];
-        while (true)
-        {
-            var read = await input.ReadAsync(chunk, cancellationToken).ConfigureAwait(false);
-            if (read == 0)
-            {
-                break;
-            }
-
-            if (buffer.Length + read > maxBytes)
-            {
-                throw new InvalidOperationException($"Risposta gateway oltre il limite di {maxBytes / 1024} KB.");
-            }
-
-            buffer.Write(chunk, 0, read);
-        }
-
-        var text = ResolveContentEncoding(content).GetString(buffer.GetBuffer(), 0, checked((int)buffer.Length));
-        return text.Length > 0 && text[0] == '\uFEFF' ? text[1..] : text;
-    }
-
-    private static Encoding ResolveContentEncoding(HttpContent content)
-    {
-        var charset = content.Headers.ContentType?.CharSet?.Trim('"');
-        if (!string.IsNullOrWhiteSpace(charset))
-        {
-            try
-            {
-                return Encoding.GetEncoding(charset);
-            }
-            catch (ArgumentException ex)
-            {
-                System.Diagnostics.Trace.WriteLine($"[GatewayService] Charset non valido '{charset}': {ex.Message}");
-            }
-        }
-
-        return Encoding.UTF8;
-    }
+        CancellationToken cancellationToken) =>
+        HttpBoundedResponse.ReadStringAsync(content, maxBytes, cancellationToken, "gateway");
 
     private static HttpRequestMessage BuildRequest(HttpMethod method, string uri, string? bearerToken = null, string? sessionId = null)
     {

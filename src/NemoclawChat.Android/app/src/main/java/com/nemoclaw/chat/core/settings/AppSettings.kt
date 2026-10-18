@@ -110,7 +110,7 @@ internal fun loadSettings(context: Context): AppSettings {
         model = prefs.getString("model", AppDefaults.model) ?: AppDefaults.model,
         reasoningEffort = prefs.getString("reasoningEffort", AppDefaults.reasoningEffort) ?: AppDefaults.reasoningEffort,
         serviceTier = prefs.getString("serviceTier", AppDefaults.serviceTier) ?: AppDefaults.serviceTier,
-        hermesSessionKey = prefs.getString("hermesSessionKey", AppDefaults.hermesSessionKey) ?: AppDefaults.hermesSessionKey,
+        hermesSessionKey = com.nemoclaw.chat.loadStoredHermesSessionKey(context),
         voiceModel = prefs.getString("voiceModel", AppDefaults.voiceModel) ?: AppDefaults.voiceModel,
         accessMode = prefs.getString("accessMode", AppDefaults.accessMode) ?: AppDefaults.accessMode,
         visualBlocksMode = prefs.getString("visualBlocksMode", AppDefaults.visualBlocksMode) ?: AppDefaults.visualBlocksMode,
@@ -217,6 +217,7 @@ private fun normalizePlugAndPlaySettings(context: Context, settings: AppSettings
 }
 
 internal fun saveSettings(context: Context, settings: AppSettings) {
+    com.nemoclaw.chat.saveHermesSessionKey(context, settings.hermesSessionKey)
     context.getSharedPreferences(CURRENT_SETTINGS_PREFS, Context.MODE_PRIVATE).edit {
         putString("gatewayUrl", normalizeUrl(settings.gatewayUrl))
         putString("localGatewayUrl", normalizeUrl(settings.localGatewayUrl))
@@ -228,7 +229,6 @@ internal fun saveSettings(context: Context, settings: AppSettings) {
         putString("model", settings.model.trim())
         putString("reasoningEffort", settings.reasoningEffort.trim())
         putString("serviceTier", settings.serviceTier.trim())
-        putString("hermesSessionKey", settings.hermesSessionKey.trim())
         putString("voiceModel", settings.voiceModel.trim())
         putString("accessMode", settings.accessMode.trim())
         putString("visualBlocksMode", settings.visualBlocksMode.trim())

@@ -2085,38 +2085,11 @@ public static class ChatStreamClient
         return t.Length > 240 ? t[..240] + "…" : t;
     }
 
-    private static async Task<string> ReadLimitedStringAsync(
+    private static Task<string> ReadLimitedStringAsync(
         HttpContent content,
         int maxBytes,
-        CancellationToken cancellationToken)
-    {
-        if (content.Headers.ContentLength is long declaredLength && declaredLength > maxBytes)
-        {
-            throw new InvalidDataException($"Risposta Hermes oltre il limite di {maxBytes / 1024} KB.");
-        }
-
-        await using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        using var buffer = new MemoryStream(Math.Min(maxBytes, 64 * 1024));
-        var chunk = new byte[16 * 1024];
-        var total = 0;
-        while (true)
-        {
-            var read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false);
-            if (read == 0)
-            {
-                break;
-            }
-
-            total += read;
-            if (total > maxBytes)
-            {
-                throw new InvalidDataException($"Risposta Hermes oltre il limite di {maxBytes / 1024} KB.");
-            }
-            buffer.Write(chunk, 0, read);
-        }
-
-        return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, checked((int)buffer.Length));
-    }
+        CancellationToken cancellationToken) =>
+        HttpBoundedResponse.ReadStringAsync(content, maxBytes, cancellationToken, "Hermes");
 
     private static string StripReasoningArtifacts(string text)
     {

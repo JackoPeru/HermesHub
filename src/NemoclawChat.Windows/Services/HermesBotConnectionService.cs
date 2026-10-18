@@ -437,7 +437,14 @@ public static class HermesBotConnectionService
             if (ActiveTurns.TryGetValue(groupName, out var previous))
             {
                 previous.Cancellation.Cancel();
-                previous.Cancellation.Dispose();
+                // Dispose differito: il turno precedente potrebbe ancora
+                // leggere il token; dispose immediato rischia ObjectDisposedException.
+                var previousSource = previous.Cancellation;
+                _ = Task.Delay(TimeSpan.FromSeconds(10), CancellationToken.None).ContinueWith(
+                    _ => previousSource.Dispose(),
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
             }
             var cancellation = CancellationTokenSource.CreateLinkedTokenSource(callerToken);
             var epoch = ++_epoch;

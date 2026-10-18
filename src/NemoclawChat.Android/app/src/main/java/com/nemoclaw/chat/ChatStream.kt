@@ -494,7 +494,9 @@ data class StreamingState(
         ).withActivity("Visual blocks ricevuti: ${event.blocks.size}.")
         is ChatStreamEvent.Status -> copy(status = friendlyActivityStatus(event.message)).withActivity(event.message)
         is ChatStreamEvent.RawHermesEvent -> copy(status = "Evento Hermes: ${event.name}")
-            .withActivity("Evento Hermes: ${event.name} ${event.json.take(300)}")
+            // Contratto redaction (redactToolRawEvent): l'activity log non
+            // conserva mai payload raw di eventi non fidati, solo il tipo.
+            .withActivity(redactToolRawEvent(event.name, event.json))
         is ChatStreamEvent.PromptProgress -> copy(
             promptProgressPercent = event.percent.coerceIn(0, 100),
             promptProgressEstimated = event.estimated,
@@ -1704,13 +1706,18 @@ internal fun shouldRetrySseAuth(
     body: String,
     hasMoreAuthCandidates: Boolean,
     token: String? = null,
-    tokenProvided: Boolean = false
+    @Suppress("UNUSED_PARAMETER") tokenProvided: Boolean = false
 ): Boolean {
     if (accepted || !hasMoreAuthCandidates) return false
-    // Path legacy (test): senza token esplicito, solo 401.
-    if (!tokenProvided) return shouldRetryHermesWithBearerAuth(code, body)
-    // Fail-closed: non ritentare con null dopo 401 con key rifiutata.
-    return shouldRetryHermesWithBearerAuth(code, body, token)
+    // Il ciclo candidati e' la fonte di verita': un 401 consent solo
+    // l'avanzamento verso i candidati rimasti (quando una chiave e' salvata
+    // hermesAuthCandidates non aggiunge mai il fallback anonimo); niente
+    // retry su 401 con chiave espressamente rifiutata.
+    if (code != 401) return false
+    val lower = body.lowercase()
+    return !(lower.contains("invalid_api_key") ||
+        lower.contains("invalid api key") ||
+        lower.contains("invalidapikey"))
 }
 
 internal fun isTerminalSseEvent(eventName: String?, data: String): Boolean {

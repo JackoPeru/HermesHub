@@ -207,58 +207,11 @@ public static class SpeechGatewayService
         }
     }
 
-    private static async Task<string> ReadBoundedStringAsync(
+    private static Task<string> ReadBoundedStringAsync(
         HttpContent content,
         int maxBytes,
-        CancellationToken cancellationToken)
-    {
-        if (content.Headers.ContentLength is long contentLength && contentLength > maxBytes)
-        {
-            throw new InvalidOperationException($"Risposta speech oltre il limite di {maxBytes / 1024} KB.");
-        }
-
-        await using var input = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        using var buffer = new MemoryStream(Math.Min(
-            maxBytes,
-            (int)Math.Max(0, content.Headers.ContentLength ?? 0)));
-        var chunk = new byte[16 * 1024];
-        while (true)
-        {
-            var read = await input.ReadAsync(chunk, cancellationToken).ConfigureAwait(false);
-            if (read == 0)
-            {
-                break;
-            }
-
-            if (buffer.Length + read > maxBytes)
-            {
-                throw new InvalidOperationException($"Risposta speech oltre il limite di {maxBytes / 1024} KB.");
-            }
-
-            buffer.Write(chunk, 0, read);
-        }
-
-        var text = ResolveContentEncoding(content).GetString(buffer.GetBuffer(), 0, checked((int)buffer.Length));
-        return text.Length > 0 && text[0] == '\uFEFF' ? text[1..] : text;
-    }
-
-    private static Encoding ResolveContentEncoding(HttpContent content)
-    {
-        var charset = content.Headers.ContentType?.CharSet?.Trim('"');
-        if (!string.IsNullOrWhiteSpace(charset))
-        {
-            try
-            {
-                return Encoding.GetEncoding(charset);
-            }
-            catch (ArgumentException ex)
-            {
-                System.Diagnostics.Trace.WriteLine($"[SpeechGatewayService] Charset non valido '{charset}': {ex.Message}");
-            }
-        }
-
-        return Encoding.UTF8;
-    }
+        CancellationToken cancellationToken) =>
+        HttpBoundedResponse.ReadStringAsync(content, maxBytes, cancellationToken, "speech");
 
     private static async Task<string> SaveValidatedWavAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {

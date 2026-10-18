@@ -239,7 +239,7 @@ fun streamHermesSessionChat(
             httpFailure?.let { failure ->
                 val code = failure.code
                 val hbody = failure.body
-                if (index < authCandidates.lastIndex && shouldRetryHermesWithBearerAuth(code, hbody)) continue
+                if (index < authCandidates.lastIndex && shouldRetryHermesWithBearerAuth(code, hbody, token)) continue
                 if (code == 401 || code == 403) {
                     emit(ChatStreamEvent.Error("Hermes ha rifiutato la chiave per questa sessione/profilo (HTTP $code)."))
                     return@flow

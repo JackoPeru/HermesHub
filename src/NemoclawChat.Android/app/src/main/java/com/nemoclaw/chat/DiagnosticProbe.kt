@@ -106,7 +106,7 @@ internal suspend fun probeDiagnosticEndpoint(
         // do not multiply every auth candidate across an unreachable route.
         if (primary.statusCode == null) continue
 
-        if (!shouldRetryHermesWithBearerAuth(primary.statusCode, primary.body)) return last
+        if (!shouldRetryHermesWithBearerAuth(primary.statusCode, primary.body, plan.authCandidates.first())) return last
 
         // This route answered HTTP, so it is the effective route. Retry only auth
         // on this host and never restart the host/auth Cartesian product.
@@ -116,7 +116,7 @@ internal suspend fun probeDiagnosticEndpoint(
             attempts++
             last = authResult.toProbeResult(authAttempt, attempts)
             if (authResult.statusCode == null) return last
-            if (!shouldRetryHermesWithBearerAuth(authResult.statusCode, authResult.body)) return last
+            if (!shouldRetryHermesWithBearerAuth(authResult.statusCode, authResult.body, token)) return last
         }
         return last
     }

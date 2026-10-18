@@ -494,7 +494,7 @@ class HermesSessionClient(
                     0 to (it.message ?: it.javaClass.simpleName)
                 }
                 last = res
-                if (!shouldRetryHermesWithBearerAuth(res.first, res.second)) {
+                if (!shouldRetryHermesWithBearerAuth(res.first, res.second, token)) {
                     if (res.first != 0) return res
                     hermesRetryBackoffDelay(attempt++)
                     continue

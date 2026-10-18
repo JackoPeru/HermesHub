@@ -29,17 +29,6 @@ fun hermesSigningAvailable(): Boolean {
         !hermesKeystoreProps.getProperty("hermes.keyPassword").isNullOrBlank()
 }
 
-// Chiave API preimpostata (local.properties gitignored, default vuota):
-// escaping per stringa Java, mai in chiaro nel repo.
-fun hermesDefaultApiKeyJavaString(): String {
-    val raw = hermesKeystoreProps.getProperty("hermes.defaultApiKey", "")
-    return raw
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
-        .replace("\n", "\\n")
-        .replace("\r", "")
-}
-
 gradle.taskGraph.whenReady {
     val containsReleaseOutput = allTasks.any { task ->
         task.project == project && task.name.endsWith("Release", ignoreCase = true)
@@ -69,11 +58,12 @@ android {
         applicationId = "com.nemoclaw.chat"
         minSdk = if (enableMetaDat) 29 else 26
         targetSdk = 36
-        versionCode = 280
-        versionName = "0.6.276"
+        versionCode = 281
+        versionName = "0.6.277"
         resConfigs("en", "it")
         buildConfigField("boolean", "META_DAT_ENABLED", enableMetaDat.toString())
-        buildConfigField("String", "HERMES_DEFAULT_API_KEY", "\"${hermesDefaultApiKeyJavaString()}\"")
+        // Nessuna chiave API nel BuildConfig: la release APK non contiene
+        // segreti (audit 0.6.276). Il pairing avviene dall'app (KeyStore).
         manifestPlaceholders["mwdat_application_id"] = mwdatApplicationId
         manifestPlaceholders["mwdat_client_token"] = mwdatClientToken
     }

@@ -370,7 +370,7 @@ internal object ConversationArchiveAutoSync {
                     try {
                         if (!response.isSuccessful) {
                             val body = runCatching { response.body.byteStream().readUtf8Bounded() }.getOrDefault("")
-                            if (shouldRetryHermesWithBearerAuth(response.code, body)) continue
+                            if (shouldRetryHermesWithBearerAuth(response.code, body, token)) continue
                             throw IllegalStateException("Archivio events HTTP ${response.code}: ${extractHumanError(body)}")
                         }
                         val reader = response.body.charStream().buffered()

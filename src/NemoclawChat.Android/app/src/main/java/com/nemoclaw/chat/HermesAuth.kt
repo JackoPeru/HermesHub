@@ -46,16 +46,13 @@ internal fun isHermesNative(settings: AppSettings): Boolean {
     return settings.preferredApi.equals("hermes-native", ignoreCase = true)
 }
 
-internal fun shouldRetryHermesWithBearerAuth(code: Int, body: String): Boolean {
-    return code == 401
-}
-
 /**
  * Classifica se il piano può proseguire dopo un 401 prima dell'accettazione.
- * Token nullo o errore esplicito della chiave chiudono il retry. Un 401
- * generico può proseguire verso un'altra route configurata, ma non aggiunge
- * credenziali: hermesAuthCandidates mantiene la chiave configurata come unico
- * candidato, quindi il retry non degrada all'anonimo.
+ * Fail-closed su tutta la superficie: senza token (tentativo anonimo) né con
+ * errore esplicito della chiave il retry chiude. Un 401 generico con token può
+ * proseguire verso un'altra route configurata, ma non aggiunge credenziali:
+ * hermesAuthCandidates mantiene la chiave configurata come unico candidato,
+ * quindi il retry non degrada all'anonimo.
  */
 internal fun shouldRetryHermesWithBearerAuth(code: Int, body: String, token: String?): Boolean {
     if (code != 401) return false

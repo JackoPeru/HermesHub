@@ -1,5 +1,7 @@
 using System.Net.Http;
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
@@ -262,6 +264,23 @@ public static class AppUpdateService
             // Validare col nome definitivo: l'estensione del file temporaneo
             // (.partial) non e' riconosciuta come pacchetto aggiornabile.
             File.Move(partialPath, destinationPath, overwrite: true);
+            var expectedSha256 = await TryFetchExpectedSha256Async(assetUrl, cancellationToken);
+            if (expectedSha256 is not null)
+            {
+                var actualSha256 = await ComputeSha256Async(destinationPath, cancellationToken);
+                if (!string.Equals(actualSha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    try { File.Delete(destinationPath); }
+                    catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"[AppUpdateService] Sha drift cleanup failed: {ex.Message}"); }
+                    progress?.Report(new UpdateDownloadProgress(null, "Checksum non corrispondente.", $"SHA-256 atteso {expectedSha256[..12]}…, ricevuto {actualSha256[..12]}…."));
+                    return null;
+                }
+                progress?.Report(new UpdateDownloadProgress(90d, "Checksum verificato.", $"SHA-256 {actualSha256[..12]}… corrisponde alla release."));
+            }
+            else
+            {
+                System.Diagnostics.Trace.WriteLine("[AppUpdateService] Nessun asset .sha256 fianco al pacchetto: verifica checksum saltata.");
+            }
             if (!ValidateDownloadedAsset(destinationPath, version, out var validationError))
             {
                 try { File.Delete(destinationPath); }
@@ -374,7 +393,10 @@ public static class AppUpdateService
             var currentProcessName = EscapePowerShellSingleQuoted(Process.GetCurrentProcess().ProcessName);
             var updatesDirectory = GetUpdatesDirectoryPath();
             Directory.CreateDirectory(updatesDirectory);
-            var scriptPath = Path.Combine(updatesDirectory, "install-msix-update.ps1");
+            // Nome random per la copia locale dello script: un attacker same-user
+            // non puo' agire in TOCTOU su un path che cambia ad ogni installazione
+            // (prima era fisso: "install-msix-update.ps1").
+            var scriptPath = Path.Combine(updatesDirectory, $"install-msix-{Guid.NewGuid():N}.ps1");
             var logPath = Path.Combine(updatesDirectory, "install-msix-update.log");
             var relaunch = string.IsNullOrWhiteSpace(escapedAumid)
                 ? string.Empty
@@ -635,38 +657,70 @@ public static class AppUpdateService
         }
     }
 
-    private static async Task<JsonDocument> ReadBoundedJsonAsync(
+    private static Task<JsonDocument> ReadBoundedJsonAsync(
         HttpContent content,
         int maxBytes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        HttpBoundedResponse.ReadJsonDocumentAsync(content, maxBytes, cancellationToken, "metadati release");
+
+    /// <summary>
+    /// Legge il file <c>.sha256</c> sputato accanto all'asset nella release:
+    /// nessuna sidecar = verifica saltata (comunicato in Trace), contenuto non
+    /// hex-64 = non fidato di default solo fallback nullo.
+    /// </summary>
+    private static async Task<string?> TryFetchExpectedSha256Async(string assetUrl, CancellationToken cancellationToken)
     {
-        if (content.Headers.ContentLength is long contentLength && contentLength > maxBytes)
+        if (string.IsNullOrWhiteSpace(assetUrl))
         {
-            throw new InvalidDataException($"Metadati release oltre il limite di {maxBytes / 1024} KB.");
+            return null;
         }
 
-        await using var input = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        using var buffer = new MemoryStream(Math.Min(
-            maxBytes,
-            (int)Math.Max(0, content.Headers.ContentLength ?? 0)));
-        var chunk = new byte[16 * 1024];
-        while (true)
+        try
         {
-            var read = await input.ReadAsync(chunk, cancellationToken).ConfigureAwait(false);
-            if (read == 0)
+            var checksumUrl = assetUrl.TrimEnd('/') + ".sha256";
+            if (!IsTrustedAssetUrl(checksumUrl))
             {
-                break;
+                return null;
             }
 
-            if (buffer.Length + read > maxBytes)
+            using var request = new HttpRequestMessage(HttpMethod.Get, checksumUrl);
+            request.Headers.UserAgent.ParseAdd("HermesHub-Windows");
+            using var response = await HttpClient.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
             {
-                throw new InvalidDataException($"Metadati release oltre il limite di {maxBytes / 1024} KB.");
+                return null;
             }
 
-            await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            var line = (await reader.ReadLineAsync(cancellationToken))?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return null;
+            }
+
+            var token = line.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)[0];
+            return token.Length == 64 && token.All(Uri.IsHexDigit) ? token : null;
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            System.Diagnostics.Trace.WriteLine($"[AppUpdateService] SHA-256 sidecar fetch failed: {ex.Message}");
+            return null;
+        }
+    }
 
-        return JsonDocument.Parse(buffer.ToArray());
+    private static async Task<string> ComputeSha256Async(string filePath, CancellationToken cancellationToken)
+    {
+        await using var input = new FileStream(
+            filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            81920,
+            FileOptions.Asynchronous);
+        using var sha = SHA256.Create();
+        var hash = await sha.ComputeHashAsync(input, cancellationToken);
+        return Convert.ToHexString(hash);
     }
 
     private static string GetCurrentPublisher()

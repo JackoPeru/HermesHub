@@ -15,6 +15,14 @@ public static class GatewayCredentialStore
     private static readonly Lazy<PasswordVault> SharedVault = new(() => new PasswordVault());
     private static readonly object MutationLock = new();
 
+    // Cache del solo secret gateway (chiave hub): il vault COM viene interrogato
+    // a ogni richiesta HTTP/SSE (anche 4 volte per send), quindi teniamo il valore
+    // in memoria per TTL corto e lo gettiamo su mutazioni o 401 invalid_api_key.
+    private static readonly object CacheLock = new();
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(30);
+    private static string? _cachedSecret;   // null = non caricato; "" = nessun segreto
+    private static DateTime _cachedAtUtc = DateTime.MinValue;
+
     public static bool HasSecret()
     {
         return TryLoadSecret(Resource, UserName, out _) ||
@@ -22,6 +30,25 @@ public static class GatewayCredentialStore
     }
 
     public static string LoadSecret()
+    {
+        lock (CacheLock)
+        {
+            if (_cachedSecret is not null && DateTime.UtcNow - _cachedAtUtc < CacheTtl)
+            {
+                return _cachedSecret;
+            }
+        }
+
+        var loaded = LoadSecretFromVault();
+        lock (CacheLock)
+        {
+            _cachedSecret = loaded;
+            _cachedAtUtc = DateTime.UtcNow;
+        }
+        return loaded;
+    }
+
+    private static string LoadSecretFromVault()
     {
         if (TryLoadSecret(Resource, UserName, out var secret))
         {
@@ -35,6 +62,15 @@ public static class GatewayCredentialStore
         }
 
         return string.Empty;
+    }
+
+    public static void InvalidateCachedSecret()
+    {
+        lock (CacheLock)
+        {
+            _cachedSecret = null;
+            _cachedAtUtc = DateTime.MinValue;
+        }
     }
 
     public static bool SaveSecret(string secret)
@@ -67,6 +103,7 @@ public static class GatewayCredentialStore
                 }
 
                 RemoveSecret(LegacyResource, LegacyUserName);
+                InvalidateCachedSecret();
                 return true;
             }
             catch (Exception ex)
@@ -83,6 +120,7 @@ public static class GatewayCredentialStore
         {
             RemoveSecret(Resource, UserName);
             RemoveSecret(LegacyResource, LegacyUserName);
+            InvalidateCachedSecret();
         }
     }
 

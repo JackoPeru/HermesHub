@@ -35,10 +35,9 @@ internal fun loadGatewaySecret(context: Context): String? {
         ?: legacyPrefs.getString(GATEWAY_SECRET_PREF_KEY, null)?.also { legacyValue ->
             prefs.edit { putString(GATEWAY_SECRET_PREF_KEY, legacyValue) }
         }
-        // Niente segreto salvato (fresh install): chiave preimpostata di
-        // base dal build (BuildConfig, da local.properties gitignored).
-        // Lo stored vince sempre quando presente; il default non si scrive mai.
-        ?: return defaultGatewayApiKey()
+        // Fresh install: nessuna chiave nel build (mai nel APK pubblicato).
+        // L'utente la inserisce una volta dall'app, poi resta in KeyStore.
+        ?: return null
 
     return runCatching {
         val parts = stored.split(':', limit = 2)
@@ -66,11 +65,9 @@ internal fun loadGatewaySecret(context: Context): String? {
 }
 
 /**
- * Chiave API preimpostata dal build (vuota se non configurata): fresh
- * install connette subito senza incollare nulla. Mai scritta nelle prefs.
+ * Nessuna chiave preimpostata di build: la release APK non contiene segreti,
+ * la connessione avviene inserendo una volta la chiave in Settings (KeyStore).
  */
-internal fun defaultGatewayApiKey(): String? =
-    BuildConfig.HERMES_DEFAULT_API_KEY.trim().takeIf { it.isNotBlank() }
 
 internal fun saveGatewaySecret(context: Context, secret: String?): Boolean {
     val normalized = secret?.trim().takeUnless { it.isNullOrEmpty() }
@@ -157,6 +154,75 @@ internal fun deleteGatewayConnectionSecret(context: Context, connectionId: Strin
         .remove(key)
         .commit()
 }
+
+private const val SESSION_KEY_PREF_KEY = "hermesSessionKeyCiphertext"
+private const val SESSION_KEY_AAD = "HermesHub.SessionKey.v1"
+
+/**
+ * Session key stabile: cifrata in KeyStore come ogni altro segreto.
+ * Migrazione transparente dal plaintext legacy ("hermesSessionKey").
+ */
+internal fun loadStoredHermesSessionKey(context: Context): String {
+    val prefs = migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
+    val stored = prefs.getString(SESSION_KEY_PREF_KEY, null)
+    if (stored != null) {
+        return decryptSessionKey(stored).orEmpty()
+    }
+    val legacyPlaintext = prefs.getString("hermesSessionKey", null)?.trim().orEmpty()
+    if (legacyPlaintext.isEmpty()) return ""
+    if (saveHermesSessionKey(context, legacyPlaintext)) {
+        prefs.edit(commit = true) { remove("hermesSessionKey") }
+    }
+    return legacyPlaintext
+}
+
+@SuppressLint("UseKtx", "ApplySharedPref") // Synchronous commit: il chiamante puo' osservare l'esito.
+internal fun saveHermesSessionKey(context: Context, value: String): Boolean {
+    val prefs = migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
+    val normalized = value.trim()
+    return if (normalized.isEmpty()) {
+        prefs.edit()
+            .remove(SESSION_KEY_PREF_KEY)
+            .remove("hermesSessionKey")
+            .commit()
+    } else {
+        val encoded = encryptSessionKey(normalized)
+        if (encoded == null) {
+            // Keystore non disponibile: degradiamo al vecchio plaintext una
+            // sola volta persistendo comunque il valore (priorita' UX).
+            prefs.edit()
+                .putString("hermesSessionKey", normalized)
+                .remove(SESSION_KEY_PREF_KEY)
+                .commit()
+        } else {
+            prefs.edit()
+                .putString(SESSION_KEY_PREF_KEY, encoded)
+                .remove("hermesSessionKey")
+                .commit()
+        }
+    }
+}
+
+private fun encryptSessionKey(secret: String): String? = runCatching {
+    val cipher = Cipher.getInstance(GATEWAY_SECRET_TRANSFORMATION)
+    cipher.init(Cipher.ENCRYPT_MODE, getOrCreateGatewaySecretKey())
+    cipher.updateAAD(SESSION_KEY_AAD.toByteArray(Charsets.UTF_8))
+    val encrypted = cipher.doFinal(secret.toByteArray(Charsets.UTF_8))
+    "${Base64.encodeToString(cipher.iv, Base64.NO_WRAP)}:${Base64.encodeToString(encrypted, Base64.NO_WRAP)}"
+}.getOrNull()
+
+private fun decryptSessionKey(stored: String): String? = runCatching {
+    val parts = stored.split(':', limit = 2)
+    if (parts.size != 2) return null
+    val cipher = Cipher.getInstance(GATEWAY_SECRET_TRANSFORMATION)
+    cipher.init(
+        Cipher.DECRYPT_MODE,
+        getOrCreateGatewaySecretKey(),
+        GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP))
+    )
+    cipher.updateAAD(SESSION_KEY_AAD.toByteArray(Charsets.UTF_8))
+    String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), Charsets.UTF_8).trim()
+}.getOrNull()
 
 private fun safeConnectionSecretKey(connectionId: String): String? {
     val normalized = connectionId.trim()

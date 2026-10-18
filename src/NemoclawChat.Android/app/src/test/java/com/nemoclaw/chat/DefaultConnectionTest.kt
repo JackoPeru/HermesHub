@@ -23,10 +23,12 @@ class DefaultConnectionTest {
     }
 
     @Test
-    fun defaultApiKeyMirrorsBuildConfig() {
-        assertEquals(
-            BuildConfig.HERMES_DEFAULT_API_KEY.trim().takeIf { it.isNotBlank() },
-            defaultGatewayApiKey()
+    fun buildConfigShipsNoApiKey() {
+        // Audit 0.6.277: nessun segreto nel APK. La chiave arriva dal
+        // pairing (SecretStore) e non puo' esistere nella BuildConfig.
+        org.junit.Assert.assertFalse(
+            "HERMES_DEFAULT_API_KEY non deve esistere nella BuildConfig",
+            BuildConfig::class.java.fields.any { it.name == "HERMES_DEFAULT_API_KEY" }
         )
     }
 }

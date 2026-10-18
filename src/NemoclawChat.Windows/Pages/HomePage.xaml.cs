@@ -147,14 +147,6 @@ public sealed partial class HomePage : Page
                 }
                 // The local bot archive is display/history only. Never carry a
                 // default-profile previous_response_id into the canonical bot route.
-                _botProfile = bot.Profile;
-                _botSessionId = bot.SessionId;
-                _botDisplayName = bot.DisplayName;
-                _botMultiplexEnabled = bot.MultiplexEnabled;
-                _botConnectionId = bot.ConnectionId;
-                _botEndpoint = bot.Endpoint;
-                _botIdentityKey = bot.BotIdentityKey ?? string.Empty;
-                _conversationId = bot.LocalConversationId;
                 _previousResponseId = null;
                 UpdateArchivedBotGuard();
                 BotActiveText.Text = $"Bot attivo · {bot.DisplayName} · Bot Chat";
