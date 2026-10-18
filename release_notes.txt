@@ -1,13 +1,10 @@
-Hermes Hub 0.6.277 (audit totale: sicurezza, cap server, robustezza)
+Hermes Hub 0.6.278 (fallback manager always-operational + menu tre puntini Windows)
 
-- Android: nessuna chiave API compilata nel APK (rimossa dal BuildConfig): il primo avvio chiede la chiave dal setup e la salva in AndroidKeyStore una volta sola; le installazioni esistenti continuano a funzionare con la chiave gia salvata.
-- Android: retry auth unificato fail-closed (firma unica shouldRetryHermesWithBearerAuth(code, body, token)) su archive sync, sessioni Hermes e diagnostic probe; session key stabile spostata nel segreto cifrato AndroidKeyStore con migrazione automatica dal plaintext legacy; gli eventi gateway raw non finiscono piu nell'activity log (redaction contrattuale gia in ChatStream).
-- Windows: self-update ora verifica lo SHA-256 della release scaricando il file .sha256 pubblicato a fianco dell'asset; lo script di installazione usa nome random (niente TOCTOU su path fisso); nuova cache della chiave PasswordVault con TTL 30 minuti e invalidazione su 401 invalid_api_key; watchdog SSE di 90 secondi sul canale events dell'archivio; reader HTTP bounded condiviso in sostituzione delle 4 copie private; dispose differito dei CTS tra turni di gruppo; assegnazioni bot in HomePage senza blocchi duplicati.
-- Gateway server: GET /v1/hub/conversations supporta paging con cursor e budget byte (413 se un record singolo eccede il budget); GET /v1/hub/sync viene serializzato fuori dall'event loop con budget byte e progression garantita; pruning SQLite del change-log e dei tombstone oltre retention a intervalli 6 ore; chmod 0600 esteso a WAL/SHM; cooldown configurabile su /v1/hub/server/action|maintenance; copia triage.py verificata byte-identica nel test.
-- Test: suite estesa con paginazione archivio, budget byte sync, prune, drift triage (742+ test).
-- Versioni: Windows/AdminBridge 0.6.277; Android versionName 0.6.277, versionCode 281.
-- Asset ufficiali: APK Android HermesHub-0.6.277-android.apk; MSIX NemoclawChat.Windows_0.6.277.0_x64.msix; gateway Linux HermesHub-0.6.277-linux-gateway.tar.gz.
-- SHA-256 Android: `a0518c2c795d5750a5588c7c787bf6c7defdcaf05322ce886a2d35081ce0a3a9`.
-- SHA-256 MSIX: `ab3972c30a730dcb9db412c13b038941be41211a65e785e1b713dbe95283a397`.
-- SHA-256 gateway Linux: `0e7c0fdc41726b348d7b699ac61d36bdd34bd500adfbcb0c5906de2710940193`.
-- Nota deploy: il gateway sul server NON viene aggiornato con questa release (l'agente sta lavorando, nessun riavvio dell'hub); quando sarai pronto per mandarlo in produzione conferma e procedo al deploy.
+- Manager GPU: qualunque errore porta la modalita' desiderata su AUTO e il recovery tenta SEMPRE prima LLM_READY, cosi' l'agente/chat torna operativa prima di ogni retry media/direct (mai piantato); le eccezioni non gestite di _drive e _supervisor_step entrano in ERROR e il worker sopravvive; resetto anche il media cooldown per ripartire puliti.
+- Windows: nel top bar chat i tre puntini rimpiazzano la penna (come Android): nuova chat, switch "LLM su GPU", switch "Gestione automatica GPU", switch "Comfy diretto", "Chat laya" (dialog sul bridge :8645) e "Comfy: cosa sta facendo" con stato aggiornato ogni 3 secondi mentre il menu e aperto.
+- Manager deployato attivo sul server (service riavviato e verde); gateway hub NON aggiornato: si attende il tuo via libera.
+- Versioni: Windows/AdminBridge 0.6.278; Android versionName 0.6.278, versionCode 282.
+- Asset ufficiali: APK Android HermesHub-0.6.278-android.apk; MSIX NemoclawChat.Windows_0.6.278.0_x64.msix; gateway Linux HermesHub-0.6.278-linux-gateway.tar.gz.
+- SHA-256 Android: `0f380cb1a49baee783624b8b85c82dcb5b73861fed52b960345178a10a975334`.
+- SHA-256 MSIX: `de73fc457793c406bfde8eb1e2f5be05474a7cff32d667d573e7e4be833b49de`.
+- SHA-256 gateway Linux: `5ffb74ca5bb3be5f6beb33482eeb7f62641eafa3f2d98c2dd41386f893dca40d`.

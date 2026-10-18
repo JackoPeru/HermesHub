@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.278 - 2026-10-18
+
+- Manager (gpu-manager): fallback sempre-operativo — qualunque errore riporta il desired su AUTO e il recovery va prima a LLM_READY (l'agente/chat torna operativa prima di ogni retry media/direct); eccezioni non gestite di _drive/_supervisor_step entrano in ERROR con worker che sopravvive; poi resetto media cooldown.
+- Windows: menu tre puntini nel top chat (come Android): nuova chat, switch LLM su GPU, switch gestione automatica GPU, switch Comfy diretto, chat laya e stato Comfy con poll 3 s; rimosso il tasto penna (nuova chat resta nel menu).
+- Test: suite 753 OK (nuovo contratto fallback manager, deploy manager), build Windows/Android/Linux verdi. Gateway server non deployato (pende OK utente).
+
 ## 0.6.277 - 2026-10-18
 
 - Audit totale di applicazione, backend e manager: sicurezza, cap server-side e robustezza stream.
