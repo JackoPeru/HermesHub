@@ -1,4 +1,4 @@
-﻿plugins {
+plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
@@ -58,8 +58,8 @@ android {
         applicationId = "com.nemoclaw.chat"
         minSdk = if (enableMetaDat) 29 else 26
         targetSdk = 36
-        versionCode = 281
-        versionName = "0.6.277"
+        versionCode = 282
+        versionName = "0.6.278"
         resConfigs("en", "it")
         buildConfigField("boolean", "META_DAT_ENABLED", enableMetaDat.toString())
         // Nessuna chiave API nel BuildConfig: la release APK non contiene

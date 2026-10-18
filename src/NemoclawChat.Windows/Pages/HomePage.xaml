@@ -183,19 +183,137 @@
             Orientation="Horizontal"
             Spacing="8">
             <Button
-                x:Name="NewChatButton"
+                x:Name="ChatMenuButton"
                 Width="42"
                 Height="42"
                 Padding="0"
                 Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource BorderBrushSoft}"
                 BorderThickness="1"
-                Click="NewChat_Click"
+                Click="ChatMenuButton_Click"
                 CornerRadius="14"
                 Foreground="{StaticResource AccentBrush}"
-                AutomationProperties.Name="Nuova chat"
-                ToolTipService.ToolTip="Inizia una nuova chat">
-                <FontIcon FontSize="16" Glyph="&#xE70F;" />
+                AutomationProperties.Name="Impostazioni rapide"
+                ToolTipService.ToolTip="Manager GPU: LLM, auto, Comfy diretto, chat laya">
+                <FontIcon FontSize="16" Glyph="&#xE712;" />
+                <Button.Flyout>
+                    <Flyout
+                        x:Name="ChatManagerFlyout"
+                        Opened="ChatManagerFlyout_Opened"
+                        Closed="ChatManagerFlyout_Closed"
+                        Placement="BottomEdgeAlignedRight">
+                        <Border
+                            Width="360"
+                            Padding="12"
+                            Background="{StaticResource ElevatedSurfaceBrush}"
+                            BorderBrush="{StaticResource BorderBrushSoft}"
+                            BorderThickness="1"
+                            CornerRadius="12">
+                            <StackPanel Spacing="2">
+                                <TextBlock
+                                    x:Name="ChatManagerStatus"
+                                    FontSize="12"
+                                    Foreground="{StaticResource MutedTextBrush}"
+                                    Text="Lettura stato manager..." />
+                                <Button
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Left"
+                                    Background="{StaticResource PanelBrush}"
+                                    BorderBrush="{StaticResource BorderBrushSoft}"
+                                    BorderThickness="1"
+                                    Click="ChatMenuNewChat_Click"
+                                    CornerRadius="10"
+                                    Padding="10,8">
+                                    <StackPanel>
+                                        <TextBlock FontWeight="SemiBold" Text="Nuova chat" />
+                                        <TextBlock
+                                            FontSize="11"
+                                            Foreground="{StaticResource MutedTextBrush}"
+                                            Text="Pulisci la conversazione corrente" />
+                                    </StackPanel>
+                                </Button>
+                                <ToggleSwitch
+                                    x:Name="ChatLlmSwitch"
+                                    Header="LLM su GPU"
+                                    IsEnabled="False"
+                                    Margin="0,2,0,0"
+                                    Toggled="ChatLlmSwitch_Toggled" />
+                                <TextBlock
+                                    x:Name="ChatLlmSubtitle"
+                                    FontSize="11"
+                                    Foreground="{StaticResource MutedTextBrush}"
+                                    Text="Stato sconosciuto" />
+                                <ToggleSwitch
+                                    x:Name="ChatAutoSwitch"
+                                    Header="Gestione automatica GPU"
+                                    IsEnabled="False"
+                                    Margin="0,2,0,0"
+                                    Toggled="ChatAutoSwitch_Toggled" />
+                                <TextBlock
+                                    x:Name="ChatAutoSubtitle"
+                                    FontSize="11"
+                                    Foreground="{StaticResource MutedTextBrush}"
+                                    Text="Stato sconosciuto" />
+                                <ToggleSwitch
+                                    x:Name="ChatDirectSwitch"
+                                    Header="Comfy diretto"
+                                    IsEnabled="False"
+                                    Margin="0,2,0,0"
+                                    Toggled="ChatDirectSwitch_Toggled" />
+                                <TextBlock
+                                    x:Name="ChatDirectSubtitle"
+                                    FontSize="11"
+                                    Foreground="{StaticResource MutedTextBrush}"
+                                    Text="Stato sconosciuto" />
+                                <Button
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Left"
+                                    Background="{StaticResource PanelBrush}"
+                                    BorderBrush="{StaticResource BorderBrushSoft}"
+                                    BorderThickness="1"
+                                    Click="ChatLaya_Click"
+                                    CornerRadius="10"
+                                    Padding="10,8">
+                                    <StackPanel>
+                                        <TextBlock FontWeight="SemiBold" Text="Chat laya" />
+                                        <TextBlock
+                                            FontSize="11"
+                                            Foreground="{StaticResource MutedTextBrush}"
+                                            Text="Chiedi in linguaggio naturale cosa fare al manager" />
+                                    </StackPanel>
+                                </Button>
+                                <Button
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Left"
+                                    Background="{StaticResource PanelBrush}"
+                                    BorderBrush="{StaticResource BorderBrushSoft}"
+                                    BorderThickness="1"
+                                    Click="ChatComfy_Click"
+                                    CornerRadius="10"
+                                    Padding="10,8">
+                                    <StackPanel>
+                                        <TextBlock FontWeight="SemiBold" Text="Comfy: cosa sta facendo" />
+                                        <TextBlock
+                                            x:Name="ChatComfySubtitle"
+                                            FontSize="11"
+                                            Foreground="{StaticResource MutedTextBrush}"
+                                            Text="Stato sconosciuto" />
+                                    </StackPanel>
+                                </Button>
+                                <Button
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Click="ChatManagerRetry_Click"
+                                    Foreground="{StaticResource MutedTextBrush}"
+                                    Padding="4">
+                                    <TextBlock x:Name="ChatManagerRetryLabel" Text="Riprova lettura" />
+                                </Button>
+                            </StackPanel>
+                        </Border>
+                    </Flyout>
+                </Button.Flyout>
             </Button>
             <Border
                 x:Name="ContextMeter"

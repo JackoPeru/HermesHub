@@ -12,6 +12,7 @@ using Microsoft.UI.Xaml.Shapes;
 using NemoclawChat_Windows.Services;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -542,6 +543,333 @@ public sealed partial class HomePage : Page
     {
         ResetForNewChat();
         PromptBox.Focus(FocusState.Programmatic);
+    }
+
+    // -------------------------------------------------- menu tre puntini ---
+    // Stesso contratto del top bar Android (ChatTopBar.kt): /status manager,
+    // switch mode llm|media / auto / direct, chat laya sul bridge :8645.
+    private DispatcherTimer? _chatManagerTimer;
+    private CancellationTokenSource? _chatManagerCts;
+    private ComfyStatusRecord? _chatManagerStatus;
+    private bool _chatManagerBusy;
+    private bool _managerToggleSyncing;
+
+    private void ChatMenuButton_Click(object sender, RoutedEventArgs e)
+    {
+    }
+
+    private void ChatManagerFlyout_Opened(object sender, object e)
+    {
+        _chatManagerCts = new CancellationTokenSource();
+        _ = RefreshChatManagerStatusAsync();
+        // Unico poll menu: 3 s mentre il menu e aperto (stesso contratto Android).
+        _chatManagerTimer?.Stop();
+        _chatManagerTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        _chatManagerTimer.Tick += async (_, _) => await RefreshChatManagerStatusAsync();
+        _chatManagerTimer.Start();
+    }
+
+    private void ChatManagerFlyout_Closed(object sender, object e)
+    {
+        _chatManagerTimer?.Stop();
+        _chatManagerTimer = null;
+    }
+
+    private async void ChatMenuNewChat_Click(object sender, RoutedEventArgs e)
+    {
+        ChatManagerFlyout.Hide();
+        ResetForNewChat();
+        PromptBox.Focus(FocusState.Programmatic);
+        await Task.CompletedTask;
+    }
+
+    private async void ChatManagerRetry_Click(object sender, RoutedEventArgs e)
+    {
+        ChatManagerRetryLabel.Text = "Lettura...";
+        await RefreshChatManagerStatusAsync();
+    }
+
+    private async Task RefreshChatManagerStatusAsync()
+    {
+        if (_chatManagerBusy) return;
+        _chatManagerBusy = true;
+        try
+        {
+            var token = _chatManagerCts?.Token ?? CancellationToken.None;
+            var status = await ComfyStatusService.LoadAsync(AppSettingsStore.Load(), token);
+            _chatManagerStatus = status;
+            RenderChatManagerFlyout(status);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception)
+        {
+            ChatManagerStatus.Text = "Errore lettura stato manager.";
+        }
+        finally
+        {
+            _chatManagerBusy = false;
+        }
+    }
+
+    private void RenderChatManagerFlyout(ComfyStatusRecord status)
+    {
+        _ = DispatcherQueue?.TryEnqueue(() => RenderChatManagerFlyoutCore(status));
+    }
+
+    private void RenderChatManagerFlyoutCore(ComfyStatusRecord status)
+    {
+        if (!status.Reachable)
+        {
+            ChatManagerStatus.Text = "Non raggiungibile: verifica server e chiave.";
+            ChatLlmSubtitle.Text = status.Error.Length == 0 ? "Non raggiungibile" : TruncateMenu(status.Error, 90);
+            ChatAutoSubtitle.Text = "Non raggiungibile";
+            ChatDirectSubtitle.Text = "Non raggiungibile";
+            ChatComfySubtitle.Text = "Non raggiungibile";
+            ChatManagerRetryLabel.Visibility = Visibility.Visible;
+            SetManagerSwitches(false, false, false, enabled: false);
+            return;
+        }
+        ChatManagerStatus.Text = ReadManagerLastLine(status.Hint, status);
+        ChatManagerRetryLabel.Visibility = string.IsNullOrWhiteSpace(status.Error)
+            ? Visibility.Collapsed : Visibility.Visible;
+        _managerToggleSyncing = true;
+        ChatLlmSwitch.IsEnabled = true;
+        ChatLlmSwitch.IsOn = status.LlmLoaded;
+        ChatAutoSwitch.IsEnabled = true;
+        ChatAutoSwitch.IsOn = string.Equals(status.Desired, "AUTO", StringComparison.OrdinalIgnoreCase);
+        ChatDirectSwitch.IsEnabled = true;
+        ChatDirectSwitch.IsOn = string.Equals(status.Desired, "DIRECT", StringComparison.OrdinalIgnoreCase);
+        _managerToggleSyncing = false;
+
+        ChatLlmSubtitle.Text = status.LlmLoaded
+            ? "Caricato sulle GPU"
+            : status.State is "LLM_LOADING" ? "Caricamento in corso..." : "Scaricato";
+        var queue = status.Queue > 0 ? $" · coda {status.Queue}" : string.Empty;
+        ChatAutoSubtitle.Text = status.Desired switch
+        {
+            "AUTO" => "Il manager cambia da solo" + queue,
+            "" => "Stato sconosciuto",
+            _ => $"Manuale ({status.Desired})" + queue
+        };
+        ChatDirectSubtitle.Text = status.Desired switch
+        {
+            "DIRECT" => "Attivo: apri Comfy nel browser",
+            "" => "Stato sconosciuto",
+            _ => "LLM scarico, Comfy pronto in rete."
+        };
+        ChatComfySubtitle.Text = status.State switch
+        {
+            "MEDIA_BUSY" => $"Sta generando · {status.ProgressLabel} · {(status.Preset.Length > 0 ? status.Preset : status.Model)}",
+            "LLM_READY" => $"LLM attivo · {(string.IsNullOrWhiteSpace(status.Desired) ? "AUTO" : status.Desired)}",
+            _ => (status.State.Length == 0 ? "Stato sconosciuto" : status.StateLabel) + queue
+        };
+    }
+
+    private void SetManagerSwitches(bool llm, bool auto, bool direct, bool enabled)
+    {
+        _managerToggleSyncing = true;
+        ChatLlmSwitch.IsEnabled = enabled;
+        ChatLlmSwitch.IsOn = llm;
+        ChatAutoSwitch.IsEnabled = enabled;
+        ChatAutoSwitch.IsOn = auto;
+        ChatDirectSwitch.IsEnabled = enabled;
+        ChatDirectSwitch.IsOn = direct;
+        _managerToggleSyncing = false;
+
+    }
+
+    private async void ChatLlmSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_managerToggleSyncing) return;
+        var wanted = ChatLlmSwitch.IsOn;
+        await SendChatManagerModeAsync(wanted ? "llm" : "media", ChatLlmSubtitle);
+    }
+
+    private async void ChatAutoSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_managerToggleSyncing) return;
+        var wanted = ChatAutoSwitch.IsOn;
+        if (!wanted)
+        {
+            var llm = _chatManagerStatus?.LlmLoaded == true;
+            await SendChatManagerModeAsync(llm ? "llm" : "media", ChatAutoSubtitle);
+        }
+        else
+        {
+            await SendChatManagerModeAsync("auto", ChatAutoSubtitle);
+        }
+    }
+
+    private async void ChatDirectSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_managerToggleSyncing) return;
+        var wanted = ChatDirectSwitch.IsOn;
+        await SendChatManagerModeAsync(wanted ? "direct" : "auto", ChatDirectSubtitle);
+    }
+
+    private async Task SendChatManagerModeAsync(string mode, TextBlock subtitle)
+    {
+        if (_chatManagerBusy) return;
+        _chatManagerBusy = true;
+        SetManagerSwitches(_chatManagerStatus?.LlmLoaded == true,
+                           _chatManagerStatus?.Desired == "AUTO",
+                           _chatManagerStatus?.Desired == "DIRECT",
+                           enabled: false);
+        ChatManagerStatus.Text = "Applicazione in corso...";
+        try
+        {
+            var settings = AppSettingsStore.Load();
+            var (code, body) = await GatewayService.SendManagerRequestAsync(
+                settings, HttpMethod.Post, $"/mode/{mode}", "{}", _chatManagerCts?.Token ?? CancellationToken.None);
+            if (code is < 200 or > 299)
+            {
+                subtitle.Text = code == 0 ? "Manager non raggiungibile." : $"HTTP {code}: {TruncateMenu(body, 80)}";
+            }
+            // Attendi la transizione (stesso contratto Android: delay 3 s) e rileggi.
+            await Task.Delay(3000);
+            _chatManagerBusy = false;
+            await RefreshChatManagerStatusAsync();
+            return;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception)
+        {
+            subtitle.Text = "Errore di rete verso il manager.";
+        }
+        finally
+        {
+            _chatManagerBusy = false;
+        }
+    }
+
+    private void ChatLaya_Click(object sender, RoutedEventArgs e)
+    {
+        ChatManagerFlyout.Hide();
+        _ = ShowChatLayaDialogAsync();
+    }
+
+    private async Task ShowChatLayaDialogAsync()
+    {
+        var input = new TextBox
+        {
+            PlaceholderText = "Chiedi a laya...",
+            MaxLength = 500
+        };
+        var reply = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 13,
+            Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+            Visibility = Visibility.Collapsed
+        };
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Chiedi in linguaggio naturale: \"metti l'LLM ready\", \"attiva comfy\", \"metti in auto\", \"come sta?\".",
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 12,
+            Foreground = new SolidColorBrush(Microsoft.UI.Colors.Gray)
+        });
+        panel.Children.Add(input);
+        panel.Children.Add(reply);
+
+        var dialog = new ContentDialog
+        {
+            Title = "Chat laya",
+            Content = panel,
+            PrimaryButtonText = "Invia",
+            CloseButtonText = "Chiudi",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        bool dispatching = false;
+        dialog.PrimaryButtonClick += async (_, args) =>
+        {
+            // Mai chiudere sul click "Invia": resta aperto per la risposta.
+            args.Cancel = true;
+            var text = input.Text?.Trim() ?? string.Empty;
+            if (text.Length == 0 || dispatching) return;
+            dispatching = true;
+            reply.Text = "...";
+            reply.Visibility = Visibility.Visible;
+            try
+            {
+                var settings = AppSettingsStore.Load();
+                var payload = JsonSerializer.Serialize(new { text });
+                var (code, body) = await GatewayService.SendBridgeRequestAsync(
+                    settings, HttpMethod.Post, "/laya", payload, CancellationToken.None);
+                reply.Text = code == 0
+                    ? $"Bridge non raggiungibile ({GatewayService.BridgeBase(settings)})."
+                    : code is < 200 or > 299
+                        ? $"Bridge HTTP {code}."
+                        : ReadLayaReply(body);
+            }
+            catch (Exception ex)
+            {
+                reply.Text = $"Bridge non raggiungibile ({ex.Message})";
+            }
+            reply.Visibility = Visibility.Visible;
+            dispatching = false;
+        };
+        dialog.Closed += async (_, _) => await RefreshChatManagerStatusAsync();
+        if (XamlRoot is not null)
+        {
+            dialog.XamlRoot = XamlRoot;
+            try
+            {
+                await dialog.ShowAsync();
+            }
+            catch (Exception)
+            {
+                // Dialog già chiuso dal sistema: niente crash visuale.
+            }
+        }
+    }
+
+    private static string ReadLayaReply(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("reply", out var reply) &&
+                reply.ValueKind == JsonValueKind.String)
+            {
+                var text = reply.GetString();
+                return string.IsNullOrWhiteSpace(text) ? "Nessuna risposta." : text;
+            }
+        }
+        catch (JsonException)
+        {
+        }
+        return "Risposta illeggibile.";
+    }
+
+    private void ChatComfy_Click(object sender, RoutedEventArgs e)
+    {
+        ChatManagerFlyout.Hide();
+        Frame?.Navigate(typeof(ComfyPage));
+    }
+
+    private static string TruncateMenu(string value, int max) =>
+        string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : value.Length <= max ? value : value[..max];
+
+    private static string ReadManagerLastLine(string hint, ComfyStatusRecord status)
+    {
+        if (string.Equals(status.State, "ERROR", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(status.Error))
+        {
+            return $"Errore manager: {TruncateMenu(status.Error, 80)} (recovery AUTO attivo)";
+        }
+        return string.IsNullOrWhiteSpace(status.Hint)
+            ? status.StateLabel.Replace("  ", " ")
+            : TruncateMenu(status.Hint, 110);
     }
 
     private void ResetForNewChat()
