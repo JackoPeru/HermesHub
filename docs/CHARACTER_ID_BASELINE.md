@@ -67,7 +67,7 @@ Extra in ComfyUI models (non-H3): `seedvr2_3b_int8_convrot`, `qwen-image-2.1-UC-
 - Backend gateway impacchettato: `scripts/hermes_hub_gateway/` (API `bootstrap.py`, adapters, modules, protocol, triage, run_resume).
 - Hub live = upstream Hermes Agent (`~/.hermes/hermes-agent`, gateway v0.6.206, `gateway run` su porta **8642**).
 - Datastore esistenti (nessun DB dedicato ai media): `hub_state.sqlite3`, `hub_conversations.json`, `kanban.db`, `state.db` in `~/.hermes/` → **SQLite è la convenzione** (spec DB confermata).
-- Porte/API: hub 8642 · manager 8643 · tabby 8000 · TTS 8020 · STT 8010 · Comfy 8188 · laya 11435.
+- Porte/API: hub 8642 · manager 8643 · laya-bridge 8645 · tabby 8000 · TTS 8020 · STT 8010 · Comfy 8188 · laya 11435.
 - Output: `/opt/hermes/media-output/images|videos/<job_id>/` = master + `metadata.json` + derivati FFmpeg. **Il preset dei video H3 è il formato di output anche per preview/eval Character ID.**
 - Job system: coda manager + poll `GET /jobs/{id}` + `metadata.json` su disco (riavvio-safe). Recovery failure verificata (failed → cleanup → restore Qwen → `LLM_READY`).
 - Notifiche/progressi: `hub_notifications.json` + endpoint hub `GET/POST/PATCH /v1/hub/notifications` (l'app fa poll) → **sistema realtime da riusare per i progressi training** (niente WebSocket da costruire).
