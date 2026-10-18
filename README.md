@@ -1,4 +1,4 @@
-﻿<p align="center">
+<p align="center">
   <img src="src/NemoclawChat.Windows/Assets/ChatClawLogo.png" alt="Hermes Hub" width="112" />
 </p>
 
@@ -19,11 +19,11 @@
 
 <p align="center">
   <a href="https://github.com/JackoPeru/HermesHub/releases/latest"><strong>Scarica l'ultima release</strong></a>
-  Â·
+  ·
   <a href="#panoramica">Panoramica</a>
-  Â·
+  ·
   <a href="#come-funziona">Architettura</a>
-  Â·
+  ·
   <a href="#sviluppo">Sviluppo</a>
 </p>
 
@@ -36,12 +36,12 @@ Hermes Hub porta **Hermes Agent** fuori dal terminale e lo rende un ambiente ope
 | Chat agentica | Voce continua | Controllo operativo |
 |---|---|---|
 | Streaming live, reasoning separato, progressi reali e tool call leggibili. | VAD, Whisper STT e Kokoro TTS in una conversazione hands-free. | Stato gateway, hardware, cron, run, notifiche e servizi del server. |
-| **Spazi di lavoro** | **Media e artifact** | **ContinuitÃ ** |
+| **Spazi di lavoro** | **Media e artifact** | **Continuità** |
 | Progetti con contesto, istruzioni, memoria e conversazioni collegate. | Allegati, Visual Blocks, immagini, video e output persistenti versionati. | Archivio sincronizzato, ricerca globale e passaggio fluido tra dispositivi. |
 
 ## L'app
 
-### Windows Â· WinUI 3
+### Windows · WinUI 3
 
 Interfaccia desktop densa ma pulita: chat, cron, notifiche, server, prestazioni, audit, ricerca, voce, video e artifact restano raggiungibili dalla stessa sidebar.
 
@@ -49,11 +49,11 @@ Interfaccia desktop densa ma pulita: chat, cron, notifiche, server, prestazioni,
   <img src="docs/media/windows-voice.png" alt="Hermes Hub su Windows - Voce" width="82%" />
 </p>
 
-<p align="center"><sub>ModalitÃ  Voce nella release Windows 0.6.162.</sub></p>
+<p align="center"><sub>Modalità Voce nella release Windows 0.6.162.</sub></p>
 
-### Android Â· Jetpack Compose
+### Android · Jetpack Compose
 
-La stessa esperienza in mobilitÃ , con navigazione pensata per il touch, azioni rapide, modalitÃ  Voce immersiva e Jarvis Mode vocale-visiva.
+La stessa esperienza in mobilità, con navigazione pensata per il touch, azioni rapide, modalità Voce immersiva e Jarvis Mode vocale-visiva.
 
 <p align="center">
   <img src="docs/media/android-navigation.png" alt="Hermes Hub su Android - Navigazione" width="31%" />
@@ -61,7 +61,7 @@ La stessa esperienza in mobilitÃ , con navigazione pensata per il touch, azion
   <img src="docs/media/android-voice.png" alt="Hermes Hub su Android - Voce" width="31%" />
 </p>
 
-<p align="center"><sub>Navigazione globale, workspace Progetti e modalitÃ  Voce nella release Android 0.6.162.</sub></p>
+<p align="center"><sub>Navigazione globale, workspace Progetti e modalità Voce nella release Android 0.6.162.</sub></p>
 
 ### Salute Galaxy Watch
 
@@ -71,15 +71,15 @@ Il telefono puo' inviare a Hermes i riepiloghi giornalieri scelti dall'utente: p
 
 ```mermaid
 flowchart LR
-    W["Windows Â· WinUI 3"] -->|Hermes Native / Responses| G["Gateway Linux Â· :8642"]
-    A["Android Â· Jetpack Compose"] -->|Tailnet / LAN privata| G
+    W["Windows · WinUI 3"] -->|Hermes Native / Responses| G["Gateway Linux · :8642"]
+    A["Android · Jetpack Compose"] -->|Tailnet / LAN privata| G
     G --> H["Hermes Agent"]
     H --> M["Modello locale"]
     H --> T["Strumenti e automazioni"]
     H --> D["Memoria e workspace"]
 ```
 
-Hermes Hub Ã¨ un **thin client**. Non sostituisce il loop agente e non duplica memoria o policy: coordina tutte le superfici attraverso il gateway Linux del server.
+Hermes Hub è un **thin client**. Non sostituisce il loop agente e non duplica memoria o policy: coordina tutte le superfici attraverso il gateway Linux del server.
 
 - protocollo preferito: `hermes-native` / Responses;
 - modello operativo: `hermes-agent`;
@@ -92,10 +92,10 @@ Hermes Hub Ã¨ un **thin client**. Non sostituisce il loop agente e non duplica
 
 Una nuova installazione non contiene IP, hostname o credenziali. Configura il tuo endpoint, preferibilmente con MagicDNS, ad esempio:
 
-1. `http://<nome-magicdns>:8642/v1` â€” nome corto MagicDNS;
-2. `http://<host>.<tailnet-name>.ts.net:8642/v1` â€” FQDN MagicDNS.
+1. `http://<nome-magicdns>:8642/v1` — nome corto MagicDNS;
+2. `http://<host>.<tailnet-name>.ts.net:8642/v1` — FQDN MagicDNS.
 
-Gli aggiornamenti mantengono endpoint, token e dati giÃ  salvati dalla versione precedente. Il reset o una nuova installazione partono invece senza dati operativi. HTTP cleartext Ã¨ una scelta intenzionale esclusivamente per reti private Tailnet/LAN.
+Gli aggiornamenti mantengono endpoint, token e dati già salvati dalla versione precedente. Il reset o una nuova installazione partono invece senza dati operativi. HTTP cleartext è una scelta intenzionale esclusivamente per reti private Tailnet/LAN.
 
 </details>
 
@@ -111,7 +111,7 @@ Scarica gli asset dalla pagina [Releases](https://github.com/JackoPeru/HermesHub
 | Android | `HermesHub-X.Y.Z-android.apk` | Android 10.0 / API 29 o successiva |
 | Server Linux | `HermesHub-X.Y.Z-linux-gateway.tar.gz` | Hermes Agent, systemd e rete Tailnet/LAN |
 
-Per installazione e configurazione del gateway consulta la [guida Linux](docs/hermes-hub-linux.md). I client conservano compatibilitÃ  con dati, identitÃ  pacchetto e aggiornamenti delle release precedenti.
+Per installazione e configurazione del gateway consulta la [guida Linux](docs/hermes-hub-linux.md). I client conservano compatibilità con dati, identità pacchetto e aggiornamenti delle release precedenti.
 
 ## Principi del progetto
 
@@ -148,7 +148,7 @@ $env:META_DAT_CLIENT_TOKEN = "<client token Meta>"
 
 Lo script fallisce se DAT, credenziali, classi finali, `minSdk 29`, versione o firma storica non sono corretti. La variante senza DAT resta disponibile soltanto per sviluppo esplicito e non deve essere pubblicata.
 
-La CI usa una modalitÃ  separata `-CiValidation`, che verifica l'intera compilazione DAT ma genera un file `*-DAT-validation-only.apk`: questo file non Ã¨ un asset di release valido.
+La CI usa una modalità separata `-CiValidation`, che verifica l'intera compilazione DAT ma genera un file `*-DAT-validation-only.apk`: questo file non è un asset di release valido.
 
 ### Gateway e contratti
 
@@ -193,10 +193,10 @@ docs/                       Guide tecniche e operative
 
 <p align="center">
   <a href="https://github.com/JackoPeru/HermesHub/releases/latest">Release</a>
-  Â·
+  ·
   <a href="https://github.com/JackoPeru/HermesHub/issues">Issue</a>
-  Â·
+  ·
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-Versione corrente: `0.6.276`.
+Versione corrente: `0.6.277`.

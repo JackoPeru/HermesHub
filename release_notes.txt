@@ -1,10 +1,13 @@
-Hermes Hub 0.6.276 (fix archivio hub oltre 10 MB + retry auth puliti)
+Hermes Hub 0.6.277 (audit totale: sicurezza, cap server, robustezza)
 
-- Windows: ChatArchiveSync tornato operativo: GET /v1/hub/conversations e POST import ora accettano risposte oltre 10 MB (cap dedicato a 32 MB); l'archivio condiviso include conversazioni bot/Jarvis mirrorate da SQLiteHubStateStore e ha superato il vecchio limite, bloccando pull/push/events con "Risposta gateway oltre il limite di 10240 KB".
-- Windows: il poller events/archivio non riprova piu senza Authorization quando esiste una chiave gateway salvata: era la causa dei ~1800 rifiuti 401/giorno nel log hub (impatto nullo sul canale autenticato, ma log inquinati e storm di retry inutili).
-- Android: nessuna modifica di codice rispetto a 0.6.274 (bump di versionName/versionCode per allineamento di release; cap archivio Android gia a 64 MB).
-- Versioni: Windows/AdminBridge 0.6.276; Android versionName 0.6.276, versionCode 280.
-- Asset ufficiali: APK Android HermesHub-0.6.276-android.apk; MSIX NemoclawChat.Windows_0.6.276.0_x64.msix; gateway Linux HermesHub-0.6.276-linux-gateway.tar.gz.
-- SHA-256 Android: `275cd1b43c6bc6900d57402a0df8d525633ce4f81dd74c55ffa0512514d38f13`.
-- SHA-256 MSIX: `49c186b4e1f7fab4dc133419a532c9fe8170d4c3bbcd3ec4a3bb10372700b57c`.
-- SHA-256 gateway Linux: `c27df4a084daefd262f73a12ec9aed507b346400a3c8a32d5568ba3c29020c7a`.
+- Android: nessuna chiave API compilata nel APK (rimossa dal BuildConfig): il primo avvio chiede la chiave dal setup e la salva in AndroidKeyStore una volta sola; le installazioni esistenti continuano a funzionare con la chiave gia salvata.
+- Android: retry auth unificato fail-closed (firma unica shouldRetryHermesWithBearerAuth(code, body, token)) su archive sync, sessioni Hermes e diagnostic probe; session key stabile spostata nel segreto cifrato AndroidKeyStore con migrazione automatica dal plaintext legacy; gli eventi gateway raw non finiscono piu nell'activity log (redaction contrattuale gia in ChatStream).
+- Windows: self-update ora verifica lo SHA-256 della release scaricando il file .sha256 pubblicato a fianco dell'asset; lo script di installazione usa nome random (niente TOCTOU su path fisso); nuova cache della chiave PasswordVault con TTL 30 minuti e invalidazione su 401 invalid_api_key; watchdog SSE di 90 secondi sul canale events dell'archivio; reader HTTP bounded condiviso in sostituzione delle 4 copie private; dispose differito dei CTS tra turni di gruppo; assegnazioni bot in HomePage senza blocchi duplicati.
+- Gateway server: GET /v1/hub/conversations supporta paging con cursor e budget byte (413 se un record singolo eccede il budget); GET /v1/hub/sync viene serializzato fuori dall'event loop con budget byte e progression garantita; pruning SQLite del change-log e dei tombstone oltre retention a intervalli 6 ore; chmod 0600 esteso a WAL/SHM; cooldown configurabile su /v1/hub/server/action|maintenance; copia triage.py verificata byte-identica nel test.
+- Test: suite estesa con paginazione archivio, budget byte sync, prune, drift triage (742+ test).
+- Versioni: Windows/AdminBridge 0.6.277; Android versionName 0.6.277, versionCode 281.
+- Asset ufficiali: APK Android HermesHub-0.6.277-android.apk; MSIX NemoclawChat.Windows_0.6.277.0_x64.msix; gateway Linux HermesHub-0.6.277-linux-gateway.tar.gz.
+- SHA-256 Android: `a0518c2c795d5750a5588c7c787bf6c7defdcaf05322ce886a2d35081ce0a3a9`.
+- SHA-256 MSIX: `ab3972c30a730dcb9db412c13b038941be41211a65e785e1b713dbe95283a397`.
+- SHA-256 gateway Linux: `0e7c0fdc41726b348d7b699ac61d36bdd34bd500adfbcb0c5906de2710940193`.
+- Nota deploy: il gateway sul server NON viene aggiornato con questa release (l'agente sta lavorando, nessun riavvio dell'hub); quando sarai pronto per mandarlo in produzione conferma e procedo al deploy.

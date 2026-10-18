@@ -2,6 +2,14 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.277 - 2026-10-18
+
+- Audit totale di applicazione, backend e manager: sicurezza, cap server-side e robustezza stream.
+- Android: chiave API rimossa dal build ( APK senza segreti ); retry auth fail-closed unificato; session key nel KeyStore; redaction raw eventi in activity log.
+- Windows: self-update con verifica SHA-256 della release e script installazione a nome random; cache chiave PasswordVault; watchdog SSE 90 s; bounded reader condiviso.
+- Gateway: paging cursor + budget byte su `/v1/hub/conversations`, sync fuori dall'event loop con budget byte, pruning change-log, chmod WAL/SHM, cooldown sui control endpoint; triage copia byte-identica (test).
+- Deploy del gateway sul server rinviato (agente attivo; l'update verra' mandato in produzione su conferma dell'utente).
+
 ## 0.6.276 - 2026-10-18
 
 - Windows: fix ChatArchiveSync: cap dedicato a 32 MB per GET `hub/archivio` e POST import; l'archivio condiviso (con mirror bot/Jarvis da SQLiteHubStateStore) ha superato i 10 MB e bloccava pull/push/events.
