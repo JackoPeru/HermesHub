@@ -32,7 +32,19 @@ class SQLiteHubStateStore(HubStateStore):
                     os.chmod(self.path, 0o600)
             except OSError:
                 pass
+            self._enforce_private_files()
         self._migrate()
+
+    def _enforce_private_files(self) -> None:
+        """Keep the sqlite file and its WAL/SHM siblings owner-only when possible."""
+
+        try:
+            base = Path(self.path).expanduser()
+            for candidate in (base, base.with_name(base.name + "-wal"), base.with_name(base.name + "-shm")):
+                if candidate.exists():
+                    os.chmod(candidate, 0o600)
+        except OSError:
+            pass
 
     def _connect(self) -> sqlite3.Connection:
         if self.path == ":memory:" and self._memory_connection is not None:
@@ -213,17 +225,26 @@ class SQLiteHubStateStore(HubStateStore):
         *,
         include_deleted: bool = True,
         limit: int = 1_000,
+        after_updated_at: int | None = None,
+        after_entity_id: str | None = None,
     ) -> tuple[HubRecord, ...]:
         normalized_type = str(entity_type).strip()
         if not normalized_type:
             raise ValueError("entity_type is required")
         bounded_limit = max(1, min(int(limit), 10_000))
         predicate = "" if include_deleted else " AND deleted = 0"
+        params: list[object] = [normalized_type]
+        if after_updated_at is not None or after_entity_id:
+            anchor_updated = int(after_updated_at or 0)
+            anchor_entity = str(after_entity_id or "")
+            predicate += " AND (updated_at < ? OR (updated_at = ? AND entity_id > ?))"
+            params.extend([anchor_updated, anchor_updated, anchor_entity])
+        params.append(bounded_limit)
         with self._connection() as connection:
             rows = connection.execute(
                 "SELECT * FROM hub_entities WHERE entity_type = ?"
                 f"{predicate} ORDER BY updated_at DESC, entity_id ASC LIMIT ?",
-                (normalized_type, bounded_limit),
+                tuple(params),
             ).fetchall()
         return tuple(self._record(row) for row in rows)
 
@@ -270,3 +291,50 @@ class SQLiteHubStateStore(HubStateStore):
         with self._connection() as connection:
             row = connection.execute("SELECT COALESCE(MAX(revision), 0) FROM hub_changes").fetchone()
         return int(row[0])
+
+    def prune(
+        self,
+        *,
+        tombstone_older_than_ms: int = 0,
+        keep_change_rows: int = 100_000,
+    ) -> dict[str, int]:
+        """Drop expired tombstones and trim the change-log so the file stays bounded.
+
+        Hard-deleting tombstones follows the same retention contract as the
+        read path: clients offline longer than the retention window already
+        see filtered payloads, so removing stale rows only reclaims disk.
+        """
+
+        keep = max(10_000, int(keep_change_rows))
+        cutoff = max(0, int(tombstone_older_than_ms))
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                pruned_tombstones = connection.execute(
+                    "DELETE FROM hub_entities "
+                    "WHERE deleted = 1 AND updated_at > 0 AND updated_at < ?",
+                    (cutoff,) if cutoff else (),
+                ).rowcount if cutoff else 0
+                total = connection.execute("SELECT COUNT(*) FROM hub_changes").fetchone()[0]
+                pruned_changes = connection.execute(
+                    "DELETE FROM hub_changes WHERE revision <= "
+                    "(SELECT COALESCE(MAX(revision), 0) FROM hub_changes) - ?",
+                    (keep,),
+                ).rowcount if int(total) > keep else 0
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        kept = self.current_revision()
+        if kept > 0 and self.path != ":memory:":
+            try:
+                with self._connection() as connection:
+                    connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error:
+                pass
+        self._enforce_private_files()
+        return {
+            "kept_revision": kept,
+            "pruned_tombstones": int(pruned_tombstones),
+            "pruned_change_rows": int(pruned_changes),
+        }

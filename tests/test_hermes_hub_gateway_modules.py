@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import sys
 import tempfile
 import time
@@ -933,6 +934,157 @@ class BotProfilesContractTests(unittest.TestCase):
         self.assertEqual("alpha", result["member_failures"][0]["profile"])
         self.assertEqual("Risposta sana", result["reply"])
         self.assertEqual(1, calls.count("alpha"))
+
+
+class HubArchivePagingTests(unittest.TestCase):
+    """Cursor paging, byte budgets and pruning for the bulk archive payloads."""
+
+    def _seed(self, root: Path, count: int) -> "HubRuntimeStore":
+        runtime = HubRuntimeStore(root / "hub.sqlite3")
+        source = root / "hub_conversations.json"
+        source.write_text(json.dumps({"items": []}), encoding="utf-8")
+        base = int(time.time() * 1000) - 1_000_000
+        items = [
+            {
+                "id": f"seed-{index:04d}",
+                "title": f"Conversazione {index}",
+                "body": "x" * 2_000,
+                "updatedAt": base + index,
+            }
+            for index in range(count)
+        ]
+        runtime.merge_conversations(source, items)
+        return runtime
+
+    def test_more_bytes_paginates_and_cursor_completes_the_series(self):
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = self._seed(root, 12)
+            source = root / "hub_conversations.json"
+
+            with mock.patch.dict(os.environ, {"HERMES_HUB_ARCHIVE_MAX_BYTES": "9000"}, clear=False):
+                full = runtime.conversations_payload(source)
+                self.assertTrue(full["truncated"])
+                self.assertTrue(full["next_cursor"])
+                pages = [full]
+                cursor = full["next_cursor"]
+                guard = 0
+                while cursor and guard < 40:
+                    guard += 1
+                    page = runtime.conversations_payload(source, cursor=cursor)
+                    pages.append(page)
+                    cursor = page["next_cursor"]
+
+            collected = [item["id"] for page in pages for item in page["items"]]
+            self.assertEqual(12, len(collected))
+            self.assertEqual(len(set(collected)), len(collected))
+
+    def test_cursor_is_deterministic_and_invalid_cursor_raises_value_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = self._seed(root, 5)
+            source = root / "hub_conversations.json"
+            first = runtime.conversations_payload(source, max_bytes=4000)
+            second = runtime.conversations_payload(source, max_bytes=4000)
+            self.assertEqual(first["next_cursor"], second["next_cursor"])
+            with self.assertRaises(ValueError):
+                runtime.conversations_payload(source, cursor="@@not-a-cursor@@")
+            restored = runtime.conversations_payload(source)
+            self.assertFalse(restored["truncated"])
+            self.assertIsNone(restored["next_cursor"])
+
+    def test_merge_import_response_stays_full_and_unpaged(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = self._seed(root, 4)
+            source = root / "hub_conversations.json"
+            merged = runtime.merge_conversations(
+                source, [{"id": "extra-1", "title": "Extra", "updatedAt": int(time.time() * 1000)}]
+            )
+            self.assertEqual(5, len(merged["items"]))
+            self.assertNotIn("truncated", merged)
+            self.assertNotIn("next_cursor", merged)
+
+    def test_whole_record_larger_than_budget_raises_overflow(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = HubRuntimeStore(root / "hub.sqlite3")
+            source = root / "hub_conversations.json"
+            source.write_text(json.dumps({"items": []}), encoding="utf-8")
+            big = {"id": "huge", "title": "Enorme", "body": "y" * 5_000, "updatedAt": int(time.time() * 1000)}
+            runtime.merge_conversations(source, [big])
+            with self.assertRaises(OverflowError):
+                runtime.conversations_payload(source, max_bytes=100)
+
+    def test_change_log_byte_budget_keeps_progression_with_has_more(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = self._seed(root, 20)
+            source_path = root / "hub_conversations.json"
+            with mock.patch.dict(os.environ, {"HERMES_HUB_ARCHIVE_MAX_BYTES": "0"}, clear=False):
+                baseline = runtime.changes_since(0)
+            self.assertFalse(baseline["has_more"])
+            self.assertGreater(len(baseline["changes"]), 4)
+
+            trimmed = None
+            cursor_revision = 0
+            rounds = 0
+            while rounds < 60:
+                rounds += 1
+                page = runtime.changes_since(cursor_revision, max_bytes=800)
+                trimmed = page
+                for item in page["changes"]:
+                    self.assertGreater(int(item["revision"]), cursor_revision)
+                cursor_revision = int(page["next_revision"])
+                if not page["has_more"]:
+                    break
+            self.assertIsNotNone(trimmed)
+            self.assertGreater(rounds, 1)
+            self.assertTrue(trimmed["changes"])
+
+    def test_prune_drops_expired_tombstones_and_trims_change_log(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = HubRuntimeStore(root / "hub.sqlite3")
+            source = root / "hub_conversations.json"
+            source.write_text(json.dumps({"items": []}), encoding="utf-8")
+            now_ms = int(time.time() * 1000)
+            runtime.merge_conversations(
+                source,
+                [
+                    # Tombstone already at creation time with an old updatedAt:
+                    # the entity row inherits that timestamp, so retention can
+                    # hard-delete it.
+                    {
+                        "id": "tomb-old",
+                        "title": "Vecchia",
+                        "updatedAt": now_ms - 40_000_000,
+                        "deletedAt": now_ms - 40_000_000,
+                    },
+                    {"id": "alive", "title": "Viva", "updatedAt": now_ms},
+                ],
+            )
+            report = runtime.sqlite.prune(
+                tombstone_older_than_ms=now_ms - 10_000_000,
+                keep_change_rows=100_000,
+            )
+            self.assertEqual(1, report["pruned_tombstones"])
+            remaining = {record.entity_id for record in runtime.sqlite.list_records("conversation")}
+            self.assertEqual({"alive"}, remaining)
+
+    def test_prune_setting_env_defaults_offline_safe(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = self._seed(root, 3)
+            pre = runtime.sqlite.current_revision()
+            with mock.patch.dict(
+                os.environ, {"HERMES_HUB_PRUNE_INTERVAL_SECONDS": "0"}, clear=False
+            ):
+                runtime._last_prune_monotonic = 0.0
+                runtime._maybe_prune()
+            self.assertEqual(pre, runtime.sqlite.current_revision())
 
 
 if __name__ == "__main__":

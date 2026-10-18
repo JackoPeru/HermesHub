@@ -264,7 +264,10 @@ class ProtocolContractTests(unittest.TestCase):
         self.assertIn("SendBotGroupTurnOnConnectionAsync", windows_orchestration)
         self.assertIn("original_user_message", windows_orchestration)
         self.assertIn("BuildFollowUpPrompt", windows_orchestration)
-        self.assertIn("previous.Cancellation.Dispose()", windows_orchestration)
+        # Il dispose del CTS del turno rimpiazzato e differito: il token del
+        # turno precedente puo' essere ancora in lettura (ObjectDisposedException).
+        self.assertIn("previousSource.Dispose()", windows_orchestration)
+        self.assertIn("Dispose differito: il turno precedente potrebbe ancora", windows_orchestration)
         self.assertIn("failedIdentities", windows_orchestration)
         self.assertIn('"member_failures"', windows_orchestration)
         self.assertIn("normalizedMembers", windows_store)

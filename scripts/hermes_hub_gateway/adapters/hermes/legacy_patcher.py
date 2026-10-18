@@ -1453,7 +1453,10 @@ def _hermes_hub_conversation_io(action, payload=None):
         _hermes_hub_conversation_io_lock = _threading.RLock()
     with _hermes_hub_conversation_io_lock:
         if action == "get":
-            return _hermes_hub_conversations_payload()
+            query = payload if isinstance(payload, dict) else {}
+            cursor = query.get("cursor") if isinstance(query.get("cursor"), str) else None
+            max_bytes = query.get("max_bytes") if isinstance(query.get("max_bytes"), (int, float)) else None
+            return _hermes_hub_conversations_payload(cursor, max_bytes)
         if action in {"put", "import"}:
             result = _hermes_hub_merge_conversations(payload if isinstance(payload, list) else [])
         elif action == "delete":
@@ -2050,15 +2053,28 @@ def _hermes_hub_transcribe_file(path, beam_size=None):
         _hermes_hub_bind_request_context(request)
         if auth_error is not None:
             return auth_error
+        cursor_value = request.query.get("cursor") or ""
+        max_bytes_raw = request.query.get("max_bytes") or ""
+        try:
+            query_payload = {
+                "cursor": cursor_value,
+                "max_bytes": int(max_bytes_raw) if max_bytes_raw else None,
+            }
+        except (TypeError, ValueError):
+            return web.json_response({"error": "max_bytes must be a non-negative integer"}, status=400)
         try:
             loop = asyncio.get_running_loop()
             payload = await asyncio.wait_for(
-                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_conversation_io, "get", None),
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_conversation_io, "get", dict(query_payload)),
                 timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 30, 2, 300),
             )
             return web.json_response(payload)
         except asyncio.TimeoutError:
             return web.json_response({"error": "Conversation store timed out"}, status=504)
+        except ValueError as exc:
+            return web.json_response({"error": "Invalid archive cursor", "detail": str(exc)}, status=400)
+        except OverflowError as exc:
+            return web.json_response({"error": "Archive response exceeds configured byte budget", "detail": str(exc)}, status=413)
         except Exception as exc:
             return web.json_response({"error": "Conversation store unavailable", "detail": str(exc)}, status=500)
 '''
@@ -5253,7 +5269,7 @@ def _hermes_hub_bind_request_context(request):
     _hermes_hub_request_context(request)
 
 
-def _hermes_hub_sync_payload(since, limit=500):
+def _hermes_hub_sync_payload(since, limit=500, max_bytes=None):
     runtime = _hermes_hub_gateway_runtime_store()
     if runtime is None:
         return {
@@ -5266,7 +5282,7 @@ def _hermes_hub_sync_payload(since, limit=500):
             "storage": "json-legacy",
             "changes": [],
         }
-    return runtime.changes_since(since, limit)
+    return runtime.changes_since(since, limit, max_bytes=max_bytes)
 
 
 _hermes_hub_legacy_conversations_payload = _hermes_hub_conversations_payload
@@ -5278,11 +5294,13 @@ _hermes_hub_legacy_delete_state = _hermes_hub_delete_state
 _hermes_hub_legacy_event_payload = _hermes_hub_conversation_event_payload
 
 
-def _hermes_hub_conversations_payload():
+def _hermes_hub_conversations_payload(cursor=None, max_bytes=None):
     runtime = _hermes_hub_gateway_runtime_store()
     if runtime is not None:
         return runtime.conversations_payload(
-            _hermes_hub_sqlite_source("HERMES_HUB_CONVERSATIONS_PATH", "hub_conversations.json")
+            _hermes_hub_sqlite_source("HERMES_HUB_CONVERSATIONS_PATH", "hub_conversations.json"),
+            cursor=cursor,
+            max_bytes=max_bytes,
         )
     return _hermes_hub_legacy_conversations_payload()
 
@@ -5382,18 +5400,44 @@ def _hermes_hub_conversation_event_payload(reason, result=None):
         try:
             since = int(request.query.get("since", request.query.get("revision", "0")) or 0)
             limit = int(request.query.get("limit", "500") or 500)
+            max_bytes_raw = request.query.get("max_bytes") or ""
+            max_bytes = int(max_bytes_raw) if max_bytes_raw else None
         except (TypeError, ValueError):
-            return web.json_response({"error": "since and limit must be integers"}, status=400)
-        if since < 0 or limit < 1:
-            return web.json_response({"error": "since must be non-negative and limit must be positive"}, status=400)
+            return web.json_response({"error": "since, limit and max_bytes must be integers"}, status=400)
+        if since < 0 or limit < 1 or (max_bytes is not None and max_bytes < 0):
+            return web.json_response(
+                {"error": "since must be non-negative and limit/max_bytes must be non-negative"}, status=400
+            )
         try:
-            return web.json_response(_hermes_hub_sync_payload(since, limit))
+            # Serialize off the event loop: large payloads and hub_changes SELECTs
+            # must not stall concurrent SSE/chat streams.
+            loop = asyncio.get_running_loop()
+            payload = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_sync_payload, since, limit, max_bytes),
+                timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 120, 5, 900),
+            )
+            return web.json_response(payload)
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Hub sync timed out"}, status=504)
         except Exception as exc:
             return web.json_response({"error": "Hub sync unavailable", "detail": str(exc)[:240]}, status=503)
 
 '''
     handler_anchor = '    async def _handle_models(self, request: "web.Request") -> "web.Response":'
-    if "async def _handle_get_hub_sync" not in text:
+    if "async def _handle_get_hub_sync" in text:
+        # Desired-state upgrade: regenerate an existing handler so older
+        # installs pick up the executor paging without reinstalling from scratch.
+        desired_handler = handler.rstrip() + "\n\n"
+        start = text.find("    async def _handle_get_hub_sync")
+        if start >= 0:
+            end = text.find("\n    async def ", start + 4)
+            if end < 0:
+                end = len(text)
+            existing = text[start:end]
+            if existing.strip() != desired_handler.strip():
+                text = text.replace(existing, desired_handler, 1)
+                changes.append("Hub sync endpoint executor paging")
+    else:
         text, _ = _replace_once(text, handler_anchor, handler + handler_anchor, "Hub sync endpoint handler")
         changes.append("Hub sync endpoint handler")
 
@@ -9454,7 +9498,27 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             body = await request.json()
         except Exception:
             body = {}
-        result = await asyncio.to_thread(_hermes_hub_server_control_action, body if isinstance(body, dict) else {})
+        body_dict = body if isinstance(body, dict) else {}
+        gate = globals().setdefault("_hermes_hub_control_last_attempt", {})
+        action_name = str(body_dict.get("action") or "")[:64]
+        try:
+            min_interval = float(os.environ.get("HERMES_HUB_CONTROL_COOLDOWN_SECONDS", "5").strip() or "5.0")
+        except (TypeError, ValueError):
+            min_interval = 5.0
+        import time as _time
+        now = _time.monotonic()
+        last_attempt = gate.get(action_name or "action", -1.0e9)
+        if min_interval > 0 and now - last_attempt < min_interval:
+            return web.json_response(
+                {
+                    "error": "rate limited",
+                    "action": action_name,
+                    "retry_after_seconds": round(min_interval - (now - last_attempt), 3),
+                },
+                status=429,
+            )
+        gate[action_name or "action"] = now
+        result = await asyncio.to_thread(_hermes_hub_server_control_action, body_dict)
         return web.json_response(result, status=403 if result.get("status") == "denied" else 200)
 
     async def _handle_hub_server_maintenance(self, request: "web.Request") -> "web.Response":
@@ -9465,7 +9529,27 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             body = await request.json()
         except Exception:
             body = {}
-        return web.json_response(await asyncio.to_thread(_hermes_hub_server_maintenance, body if isinstance(body, dict) else {}))
+        body_dict = body if isinstance(body, dict) else {}
+        gate = globals().setdefault("_hermes_hub_control_last_attempt", {})
+        task_name = str(body_dict.get("task") or body_dict.get("action") or "")[:64]
+        try:
+            min_interval = float(os.environ.get("HERMES_HUB_CONTROL_COOLDOWN_SECONDS", "5").strip() or "5.0")
+        except (TypeError, ValueError):
+            min_interval = 5.0
+        import time as _time
+        now = _time.monotonic()
+        last_attempt = gate.get("maintenance:" + (task_name or "task"), -1.0e9)
+        if min_interval > 0 and now - last_attempt < min_interval:
+            return web.json_response(
+                {
+                    "error": "rate limited",
+                    "task": task_name,
+                    "retry_after_seconds": round(min_interval - (now - last_attempt), 3),
+                },
+                status=429,
+            )
+        gate["maintenance:" + (task_name or "task")] = now
+        return web.json_response(await asyncio.to_thread(_hermes_hub_server_maintenance, body_dict))
 
     async def _handle_models(self, request: "web.Request") -> "web.Response":''',
             "server control endpoint handlers",
