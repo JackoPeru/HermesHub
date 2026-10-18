@@ -191,70 +191,16 @@ public sealed partial class ArchivePage : Page
 
     private Button CreateResultCard(ArchiveItem item)
     {
-        return new Button
+        var glyph = item.Kind switch
         {
-            Tag = item,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Padding = new Thickness(0),
-            Background = (Brush)Application.Current.Resources["SurfaceBrush"],
-            BorderBrush = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(255, 58, 58, 58)),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
-            Content = new Border
-            {
-                Padding = new Thickness(18),
-                Child = new StackPanel
-                {
-                    Spacing = 8,
-                    Children =
-                    {
-                        new Grid
-                        {
-                            ColumnDefinitions =
-                            {
-                                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
-                                new ColumnDefinition { Width = GridLength.Auto }
-                            },
-                            Children =
-                            {
-                                new TextBlock
-                                {
-                                    Text = item.Title,
-                                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-                                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-                                },
-                                CreateKindPill(item.Kind)
-                            }
-                        },
-                        new TextBlock
-                        {
-                            Text = item.Description,
-                            Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
-                            TextWrapping = TextWrapping.WrapWholeWords
-                        }
-                    }
-                }
-            }
-        }.WithClick(SelectItem_Click);
-    }
-
-    private static Border CreateKindPill(string kind)
-    {
-        var pill = new Border
-        {
-            Padding = new Thickness(10, 4, 10, 4),
-            Background = (Brush)Application.Current.Resources["AssistantBubbleBrush"],
-            CornerRadius = new CornerRadius(12),
-            Child = new TextBlock
-            {
-                Text = kind,
-                Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
-                FontSize = 12
-            }
+            "Task" => "\uE7BE",
+            "Progetto" => "\uE8F1",
+            _ => "\uE8BD"
         };
-        Grid.SetColumn(pill, 1);
-        return pill;
+        var row = PremiumRows.LabeledRow(glyph, item.Title, item.Description);
+        var button = PremiumRows.RowButton(row);
+        button.Tag = item;
+        return button.WithClick(SelectItem_Click);
     }
 
     private string SelectedFilter()

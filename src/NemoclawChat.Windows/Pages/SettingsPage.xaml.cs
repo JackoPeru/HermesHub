@@ -39,6 +39,7 @@ public sealed partial class SettingsPage : Page
         VoiceModelBox.Text = settings.VoiceModel;
         VideoLibraryPathBox.Text = settings.VideoLibraryPath;
         NewsLibraryPathBox.Text = settings.NewsLibraryPath;
+        ImageLibraryPathBox.Text = settings.ImageLibraryPath;
         ActiveProjectNameBox.Text = settings.ActiveProjectName;
         MaxAttachmentMbBox.Value = settings.MaxAttachmentMb;
         StrictNativeModeSwitch.IsOn = settings.StrictNativeMode;
@@ -164,6 +165,7 @@ public sealed partial class SettingsPage : Page
             VoiceModel = VoiceModelBox.Text.Trim(),
             VideoLibraryPath = VideoLibraryPathBox.Text.Trim(),
             NewsLibraryPath = NewsLibraryPathBox.Text.Trim(),
+            ImageLibraryPath = ImageLibraryPathBox.Text.Trim(),
             ActiveProjectId = existing.ActiveProjectId,
             ActiveProjectName = existing.ActiveProjectName,
             AccessMode = SelectedComboText(AccessModeBox),

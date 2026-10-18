@@ -22,7 +22,19 @@ public sealed partial class SearchPage : Page
         ResultsPanel.Children.Clear();
         foreach (var result in visible)
         {
-            var button = new Button { Tag = result, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(14), Content = new StackPanel { Spacing = 4, Children = { new TextBlock { Text = $"{result.Kind} · {result.Title}", Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold }, new TextBlock { Text = result.Snippet, Foreground = (Brush)Application.Current.Resources["MutedTextBrush"], TextWrapping = TextWrapping.Wrap } } } };
+            var glyph = result.Kind switch
+            {
+                "Task" => "\uE7BE",
+                "Progetto" => "\uE8F1",
+                "Artifact" => "\uE160",
+                "Cron" => "\uE7BE",
+                "Notifica" => "\uE7B8",
+                "Memoria" => "\uE1C6",
+                _ => "\uE8BD"
+            };
+            var row = PremiumRows.LabeledRow(glyph, $"{result.Kind} · {result.Title}", result.Snippet);
+            var button = PremiumRows.RowButton(row);
+            button.Tag = result;
             button.Click += Open_Click; ResultsPanel.Children.Add(button);
         }
         StatusText.Text = $"{visible.Count} risultati.";

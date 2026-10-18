@@ -220,6 +220,11 @@ public sealed record HardwareSnapshot(
 public static class GatewayService
 {
     private const int MaxBufferedResponseBytes = 10 * 1024 * 1024;
+
+    // L'archivio hub (GET /v1/hub/conversations e POST import) oggi supera i 10 MB:
+    // conversazioni bot/jarvis mirrorate dal SQLiteHubStateStore spingono oltre il
+    // limite base. Cap dedicato piu' generoso solo per gli endpoint archivio.
+    private const int MaxHubArchiveResponseBytes = 32 * 1024 * 1024;
     private const int MaxErrorResponseBytes = 64 * 1024;
     private static readonly TimeSpan RuntimeInfoPollTimeout = TimeSpan.FromSeconds(5);
     private static readonly string[] PlugAndPlayGatewayHosts = [];
@@ -1777,7 +1782,8 @@ public static class GatewayService
         });
         var response = await SendBufferedAsync(
             token => BuildJsonRequest(HttpMethod.Post, ResolveHermesUri(settings, "/v1/hub/conversations/import"), payload, token),
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            maxBytes: MaxHubArchiveResponseBytes);
         return response.IsSuccessStatusCode
             ? new HubOperationResult(true, "Archivio caricato sul gateway.")
             : new HubOperationResult(false, $"Archivio server non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}");
@@ -1792,7 +1798,8 @@ public static class GatewayService
             await EnsureReachableGatewayAsync(settings, cancellationToken);
             var response = await SendBufferedAsync(
                 token => BuildRequest(HttpMethod.Get, ResolveHermesUri(settings, "/v1/hub/conversations"), token),
-                cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken,
+                maxBytes: MaxHubArchiveResponseBytes);
             if (!response.IsSuccessStatusCode)
             {
                 return new HubConversationsResult([], $"Archivio server non disponibile: HTTP {response.StatusCode} {ExtractHumanError(response.Body)}");
@@ -2242,6 +2249,154 @@ public static class GatewayService
             : api;
     }
 
+    /// <summary>
+    /// Base GPU-manager: deriva dal gateway con port-swap verso :8643
+    /// (stesso contratto di gpuManagerBase del client Android). Chiave =
+    /// stesso secret gateway (hubkey = mgrkey), mai hardcoded.
+    /// </summary>
+    public static string ManagerBase(AppSettings settings) => SwapServicePort(settings, 8643);
+
+    /// <summary>
+    /// Base ComfyUI diretto: deriva dal gateway con port-swap verso :8188.
+    /// Senza auth (stesso contratto Android).
+    /// </summary>
+    public static string ComfyDirectBase(AppSettings settings) => SwapServicePort(settings, 8188);
+
+    /// <summary>
+    /// Base del bridge laya (hermes-laya-bridge, :8645): sempre attivo e
+    /// indipendente dal manager, così il canale risponde anche se il manager
+    /// è bloccato (stesso contratto di gpuBridgeBase del client Android).
+    /// </summary>
+    public static string BridgeBase(AppSettings settings) => SwapServicePort(settings, 8645);
+
+    private static string SwapServicePort(AppSettings settings, int port)
+    {
+        var trimmed = settings.GatewayUrl.Trim().TrimEnd('/');
+        var noPath = trimmed;
+        var cutV1 = trimmed.IndexOf("/v1", StringComparison.OrdinalIgnoreCase);
+        var cutApi = trimmed.IndexOf("/api", StringComparison.OrdinalIgnoreCase);
+        var cut = cutV1 >= 0 && cutApi >= 0 ? Math.Min(cutV1, cutApi) : Math.Max(cutV1, cutApi);
+        if (cut > 0)
+        {
+            noPath = trimmed[..cut];
+        }
+        var lastColon = noPath.LastIndexOf(':');
+        var lastSlash = noPath.LastIndexOf('/');
+        if (lastColon > lastSlash)
+        {
+            noPath = noPath[..lastColon];
+        }
+        return $"{noPath}:{port}";
+    }
+
+    /// <summary>
+    /// GET/POST JSON verso il gpu-manager con Bearer del secret gateway.
+    /// Ritorna (0, messaggio) su errore transport, mai throw (tranne cancel).
+    /// </summary>
+    public static async Task<(int StatusCode, string Body)> SendManagerRequestAsync(
+        AppSettings settings,
+        HttpMethod method,
+        string path,
+        string? jsonPayload = null,
+        CancellationToken cancellationToken = default)
+    {
+        var url = ManagerBase(settings) + (path.StartsWith('/') ? path : "/" + path);
+        using var request = new HttpRequestMessage(method, url);
+        request.Headers.TryAddWithoutValidation("Accept", "application/json");
+        request.Headers.TryAddWithoutValidation("User-Agent", "HermesHub-Windows");
+        var secret = GatewayCredentialStore.LoadSecret();
+        if (!string.IsNullOrWhiteSpace(secret))
+        {
+            request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {secret.Trim()}");
+        }
+        if (jsonPayload is not null)
+        {
+            request.Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+        }
+        try
+        {
+            using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return ((int)response.StatusCode, body);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return (0, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// POST/GET JSON verso il bridge laya (:8645) con Bearer del secret gateway.
+    /// Ritorna (0, messaggio) su errore transport, mai throw (tranne cancel).
+    /// </summary>
+    public static async Task<(int StatusCode, string Body)> SendBridgeRequestAsync(
+        AppSettings settings,
+        HttpMethod method,
+        string path,
+        string? jsonPayload = null,
+        CancellationToken cancellationToken = default)
+    {
+        var url = BridgeBase(settings) + (path.StartsWith('/') ? path : "/" + path);
+        using var request = new HttpRequestMessage(method, url);
+        request.Headers.TryAddWithoutValidation("Accept", "application/json");
+        request.Headers.TryAddWithoutValidation("User-Agent", "HermesHub-Windows");
+        var secret = GatewayCredentialStore.LoadSecret();
+        if (!string.IsNullOrWhiteSpace(secret))
+        {
+            request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {secret.Trim()}");
+        }
+        if (jsonPayload is not null)
+        {
+            request.Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+        }
+        try
+        {
+            using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return ((int)response.StatusCode, body);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return (0, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// GET verso ComfyUI diretto, senza auth (stesso contratto Android).
+    /// </summary>
+    public static async Task<(int StatusCode, string Body)> SendComfyDirectRequestAsync(
+        AppSettings settings,
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        var url = ComfyDirectBase(settings) + (path.StartsWith('/') ? path : "/" + path);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.TryAddWithoutValidation("Accept", "application/json");
+        request.Headers.TryAddWithoutValidation("User-Agent", "HermesHub-Windows-Comfy");
+        try
+        {
+            using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return ((int)response.StatusCode, body);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return (0, ex.Message);
+        }
+    }
+
     internal static string ResolveHermesUri(AppSettings settings, string path)
     {
         if (Uri.TryCreate(path, UriKind.Absolute, out _))
@@ -2295,7 +2450,10 @@ public static class GatewayService
         var saved = GatewayCredentialStore.LoadSecret();
         if (!string.IsNullOrWhiteSpace(saved))
         {
+            // Con una chiave salvata NON riproviamo senza Authorization: il gateway
+            // risponderebbe 401 e il poller events riempie i log di rifiuti inutili.
             yield return saved.Trim();
+            yield break;
         }
 
         if (allowCompatAuth)
@@ -2502,6 +2660,7 @@ public static class GatewayService
         Func<string?, HttpRequestMessage> requestFactory,
         bool allowCompatAuth = true,
         IEnumerable<string?>? authCandidates = null,
+        int maxBytes = MaxBufferedResponseBytes,
         CancellationToken cancellationToken = default)
     {
         BufferedHermesResponse? last = null;
@@ -2515,7 +2674,7 @@ public static class GatewayService
                 cancellationToken);
             var body = await ReadBoundedStringAsync(
                 response.Content,
-                MaxBufferedResponseBytes,
+                maxBytes,
                 cancellationToken);
             var buffered = new BufferedHermesResponse(
                 (int)response.StatusCode,

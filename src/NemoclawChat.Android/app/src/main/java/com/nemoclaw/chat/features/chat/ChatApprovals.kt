@@ -351,7 +351,7 @@ internal fun ChatApprovalCards(
     }
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         approvals.take(3).forEach { approval ->
-            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF3A2A00))) {
+            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Elevated)) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Approvazione Hermes richiesta", fontWeight = FontWeight.SemiBold, color = Color.White, fontSize = 13.sp)
                     Text(
@@ -366,50 +366,101 @@ internal fun ChatApprovalCards(
                             .ifEmpty { listOf("once", "deny") }
                         offered.forEach { choice ->
                             val busy = resolving == "${approval.approvalId}::$choice"
-                            TextButton(
-                                enabled = resolving.isBlank(),
-                                onClick = {
-                                    resolving = "${approval.approvalId}::$choice"
-                                    status = ""
-                                    scope.launch {
-                                        // Single-flight anche sul tap: niente doppi POST.
-                                        if (!tryClaimApproval(approval.approvalId.ifBlank { approval.requestId })) {
-                                            status = "Approval gia risolta."
-                                            resolving = ""
-                                            return@launch
-                                        }
-                                        val runId = approval.runId.ifBlank { state.streamingState?.activeRunId.orEmpty() }
-                                        if (runId.isBlank()) {
-                                            status = "Run non disponibile per questa approval."
-                                            resolving = ""
-                                            releaseApprovalClaim(approval.approvalId.ifBlank { approval.requestId })
-                                            return@launch
-                                        }
-                                        val (code, body) = resolveHermesRunApproval(
-                                            botSettings, runId, choice, botApiKey,
-                                            approval.requestId.takeIf { it.isNotBlank() }, botProfile, botMultiplexEnabled
-                                        )
-                                        if (code in 200..299) {
-                                            val cur = state.streamingState
-                                            if (cur != null && state.activeConversationId != null) {
-                                                state.streamingState = cur.applyEvent(
-                                                    ChatStreamEvent.ApprovalResolved(runId, approval.approvalId, choice)
-                                                )
+                            val isDeny = choice.equals("deny", ignoreCase = true)
+                            val isPrimary = !isDeny && choice == offered.firstOrNull { !it.equals("deny", ignoreCase = true) }
+                            if (isPrimary) {
+                                Button(
+                                    enabled = resolving.isBlank(),
+                                    onClick = {
+                                        resolving = "${approval.approvalId}::$choice"
+                                        status = ""
+                                        scope.launch {
+                                            // Single-flight anche sul tap: niente doppi POST.
+                                            if (!tryClaimApproval(approval.approvalId.ifBlank { approval.requestId })) {
+                                                status = "Approval gia risolta."
+                                                resolving = ""
+                                                return@launch
                                             }
-                                            status = ""
-                                        } else {
-                                            releaseApprovalClaim(approval.approvalId.ifBlank { approval.requestId })
-                                            status = when (code) {
-                                                401, 403 -> "Chiave rifiutata (HTTP $code)."
-                                                404 -> "Approval/run non trovato (404)."
-                                                409 -> "Run non in attesa di approval (409)."
-                                                else -> "Approval fallita: HTTP $code ${body.take(WorkLimits.TRUNC_140)}"
+                                            val runId = approval.runId.ifBlank { state.streamingState?.activeRunId.orEmpty() }
+                                            if (runId.isBlank()) {
+                                                status = "Run non disponibile per questa approval."
+                                                resolving = ""
+                                                releaseApprovalClaim(approval.approvalId.ifBlank { approval.requestId })
+                                                return@launch
                                             }
+                                            val (code, body) = resolveHermesRunApproval(
+                                                botSettings, runId, choice, botApiKey,
+                                                approval.requestId.takeIf { it.isNotBlank() }, botProfile, botMultiplexEnabled
+                                            )
+                                            if (code in 200..299) {
+                                                val cur = state.streamingState
+                                                if (cur != null && state.activeConversationId != null) {
+                                                    state.streamingState = cur.applyEvent(
+                                                        ChatStreamEvent.ApprovalResolved(runId, approval.approvalId, choice)
+                                                    )
+                                                }
+                                                status = ""
+                                            } else {
+                                                releaseApprovalClaim(approval.approvalId.ifBlank { approval.requestId })
+                                                status = when (code) {
+                                                    401, 403 -> "Chiave rifiutata (HTTP $code)."
+                                                    404 -> "Approval/run non trovato (404)."
+                                                    409 -> "Run non in attesa di approval (409)."
+                                                    else -> "Approval fallita: HTTP $code ${body.take(WorkLimits.TRUNC_140)}"
+                                                }
+                                            }
+                                            resolving = ""
                                         }
-                                        resolving = ""
-                                    }
-                                }
-                            ) { Text(if (busy) "..." else choice, fontSize = 12.sp) }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
+                                ) { Text(if (busy) "..." else choice, fontSize = 12.sp) }
+                            } else {
+                                TextButton(
+                                    enabled = resolving.isBlank(),
+                                    onClick = {
+                                        resolving = "${approval.approvalId}::$choice"
+                                        status = ""
+                                        scope.launch {
+                                            // Single-flight anche sul tap: niente doppi POST.
+                                            if (!tryClaimApproval(approval.approvalId.ifBlank { approval.requestId })) {
+                                                status = "Approval gia risolta."
+                                                resolving = ""
+                                                return@launch
+                                            }
+                                            val runId = approval.runId.ifBlank { state.streamingState?.activeRunId.orEmpty() }
+                                            if (runId.isBlank()) {
+                                                status = "Run non disponibile per questa approval."
+                                                resolving = ""
+                                                releaseApprovalClaim(approval.approvalId.ifBlank { approval.requestId })
+                                                return@launch
+                                            }
+                                            val (code, body) = resolveHermesRunApproval(
+                                                botSettings, runId, choice, botApiKey,
+                                                approval.requestId.takeIf { it.isNotBlank() }, botProfile, botMultiplexEnabled
+                                            )
+                                            if (code in 200..299) {
+                                                val cur = state.streamingState
+                                                if (cur != null && state.activeConversationId != null) {
+                                                    state.streamingState = cur.applyEvent(
+                                                        ChatStreamEvent.ApprovalResolved(runId, approval.approvalId, choice)
+                                                    )
+                                                }
+                                                status = ""
+                                            } else {
+                                                releaseApprovalClaim(approval.approvalId.ifBlank { approval.requestId })
+                                                status = when (code) {
+                                                    401, 403 -> "Chiave rifiutata (HTTP $code)."
+                                                    404 -> "Approval/run non trovato (404)."
+                                                    409 -> "Run non in attesa di approval (409)."
+                                                    else -> "Approval fallita: HTTP $code ${body.take(WorkLimits.TRUNC_140)}"
+                                                }
+                                            }
+                                            resolving = ""
+                                        }
+                                    },
+                                    colors = ButtonDefaults.textButtonColors(contentColor = if (isDeny) AppColors.Error else AppColors.Accent)
+                                ) { Text(if (busy) "..." else choice, fontSize = 12.sp, color = if (isDeny) AppColors.Error else AppColors.Accent) }
+                            }
                         }
                     }
                     if (status.isNotBlank()) Text(status, color = AppColors.Muted, fontSize = 11.sp)

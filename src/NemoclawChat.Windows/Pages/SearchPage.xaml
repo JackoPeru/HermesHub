@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <Page x:Class="NemoclawChat_Windows.Pages.SearchPage" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="{StaticResource AppBackgroundBrush}">
     <Grid Padding="40" RowSpacing="16"><Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-        <StackPanel Spacing="6"><TextBlock Text="Ricerca universale" Foreground="White" FontSize="30" FontWeight="SemiBold" /><TextBlock Text="Chat, allegati, artifact, progetti, memoria, notifiche, cron, run e tool call." Foreground="{StaticResource MutedTextBrush}" /></StackPanel>
+        <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center"><Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13"><FontIcon FontSize="19" Glyph="&#xE721;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border><StackPanel VerticalAlignment="Center" Spacing="2"><TextBlock Text="Ricerca universale" Style="{StaticResource PageTitleStyle}" /><TextBlock Text="Chat, allegati, artifact, progetti, memoria, notifiche, cron, run e tool call." Style="{StaticResource PageSubtitleStyle}" /></StackPanel></StackPanel>
         <Grid Grid.Row="1" ColumnSpacing="10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="200" /><ColumnDefinition Width="200" /></Grid.ColumnDefinitions>
             <TextBox x:Name="QueryBox" PlaceholderText="Cerca ovunque..." KeyDown="QueryBox_KeyDown" />
             <ComboBox x:Name="TypeFilter" Grid.Column="1" SelectedIndex="0"><ComboBoxItem Content="Tutto" /><ComboBoxItem Content="Chat" /><ComboBoxItem Content="Progetto" /><ComboBoxItem Content="Artifact" /><ComboBoxItem Content="Cron" /><ComboBoxItem Content="Notifica" /><ComboBoxItem Content="Run" /><ComboBoxItem Content="Memoria" /></ComboBox>
-            <Button Grid.Column="2" Click="Search_Click" Content="Cerca" />
+            <Button Grid.Column="2" Click="Search_Click" Style="{StaticResource TextButtonStyle}" Content="Cerca" />
         </Grid>
-        <ScrollViewer Grid.Row="2"><StackPanel><TextBlock x:Name="StatusText" Foreground="{StaticResource MutedTextBrush}" Text="Inserisci almeno 2 caratteri." /><StackPanel x:Name="ResultsPanel" Spacing="10" Margin="0,12,0,0" /></StackPanel></ScrollViewer>
+        <ScrollViewer Grid.Row="2"><StackPanel><TextBlock x:Name="StatusText" Style="{StaticResource CaptionStyle}" Text="Inserisci almeno 2 caratteri." /><StackPanel x:Name="ResultsPanel" Spacing="10" Margin="0,12,0,0" /></StackPanel></ScrollViewer>
     </Grid>
 </Page>

@@ -301,6 +301,87 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 @Composable
+internal fun AutomationHeader(icon: ImageVector, title: String, subtitle: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF302517)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(20.dp))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(subtitle, color = AppColors.Muted, fontSize = 14.sp)
+        }
+    }
+}
+
+@Composable
+internal fun AutomationSectionLabel(text: String) {
+    Text(text.uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+}
+
+@Composable
+internal fun AutomationRowTile(icon: ImageVector) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF302517)),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(20.dp))
+    }
+}
+
+@Composable
+internal fun AutomationEmptyState(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    ctaLabel: String,
+    onCta: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 32.dp, horizontal = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF302517)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(20.dp))
+        }
+        Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+        Text(subtitle, color = AppColors.Muted, fontSize = 14.sp, textAlign = TextAlign.Center)
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = onCta,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = AppColors.Accent,
+                contentColor = Color(0xFF171009)
+            )
+        ) {
+            Text(ctaLabel, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
 internal fun CronScreen(context: Context, settings: AppSettings) {
     val scope = rememberCoroutineScope()
     var jobs by remember { mutableStateOf<List<CronJob>>(emptyList()) }
@@ -378,68 +459,80 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            Text("Automation Studio", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("Crea, modifica, prova e controlla automazioni Hermes sul gateway.", color = AppColors.Muted)
+            AutomationHeader(
+                icon = Icons.Rounded.Tune,
+                title = "Automation Studio",
+                subtitle = "Crea, modifica, prova e controlla automazioni Hermes sul gateway."
+            )
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (editingId.isBlank()) "Nuova automazione" else "Modifica automazione", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                        IconButton(onClick = { clearEditor() }) { Icon(Icons.Rounded.Add, contentDescription = "Nuova automazione", tint = Color.White) }
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    AutomationSectionLabel(if (editingId.isBlank()) "Nuova automazione" else "Modifica automazione")
+                    TextButton(
+                        onClick = { clearEditor() },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) { Text("Nuova") }
+                }
+                Box {
+                    TextButton(
+                        onClick = { botMenuExpanded = true },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) {
+                        Text(if (selectedBotProfile.isBlank()) "Profilo: Globale / default" else "Profilo: $selectedBotProfile")
                     }
-                    Box {
-                        Button(onClick = { botMenuExpanded = true }) {
-                            Text(if (selectedBotProfile.isBlank()) "Profilo: Globale / default" else "Profilo: $selectedBotProfile")
-                        }
-                        DropdownMenu(expanded = botMenuExpanded, onDismissRequest = { botMenuExpanded = false }) {
+                    DropdownMenu(expanded = botMenuExpanded, onDismissRequest = { botMenuExpanded = false }, containerColor = AppColors.Surface) {
+                        DropdownMenuItem(
+                            text = { Text("Globale / default", color = Color.White) },
+                            onClick = { selectedBotProfile = ""; botMenuExpanded = false }
+                        )
+                        botRoster?.items.orEmpty().forEach { bot ->
                             DropdownMenuItem(
-                                text = { Text("Globale / default") },
-                                onClick = { selectedBotProfile = ""; botMenuExpanded = false }
+                                text = { Text("${bot.displayName} (${bot.profile})", color = Color.White) },
+                                enabled = botRoster?.multiplexEnabled == true,
+                                onClick = { selectedBotProfile = bot.profile; botMenuExpanded = false }
                             )
-                            botRoster?.items.orEmpty().forEach { bot ->
-                                DropdownMenuItem(
-                                    text = { Text("${bot.displayName} (${bot.profile})") },
-                                    enabled = botRoster?.multiplexEnabled == true,
-                                    onClick = { selectedBotProfile = bot.profile; botMenuExpanded = false }
-                                )
-                            }
                         }
                     }
-                    if (selectedBotProfile.isNotBlank() && botRoster?.multiplexEnabled != true) {
-                        Text("Routine bot bloccate: il gateway non dichiara multiplexing profili attivo.", color = AppColors.Muted, fontSize = 12.sp)
+                }
+                if (selectedBotProfile.isNotBlank() && botRoster?.multiplexEnabled != true) {
+                    Text("Routine bot bloccate: il gateway non dichiara multiplexing profili attivo.", color = AppColors.Muted, fontSize = 12.sp)
+                }
+                AutomationSectionLabel("Dettagli")
+                SettingsField("Nome", name, { name = it })
+                SettingsField("Attività", taskPrompt, { taskPrompt = it })
+                AutomationSectionLabel("Programmazione")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Ogni ora", "Giornaliera", "Settimanale", "Cron avanzato").forEach { option ->
+                        VideoFeedChip(option, selected = frequency == option) { frequency = option }
                     }
-                    SettingsField("Nome", name, { name = it })
-                    SettingsField("Attività", taskPrompt, { taskPrompt = it })
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Ogni ora", "Giornaliera", "Settimanale", "Cron avanzato").forEach { option ->
-                            VideoFeedChip(option, selected = frequency == option) { frequency = option }
-                        }
-                    }
-                    if (frequency == "Giornaliera" || frequency == "Settimanale") SettingsField("Ora HH:mm", time, { time = it })
-                    if (frequency == "Settimanale") SettingsField("Giorni cron", days, { days = it })
-                    if (frequency == "Cron avanzato") SettingsField("Espressione cron", advancedCron, { advancedCron = it })
-                    Text("Espressione: ${schedule().ifBlank { "non valida" }}", color = AppColors.Muted, fontSize = 12.sp)
-                    SettingsField("Condizione opzionale", condition, { condition = it })
-                    SettingsField("Destinazione (local, origin, telegram, ..., bot-chat, bot-chat:<profilo>, all)", deliver, { deliver = it })
-                    Text("Consegna bot-chat: l'output entra come messaggio nella Bot Chat del profilo (costa un turno). Mai inclusa in all.", color = AppColors.Muted, fontSize = 12.sp)
-                    SettingsField("Skill (separate da virgola, salvate sul server)", cronSkills, { cronSkills = it })
-                    Text(
-                        "Pin modello/provider/reasoning, workdir, script/no-agent, monitor, continuity e notepad vivono sulla superficie dashboard e non sono modificabili da qui: i valori eventualmente impostati da CLI restano visibili in sola lettura nella lista.",
-                        color = AppColors.Muted, fontSize = 12.sp
-                    )
-                    SettingsField("Timeout secondi", timeout, { timeout = it })
-                    SettingsField("Retry", retry, { retry = it })
-                    SettingsField("Modello notifica", notificationTemplate, { notificationTemplate = it })
-                    SettingsField("Progetto associato", projectId, { projectId = it })
-                    SettingsField("Dipendenze job", dependencies, { dependencies = it })
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IconButton(onClick = {
+                }
+                if (frequency == "Giornaliera" || frequency == "Settimanale") SettingsField("Ora HH:mm", time, { time = it })
+                if (frequency == "Settimanale") SettingsField("Giorni cron", days, { days = it })
+                if (frequency == "Cron avanzato") SettingsField("Espressione cron", advancedCron, { advancedCron = it })
+                Text("Espressione: ${schedule().ifBlank { "non valida" }}", color = AppColors.Muted, fontSize = 12.sp)
+                SettingsField("Condizione opzionale", condition, { condition = it })
+                AutomationSectionLabel("Consegna e skill")
+                SettingsField("Destinazione (local, origin, telegram, ..., bot-chat, bot-chat:<profilo>, all)", deliver, { deliver = it })
+                Text("Consegna bot-chat: l'output entra come messaggio nella Bot Chat del profilo (costa un turno). Mai inclusa in all.", color = AppColors.Muted, fontSize = 12.sp)
+                SettingsField("Skill (separate da virgola, salvate sul server)", cronSkills, { cronSkills = it })
+                Text(
+                    "Pin modello/provider/reasoning, workdir, script/no-agent, monitor, continuity e notepad vivono sulla superficie dashboard e non sono modificabili da qui: i valori eventualmente impostati da CLI restano visibili in sola lettura nella lista.",
+                    color = AppColors.Muted, fontSize = 12.sp
+                )
+                AutomationSectionLabel("Limiti e progetto")
+                SettingsField("Timeout secondi", timeout, { timeout = it })
+                SettingsField("Retry", retry, { retry = it })
+                SettingsField("Modello notifica", notificationTemplate, { notificationTemplate = it })
+                SettingsField("Progetto associato", projectId, { projectId = it })
+                SettingsField("Dipendenze job", dependencies, { dependencies = it })
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
                             val cron = schedule()
                             if (name.isBlank() || taskPrompt.isBlank() || cron.isBlank()) {
                                 status = "Nome, attività e programmazione obbligatori."
@@ -462,39 +555,75 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                                 )
                                 if (!status.startsWith("Automazione non")) { clearEditor(); refreshNonce++ }
                             }
-                        }) { Icon(Icons.Rounded.Save, contentDescription = "Salva automazione", tint = Color.White) }
-                        IconButton(onClick = {
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AppColors.Accent,
+                            contentColor = Color(0xFF171009)
+                        )
+                    ) {
+                        Icon(Icons.Rounded.Save, contentDescription = null, tint = Color(0xFF171009))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Salva", fontWeight = FontWeight.SemiBold)
+                    }
+                    TextButton(
+                        onClick = {
                             if (taskPrompt.isBlank()) status = "Attività obbligatoria per prova." else scope.launch {
                                 status = "Prova in corso, job non salvato..."
                                 val result = sendWorkspaceRunRequest(settings, "Automation", encodeAutomationPrompt(definition()), loadGatewaySecret(context))
                                 status = "${result.status} ${result.result}".trim()
                             }
-                        }) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Prova senza salvare", tint = Color.White) }
-                        IconButton(onClick = { editingId = ""; name = if (name.isBlank()) "" else "$name copia"; status = "Copia pronta." }) { Icon(Icons.Rounded.ContentCopy, contentDescription = "Duplica automazione", tint = Color.White) }
+                        },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) {
+                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Prova")
+                    }
+                    TextButton(
+                        onClick = { editingId = ""; name = if (name.isBlank()) "" else "$name copia"; status = "Copia pronta." },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) {
+                        Icon(Icons.Rounded.ContentCopy, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Duplica")
                     }
                 }
+                HorizontalDivider(color = AppColors.Border)
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(status, color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text("Fonte: API Hermes jobs. Profilo: ${selectedBotProfile.ifBlank { "Globale / default" }}. Le routine bot usano /p/{profilo}/api/jobs quando il multiplexing è pronto.", color = AppColors.Muted, fontSize = 12.sp)
-                    IconButton(onClick = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                AutomationSectionLabel("Stato")
+                Text(status, color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text("Fonte: API Hermes jobs. Profilo: ${selectedBotProfile.ifBlank { "Globale / default" }}. Le routine bot usano /p/{profilo}/api/jobs quando il multiplexing è pronto.", color = AppColors.Muted, fontSize = 12.sp)
+                TextButton(
+                    onClick = {
                         status = "Aggiorno cron..."
                         refreshNonce++
-                    }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna cron", tint = Color.White) }
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                ) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Aggiorna")
                 }
+                HorizontalDivider(color = AppColors.Border)
+            }
+        }
+        if (jobs.isNotEmpty()) {
+            item {
+                AutomationSectionLabel("Automazioni")
             }
         }
         if (jobs.isEmpty()) {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble), shape = RoundedCornerShape(20.dp)) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Nessun cron trovato.", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text("Esempio in chat: programma un briefing ogni mattina alle 8.", color = AppColors.Muted, fontSize = 13.sp)
-                    }
-                }
+                AutomationEmptyState(
+                    icon = Icons.Rounded.SmartToy,
+                    title = "Nessun cron trovato.",
+                    subtitle = "Esempio in chat: programma un briefing ogni mattina alle 8.",
+                    ctaLabel = "Nuova automazione",
+                    onCta = { clearEditor() }
+                )
             }
         }
         items(jobs, key = { it.id.ifBlank { it.name } }) { job ->
@@ -522,18 +651,29 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
     pendingDeleteJob?.let { target ->
         AlertDialog(
             onDismissRequest = { pendingDeleteJob = null },
-            title = { Text("Elimina ${target.name}") },
-            text = { Text("Eliminare la routine \"${target.name}\" (${target.schedule})? L'operazione non si può annullare.") },
+            containerColor = AppColors.Surface,
+            titleContentColor = Color.White,
+            textContentColor = AppColors.Muted,
+            title = { Text("Elimina ${target.name}", color = Color.White, fontWeight = FontWeight.SemiBold) },
+            text = { Text("Eliminare la routine \"${target.name}\" (${target.schedule})? L'operazione non si può annullare.", color = AppColors.Muted) },
             confirmButton = {
-                IconButton(onClick = {
-                    pendingDeleteJob = null
-                    scope.launch {
-                        status = cronAction(settings, target.id, "delete", loadGatewaySecret(context), selectedBotProfile.takeIf { it.isNotBlank() }, botRoster?.multiplexEnabled == true)
-                        refreshNonce++
-                    }
-                }) { Icon(Icons.Rounded.Delete, contentDescription = "Conferma eliminazione routine", tint = Color(0xFFFF7B8E)) }
+                TextButton(
+                    onClick = {
+                        pendingDeleteJob = null
+                        scope.launch {
+                            status = cronAction(settings, target.id, "delete", loadGatewaySecret(context), selectedBotProfile.takeIf { it.isNotBlank() }, botRoster?.multiplexEnabled == true)
+                            refreshNonce++
+                        }
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Error)
+                ) { Text("Elimina", fontWeight = FontWeight.SemiBold) }
             },
-            dismissButton = { IconButton(onClick = { pendingDeleteJob = null }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla eliminazione", tint = Color.White) } }
+            dismissButton = {
+                TextButton(
+                    onClick = { pendingDeleteJob = null },
+                    colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                ) { Text("Annulla") }
+            }
         )
     }
 }
@@ -546,55 +686,63 @@ internal fun CronCard(
     onPauseResume: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Card(colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble), shape = RoundedCornerShape(20.dp)) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(job.name, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                Text(if (job.enabled) "Attivo" else "Pausa", color = if (job.enabled) AppColors.Accent else Color(0xFFFFB020), fontSize = 12.sp)
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AutomationRowTile(Icons.Rounded.Tune)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(job.name, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                Text(job.schedule.ifBlank { job.id }, color = AppColors.Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            CronDetail("ID", job.id)
-            CronDetail("Programmazione", job.schedule)
-            CronDetail("Prossima esecuzione", job.nextRunAt)
-            CronDetail("Ultima esecuzione", job.lastRunAt)
-            CronDetail("Stato", job.state)
-            CronDetail("Consegna", job.deliver)
-            CronDetail("Profilo", job.profile)
-            CronDetail("Modello", job.model)
-            CronDetail("Provider", job.provider)
-            CronDetail("Reasoning", job.reasoningEffort)
-            CronDetail("Workdir", job.workdir)
-            CronDetail("Skill", job.skills)
-            CronDetail("Script", job.script)
-            CronDetail("No-agent", if (job.noAgent) "attivo (solo CLI/dashboard)" else "")
-            CronDetail("Context from", job.contextFrom)
-            CronDetail("Toolset abilitati", job.enabledToolsets)
-            CronDetail("Origine", job.origin)
-            CronDetail("Ultimo output", job.lastStatus)
-            Text(job.prompt.ifBlank { "Prompt non disponibile." }, color = Color.White)
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                IconButton(onClick = onEdit) { Icon(Icons.Rounded.Edit, contentDescription = "Modifica routine", tint = Color.White) }
-                IconButton(onClick = onDuplicate) { Icon(Icons.Rounded.ContentCopy, contentDescription = "Duplica routine", tint = Color.White) }
-                IconButton(onClick = onRun) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Esegui ora", tint = Color.White) }
-                IconButton(onClick = onPauseResume) {
-                    Icon(
-                        if (job.enabled) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = if (job.enabled) "Pausa routine" else "Riprendi routine",
-                        tint = Color.White
-                    )
-                }
-                IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina routine", tint = Color(0xFFFF7B8E)) }
-            }
+            Text(if (job.enabled) "Attivo" else "Pausa", color = if (job.enabled) AppColors.Accent else AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
+        CronDetail("ID", job.id)
+        CronDetail("Programmazione", job.schedule)
+        CronDetail("Prossima esecuzione", job.nextRunAt)
+        CronDetail("Ultima esecuzione", job.lastRunAt)
+        CronDetail("Stato", job.state)
+        CronDetail("Consegna", job.deliver)
+        CronDetail("Profilo", job.profile)
+        CronDetail("Modello", job.model)
+        CronDetail("Provider", job.provider)
+        CronDetail("Reasoning", job.reasoningEffort)
+        CronDetail("Workdir", job.workdir)
+        CronDetail("Skill", job.skills)
+        CronDetail("Script", job.script)
+        CronDetail("No-agent", if (job.noAgent) "attivo (solo CLI/dashboard)" else "")
+        CronDetail("Context from", job.contextFrom)
+        CronDetail("Toolset abilitati", job.enabledToolsets)
+        CronDetail("Origine", job.origin)
+        CronDetail("Ultimo output", job.lastStatus)
+        Text(job.prompt.ifBlank { "Prompt non disponibile." }, color = Color.White, fontSize = 14.sp)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            TextButton(onClick = onEdit, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Modifica") }
+            TextButton(onClick = onDuplicate, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Duplica") }
+            Button(
+                onClick = onRun,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AppColors.Accent,
+                    contentColor = Color(0xFF171009)
+                )
+            ) { Text("Esegui", fontWeight = FontWeight.SemiBold) }
+            TextButton(onClick = onPauseResume, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) {
+                Text(if (job.enabled) "Pausa" else "Riprendi")
+            }
+            TextButton(onClick = onDelete, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Error)) { Text("Elimina") }
+        }
+        HorizontalDivider(color = AppColors.Border)
     }
 }
 
 @Composable
 internal fun CronDetail(label: String, value: String) {
     if (value.isNotBlank()) {
-        Text("$label: $value", color = AppColors.Muted, fontSize = 12.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
+            Text(label.uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Text(value, color = AppColors.Muted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+        }
     }
 }
 
@@ -617,21 +765,24 @@ internal fun NotificationsScreen(context: Context, settings: AppSettings, onOpen
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            Text("Notifiche", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("Avvisi autonomi che Hermes lascia quando cron o agenti devono contattarti.", color = AppColors.Muted)
+            AutomationHeader(
+                icon = Icons.Rounded.Notifications,
+                title = "Notifiche",
+                subtitle = "Avvisi autonomi che Hermes lascia quando cron o agenti devono contattarti."
+            )
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(status, color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text("Android controlla in background periodicamente e mostra notifiche di sistema.", color = AppColors.Muted, fontSize = 12.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IconButton(onClick = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                AutomationSectionLabel("Stato")
+                Text(status, color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text("Android controlla in background periodicamente e mostra notifiche di sistema.", color = AppColors.Muted, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = {
                             scope.launch {
                                 val unread = items.filter { it.readAt <= 0L }
                                 if (unread.isNotEmpty()) {
@@ -641,32 +792,41 @@ internal fun NotificationsScreen(context: Context, settings: AppSettings, onOpen
                                     refreshNonce++
                                 }
                             }
-                        }) { Icon(Icons.Rounded.Check, contentDescription = "Segna tutte lette", tint = Color.White) }
-                        IconButton(onClick = { refreshNonce++ }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna notifiche", tint = Color.White) }
-                    }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                        listOf("Tutte", "Automazioni", "Run", "Sistema", "File", "Progetti").forEach { value -> VideoFeedChip(value, categoryFilter == value) { categoryFilter = value } }
-                    }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                        listOf("Tutte", "Critica", "Alta", "Normale", "Bassa").forEach { value -> VideoFeedChip(value, priorityFilter == value) { priorityFilter = value } }
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Switch(unreadOnly, { unreadOnly = it }); Text("Solo non lette", color = AppColors.Muted)
-                        Switch(showArchived, { showArchived = it }); Text("Archiviate", color = AppColors.Muted)
-                        Switch(dnd, { dnd = it; context.getSharedPreferences("notification_settings", Context.MODE_PRIVATE).edit { putBoolean("dnd", it) } }); Text("Non disturbare", color = AppColors.Muted)
-                    }
-                    Text("Badge: ${items.count { it.readAt <= 0 && !it.archived }} non lette · ${items.count { it.priority.equals("Critica", true) && !it.archived }} critiche", color = AppColors.Muted, fontSize = 12.sp)
+                        },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) { Text("Segna lette") }
+                    TextButton(
+                        onClick = { refreshNonce++ },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) { Text("Aggiorna") }
                 }
+                AutomationSectionLabel("Categoria")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    listOf("Tutte", "Automazioni", "Run", "Sistema", "File", "Progetti").forEach { value -> VideoFeedChip(value, categoryFilter == value) { categoryFilter = value } }
+                }
+                AutomationSectionLabel("Priorità")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    listOf("Tutte", "Critica", "Alta", "Normale", "Bassa").forEach { value -> VideoFeedChip(value, priorityFilter == value) { priorityFilter = value } }
+                }
+                AutomationSectionLabel("Opzioni")
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Switch(unreadOnly, { unreadOnly = it }); Text("Solo non lette", color = AppColors.Muted)
+                    Switch(showArchived, { showArchived = it }); Text("Archiviate", color = AppColors.Muted)
+                    Switch(dnd, { dnd = it; context.getSharedPreferences("notification_settings", Context.MODE_PRIVATE).edit { putBoolean("dnd", it) } }); Text("Non disturbare", color = AppColors.Muted)
+                }
+                Text("Badge: ${items.count { it.readAt <= 0 && !it.archived }} non lette · ${items.count { it.priority.equals("Critica", true) && !it.archived }} critiche", color = AppColors.Muted, fontSize = 12.sp)
+                HorizontalDivider(color = AppColors.Border)
             }
         }
         if (items.isEmpty()) {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble), shape = RoundedCornerShape(20.dp)) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Nessuna notifica.", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text("Quando un cron trova qualcosa, Hermes puo' pubblicare un messaggio qui.", color = AppColors.Muted)
-                    }
-                }
+                AutomationEmptyState(
+                    icon = Icons.Rounded.Notifications,
+                    title = "Nessuna notifica.",
+                    subtitle = "Quando un cron trova qualcosa, Hermes puo' pubblicare un messaggio qui.",
+                    ctaLabel = "Aggiorna",
+                    onCta = { refreshNonce++ }
+                )
             }
         }
         val visibleItems = items.filter { item ->
@@ -674,6 +834,11 @@ internal fun NotificationsScreen(context: Context, settings: AppSettings, onOpen
                 (categoryFilter == "Tutte" || item.category.equals(categoryFilter, true)) &&
                 (priorityFilter == "Tutte" || item.priority.equals(priorityFilter, true))
         }.sortedWith(compareByDescending<HubNotification> { notificationPriorityRank(it.priority) }.thenByDescending { it.createdAt })
+        if (visibleItems.isNotEmpty()) {
+            item {
+                AutomationSectionLabel("Elenco")
+            }
+        }
         items(visibleItems, key = { it.id }) { item ->
             NotificationCard(
                 item = item,
@@ -705,31 +870,27 @@ internal fun NotificationsScreen(context: Context, settings: AppSettings, onOpen
 @Composable
 internal fun NotificationCard(item: HubNotification, onRead: () -> Unit, onOpenChat: () -> Unit, onSnooze: () -> Unit, onArchive: () -> Unit, onReference: () -> Unit) {
     val unread = item.readAt <= 0L
-    Card(
-        colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble),
-        shape = RoundedCornerShape(20.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                Text(if (unread) "Nuova" else "Letta", color = if (unread) AppColors.Accent else AppColors.Muted, fontSize = 12.sp)
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AutomationRowTile(Icons.Rounded.Notifications)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                Text("${item.category} · ${item.priority} · ${formatDateTime(item.createdAt)}", color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text("${item.category} · ${item.priority} · ${item.source} · ${formatDateTime(item.createdAt)}", color = AppColors.Muted, fontSize = 12.sp)
-            Text(item.message, color = Color.White)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                IconButton(onClick = onOpenChat) { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Apri chat", tint = Color.White) }
-                IconButton(onClick = onRead) { Icon(Icons.Rounded.Check, contentDescription = "Segna letta", tint = Color.White) }
-                IconButton(onClick = onSnooze) { Icon(Icons.Rounded.Snooze, contentDescription = "Tra 1 ora", tint = Color.White) }
-                IconButton(onClick = onArchive) {
-                    Icon(
-                        if (item.archived) Icons.Rounded.Unarchive else Icons.Rounded.Archive,
-                        contentDescription = if (item.archived) "Ripristina notifica" else "Archivia notifica",
-                        tint = Color.White
-                    )
-                }
-                if (item.fileUrl.isNotBlank() || item.projectId.isNotBlank() || item.automationId.isNotBlank() || item.runId.isNotBlank()) IconButton(onClick = onReference) { Icon(Icons.Rounded.Link, contentDescription = "Riferimento", tint = Color.White) }
-            }
+            Text(if (unread) "Nuova" else "Letta", color = if (unread) AppColors.Accent else AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
+        Text("${item.category} · ${item.priority} · ${item.source} · ${formatDateTime(item.createdAt)}", color = AppColors.Faint, fontSize = 12.sp)
+        Text(item.message, color = Color.White, fontSize = 14.sp)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            TextButton(onClick = onOpenChat, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Apri chat") }
+            TextButton(onClick = onRead, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Letta") }
+            TextButton(onClick = onSnooze, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Tra 1 ora") }
+            TextButton(onClick = onArchive, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) {
+                Text(if (item.archived) "Ripristina" else "Archivia")
+            }
+            if (item.fileUrl.isNotBlank() || item.projectId.isNotBlank() || item.automationId.isNotBlank() || item.runId.isNotBlank()) TextButton(onClick = onReference, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Riferimento") }
+        }
+        HorizontalDivider(color = AppColors.Border)
     }
 }
 
@@ -749,35 +910,103 @@ internal fun ContinuityScreen(context: Context, settings: AppSettings, onOpenCon
         if (uri != null) scope.launch { status = uploadContinuityFile(context, settings, uri, deviceId, loadGatewaySecret(context)); refresh++ }
     }
     LaunchedEffect(settings.gatewayUrl, refresh) { val loaded = loadContinuityItems(settings, loadGatewaySecret(context)); items = loaded.first; status = loaded.second }
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item { Text("Continuità dispositivi", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold); Text("Presenza, ripresa chat, handoff voce, clipboard, file, coda offline e conflitti.", color = AppColors.Muted) }
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Text("$deviceId · Android", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IconButton(onClick = { scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.presence", statusValue = "online", apiKey = loadGatewaySecret(context)); refresh++ } }) { Icon(Icons.Rounded.Person, contentDescription = "Pubblica presenza", tint = Color.White) }
-                        IconButton(onClick = { val latest = loadConversations(context).firstOrNull { it.kind in setOf("Chat", "Task") }; if (latest != null) { scope.launch { publishContinuity(context, settings, deviceId, "continuity.chat", latest.title, latest.id, latest.projectId, apiKey = loadGatewaySecret(context)); onOpenConversation(latest.id) } } }) { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Riprendi chat", tint = Color.White) }
-                        IconButton(onClick = { scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.voice", "handoff_requested", statusValue = "ringing", apiKey = loadGatewaySecret(context)); refresh++ } }) { Icon(Icons.Rounded.Call, contentDescription = "Trasferisci voce", tint = Color.White) }
-                        IconButton(onClick = { scope.launch { status = flushContinuityQueue(context, settings, loadGatewaySecret(context)); refresh++ } }) { Icon(Icons.Rounded.Sync, contentDescription = "Sincronizza", tint = Color.White) }
-                    }
-                    SettingsField("Clipboard condivisa", clipboardText, { clipboardText = it })
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IconButton(onClick = { val clipboard = context.getSystemService(ClipboardManager::class.java); val value = clipboardText.ifBlank { clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty() }; scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.clipboard", value, apiKey = loadGatewaySecret(context)); refresh++ } }) { Icon(Icons.Rounded.ContentPaste, contentDescription = "Invia clipboard", tint = Color.White) }
-                        IconButton(onClick = { val remote = items.firstOrNull { it.type == "continuity.clipboard" && it.device != deviceId }; if (remote != null) { clipboardText = remote.value; context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Hermes Hub", remote.value)); status = "Clipboard ricevuta." } }) { Icon(Icons.Rounded.Download, contentDescription = "Ricevi clipboard", tint = Color.White) }
-                        IconButton(onClick = { filePicker.launch(arrayOf("*/*")) }) { Icon(Icons.Rounded.UploadFile, contentDescription = "Invia file", tint = Color.White) }
-                    }
-                    Text(status, color = AppColors.Muted, fontSize = 12.sp)
+            AutomationHeader(
+                icon = Icons.Rounded.Sync,
+                title = "Continuità dispositivi",
+                subtitle = "Presenza, ripresa chat, handoff voce, clipboard, file, coda offline e conflitti."
+            )
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                AutomationSectionLabel("Questo dispositivo")
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    AutomationRowTile(Icons.Rounded.Sync)
+                    Text("$deviceId · Android", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.weight(1f))
                 }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = { scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.presence", statusValue = "online", apiKey = loadGatewaySecret(context)); refresh++ } },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) { Text("Online") }
+                    TextButton(
+                        onClick = { val latest = loadConversations(context).firstOrNull { it.kind in setOf("Chat", "Task") }; if (latest != null) { scope.launch { publishContinuity(context, settings, deviceId, "continuity.chat", latest.title, latest.id, latest.projectId, apiKey = loadGatewaySecret(context)); onOpenConversation(latest.id) } } },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) { Text("Riprendi chat") }
+                    TextButton(
+                        onClick = { scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.voice", "handoff_requested", statusValue = "ringing", apiKey = loadGatewaySecret(context)); refresh++ } },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) { Text("Handoff voce") }
+                    TextButton(
+                        onClick = { scope.launch { status = flushContinuityQueue(context, settings, loadGatewaySecret(context)); refresh++ } },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) { Text("Sincronizza") }
+                }
+                AutomationSectionLabel("Clipboard condivisa")
+                SettingsField("Clipboard condivisa", clipboardText, { clipboardText = it })
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Button(
+                        onClick = { val clipboard = context.getSystemService(ClipboardManager::class.java); val value = clipboardText.ifBlank { clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty() }; scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.clipboard", value, apiKey = loadGatewaySecret(context)); refresh++ } },
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
+                    ) { Text("Invia", fontWeight = FontWeight.SemiBold) }
+                    TextButton(
+                        onClick = { val remote = items.firstOrNull { it.type == "continuity.clipboard" && it.device != deviceId }; if (remote != null) { clipboardText = remote.value; context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Hermes Hub", remote.value)); status = "Clipboard ricevuta." } },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) { Text("Ricevi") }
+                    TextButton(
+                        onClick = { filePicker.launch(arrayOf("*/*")) },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) { Text("Invia file") }
+                }
+                Text(status, color = AppColors.Muted, fontSize = 12.sp)
+                HorizontalDivider(color = AppColors.Border)
+            }
+        }
+        if (items.isEmpty()) {
+            item {
+                AutomationEmptyState(
+                    icon = Icons.Rounded.Sync,
+                    title = "Nessuna attività.",
+                    subtitle = "Pubblica presenza o invia clipboard per iniziare.",
+                    ctaLabel = "Sincronizza",
+                    onCta = { scope.launch { status = flushContinuityQueue(context, settings, loadGatewaySecret(context)); refresh++ } }
+                )
+            }
+        } else {
+            item {
+                AutomationSectionLabel("Attività")
             }
         }
         items(items.take(80), key = { it.id + it.updatedAt }) { item ->
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble)) { Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { Text("${item.type} · ${item.device}", color = AppColors.Accent); Text(item.value.ifBlank { item.fileName }, color = Color.White); FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { if (item.conversationId.isNotBlank()) IconButton(onClick = { onOpenConversation(item.conversationId) }) { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Apri chat", tint = Color.White) }; if (item.type == "continuity.clipboard") IconButton(onClick = { context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Hermes Hub", item.value)) }) { Icon(Icons.Rounded.ContentCopy, contentDescription = "Copia", tint = Color.White) }; if (item.fileUrl.isNotBlank()) IconButton(onClick = { resolveMediaUrl(settings, item.fileUrl, allowExternalMedia = true)?.let { url -> context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) } }) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri file", tint = Color.White) } } } }
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    AutomationRowTile(
+                        when {
+                            item.type == "continuity.clipboard" -> Icons.Rounded.ContentPaste
+                            item.type == "continuity.file" -> Icons.Rounded.UploadFile
+                            item.type == "continuity.chat" -> Icons.Rounded.ChatBubbleOutline
+                            else -> Icons.Rounded.Sync
+                        }
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("${item.type} · ${item.device}".uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text(item.value.ifBlank { item.fileName }, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (item.conversationId.isNotBlank()) TextButton(onClick = { onOpenConversation(item.conversationId) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Apri chat") }
+                    if (item.type == "continuity.clipboard") TextButton(onClick = { context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Hermes Hub", item.value)) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Copia") }
+                    if (item.fileUrl.isNotBlank()) TextButton(onClick = { resolveMediaUrl(settings, item.fileUrl, allowExternalMedia = true)?.let { url -> context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) } }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Apri file") }
+                }
+                HorizontalDivider(color = AppColors.Border)
+            }
         }
         item {
             val conflicts = items.groupBy { it.type }.filterValues { values -> values.map { it.device }.distinct().size > 1 && (values.maxOfOrNull { it.updatedAt } ?: 0L) - (values.minOfOrNull { it.updatedAt } ?: 0L) < 300_000L }
-            Text("Conflitti", color = Color.White, fontWeight = FontWeight.SemiBold)
-            if (conflicts.isEmpty()) Text("Nessun conflitto.", color = AppColors.Muted) else conflicts.forEach { (type, values) -> Text("$type: modifiche concorrenti da ${values.map { it.device }.distinct().joinToString()}; prevale la più recente.", color = AppColors.Muted) }
+            AutomationSectionLabel("Conflitti")
+            Spacer(modifier = Modifier.height(4.dp))
+            if (conflicts.isEmpty()) Text("Nessun conflitto.", color = AppColors.Muted, fontSize = 14.sp) else conflicts.forEach { (type, values) -> Text("$type: modifiche concorrenti da ${values.map { it.device }.distinct().joinToString()}; prevale la più recente.", color = AppColors.Muted, fontSize = 14.sp) }
         }
     }
 }
@@ -921,10 +1150,63 @@ internal data class AuditItem(val id: String, val timestamp: Long, val event: St
 internal fun AuditScreen(context: Context, settings: AppSettings) {
     var project by rememberSaveable { mutableStateOf("") }; var run by rememberSaveable { mutableStateOf("") }; var tool by rememberSaveable { mutableStateOf("") }; var device by rememberSaveable { mutableStateOf("") }; var risk by rememberSaveable { mutableStateOf("") }; var refresh by remember { mutableIntStateOf(0) }; var items by remember { mutableStateOf<List<AuditItem>>(emptyList()) }; var status by remember { mutableStateOf("Carico audit...") }
     LaunchedEffect(settings.gatewayUrl, refresh) { val loaded = loadAuditItems(settings, project, run, tool, device, risk, loadGatewaySecret(context)); items = loaded.first; status = loaded.second }
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text("Timeline audit", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold); Text("Chat, run, tool, automazioni, dispositivi e operazioni server in una cronologia filtrabile.", color = AppColors.Muted) }
-        item { Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface)) { Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { SettingsField("Progetto", project, { project = it }); SettingsField("Run", run, { run = it }); SettingsField("Tool", tool, { tool = it }); SettingsField("Dispositivo", device, { device = it }); FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) { listOf("", "low", "medium", "high", "critical").forEach { value -> VideoFeedChip(value.ifBlank { "Tutti i rischi" }, risk == value) { risk = value } }; Button(onClick = { refresh++ }) { Text("Applica") } }; Text(status, color = AppColors.Muted) } } }
-        items(items, key = { it.id }) { item -> Surface(color = AppColors.AssistantBubble, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, if (item.risk in setOf("high", "critical")) Color(0xFFFF6F3D) else AppColors.Border)) { Column(modifier = Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) { Text("${formatDateTime(item.timestamp)} · ${item.event} · rischio ${item.risk}", color = AppColors.Accent, fontWeight = FontWeight.SemiBold); Text(item.summary, color = Color.White); Text("Progetto ${item.project} · Run ${item.run} · Tool ${item.tool} · Device ${item.device} · ${item.status}", color = AppColors.Muted, fontSize = 11.sp) } } }
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        item {
+            AutomationHeader(
+                icon = Icons.Rounded.ManageSearch,
+                title = "Timeline audit",
+                subtitle = "Chat, run, tool, automazioni, dispositivi e operazioni server in una cronologia filtrabile."
+            )
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                AutomationSectionLabel("Filtri")
+                SettingsField("Progetto", project, { project = it }); SettingsField("Run", run, { run = it }); SettingsField("Tool", tool, { tool = it }); SettingsField("Dispositivo", device, { device = it })
+                AutomationSectionLabel("Rischio")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    listOf("", "low", "medium", "high", "critical").forEach { value -> VideoFeedChip(value.ifBlank { "Tutti i rischi" }, risk == value) { risk = value } }
+                    Button(
+                        onClick = { refresh++ },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AppColors.Accent,
+                            contentColor = Color(0xFF171009)
+                        )
+                    ) { Text("Applica", fontWeight = FontWeight.SemiBold) }
+                }
+                Text(status, color = AppColors.Muted, fontSize = 12.sp)
+                HorizontalDivider(color = AppColors.Border)
+            }
+        }
+        if (items.isEmpty()) {
+            item {
+                AutomationEmptyState(
+                    icon = Icons.Rounded.ManageSearch,
+                    title = "Nessun evento.",
+                    subtitle = status,
+                    ctaLabel = "Aggiorna",
+                    onCta = { refresh++ }
+                )
+            }
+        } else {
+            item {
+                AutomationSectionLabel("Eventi")
+            }
+        }
+        items(items, key = { it.id }) { item ->
+            val isHighRisk = item.risk in setOf("high", "critical")
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    AutomationRowTile(Icons.Rounded.ManageSearch)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("${formatDateTime(item.timestamp)} · ${item.event}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text("rischio ${item.risk}".uppercase(), color = if (isHighRisk) AppColors.Error else AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    }
+                }
+                Text(item.summary, color = Color.White, fontSize = 14.sp)
+                Text("Progetto ${item.project} · Run ${item.run} · Tool ${item.tool} · Device ${item.device} · ${item.status}", color = AppColors.Muted, fontSize = 11.sp)
+                HorizontalDivider(color = AppColors.Border)
+            }
+        }
     }
 }
 

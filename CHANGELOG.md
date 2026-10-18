@@ -2,6 +2,81 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.276 - 2026-10-18
+
+- Windows: fix ChatArchiveSync: cap dedicato a 32 MB per GET `hub/archivio` e POST import; l'archivio condiviso (con mirror bot/Jarvis da SQLiteHubStateStore) ha superato i 10 MB e bloccava pull/push/events.
+- Windows: niente piu retry senza Authorization quando esiste una chiave gateway salvata (causa dei ~1800 rifiuti 401/giorno nel log server).
+- Android: bump versionName 0.6.276 / versionCode 280, nessun codice nuovo rispetto a 0.6.274.
+- Test: consistenza release verde; build Android, Windows e gateway Linux verdi.
+
+## 0.6.274 - 2026-10-18
+
+- Windows: fix aggiornamento in-app: il pacchetto scaricato veniva validato col nome del file temporaneo (`.partial`), quindi rifiutato come "Download non valido"; ora la validazione usa il nome definitivo e l'asset invalido viene rimosso.
+- Android: "Chat laya" raggiungibile dai tre puntini del top bar chat (flag manager) oltre alla card GPU della scheda Server.
+- Test: consistenza release verde; build Android, Windows e gateway Linux verdi.
+
+## 0.6.273 - 2026-10-17
+
+- Canale laya diretto: bridge `hermes-laya-bridge` (porta 8645) con `POST /laya` (domanda in linguaggio naturale → modalità) e `POST /force` sul manager per forzare la transizione; nessun retry automatico dei job falliti.
+- Android: pannello "Chat laya" sempre presente nella card GpuCompute (funziona anche a manager fermo); base bridge su :8645.
+- Windows: pannello "Chat laya" nella pagina Comfy con invio e risposta; base bridge su :8645.
+- Test: bridge laya, force e deploy verdi; build Android e Windows verdi.
+
+## 0.6.272 - 2026-10-15
+
+- Android: schermate di dettaglio in stile: header, righe piatte, bottoni ambra/testuali/rossi, dialog coerenti (bot, personaggi, video, news, archivio, automazioni, gallery, approvazioni).
+- Test: consistenza release verde; build Android + test verdi.
+
+## 0.6.271 - 2026-10-15
+
+- Android: passata visual Apple su tutte le schermate: righe con tile+chevron, bottoni ambra/testuali, header maiuscoli, tema M3 nei colori brand; chat con più respiro e composer con focus ambra.
+- Test: consistenza release verde; build Android + test verdi.
+
+## 0.6.270 - 2026-10-15
+
+- Windows: header scheletro con tile icona in tutte le pagine; avatar Hermes nei messaggi; chip contesto nel composer; tile icona topbar.
+
+## 0.6.269 - 2026-10-15
+
+- Windows: scheletro ridisegnato: avatar Hermes nei messaggi, chip contesto (identità/modalità) nel composer, tile icona per pagina nella topbar.
+- Test: consistenza release verde; build Windows verde.
+
+## 0.6.268 - 2026-10-15
+
+- Windows: bottoni vivi (hover/press senza grigio sistema), transizioni tra pagine, hero con icone e descrizioni.
+- Test: consistenza release verde; build Windows verde.
+
+## 0.6.267 - 2026-10-15
+
+- Windows: redesign strutturale: sidebar stretta, hero home centrato, titoli 34px, alone ambra di profondità, composer e messaggi più leggibili.
+- Test: consistenza release verde; build Windows verde.
+
+## 0.6.266 - 2026-10-15
+
+- Windows: stile Apple minimalista: header sezioni maiuscoli, hairline tra righe, text-button ambra per azioni secondarie, primario solo per commit veri.
+- Test: consistenza release verde; build Windows verde.
+
+## 0.6.265 - 2026-10-15
+
+- Windows: rimozione card decorative (canva dentro canva): contenuti raggruppati con respiro e tipografia, superfici funzionali intatte.
+- Test: consistenza release verde; build Windows verde.
+
+## 0.6.264 - 2026-10-15
+
+- Windows: restyling premium UI: gerarchia bottoni primario/ghost/danger (mai blu sistema), scala tipografica condivisa, header pagine unificati, selettore identità in stile ghost.
+- Test: consistenza release verde; build Windows + format verdi.
+
+## 0.6.263 - 2026-10-15
+
+- Windows: parità funzionale Android fase 1-6: reattach stream con recovery via GET (continue_on_disconnect), forever-chat bot canonica + selettore identità, sezione Immagini con gallery/zoom, hardening WebView2 news, pagine Comfy/GPU e Personaggi, pagina Schermo bot noVNC.
+- Test: consistenza release verde; build Windows + format verdi.
+
+## 0.6.262 - 2026-10-15
+
+- Android: recovery turni anche sul percorso Sessions/Bot — a stream accettato ma chiuso senza terminale, prima poll run osservato (GET /v1/runs) poi riconciliazione via history sessione; solo dopo l'errore vero. Niente piu "risposta non confermata" a ogni blip di rete.
+- Test: 11 nuovi (491 android verdi).
+- Windows/AdminBridge: allineati a 0.6.262 (parity versioni, nessuna modifica funzionale).
+
 ## 0.6.261 - 2026-10-13
 
 - Android: WebView news senza JS/bridge, screen bridge blindato (no file/mixed, asset jail con decode); copia archivio con conferma, import validato.

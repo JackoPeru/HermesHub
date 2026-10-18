@@ -27,6 +27,8 @@ import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -473,12 +475,16 @@ internal fun BotSectionNameDialog(    initial: String = "",
             )
         },
         confirmButton = {
-            TextButton(
+            Button(
                 onClick = { onConfirm(sanitizeSectionName(name)) },
-                enabled = sanitizeSectionName(name).isNotEmpty()
-            ) { Text("Crea", color = AppColors.Accent) }
+                enabled = sanitizeSectionName(name).isNotEmpty(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AppColors.Accent,
+                    contentColor = Color(0xFF171009)
+                )
+            ) { Text("Crea", color = Color(0xFF171009)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Annulla", color = Color.White) } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annulla", color = AppColors.Accent) } }
     )
 }
 
@@ -489,6 +495,7 @@ internal fun BotSectionHeader(name: String) {
         color = AppColors.Accent,
         fontSize = 12.sp,
         fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+        letterSpacing = 1.sp,
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
     )
 }
@@ -542,7 +549,7 @@ internal data class BotSidebarMenuHost(
     val onDelete: () -> Unit
 )
 
-private val BotDeleteRed = Color(0xFFFF453A)
+private val BotDeleteRed = AppColors.Error
 
 @Composable
 internal fun BotSidebarMenu(bot: HermesBotItem, host: BotSidebarMenuHost) {

@@ -43,6 +43,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Delete
@@ -59,14 +60,11 @@ import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -80,6 +78,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
@@ -1242,21 +1241,39 @@ internal fun BotsScreen(
 
     LazyColumn(
         state = botListState,
-        modifier = Modifier.fillMaxSize().padding(20.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
         contentPadding = PaddingValues(bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item(key = "header") {
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Bot Hermes", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Profili reali con configurazione, memoria, skill e credenziali separate. Le routine bot richiedono multiplexing attivo.", color = AppColors.Muted, fontSize = 13.sp)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier.size(40.dp).clip(RoundedCornerShape(13.dp))
+                            .background(AppColors.Accent.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Rounded.Computer,
+                            contentDescription = null,
+                            tint = AppColors.Accent,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Bot Hermes", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Profili reali con configurazione, memoria, skill e credenziali separate. Le routine bot richiedono multiplexing attivo.", color = AppColors.Muted, fontSize = 14.sp)
+                    }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     // Sidebar in modalita bot (come Hermes desktop).
                     IconButton(onClick = onOpenSidebar) {
                         Icon(Icons.Rounded.Menu, contentDescription = "Apri lista bot", tint = Color.White)
@@ -1279,22 +1296,41 @@ internal fun BotsScreen(
                     IconButton(onClick = { refreshNonce++ }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna bot", tint = Color.White) }
                 }
             }
-            Text(status, color = AppColors.Muted, modifier = Modifier.padding(top = 12.dp).semantics { liveRegion = LiveRegionMode.Polite })
+            Text(status, color = AppColors.Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp).semantics { liveRegion = LiveRegionMode.Polite })
         }
         // Loading: roster null = primo fetch in corso (skeleton/progress +
         // liveRegion per screen reader). Distinto da empty/error.
         if (roster == null) {
             item(key = "loading") {
-                Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
-                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        Text(
-                            "Carico il roster reale Hermes…",
-                            color = AppColors.Muted,
-                            fontSize = 13.sp,
-                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier.size(40.dp).clip(RoundedCornerShape(13.dp))
+                            .background(AppColors.Accent.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Rounded.Computer,
+                            contentDescription = null,
+                            tint = AppColors.Accent,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = AppColors.Accent,
+                        trackColor = AppColors.Border
+                    )
+                    Text(
+                        "Carico il roster reale Hermes…",
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                    )
                 }
             }
         }
@@ -1302,129 +1338,145 @@ internal fun BotsScreen(
         val sourceFailures = roster?.sourceFailures.orEmpty()
         if (sourceFailures.isNotEmpty()) {
             item(key = "sources-error") {
-                Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
-                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Alcune fonti Hermes non rispondono.", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "Fonti con errore: ${sourceFailures.joinToString(", ")}.",
-                            color = AppColors.Muted,
-                            fontSize = 12.sp,
-                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
-                        )
-                        TextButton(
-                            onClick = { refreshNonce++ },
-                            modifier = Modifier.heightIn(min = 48.dp)
-                        ) { Text("Riprova", color = AppColors.Accent) }
-                    }
-                }
-            }
-        }
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Endpoint Hermes", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    connections.items.forEach { connection ->
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(connection.label, color = Color.White)
-                                Text(
-                                    if (connection.endpoint.isBlank()) "Endpoint non configurato" else connection.endpoint,
-                                    color = AppColors.Muted,
-                                    fontSize = 12.sp
-                                )
-                            }
-                            if (!connection.isPrimary) {
-                                IconButton(onClick = { removeConnection = connection }) { Icon(Icons.Rounded.Delete, contentDescription = "Rimuovi connessione", tint = Color(0xFFFF7B8E)) }
-                            }
-                        }
-                    }
-                    connections.warnings.forEach { warning ->
-                        Text(warning, color = AppColors.Muted, fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Gruppi Hermes", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text("Seleziona da 2 a 6 bot anche su connessioni diverse. Max 3 turni e 10 risposte per turno.", color = AppColors.Muted, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = groupNameInput,
-                        onValueChange = { groupNameInput = it },
-                        label = { Text("Nome gruppo") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Alcune fonti Hermes non rispondono.", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Fonti con errore: ${sourceFailures.joinToString(", ")}.",
+                        color = AppColors.Muted,
+                        fontSize = 14.sp,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
                     )
-                    roster?.items.orEmpty().forEach { bot ->
-                        val selected = bot.identityKey in selectedGroupMemberKeys
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Checkbox(
-                                checked = selected,
-                                onCheckedChange = {
-                                    selectedGroupMemberKeys = if (selected) {
-                                        selectedGroupMemberKeys - bot.identityKey
-                                    } else if (selectedGroupMemberKeys.size < 6) {
-                                        selectedGroupMemberKeys + bot.identityKey
-                                    } else {
-                                        selectedGroupMemberKeys
-                                    }
-                                }
+                    TextButton(
+                        onClick = { refreshNonce++ },
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) { Text("Riprova", color = AppColors.Accent) }
+                    HorizontalDivider(color = AppColors.Border)
+                }
+            }
+        }
+        item {
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("ENDPOINT HERMES", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                connections.items.forEach { connection ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(connection.label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (connection.endpoint.isBlank()) "Endpoint non configurato" else connection.endpoint,
+                                color = AppColors.Muted,
+                                fontSize = 11.sp
                             )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("@${bot.handle} · ${bot.displayName}", color = Color.White, fontSize = 13.sp)
-                                Text(bot.connectionLabel, color = AppColors.Muted, fontSize = 11.sp)
-                            }
+                        }
+                        if (!connection.isPrimary) {
+                            IconButton(onClick = { removeConnection = connection }) { Icon(Icons.Rounded.Delete, contentDescription = "Rimuovi connessione", tint = AppColors.Error) }
+                        } else {
+                            Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = AppColors.Faint)
                         }
                     }
-                    if (roster?.items.isNullOrEmpty()) {
-                        Text("Crea prima almeno 2 bot qui sopra per formare un gruppo.", color = AppColors.Muted, fontSize = 12.sp)
+                    HorizontalDivider(color = AppColors.Border)
+                }
+                connections.warnings.forEach { warning ->
+                    Text(warning, color = AppColors.Muted, fontSize = 12.sp)
+                }
+            }
+        }
+        item {
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("GRUPPI HERMES", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("Seleziona da 2 a 6 bot anche su connessioni diverse. Max 3 turni e 10 risposte per turno.", color = AppColors.Muted, fontSize = 14.sp)
+                OutlinedTextField(
+                    value = groupNameInput,
+                    onValueChange = { groupNameInput = it },
+                    label = { Text("Nome gruppo") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                roster?.items.orEmpty().forEach { bot ->
+                    val selected = bot.identityKey in selectedGroupMemberKeys
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = selected,
+                            onCheckedChange = {
+                                selectedGroupMemberKeys = if (selected) {
+                                    selectedGroupMemberKeys - bot.identityKey
+                                } else if (selectedGroupMemberKeys.size < 6) {
+                                    selectedGroupMemberKeys + bot.identityKey
+                                } else {
+                                    selectedGroupMemberKeys
+                                }
+                            }
+                        )
+                        BotAvatar(bot.displayName, bot.profile, 40.dp)
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("@${bot.handle} · ${bot.displayName}", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text(bot.connectionLabel, color = AppColors.Muted, fontSize = 11.sp)
+                        }
+                        Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = AppColors.Faint)
                     }
-                    Text("Selezionati: ${selectedGroupMemberKeys.size}/6", color = AppColors.Muted, fontSize = 12.sp)
-                    IconButton(
-                        enabled = groupNameInput.isNotBlank() && selectedGroupMemberKeys.size in 2..6,
-                        onClick = {
-                            runCatching {
-                                val selected = roster?.items.orEmpty().filter { it.identityKey in selectedGroupMemberKeys }
-                                upsertHermesBotGroup(
-                                    context,
-                                    HermesBotGroup(
-                                        groupNameInput.trim(),
-                                        selected.map { bot -> HermesBotGroupMember(bot.connectionId, bot.profile, bot.displayName, bot.handle, bot.identityKey) }
-                                    )
+                    HorizontalDivider(color = AppColors.Border)
+                }
+                if (roster?.items.isNullOrEmpty()) {
+                    Text("Crea prima almeno 2 bot qui sopra per formare un gruppo.", color = AppColors.Muted, fontSize = 13.sp)
+                }
+                Text("Selezionati: ${selectedGroupMemberKeys.size}/6", color = AppColors.Muted, fontSize = 12.sp)
+                Button(
+                    enabled = groupNameInput.isNotBlank() && selectedGroupMemberKeys.size in 2..6,
+                    onClick = {
+                        runCatching {
+                            val selected = roster?.items.orEmpty().filter { it.identityKey in selectedGroupMemberKeys }
+                            upsertHermesBotGroup(
+                                context,
+                                HermesBotGroup(
+                                    groupNameInput.trim(),
+                                    selected.map { bot -> HermesBotGroupMember(bot.connectionId, bot.profile, bot.displayName, bot.handle, bot.identityKey) }
                                 )
-                            }.onSuccess {
-                                groups = loadHermesBotGroups(context)
-                                groupNameInput = ""
-                                selectedGroupMemberKeys = emptySet()
-                                status = "Gruppo Hermes salvato."
-                            }.onFailure { status = it.message ?: "Gruppo non salvato." }
+                            )
+                        }.onSuccess {
+                            groups = loadHermesBotGroups(context)
+                            groupNameInput = ""
+                            selectedGroupMemberKeys = emptySet()
+                            status = "Gruppo Hermes salvato."
+                        }.onFailure { status = it.message ?: "Gruppo non salvato." }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) { Text("Salva gruppo", color = Color(0xFF171009)) }
+                groups.forEach { group ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(group.name, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (group.members.size == 1) "1 membro · sessioni Group persistenti" else "${group.members.size} membri · sessioni Group persistenti",
+                                color = AppColors.Muted,
+                                fontSize = 11.sp
+                            )
                         }
-                    ) { Icon(Icons.Rounded.Check, contentDescription = "Salva gruppo", tint = Color.White) }
-                    groups.forEach { group ->
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(group.name, color = Color.White, fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    if (group.members.size == 1) "1 membro · sessioni Group persistenti" else "${group.members.size} membri · sessioni Group persistenti",
-                                    color = AppColors.Muted,
-                                    fontSize = 11.sp
-                                )
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                IconButton(onClick = {
-                                    openGroup = group
-                                    groupPrompt = ""
-                                    groupResult = null
-                                }) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri gruppo", tint = Color.White) }
-                                IconButton(onClick = {
-                                    runCatching { deleteHermesBotGroup(context, group.name) }
-                                        .onSuccess { groups = loadHermesBotGroups(context); status = "Gruppo rimosso." }
-                                        .onFailure { status = it.message ?: "Gruppo non rimosso." }
-                                }) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina gruppo", tint = Color(0xFFFF7B8E)) }
-                            }
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = {
+                                openGroup = group
+                                groupPrompt = ""
+                                groupResult = null
+                            }) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri gruppo", tint = Color.White) }
+                            IconButton(onClick = {
+                                runCatching { deleteHermesBotGroup(context, group.name) }
+                                    .onSuccess { groups = loadHermesBotGroups(context); status = "Gruppo rimosso." }
+                                    .onFailure { status = it.message ?: "Gruppo non rimosso." }
+                            }) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina gruppo", tint = AppColors.Error) }
                         }
                     }
+                    HorizontalDivider(color = AppColors.Border)
                 }
             }
         }
@@ -1433,29 +1485,49 @@ internal fun BotsScreen(
         val emptyRoster = roster
         if (emptyRoster != null && emptyRoster.items.isEmpty() && emptyRoster.sourceFailures.isEmpty()) {
             item(key = "empty") {
-                Card(colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble), shape = RoundedCornerShape(18.dp)) {
-                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Nessun bot disponibile.", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "Crea il primo bot oppure collega un altro endpoint Hermes.",
-                            color = AppColors.Muted,
-                            fontSize = 13.sp,
-                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier.size(40.dp).clip(RoundedCornerShape(13.dp))
+                            .background(AppColors.Accent.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Rounded.Add,
+                            contentDescription = null,
+                            tint = AppColors.Accent,
+                            modifier = Modifier.size(24.dp)
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            IconButton(onClick = { openEditor(null) }) { Icon(Icons.Rounded.Add, contentDescription = "Crea bot", tint = Color.White) }
-                            IconButton(onClick = {
-                                connectionLabelInput = ""
-                                connectionEndpointInput = ""
-                                connectionTokenInput = ""
-                                showConnectionEditor = true
-                            }) { Icon(Icons.Rounded.Link, contentDescription = "Verifica connessioni", tint = Color.White) }
-                        }
-                        TextButton(
-                            onClick = { openEditor(null) },
-                            modifier = Modifier.heightIn(min = 48.dp)
-                        ) { Text("Crea primo bot", color = AppColors.Accent) }
                     }
+                    Text(
+                        "Nessun bot disponibile.",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "Crea il primo bot oppure collega un altro endpoint Hermes.",
+                        color = AppColors.Muted,
+                        fontSize = 14.sp,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                    )
+                    Button(
+                        onClick = { openEditor(null) },
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) { Text("Crea primo bot", color = Color(0xFF171009)) }
+                    TextButton(
+                        onClick = {
+                            connectionLabelInput = ""
+                            connectionEndpointInput = ""
+                            connectionTokenInput = ""
+                            showConnectionEditor = true
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) { Text("Verifica connessioni", color = AppColors.Accent) }
                 }
             }
         }
@@ -1507,7 +1579,7 @@ internal fun BotsScreen(
     openGroup?.let { group ->
         AlertDialog(
             onDismissRequest = { if (!groupRunning) openGroup = null },
-            title = { Text("Turno · ${group.name}") },
+            title = { Text("Turno · ${group.name}", color = Color.White) },
             text = {
                 Column(
                     modifier = Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
@@ -1547,9 +1619,13 @@ internal fun BotsScreen(
             },
             confirmButton = {
                 if (groupRunning) {
-                    IconButton(onClick = { groupJob?.cancel() }) { Icon(Icons.Rounded.Stop, contentDescription = "Annulla turno", tint = Color.White) }
+                    TextButton(
+                        onClick = { groupJob?.cancel() },
+                        // Contratto a11y test_protocol_contract: etichetta parlata "Annulla turno".
+                        modifier = Modifier.semantics { contentDescription = "Annulla turno" }
+                    ) { Text("Annulla", color = AppColors.Accent) }
                 } else {
-                    IconButton(
+                    Button(
                         enabled = groupPrompt.isNotBlank(),
                         onClick = {
                             groupRunning = true
@@ -1569,11 +1645,15 @@ internal fun BotsScreen(
                                     groupJob = null
                                 }
                             }
-                        }
-                    ) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Esegui turno", tint = Color.White) }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AppColors.Accent,
+                            contentColor = Color(0xFF171009)
+                        )
+                    ) { Text("Esegui", color = Color(0xFF171009)) }
                 }
             },
-            dismissButton = { IconButton(onClick = { openGroup = null }, enabled = !groupRunning) { Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = Color.White) } }
+            dismissButton = { TextButton(onClick = { openGroup = null }, enabled = !groupRunning) { Text("Chiudi", color = AppColors.Accent) } }
         )
     }
 
@@ -1584,7 +1664,7 @@ internal fun BotsScreen(
         val autoApproveMap = remember(editing?.profile, showEditor) { loadBotAutoApproveMap(appContext) }
         AlertDialog(
             onDismissRequest = { if (!mutating) showEditor = false },
-            title = { Text(if (editing == null) "Nuovo bot Hermes" else "Modifica ${editing.displayName}") },
+            title = { Text(if (editing == null) "Nuovo bot Hermes" else "Modifica ${editing.displayName}", color = Color.White) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(profileInput, { profileInput = it; editorError = "" }, label = { Text("Nome profilo") }, enabled = editing == null, singleLine = true)
@@ -1593,10 +1673,10 @@ internal fun BotsScreen(
                     OutlinedTextField(soulInput, { soulInput = it; editorError = "" }, label = { Text("SOUL.md (opzionale, ${soulInput.length}/$MAX_BOT_SOUL)") }, minLines = 4)
                     val editorValidation = validateBotEditor(profileInput, displayNameInput, descriptionInput, soulInput, editing == null)
                     if (editorValidation != null) {
-                        Text(editorValidation, color = Color(0xFFFF7B8E), fontSize = 12.sp)
+                        Text(editorValidation, color = AppColors.Error, fontSize = 12.sp)
                     }
                     if (editorError.isNotBlank()) {
-                        Text(editorError, color = Color(0xFFFF7B8E), fontSize = 12.sp)
+                        Text(editorError, color = AppColors.Error, fontSize = 12.sp)
                     }
                     Text("Auto-approvazione run di questo bot (solo client, mai deny automatico)", color = AppColors.Muted, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1612,15 +1692,22 @@ internal fun BotsScreen(
                                     }
                                 }
                             ) {
-                                Text(if (selected) "✓ $label" else label)
+                                Text(
+                                    if (selected) "✓ $label" else label,
+                                    color = if (selected) AppColors.Accent else AppColors.Muted
+                                )
                             }
                         }
                     }
                     Text("Connessione", color = AppColors.Muted, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         connections.items.filter { it.enabled }.forEach { connection ->
+                            val connectionSelected = connection.id.equals(selectedConnectionId, true)
                             TextButton(onClick = { selectedConnectionId = connection.id }, enabled = editing == null) {
-                                Text(if (connection.id.equals(selectedConnectionId, true)) "✓ ${connection.label}" else connection.label)
+                                Text(
+                                    if (connectionSelected) "✓ ${connection.label}" else connection.label,
+                                    color = if (connectionSelected) AppColors.Accent else AppColors.Muted
+                                )
                             }
                         }
                     }
@@ -1630,7 +1717,7 @@ internal fun BotsScreen(
             confirmButton = {
                 // Stessa validazione del server: mai un 400 criptico.
                 val editorValidation = validateBotEditor(profileInput, displayNameInput, descriptionInput, soulInput, editing == null)
-                IconButton(
+                Button(
                     enabled = profileInput.isNotBlank() && !mutating && selectedConnection?.enabled == true && editorValidation == null,
                     onClick = {
                         mutating = true
@@ -1657,25 +1744,29 @@ internal fun BotsScreen(
                             }
                             mutating = false
                         }
-                    }
-                ) { Icon(Icons.Rounded.Save, contentDescription = "Salva bot", tint = Color.White) }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AppColors.Accent,
+                        contentColor = Color(0xFF171009)
+                    )
+                ) { Text("Salva", color = Color(0xFF171009)) }
             },
-            dismissButton = { IconButton(onClick = { showEditor = false }, enabled = !mutating) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
+            dismissButton = { TextButton(onClick = { showEditor = false }, enabled = !mutating) { Text("Annulla", color = AppColors.Accent) } }
         )
     }
 
     deleteBot?.let { bot ->
         AlertDialog(
             onDismissRequest = { if (!mutating) deleteBot = null },
-            title = { Text("Elimina ${bot.displayName}") },
+            title = { Text("Elimina ${bot.displayName}", color = Color.White) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("L'eliminazione rimuove il profilo Hermes e i suoi dati dal server. Scrivi esattamente ${bot.profile} per confermare.")
+                    Text("L'eliminazione rimuove il profilo Hermes e i suoi dati dal server. Scrivi esattamente ${bot.profile} per confermare.", color = AppColors.Muted)
                     OutlinedTextField(deleteConfirmation, { deleteConfirmation = it }, label = { Text("Conferma nome") }, singleLine = true)
                 }
             },
             confirmButton = {
-                IconButton(
+                Button(
                     enabled = deleteConfirmation == bot.profile && !mutating,
                     onClick = {
                         mutating = true
@@ -1695,20 +1786,24 @@ internal fun BotsScreen(
                                 .onFailure { status = it.message ?: "Eliminazione bot fallita." }
                             mutating = false
                         }
-                    }
-                ) { Icon(Icons.Rounded.Delete, contentDescription = "Conferma eliminazione bot", tint = MaterialTheme.colorScheme.error) }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AppColors.Error,
+                        contentColor = Color.White
+                    )
+                ) { Text("Conferma", color = Color.White) }
             },
-            dismissButton = { IconButton(onClick = { deleteBot = null }, enabled = !mutating) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
+            dismissButton = { TextButton(onClick = { deleteBot = null }, enabled = !mutating) { Text("Annulla", color = AppColors.Accent) } }
         )
     }
 
     removeConnection?.let { connection ->
         AlertDialog(
             onDismissRequest = { removeConnection = null },
-            title = { Text("Rimuovi ${connection.label}") },
-            text = { Text("La connessione endpoint verrà eliminata dal dispositivo. I bot su questa connessione smetteranno di funzionare.") },
+            title = { Text("Rimuovi ${connection.label}", color = Color.White) },
+            text = { Text("La connessione endpoint verrà eliminata dal dispositivo. I bot su questa connessione smetteranno di funzionare.", color = AppColors.Muted) },
             confirmButton = {
-                IconButton(
+                Button(
                     onClick = {
                         removeConnection = null
                         scope.launch {
@@ -1716,17 +1811,21 @@ internal fun BotsScreen(
                                 .onSuccess { status = "Connessione rimossa."; refreshNonce++ }
                                 .onFailure { status = it.message ?: "Connessione non rimossa." }
                         }
-                    }
-                ) { Icon(Icons.Rounded.Delete, contentDescription = "Conferma rimozione connessione", tint = MaterialTheme.colorScheme.error) }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AppColors.Error,
+                        contentColor = Color.White
+                    )
+                ) { Text("Conferma", color = Color.White) }
             },
-            dismissButton = { IconButton(onClick = { removeConnection = null }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
+            dismissButton = { TextButton(onClick = { removeConnection = null }) { Text("Annulla", color = AppColors.Accent) } }
         )
     }
 
     if (showConnectionEditor) {
         AlertDialog(
             onDismissRequest = { if (!mutating) showConnectionEditor = false },
-            title = { Text("Nuova connessione Hermes") },
+            title = { Text("Nuova connessione Hermes", color = Color.White) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(connectionLabelInput, { connectionLabelInput = it }, label = { Text("Nome") }, singleLine = true)
@@ -1743,7 +1842,7 @@ internal fun BotsScreen(
                 }
             },
             confirmButton = {
-                IconButton(
+                Button(
                     enabled = connectionLabelInput.isNotBlank() && connectionEndpointInput.isNotBlank() && !mutating,
                     onClick = {
                         mutating = true
@@ -1763,10 +1862,14 @@ internal fun BotsScreen(
                             }
                             mutating = false
                         }
-                    }
-                ) { Icon(Icons.Rounded.Save, contentDescription = "Salva connessione", tint = Color.White) }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AppColors.Accent,
+                        contentColor = Color(0xFF171009)
+                    )
+                ) { Text("Salva", color = Color(0xFF171009)) }
             },
-            dismissButton = { IconButton(onClick = { showConnectionEditor = false }, enabled = !mutating) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
+            dismissButton = { TextButton(onClick = { showConnectionEditor = false }, enabled = !mutating) { Text("Annulla", color = AppColors.Accent) } }
         )
     }
 }
@@ -1824,86 +1927,104 @@ internal fun BotRosterCard(
     menu: BotMenuHost? = null,
     onMenuRequest: () -> Unit = {}
 ) {
-    Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth().combinedClickable(
-                    onClickLabel = "Apri dettaglio bot",
-                    onLongClickLabel = "Opzioni bot",
-                    onClick = onOpenDetail,
-                    onLongClick = onMenuRequest
-                ),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box {
-                    BotAvatar(bot.displayName, bot.profile)
-                    Box(
-                        modifier = Modifier.size(14.dp).clip(CircleShape)
-                            .background(if (screenRunning) Color(0xFF4CAF50) else AppColors.Faint)
-                            .align(Alignment.BottomEnd)
-                    )
-                }
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(bot.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, modifier = Modifier.weight(1f, fill = false))
-                        if (pinned) Text("FISSATO", color = AppColors.Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        if (hiddenBadge) Text("NASCOSTO", color = AppColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                        Text("@${bot.handle} · ${bot.connectionLabel}", color = AppColors.Muted, fontSize = 12.sp)
-                    if (!previewText.isNullOrBlank()) {
-                        Text(
-                            (if (!previewTime.isNullOrBlank()) "$previewTime · " else "") + previewText,
-                            color = AppColors.Muted,
-                            fontSize = 12.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Text(
-                        if (screenRunning) "Schermo live" else if (bot.isDefault) "Profilo predefinito" else bot.profile,
-                        color = if (screenRunning) Color(0xFF4CAF50) else AppColors.Faint,
-                        fontSize = 11.sp
-                    )
-                }
-                Box {
-                    IconButton(onClick = onMenuRequest) {
-                        Icon(Icons.Rounded.MoreVert, contentDescription = "Opzioni bot", tint = Color.White)
-                    }
-                    // Solo la card con menuFor == key compone il DropdownMenu
-                    // (hoist in BotsScreen: le altre passano menu = null).
-                    if (menu != null && menu.expanded) {
-                        BotCardMenu(bot = bot, host = menu)
-                    }
-                }
-                IconButton(onClick = onOpenChat, enabled = !busy && chatSupported) {
-                    Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Apri Bot Chat", tint = Color.White)
-                }
-            }
-            if (screenRunning && screenPreview != null) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().combinedClickable(
+                onClickLabel = "Apri dettaglio bot",
+                onLongClickLabel = "Opzioni bot",
+                onClick = onOpenDetail,
+                onLongClick = onMenuRequest
+            ).padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box {
+                BotAvatar(bot.displayName, bot.profile, 40.dp)
                 Box(
-                    modifier = Modifier.fillMaxWidth().height(120.dp)
-                        .clip(RoundedCornerShape(12.dp)).background(Color.Black)
-                        .clickable(onClick = onOpenScreen)
-                ) {
-                    Image(
-                        bitmap = screenPreview.asImageBitmap(),
-                        contentDescription = "Anteprima schermo",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.size(14.dp).clip(CircleShape)
+                        .background(if (screenRunning) Color(0xFF4CAF50) else AppColors.Faint)
+                        .align(Alignment.BottomEnd)
+                )
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(bot.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.weight(1f, fill = false))
+                    if (pinned) Text("FISSATO", color = AppColors.Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    if (hiddenBadge) Text("NASCOSTO", color = AppColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+                Text("@${bot.handle} · ${bot.connectionLabel}", color = AppColors.Muted, fontSize = 11.sp)
+                if (!previewText.isNullOrBlank()) {
+                    Text(
+                        (if (!previewTime.isNullOrBlank()) "$previewTime · " else "") + previewText,
+                        color = AppColors.Muted,
+                        fontSize = 13.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
+                Text(
+                    if (screenRunning) "Schermo live" else if (bot.isDefault) "Profilo predefinito" else bot.profile,
+                    color = if (screenRunning) Color(0xFF4CAF50) else AppColors.Faint,
+                    fontSize = 12.sp
+                )
             }
-            if (!bot.description.isBlank()) Text(bot.description, color = Color.White, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(onClick = onOpenScreen, enabled = screenRunning) { Text("Apri live") }
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = onEdit) { Icon(Icons.Rounded.Edit, contentDescription = "Modifica bot", tint = Color.White) }
-                if (canDelete) {
-                    IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina bot", tint = MaterialTheme.colorScheme.error) }
+            Box {
+                IconButton(onClick = onMenuRequest) {
+                    Icon(Icons.Rounded.MoreVert, contentDescription = "Opzioni bot", tint = Color.White)
                 }
+                // Solo la card con menuFor == key compone il DropdownMenu
+                // (hoist in BotsScreen: le altre passano menu = null).
+                if (menu != null && menu.expanded) {
+                    BotCardMenu(bot = bot, host = menu)
+                }
+            }
+            IconButton(onClick = onOpenChat, enabled = !busy && chatSupported) {
+                Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Apri Bot Chat", tint = Color.White)
+            }
+            Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = AppColors.Faint)
+        }
+        if (screenRunning && screenPreview != null) {
+            Box(
+                modifier = Modifier.fillMaxWidth().height(120.dp)
+                    .clip(RoundedCornerShape(12.dp)).background(Color.Black)
+                    .clickable(onClick = onOpenScreen)
+            ) {
+                Image(
+                    bitmap = screenPreview.asImageBitmap(),
+                    contentDescription = "Anteprima schermo",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        if (!bot.description.isBlank()) {
+            Text(
+                bot.description,
+                color = AppColors.Muted,
+                fontSize = 13.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            TextButton(
+                onClick = onOpenScreen,
+                enabled = screenRunning,
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) { Text("Apri live", color = if (screenRunning) AppColors.Accent else AppColors.Faint) }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onEdit) { Icon(Icons.Rounded.Edit, contentDescription = "Modifica bot", tint = Color.White) }
+            if (canDelete) {
+                IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina bot", tint = AppColors.Error) }
             }
         }
+        HorizontalDivider(color = AppColors.Border)
     }
 }
 
@@ -1929,56 +2050,70 @@ internal fun BotDetailScreen(
     var autoMode by remember(bot.identityKey) {
         mutableStateOf(loadBotAutoApproveMap(appContext)[bot.profile] ?: "off")
     }
-    Column(modifier = Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = Color.White)
             }
-            BotAvatar(bot.displayName, bot.profile, 44.dp)
-            Column(modifier = Modifier.weight(1f)) {
+            BotAvatar(bot.displayName, bot.profile, 40.dp)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(bot.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
                 Text(
                     "@${bot.handle} · " + if (screenStatus?.running == true) "schermo live" else "schermo spento",
-                    color = AppColors.Muted, fontSize = 12.sp
+                    color = AppColors.Muted, fontSize = 11.sp
                 )
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            BotDetailTab.values().forEach { entry ->
-                val selected = tab == entry
-                TextButton(
-                    onClick = { tab = entry },
-                    modifier = Modifier.heightIn(min = 48.dp)
-                ) {
-                    Text(
-                        entry.label,
-                        color = if (selected) AppColors.Accent else Color.White,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                    )
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                BotDetailTab.values().forEach { entry ->
+                    val selected = tab == entry
+                    TextButton(
+                        onClick = { tab = entry },
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) {
+                        Text(
+                            entry.label,
+                            color = if (selected) AppColors.Accent else AppColors.Muted,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
                 }
             }
+            HorizontalDivider(color = AppColors.Border)
         }
         when (tab) {
             BotDetailTab.Chat -> {
-                if (bot.description.isNotBlank()) Text(bot.description, color = Color.White, fontSize = 14.sp)
-                Button(
-                    // Delega all'handler esterno (singola POST persistente):
-                    // prima faceva POST qui + POST fuori (doppia sessione).
-                    onClick = { onOpenChat(bot) },
-                    enabled = !busy,
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
-                ) { Text("Apri Bot Chat", color = Color(0xFF171009)) }
-                Text("Auto-approvazione run di ${bot.displayName}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for ((label, value) in listOf("Chiedi" to WorkLimits.AUTO_APPROVE_OFF, "Sessione" to WorkLimits.AUTO_APPROVE_SESSION, "Sempre" to WorkLimits.AUTO_APPROVE_ALWAYS)) {
-                        val selected = autoMode == value
-                        TextButton(onClick = {
-                            saveBotAutoApprove(appContext, bot.profile, value)
-                            autoMode = value
-                        }) { Text(if (selected) "✓ $label" else label) }
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (bot.description.isNotBlank()) Text(bot.description, color = AppColors.Muted, fontSize = 14.sp)
+                    Button(
+                        // Delega all'handler esterno (singola POST persistente):
+                        // prima faceva POST qui + POST fuori (doppia sessione).
+                        onClick = { onOpenChat(bot) },
+                        enabled = !busy,
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    ) { Text("Apri Bot Chat", color = Color(0xFF171009)) }
+                    Text("Auto-approvazione run di ${bot.displayName}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for ((label, value) in listOf("Chiedi" to WorkLimits.AUTO_APPROVE_OFF, "Sessione" to WorkLimits.AUTO_APPROVE_SESSION, "Sempre" to WorkLimits.AUTO_APPROVE_ALWAYS)) {
+                            val selected = autoMode == value
+                            TextButton(
+                                onClick = {
+                                    saveBotAutoApprove(appContext, bot.profile, value)
+                                    autoMode = value
+                                },
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) {
+                                Text(
+                                    if (selected) "✓ $label" else label,
+                                    color = if (selected) AppColors.Accent else AppColors.Muted
+                                )
+                            }
+                        }
                     }
+                    Text("Mai deny automatico; ogni auto-approvazione resta visibile.", color = AppColors.Faint, fontSize = 12.sp)
                 }
-                Text("Mai deny automatico; ogni auto-approvazione resta visibile.", color = AppColors.Faint, fontSize = 11.sp)
             }
             BotDetailTab.Screen -> {
                 Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
@@ -1986,11 +2121,30 @@ internal fun BotDetailScreen(
                 }
             }
             BotDetailTab.Info -> {
-                Text("Profilo: ${bot.profile}", color = Color.White, fontSize = 13.sp)
-                Text("Connessione: ${bot.connectionLabel}", color = AppColors.Muted, fontSize = 12.sp)
-                if (bot.description.isNotBlank()) Text(bot.description, color = Color.White, fontSize = 13.sp)
-                OutlinedButton(onClick = onOpenCron) { Text("Routine e Cron") }
-                OutlinedButton(onClick = onOpenScreen) { Text("Apri schermo live") }
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("PROFILO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text(bot.profile, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    HorizontalDivider(color = AppColors.Border)
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("CONNESSIONE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text(bot.connectionLabel, color = Color.White, fontSize = 14.sp)
+                    }
+                    HorizontalDivider(color = AppColors.Border)
+                    if (bot.description.isNotBlank()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("DESCRIZIONE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Text(bot.description, color = AppColors.Muted, fontSize = 14.sp)
+                        }
+                        HorizontalDivider(color = AppColors.Border)
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("ROUTINE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        TextButton(onClick = onOpenCron, modifier = Modifier.heightIn(min = 48.dp)) { Text("Routine e Cron", color = AppColors.Accent) }
+                        TextButton(onClick = onOpenScreen, modifier = Modifier.heightIn(min = 48.dp)) { Text("Apri schermo live", color = AppColors.Accent) }
+                    }
+                }
             }
         }
     }

@@ -16,6 +16,17 @@ public sealed record HermesBotChatContext(
     HermesBotConnection Connection,
     string LocalConversationId);
 
+/// <summary>
+/// Navigazione verso la forever-chat canonica del bot (1 bot = 1 chat).
+/// LocalConversationId riusa la conversazione esistente con la stessa chiave
+/// identita quando presente, altrimenti l'id derivato dalla sessione.
+/// </summary>
+public sealed record CanonicalBotNavigation(
+    HermesBotChat Chat,
+    HermesBotConnection Connection,
+    string LocalConversationId,
+    string BotIdentityKey);
+
 public sealed record HermesBotGroupMemberReply(
     HermesBotGroupMember Member,
     string Reply,
@@ -123,6 +134,38 @@ public static class HermesBotConnectionService
             : await GatewayService.OpenBotChatOnConnectionAsync(effective, token, bot, cancellationToken);
         var localId = $"bot-{Sanitize(bot.ConnectionId)}-{Sanitize(bot.Profile)}-{Sanitize(chat.SessionId)}";
         return new HermesBotChatContext(chat, connection, localId);
+    }
+
+    /// <summary>
+    /// Chiave identita canonica del bot, stabile tra aperture e sessioni.
+    /// Stesso formato del client Android ("conn::{profilo}", esteso con
+    /// connessione per le connessioni extra).
+    /// </summary>
+    public static string CanonicalBotKey(string? connectionId, string? profile)
+    {
+        var conn = string.IsNullOrWhiteSpace(connectionId) ? "primary" : connectionId.Trim().ToLowerInvariant();
+        var prof = (profile ?? string.Empty).Trim().ToLowerInvariant();
+        return $"conn::{conn}::{prof}";
+    }
+
+    /// <summary>
+    /// Apre/aggiorna la sessione server del bot (idempotente, sessione stabile
+    /// per profilo) e risolve la forever-chat locale canonica: riusa la
+    /// conversazione esistente con la stessa chiave invece di crearne una nuova.
+    /// </summary>
+    public static async Task<CanonicalBotNavigation> ResolveCanonicalBotNavigationAsync(
+        AppSettings settings,
+        HermesBotRecord bot,
+        CancellationToken cancellationToken = default)
+    {
+        var context = await OpenBotChatAsync(settings, bot, cancellationToken);
+        var key = CanonicalBotKey(bot.ConnectionId, bot.Profile);
+        var canonical = ChatArchiveStore.FindByBotIdentity(key);
+        return new CanonicalBotNavigation(
+            context.Chat,
+            context.Connection,
+            canonical?.Id ?? context.LocalConversationId,
+            key);
     }
 
     public static async Task<HermesBotGroupTurnResult> RunGroupTurnAsync(

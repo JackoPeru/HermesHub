@@ -10,24 +10,17 @@
     <ScrollViewer Background="{StaticResource AppBackgroundBrush}" VerticalScrollBarVisibility="Auto">
         <Grid Padding="44,36">
             <StackPanel MaxWidth="860" Spacing="22">
-                <StackPanel Spacing="8">
-                    <TextBlock
-                        FontSize="30"
-                        FontWeight="SemiBold"
-                        Foreground="White"
-                        Text="Profilo e app" />
-                    <TextBlock
-                        Foreground="{StaticResource MutedTextBrush}"
-                        Text="Info locale client. Nessun account cloud, nessun token provider nel client." />
+                <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                    <Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13">
+                        <FontIcon FontSize="19" Glyph="&#xE76C;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource PageTitleStyle}" Text="Profilo e app" />
+                        <TextBlock Style="{StaticResource PageSubtitleStyle}" Text="Info locale client. Nessun account cloud, nessun token provider nel client." />
+                    </StackPanel>
                 </StackPanel>
 
-                <Border
-                    Padding="22"
-                    Background="{StaticResource SurfaceBrush}"
-                    BorderBrush="{StaticResource BorderBrushSoft}"
-                    BorderThickness="1"
-                    CornerRadius="18">
-                    <Grid ColumnSpacing="16">
+                <Grid ColumnSpacing="16">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
@@ -40,12 +33,11 @@
                                 Stretch="UniformToFill" />
                         </Border>
                         <StackPanel Grid.Column="1" Spacing="6">
-                            <TextBlock Foreground="White" FontSize="20" FontWeight="SemiBold" Text="Open source" />
-                            <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Profilo locale per home-server Hermes Agent." />
-                            <TextBlock x:Name="SettingsPathText" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" />
+                            <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="OPEN SOURCE" />
+                            <TextBlock Style="{StaticResource CaptionStyle}" Text="Profilo locale per home-server Hermes Agent." />
+                            <TextBlock x:Name="SettingsPathText" Style="{StaticResource CaptionStyle}" TextWrapping="Wrap" />
                         </StackPanel>
                     </Grid>
-                </Border>
 
                 <Grid ColumnSpacing="16" RowSpacing="16">
                     <Grid.ColumnDefinitions>
@@ -57,43 +49,29 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Border Padding="18" Background="{StaticResource SurfaceBrush}" CornerRadius="18">
-                        <StackPanel Spacing="8">
-                            <TextBlock Foreground="White" FontWeight="SemiBold" Text="Versione" />
-                            <TextBlock x:Name="VersionText" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                    <StackPanel Spacing="12">
+                            <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="VERSIONE" />
+                            <TextBlock x:Name="VersionText" Style="{StaticResource CaptionStyle}" TextWrapping="Wrap" />
                         </StackPanel>
-                    </Border>
-                    <Border Grid.Column="1" Padding="18" Background="{StaticResource SurfaceBrush}" CornerRadius="18">
-                        <StackPanel Spacing="8">
-                            <TextBlock Foreground="White" FontWeight="SemiBold" Text="Hermes API" />
-                            <TextBlock x:Name="GatewayText" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                    <StackPanel Grid.Column="1" Spacing="12">
+                            <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="HERMES API" />
+                            <TextBlock x:Name="GatewayText" Style="{StaticResource CaptionStyle}" TextWrapping="Wrap" />
                         </StackPanel>
-                    </Border>
-                    <Border Grid.Row="1" Padding="18" Background="{StaticResource SurfaceBrush}" CornerRadius="18">
-                        <StackPanel Spacing="8">
-                            <TextBlock Foreground="White" FontWeight="SemiBold" Text="Privacy" />
-                            <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Chat e settings restano locali finche' non colleghi Hermes. API key Hermes salvata nel Credential Locker; segreti modello restano lato server." TextWrapping="Wrap" />
+                    <StackPanel Grid.Row="1" Spacing="12">
+                            <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="PRIVACY" />
+                            <TextBlock Style="{StaticResource CaptionStyle}" Text="Chat e settings restano locali finche' non colleghi Hermes. API key Hermes salvata nel Credential Locker; segreti modello restano lato server." TextWrapping="Wrap" />
                         </StackPanel>
-                    </Border>
-                    <Border Grid.Row="1" Grid.Column="1" Padding="18" Background="{StaticResource SurfaceBrush}" CornerRadius="18">
-                        <StackPanel Spacing="8">
-                            <TextBlock Foreground="White" FontWeight="SemiBold" Text="Modalita" />
-                            <TextBlock x:Name="ModeText" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                    <StackPanel Grid.Row="1" Grid.Column="1" Spacing="12">
+                            <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="MODALITA" />
+                            <TextBlock x:Name="ModeText" Style="{StaticResource CaptionStyle}" TextWrapping="Wrap" />
                         </StackPanel>
-                    </Border>
                 </Grid>
 
-                <Border
-                    Padding="22"
-                    Background="{StaticResource SurfaceBrush}"
-                    BorderBrush="{StaticResource BorderBrushSoft}"
-                    BorderThickness="1"
-                    CornerRadius="18">
-                    <StackPanel Spacing="12">
-                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="Aggiornamenti" />
+                <StackPanel Spacing="16">
+                        <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="AGGIORNAMENTI" />
                         <TextBlock
                             x:Name="UpdateStatusText"
-                            Foreground="{StaticResource MutedTextBrush}"
+                            Style="{StaticResource CaptionStyle}"
                             Text="Controlla GitHub Releases per nuove versioni."
                             TextWrapping="Wrap" />
                         <TextBlock
@@ -104,8 +82,7 @@
                             Visibility="Collapsed" />
                         <TextBlock
                             x:Name="UpdateDetailText"
-                            Foreground="{StaticResource MutedTextBrush}"
-                            FontSize="12"
+                            Style="{StaticResource CaptionStyle}"
                             TextWrapping="Wrap" />
                         <ProgressBar
                             x:Name="UpdateProgressBar"
@@ -115,26 +92,25 @@
                             Visibility="Collapsed" />
                         <StackPanel Orientation="Horizontal" Spacing="10">
                             <Button
-                                Background="{StaticResource AccentGreenBrush}"
-                                BorderThickness="0"
                                 Click="CheckUpdates_Click"
-                                Content="Controlla update"
-                                Foreground="White" />
+                                Style="{StaticResource TextButtonStyle}"
+                                Content="Controlla update" />
                             <Button
                                 x:Name="DownloadUpdateButton"
                                 Click="DownloadUpdate_Click"
+                                Style="{StaticResource TextButtonStyle}"
                                 Content="Scarica update"
                                 IsEnabled="False"
                                 Visibility="Collapsed" />
                             <Button
                                 x:Name="InstallUpdateButton"
                                 Click="InstallUpdate_Click"
+                                Style="{StaticResource TextButtonStyle}"
                                 Content="Installa e riavvia"
                                 IsEnabled="False"
                                 Visibility="Collapsed" />
                         </StackPanel>
-                    </StackPanel>
-                </Border>
+                </StackPanel>
             </StackPanel>
         </Grid>
     </ScrollViewer>

@@ -2,7 +2,9 @@ package com.nemoclaw.chat.features.comfy
 
 import android.content.Context
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,13 +13,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.HourglassEmpty
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -32,12 +36,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -259,132 +265,186 @@ internal fun ComfyScreen(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        modifier = Modifier.fillMaxSize().background(AppColors.Background).padding(horizontal = 20.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 IconButton(onClick = onBack) {
                     Icon(Icons.Rounded.ArrowBack, contentDescription = "Torna alla chat", tint = Color.White)
                 }
+                Box(
+                    modifier = Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
+                        .background(AppColors.Accent.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = AppColors.Accent)
+                }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Comfy", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Comfy", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
                     Text(
                         "Cosa sta facendo la GPU: stato, lavoro e avanzamento live.",
                         color = AppColors.Muted,
-                        fontSize = 13.sp
+                        fontSize = 14.sp
                     )
                 }
-                IconButton(onClick = { refreshNonce++ }) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna stato", tint = Color.White)
+                TextButton(onClick = { refreshNonce++ }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text("Aggiorna", color = AppColors.Accent)
                 }
             }
         }
         val current = status
         if (current == null) {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        Text(
-                            "Leggo lo stato dal manager…",
-                            color = AppColors.Muted,
-                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
-                        )
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
+                            .background(AppColors.Accent.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.HourglassEmpty, contentDescription = null, tint = AppColors.Accent)
                     }
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().height(4.dp),
+                        color = AppColors.Accent,
+                        trackColor = AppColors.Border
+                    )
+                    Text(
+                        "Leggo lo stato dal manager…",
+                        color = AppColors.Muted,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                    )
                 }
             }
         } else if (!current.reachable) {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Manager non raggiungibile", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            current.error.ifBlank { "Controlla la connessione e riprova." },
-                            color = AppColors.Muted,
-                            fontSize = 13.sp,
-                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
-                        )
-                        TextButton(onClick = { refreshNonce++ }, modifier = Modifier.heightIn(min = 48.dp)) {
-                            Text("Riprova", color = AppColors.Accent)
-                        }
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
+                            .background(AppColors.Accent.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.CloudOff, contentDescription = null, tint = AppColors.Accent)
+                    }
+                    Text(
+                        "Manager non raggiungibile",
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        current.error.ifBlank { "Controlla la connessione e riprova." },
+                        color = AppColors.Muted,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
+                    )
+                    TextButton(onClick = { refreshNonce++ }, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text("Riprova", color = AppColors.Accent)
                     }
                 }
             }
         } else {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                comfyStateLabel(current.state),
-                                color = Color.White,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f).semantics {
-                                    contentDescription = "Stato GPU: ${comfyStateLabel(current.state)}"
-                                }
-                            )
-                            Text(
-                                current.desired.ifBlank { "AUTO" },
-                                color = AppColors.Muted,
-                                fontSize = 12.sp,
-                                maxLines = 1
-                            )
-                        }
-                        if (current.state == "MEDIA_BUSY") {
-                            val pct = current.progress?.let { "${(it * 100).roundToInt()}%" } ?: "…"
-                            Text("Avanzamento $pct", color = AppColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            if (current.progress != null) {
-                                LinearProgressIndicator(
-                                    progress = { current.progress },
-                                    modifier = Modifier.fillMaxWidth().height(8.dp).semantics { contentDescription = "Avanzamento $pct" }
-                                )
-                            } else {
-                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(8.dp).semantics { contentDescription = "Avanzamento $pct" })
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("STATO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            comfyStateLabel(current.state),
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f).semantics {
+                                contentDescription = "Stato GPU: ${comfyStateLabel(current.state)}"
                             }
-                        }
-                        if (current.error.isNotBlank() || current.state == "ERROR") {
-                            Text(
-                                current.error.ifBlank { "Errore senza dettagli: riprova o cambia modo." },
-                                color = Color(0xFFFF7B8E),
-                                fontSize = 13.sp,
-                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
+                        )
+                        Text(
+                            current.desired.ifBlank { "AUTO" },
+                            color = AppColors.Muted,
+                            fontSize = 12.sp,
+                            maxLines = 1
+                        )
+                    }
+                    HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
+                    if (current.state == "MEDIA_BUSY") {
+                        val pct = current.progress?.let { "${(it * 100).roundToInt()}%" } ?: "…"
+                        Text("Avanzamento $pct", color = AppColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        if (current.progress != null) {
+                            LinearProgressIndicator(
+                                progress = { current.progress },
+                                modifier = Modifier.fillMaxWidth().height(8.dp).semantics { contentDescription = "Avanzamento $pct" },
+                                color = AppColors.Accent,
+                                trackColor = AppColors.Border
+                            )
+                        } else {
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth().height(8.dp).semantics { contentDescription = "Avanzamento $pct" },
+                                color = AppColors.Accent,
+                                trackColor = AppColors.Border
                             )
                         }
+                    }
+                    if (current.error.isNotBlank() || current.state == "ERROR") {
+                        Text(
+                            current.error.ifBlank { "Errore senza dettagli: riprova o cambia modo." },
+                            color = AppColors.Error,
+                            fontSize = 13.sp,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
+                        )
                     }
                 }
             }
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Lavoro in corso", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("LAVORO IN CORSO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Column(modifier = Modifier.fillMaxWidth()) {
                         ComfyRow("Preset", current.preset.ifBlank { "—" })
+                        HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
                         ComfyRow("Modello", current.model.ifBlank { "—" })
+                        HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
                         ComfyRow("Job", current.jobId.take(8).ifBlank { "—" })
+                        HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
                         ComfyRow(
                             "Coda",
                             if (current.queue > 0) "${current.queue} in attesa" else "vuota"
                         )
                         if (current.comfyDirect && current.comfyQueue != null) {
+                            HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
                             ComfyRow(
                                 "Coda Comfy",
                                 if (current.comfyQueue > 0) "${current.comfyQueue} in esecuzione/coda" else "libera"
                             )
                         }
-                        if (current.hint.isNotBlank()) {
-                            Text(current.hint, color = AppColors.Muted, fontSize = 12.sp)
-                        }
+                    }
+                    if (current.hint.isNotBlank()) {
+                        Text(current.hint, color = AppColors.Muted, fontSize = 12.sp)
                     }
                 }
             }
@@ -396,21 +456,22 @@ internal fun ComfyScreen(
                 }
             if (comfyProblem != null) {
                 item {
-                    Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(18.dp)) {
-                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Errori Comfy", color = Color.White, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                comfyProblem,
-                                color = Color(0xFFFF7B8E),
-                                fontSize = 13.sp,
-                                maxLines = 8,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.semantics {
-                                    liveRegion = LiveRegionMode.Assertive
-                                    contentDescription = comfyProblem
-                                }
-                            )
-                        }
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text("ERRORI COMFY", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            comfyProblem,
+                            color = AppColors.Error,
+                            fontSize = 13.sp,
+                            maxLines = 8,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.semantics {
+                                liveRegion = LiveRegionMode.Assertive
+                                contentDescription = comfyProblem
+                            }
+                        )
                     }
                 }
             }
@@ -429,7 +490,7 @@ internal fun ComfyScreen(
 @Composable
 private fun ComfyRow(label: String, value: String) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {

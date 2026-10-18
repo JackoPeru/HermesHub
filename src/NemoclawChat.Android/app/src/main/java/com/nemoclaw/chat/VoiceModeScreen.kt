@@ -20,21 +20,26 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.Card
@@ -360,7 +365,7 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
     val assembled = callActive && phase != VoiceCallPhase.Connecting && phase != VoiceCallPhase.Error
     val speaking = phase == VoiceCallPhase.Speaking
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(AppColors.Background)) {
         VoiceParticleField(
             assembled = assembled,
             speaking = speaking,
@@ -373,9 +378,9 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 34.dp, start = 24.dp, end = 24.dp),
+                .padding(bottom = 34.dp, start = 20.dp, end = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Button(
                 onClick = {
@@ -393,22 +398,27 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
                 },
                 shape = CircleShape,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (callActive) Color(0xFF9E2424) else Color(0x33222222)
+                    containerColor = if (callActive) AppColors.Error else AppColors.Accent,
+                    contentColor = if (callActive) Color.White else Color(0xFF171009),
+                    disabledContainerColor = if (callActive) AppColors.Error else AppColors.Accent,
+                    disabledContentColor = if (callActive) Color.White else Color(0xFF171009)
                 ),
                 modifier = Modifier
                     .size(78.dp)
                     .clip(CircleShape)
-                    .border(1.dp, if (callActive) Color(0xCCFF6F24) else Color(0x66FFFFFF), CircleShape)
+                    .border(1.dp, if (callActive) AppColors.Error else AppColors.Accent, CircleShape)
             ) {
                 Icon(
                     imageVector = if (callActive) Icons.Rounded.CallEnd else Icons.Rounded.Call,
                     contentDescription = if (callActive) "Chiudi chiamata" else "Avvia chiamata",
-                    tint = Color.White
+                    tint = if (callActive) Color.White else Color(0xFF171009),
+                    modifier = Modifier.size(28.dp)
                 )
             }
             Text(
                 text = status,
-                color = Color(0xCCFFFFFF),
+                color = AppColors.Muted,
+                fontSize = 13.sp,
                 textAlign = TextAlign.Center,
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis
@@ -416,8 +426,63 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
         }
 
         if (voiceProfile.showTranscript) {
-            Card(modifier = Modifier.align(Alignment.TopStart).padding(18.dp).fillMaxWidth(0.72f).heightIn(max = 420.dp), colors = CardDefaults.cardColors(containerColor = Color(0xDD151515))) {
-                androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { items(history, key = { it.id }) { message -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) { Text(message.author, color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold); Text(message.text, color = Color.White, fontSize = 14.sp) } } }
+            Card(
+                modifier = Modifier.align(Alignment.TopStart).padding(20.dp).fillMaxWidth(0.72f).heightIn(max = 420.dp),
+                shape = RoundedCornerShape(13.dp),
+                border = BorderStroke(1.dp, AppColors.Border),
+                colors = CardDefaults.cardColors(
+                    containerColor = AppColors.Surface,
+                    contentColor = Color.White,
+                    disabledContainerColor = AppColors.Surface,
+                    disabledContentColor = Color.White
+                )
+            ) {
+                if (history.isEmpty()) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp).fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF302517)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Call,
+                                contentDescription = null,
+                                tint = AppColors.Accent,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "Nessuna trascrizione",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            text = "I messaggi appariranno qui durante la chiamata.",
+                            color = AppColors.Muted,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                } else {
+                    androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                        itemsIndexed(history, key = { _, item -> item.id }) { index, message ->
+                            Column(modifier = Modifier.padding(vertical = 10.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(message.author.uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                Text(message.text, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            if (index < history.lastIndex) HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
+                        }
+                    }
+                }
             }
         }
     }

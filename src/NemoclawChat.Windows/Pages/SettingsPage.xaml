@@ -14,142 +14,133 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <TextBlock
-            FontSize="30"
-            FontWeight="SemiBold"
-            Foreground="White"
-            Text="Impostazioni" />
+        <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+            <Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13">
+                <FontIcon FontSize="19" Glyph="&#xE713;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <StackPanel VerticalAlignment="Center" Spacing="2">
+                <TextBlock Style="{StaticResource PageTitleStyle}" Text="Impostazioni" />
+                <TextBlock Style="{StaticResource PageSubtitleStyle}" Text="Impostazioni salvate localmente. Le nuove installazioni non includono endpoint o credenziali preconfigurati." />
+            </StackPanel>
+        </StackPanel>
         <StackPanel Grid.Row="1" MaxWidth="820" HorizontalAlignment="Stretch" Spacing="16">
-            <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Impostazioni salvate localmente. Le nuove installazioni non includono endpoint o credenziali preconfigurati." />
 
-            <Border Padding="16" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="20">
-                <StackPanel Spacing="10">
-                    <TextBlock Foreground="White" FontSize="16" FontWeight="SemiBold" Text="Connessione Hermes" />
-                        <TextBox x:Name="GatewayUrlBox" Header="Hermes API URL" PlaceholderText="http://nome-magicdns:8642/v1" />
-                        <PasswordBox x:Name="ApiKeyBox" Header="API key Hermes" PlaceholderText="Inserisci la chiave del tuo server" />
-                        <TextBox x:Name="ActiveProjectNameBox" Header="Progetto attivo (gestisci dalla pagina Progetti)" IsReadOnly="True" />
-                        <TextBox x:Name="VideoLibraryPathBox" Header="Cartella video Hermes (sync server)" IsReadOnly="True" PlaceholderText="In attesa di sync da Hermes /health/detailed" />
-                        <TextBox x:Name="NewsLibraryPathBox" Header="Cartella news Hermes" PlaceholderText="~/news" />
-                        <NumberBox x:Name="MaxAttachmentMbBox" Header="Limite allegati file (MB)" Minimum="1" Maximum="150" SmallChange="1" LargeChange="10" />
-                    </StackPanel>
-                </Border>
+            <StackPanel Spacing="16">
+                <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="CONNESSIONE HERMES" />
+                <TextBox x:Name="GatewayUrlBox" Header="Hermes API URL" PlaceholderText="http://nome-magicdns:8642/v1" />
+                <PasswordBox x:Name="ApiKeyBox" Header="API key Hermes" PlaceholderText="Inserisci la chiave del tuo server" />
+                <TextBox x:Name="ActiveProjectNameBox" Header="Progetto attivo (gestisci dalla pagina Progetti)" IsReadOnly="True" />
+                <TextBox x:Name="VideoLibraryPathBox" Header="Cartella video Hermes (sync server)" IsReadOnly="True" PlaceholderText="In attesa di sync da Hermes /health/detailed" />
+                <TextBox x:Name="NewsLibraryPathBox" Header="Cartella news Hermes" PlaceholderText="~/news" />
+                <TextBox x:Name="ImageLibraryPathBox" Header="Cartella immagini Hermes" PlaceholderText="~/.hermes/hub_uploads/denudate" />
+                <NumberBox x:Name="MaxAttachmentMbBox" Header="Limite allegati file (MB)" Minimum="1" Maximum="150" SmallChange="1" LargeChange="10" />
+            </StackPanel>
 
             <TextBox x:Name="GatewayWsUrlBox" Visibility="Collapsed" />
             <TextBox x:Name="AdminBridgeUrlBox" Visibility="Collapsed" />
 
-            <Border Padding="16" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="20">
-                <StackPanel Spacing="10">
-                    <TextBlock Foreground="White" FontSize="16" FontWeight="SemiBold" Text="Chat / Agente" />
-                    <TextBox x:Name="ModelBox" Header="Modello / agente" />
-                    <ToggleSwitch x:Name="ShowToolCallsSwitch" Header="Tool call in chat" OffContent="Nascondi pannello tool" OnContent="Mostra pannello tool compatto" />
-                    <ToggleSwitch x:Name="AdvancedChatDetailsSwitch" Header="Dettagli tecnici chat" OffContent="Nascondi eventi raw" OnContent="Mostra eventi raw" />
-                </StackPanel>
-            </Border>
+            <StackPanel Spacing="16">
+                <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="CHAT / AGENTE" />
+                <TextBox x:Name="ModelBox" Header="Modello / agente" />
+                <ToggleSwitch x:Name="ShowToolCallsSwitch" Header="Tool call in chat" OffContent="Nascondi pannello tool" OnContent="Mostra pannello tool compatto" />
+                <ToggleSwitch x:Name="AdvancedChatDetailsSwitch" Header="Dettagli tecnici chat" OffContent="Nascondi eventi raw" OnContent="Mostra eventi raw" />
+            </StackPanel>
 
-            <Border Padding="16" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="20">
-                <StackPanel Spacing="10">
-                    <TextBlock Foreground="White" FontSize="16" FontWeight="SemiBold" Text="Voce" />
-                    <TextBlock x:Name="VoiceProjectText" Foreground="{StaticResource MutedTextBrush}" Text="Profilo voce generale" />
-                    <TextBox x:Name="VoiceModelBox" Header="Modello dedicato Voce" PlaceholderText="hermes-voice" />
-                    <ComboBox x:Name="VoiceNameBox" Header="Voce Kokoro" SelectedIndex="0">
-                        <ComboBoxItem Content="if_sara" />
-                        <ComboBoxItem Content="im_nicola" />
-                    </ComboBox>
-                    <ComboBox x:Name="VoiceParticleShapeBox" Header="Forma particelle" SelectedIndex="0">
-                        <ComboBoxItem Content="Sfera" Tag="sphere" />
-                        <ComboBoxItem Content="Nucleo neurale" Tag="neural-core" />
-                        <ComboBoxItem Content="Testa Hermes" Tag="hermes-head" />
-                    </ComboBox>
-                    <Slider x:Name="VoiceSpeedSlider" Header="Velocità" Minimum="0.75" Maximum="1.35" Value="1.08" StepFrequency="0.05" />
-                    <ToggleSwitch x:Name="VoiceWakeWordSwitch" Header="Abilita wake word" />
-                    <AutoSuggestBox
-                        x:Name="VoiceWakePhraseBox"
-                        Header="Parola di attivazione"
-                        PlaceholderText="Hermes"
-                        Text="Hermes" />
-                    <TextBlock
-                        FontSize="12"
-                        Foreground="{StaticResource MutedTextBrush}"
-                        Text="Scegli un suggerimento o scrivi una frase personalizzata. Quando Hermes Hub è aperto, la wake word avvia automaticamente una chiamata."
-                        TextWrapping="Wrap" />
-                    <ToggleSwitch x:Name="VoicePushToTalkSwitch" Header="Push-to-talk" OffContent="Conversazione continua" OnContent="Barra spaziatrice interrompe Hermes e riapre ascolto" />
-                    <ToggleSwitch x:Name="VoiceTranscriptSwitch" Header="Trascrizione durante chiamata" OffContent="Schermata libera" OnContent="Mostra trascrizione" />
-                    <Button Click="PreviewVoice_Click" Content="Ascolta anteprima" HorizontalAlignment="Left" />
-                </StackPanel>
-            </Border>
+            <StackPanel Spacing="16">
+                <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="VOCE" />
+                <TextBlock x:Name="VoiceProjectText" Style="{StaticResource CaptionStyle}" Text="Profilo voce generale" />
+                <TextBox x:Name="VoiceModelBox" Header="Modello dedicato Voce" PlaceholderText="hermes-voice" />
+                <ComboBox x:Name="VoiceNameBox" Header="Voce Kokoro" SelectedIndex="0">
+                    <ComboBoxItem Content="if_sara" />
+                    <ComboBoxItem Content="im_nicola" />
+                </ComboBox>
+                <ComboBox x:Name="VoiceParticleShapeBox" Header="Forma particelle" SelectedIndex="0">
+                    <ComboBoxItem Content="Sfera" Tag="sphere" />
+                    <ComboBoxItem Content="Nucleo neurale" Tag="neural-core" />
+                    <ComboBoxItem Content="Testa Hermes" Tag="hermes-head" />
+                </ComboBox>
+                <Slider x:Name="VoiceSpeedSlider" Header="Velocità" Minimum="0.75" Maximum="1.35" Value="1.08" StepFrequency="0.05" />
+                <ToggleSwitch x:Name="VoiceWakeWordSwitch" Header="Abilita wake word" />
+                <AutoSuggestBox
+                    x:Name="VoiceWakePhraseBox"
+                    Header="Parola di attivazione"
+                    PlaceholderText="Hermes"
+                    Text="Hermes" />
+                <TextBlock
+                    Style="{StaticResource CaptionStyle}"
+                    Text="Scegli un suggerimento o scrivi una frase personalizzata. Quando Hermes Hub è aperto, la wake word avvia automaticamente una chiamata."
+                    TextWrapping="Wrap" />
+                <ToggleSwitch x:Name="VoicePushToTalkSwitch" Header="Push-to-talk" OffContent="Conversazione continua" OnContent="Barra spaziatrice interrompe Hermes e riapre ascolto" />
+                <ToggleSwitch x:Name="VoiceTranscriptSwitch" Header="Trascrizione durante chiamata" OffContent="Schermata libera" OnContent="Mostra trascrizione" />
+                <Button Style="{StaticResource TextButtonStyle}" Click="PreviewVoice_Click" Content="Ascolta anteprima" HorizontalAlignment="Left" />
+            </StackPanel>
 
-            <Border Padding="16" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="20">
-                <StackPanel Spacing="10">
-                    <TextBlock Foreground="White" FontSize="16" FontWeight="SemiBold" Text="Visualizzazione messaggi" />
-                    <ToggleSwitch x:Name="ShowMessageMetricsSwitch" Header="Metriche sotto messaggi" OffContent="Nascoste" OnContent="Visibili" />
-                    <Grid ColumnSpacing="12" RowSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <CheckBox x:Name="MetricTtftBox" Content="Tempo primo token" />
-                        <CheckBox x:Name="MetricTokensPerSecondBox" Grid.Column="1" Content="Token/sec" />
-                        <CheckBox x:Name="MetricOutputTokensBox" Grid.Row="1" Content="Token output" />
-                        <CheckBox x:Name="MetricPromptTokensBox" Grid.Row="1" Grid.Column="1" Content="Token input" />
-                        <CheckBox x:Name="MetricContextTokensBox" Grid.Row="2" Content="Contesto" />
-                        <CheckBox x:Name="MetricDurationBox" Grid.Row="2" Grid.Column="1" Content="Durata totale" />
-                    </Grid>
-                </StackPanel>
-            </Border>
+            <StackPanel Spacing="16">
+                <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="VISUALIZZAZIONE MESSAGGI" />
+                <ToggleSwitch x:Name="ShowMessageMetricsSwitch" Header="Metriche sotto messaggi" OffContent="Nascoste" OnContent="Visibili" />
+                <Grid ColumnSpacing="12" RowSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <CheckBox x:Name="MetricTtftBox" Content="Tempo primo token" />
+                    <CheckBox x:Name="MetricTokensPerSecondBox" Grid.Column="1" Content="Token/sec" />
+                    <CheckBox x:Name="MetricOutputTokensBox" Grid.Row="1" Content="Token output" />
+                    <CheckBox x:Name="MetricPromptTokensBox" Grid.Row="1" Grid.Column="1" Content="Token input" />
+                    <CheckBox x:Name="MetricContextTokensBox" Grid.Row="2" Content="Contesto" />
+                    <CheckBox x:Name="MetricDurationBox" Grid.Row="2" Grid.Column="1" Content="Durata totale" />
+                </Grid>
+            </StackPanel>
 
             <Expander Header="Avanzate">
-            <Border Padding="16" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="20">
-                    <StackPanel Spacing="10">
-                        <TextBox x:Name="ProviderBox" Header="Provider" />
-                        <TextBox x:Name="InferenceEndpointBox" Header="Endpoint API lato server" />
-                        <ComboBox x:Name="PreferredApiBox" Header="API preferita" SelectedIndex="0">
-                            <ComboBoxItem Content="hermes-native" />
-                            <ComboBoxItem Content="openai-completions" />
-                            <ComboBoxItem Content="openai-responses" />
-                        </ComboBox>
-                        <ComboBox x:Name="AccessModeBox" Header="Accesso consigliato" SelectedIndex="0">
-                            <ComboBoxItem Content="Tailscale/LAN" />
-                            <ComboBoxItem Content="LAN only" />
-                            <ComboBoxItem Content="Public HTTPS" />
-                        </ComboBox>
-                        <ComboBox x:Name="VisualBlocksModeBox" Header="Modalita visuale" SelectedIndex="0">
-                            <ComboBoxItem Content="auto" />
-                            <ComboBoxItem Content="always" />
-                            <ComboBoxItem Content="never" />
-                        </ComboBox>
-                        <ToggleSwitch x:Name="StrictNativeModeSwitch" Header="Strict native mode" OffContent="Fallback compat consentiti" OnContent="Solo Hermes native/Responses" />
-                        <ToggleSwitch x:Name="DemoModeSwitch" Header="Fallback locale" OffContent="Solo Hermes" OnContent="Fallback locale attivo" />
-                    </StackPanel>
-                </Border>
+                <StackPanel Spacing="16">
+                    <TextBox x:Name="ProviderBox" Header="Provider" />
+                    <TextBox x:Name="InferenceEndpointBox" Header="Endpoint API lato server" />
+                    <ComboBox x:Name="PreferredApiBox" Header="API preferita" SelectedIndex="0">
+                        <ComboBoxItem Content="hermes-native" />
+                        <ComboBoxItem Content="openai-completions" />
+                        <ComboBoxItem Content="openai-responses" />
+                    </ComboBox>
+                    <ComboBox x:Name="AccessModeBox" Header="Accesso consigliato" SelectedIndex="0">
+                        <ComboBoxItem Content="Tailscale/LAN" />
+                        <ComboBoxItem Content="LAN only" />
+                        <ComboBoxItem Content="Public HTTPS" />
+                    </ComboBox>
+                    <ComboBox x:Name="VisualBlocksModeBox" Header="Modalita visuale" SelectedIndex="0">
+                        <ComboBoxItem Content="auto" />
+                        <ComboBoxItem Content="always" />
+                        <ComboBoxItem Content="never" />
+                    </ComboBox>
+                    <ToggleSwitch x:Name="StrictNativeModeSwitch" Header="Strict native mode" OffContent="Fallback compat consentiti" OnContent="Solo Hermes native/Responses" />
+                    <ToggleSwitch x:Name="DemoModeSwitch" Header="Fallback locale" OffContent="Solo Hermes" OnContent="Fallback locale attivo" />
+                </StackPanel>
             </Expander>
 
             <Expander Header="Memoria Hermes">
-            <Border Padding="16" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="20">
-                    <StackPanel Spacing="10">
-                        <TextBlock x:Name="MemoryStatusText" Foreground="{StaticResource MutedTextBrush}" Text="Memoria gateway non ancora letta." TextWrapping="Wrap" />
-                        <TextBox x:Name="MemoryVideoBox" Header="Preferenze video" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
-                        <TextBox x:Name="MemoryNewsBox" Header="Preferenze news" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
-                        <TextBox x:Name="MemoryStyleBox" Header="Stile risposta" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
-                        <TextBox x:Name="MemoryProjectBox" Header="Regole progetto" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
-                        <TextBox x:Name="MemoryNotesBox" Header="Note generali" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
-                        <Grid ColumnSpacing="10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <Button Click="LoadMemory_Click" Content="Leggi memoria" />
-                            <Button Grid.Column="1" Click="SaveMemory_Click" Content="Salva memoria" />
-                        </Grid>
-                    </StackPanel>
-                </Border>
+                <StackPanel Spacing="16">
+                    <TextBlock x:Name="MemoryStatusText" Style="{StaticResource CaptionStyle}" Text="Memoria gateway non ancora letta." TextWrapping="Wrap" />
+                    <TextBox x:Name="MemoryVideoBox" Header="Preferenze video" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
+                    <TextBox x:Name="MemoryNewsBox" Header="Preferenze news" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
+                    <TextBox x:Name="MemoryStyleBox" Header="Stile risposta" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
+                    <TextBox x:Name="MemoryProjectBox" Header="Regole progetto" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
+                    <TextBox x:Name="MemoryNotesBox" Header="Note generali" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" />
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button Style="{StaticResource TextButtonStyle}" Click="LoadMemory_Click" Content="Leggi memoria" />
+                        <Button Style="{StaticResource PrimaryButtonStyle}" Grid.Column="1" Click="SaveMemory_Click" Content="Salva memoria" />
+                    </Grid>
+                </StackPanel>
             </Expander>
-            <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedTextBrush}" Text="Pronto." />
-            <Grid ColumnSpacing="10" RowSpacing="8">
+            <TextBlock x:Name="StatusText" Style="{StaticResource CaptionStyle}" Text="Pronto." />
+            <Grid ColumnSpacing="10" RowSpacing="16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
@@ -158,15 +149,13 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <Button
-                    Background="{StaticResource AccentGreenBrush}"
-                    BorderThickness="0"
+                    Style="{StaticResource PrimaryButtonStyle}"
                     Click="Save_Click"
-                    Content="Salva"
-                    Foreground="White" />
-                <Button Grid.Column="1" Click="TestGateway_Click" Content="Test Hermes" />
-                <Button Grid.Column="2" Click="ResetApiKey_Click" Content="Ripristina API key" />
-                <Button Grid.Column="3" Click="Reset_Click" Content="Reset default" />
-                <Button Grid.Column="4" Click="Backup_Click" Content="Backup locale" />
+                    Content="Salva" />
+                <Button Style="{StaticResource TextButtonStyle}" Grid.Column="1" Click="TestGateway_Click" Content="Test Hermes" />
+                <Button Style="{StaticResource TextButtonStyle}" Grid.Column="2" Click="ResetApiKey_Click" Content="Ripristina API key" />
+                <Button Style="{StaticResource TextButtonStyle}" Grid.Column="3" Click="Reset_Click" Content="Reset default" />
+                <Button Style="{StaticResource TextButtonStyle}" Grid.Column="4" Click="Backup_Click" Content="Backup locale" />
             </Grid>
         </StackPanel>
     </Grid>

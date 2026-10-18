@@ -53,6 +53,7 @@ public sealed partial class HomePage : Page
     private string? _botProfile;
     private string? _botSessionId;
     private string? _botDisplayName;
+    private string _botIdentityKey = string.Empty;
     private bool _botMultiplexEnabled;
     private string _botConnectionId = "primary";
     private string _botEndpoint = string.Empty;
@@ -138,6 +139,7 @@ public sealed partial class HomePage : Page
                 _botMultiplexEnabled = bot.MultiplexEnabled;
                 _botConnectionId = bot.ConnectionId;
                 _botEndpoint = bot.Endpoint;
+                _botIdentityKey = bot.BotIdentityKey ?? string.Empty;
                 _conversationId = bot.LocalConversationId;
                 if (ChatArchiveStore.Find(bot.LocalConversationId) is not null)
                 {
@@ -151,11 +153,13 @@ public sealed partial class HomePage : Page
                 _botMultiplexEnabled = bot.MultiplexEnabled;
                 _botConnectionId = bot.ConnectionId;
                 _botEndpoint = bot.Endpoint;
+                _botIdentityKey = bot.BotIdentityKey ?? string.Empty;
                 _conversationId = bot.LocalConversationId;
                 _previousResponseId = null;
                 UpdateArchivedBotGuard();
                 BotActiveText.Text = $"Bot attivo · {bot.DisplayName} · Bot Chat";
                 BotActiveText.Visibility = Visibility.Visible;
+                UpdateIdentitySelector();
                 if (!string.IsNullOrWhiteSpace(request.Prompt))
                 {
                     PromptBox.Text = request.Prompt;
@@ -165,9 +169,9 @@ public sealed partial class HomePage : Page
             }
             if (!string.IsNullOrWhiteSpace(request.ConversationId))
             {
-                // Global Archive never implies a bot continuation.
                 ResetForNewChat();
                 LoadConversation(request.ConversationId);
+                RestoreBotContextFromRecord(ChatArchiveStore.Find(request.ConversationId));
                 return;
             }
 
@@ -565,6 +569,7 @@ public sealed partial class HomePage : Page
         _botProfile = null;
         _botSessionId = null;
         _botDisplayName = null;
+        _botIdentityKey = string.Empty;
         _botMultiplexEnabled = false;
         _botConnectionId = "primary";
         _botEndpoint = string.Empty;
@@ -582,6 +587,7 @@ public sealed partial class HomePage : Page
         SetEmptyStateVisibility(Visibility.Visible);
         PromptBox.Text = string.Empty;
         UpdateContextMeter();
+        UpdateIdentitySelector();
     }
 
     private void SetEmptyStateVisibility(Visibility visibility)
@@ -629,6 +635,12 @@ public sealed partial class HomePage : Page
     private void SetMode(string mode)
     {
         _mode = mode;
+        if (ModeChipButton is not null)
+        {
+            ModeChipButton.Content = mode;
+            var other = mode == "Agente" ? "Chat" : "Agente";
+            ToolTipService.SetToolTip(ModeChipButton, $"Modalità {mode}: tocca per passare a {other}");
+        }
     }
 
     private bool IsComposerRunCurrent(string runId)
@@ -790,7 +802,7 @@ public sealed partial class HomePage : Page
             _messageHistory.Add(userMessage);
             localHistory.Add(userMessage);
             PromptBox.Text = string.Empty;
-            var initialSave = await Task.Run(() => ChatArchiveStore.SaveSnapshot(conversationId, sendMode, displayPrompt, localHistory.ToList(), "Hermes in corso", previousResponseId, settings.ActiveProjectId));
+            var initialSave = await Task.Run(() => SaveSnapshotWithBotIdentity(conversationId, sendMode, displayPrompt, localHistory.ToList(), "Hermes in corso", previousResponseId, settings.ActiveProjectId));
             conversationId = initialSave.Id;
             previousResponseId = initialSave.PreviousResponseId;
             streamCts.Token.ThrowIfCancellationRequested();
@@ -984,7 +996,7 @@ public sealed partial class HomePage : Page
                             }
                         })
                         .ToList();
-                    var checkpoint = await Task.Run(() => ChatArchiveStore.SaveSnapshot(conversationId, sendMode, prompt, partialMessages, "Hermes in corso", finalResponseId ?? previousResponseId));
+                    var checkpoint = await Task.Run(() => SaveSnapshotWithBotIdentity(conversationId, sendMode, prompt, partialMessages, "Hermes in corso", finalResponseId ?? previousResponseId));
                     conversationId = checkpoint.Id;
                     previousResponseId = checkpoint.PreviousResponseId;
                     if (IsComposerRunCurrent(composerRunId))
@@ -1005,7 +1017,7 @@ public sealed partial class HomePage : Page
 
             if (wasCancelled)
             {
-                await Task.Run(() => ChatArchiveStore.SaveSnapshot(
+                await Task.Run(() => SaveSnapshotWithBotIdentity(
                     conversationId,
                     sendMode,
                     prompt,
@@ -1067,7 +1079,7 @@ public sealed partial class HomePage : Page
             {
                 _messageHistory.Add(localHistory[^1]);
             }
-            var saved = await Task.Run(() => ChatArchiveStore.SaveSnapshot(conversationId, sendMode, prompt, localHistory.ToList(), source, finalResponseId ?? previousResponseId));
+            var saved = await Task.Run(() => SaveSnapshotWithBotIdentity(conversationId, sendMode, prompt, localHistory.ToList(), source, finalResponseId ?? previousResponseId));
             conversationId = saved.Id;
             previousResponseId = saved.PreviousResponseId;
             if (IsComposerRunCurrent(composerRunId))
@@ -1094,7 +1106,7 @@ public sealed partial class HomePage : Page
             bubble?.CompleteInterrupted();
             try
             {
-                await Task.Run(() => ChatArchiveStore.SaveSnapshot(
+                await Task.Run(() => SaveSnapshotWithBotIdentity(
                     conversationId,
                     sendMode,
                     prompt,
@@ -1126,7 +1138,7 @@ public sealed partial class HomePage : Page
             var interruptedMessages = localHistory
                 .Concat(new[] { new ChatMessageRecord("Stato", $"Stream interrotto: {ex.Message}", DateTimeOffset.Now) })
                 .ToList();
-            var saved = await Task.Run(() => ChatArchiveStore.SaveSnapshot(conversationId, sendMode, prompt, interruptedMessages, "Errore Hermes", previousResponseId));
+            var saved = await Task.Run(() => SaveSnapshotWithBotIdentity(conversationId, sendMode, prompt, interruptedMessages, "Errore Hermes", previousResponseId));
             conversationId = saved.Id;
             previousResponseId = saved.PreviousResponseId;
             if (IsComposerRunCurrent(composerRunId))
@@ -1708,9 +1720,151 @@ public sealed partial class HomePage : Page
         ErrorInfoBar.IsOpen = true;
     }
 
+    /// <summary>
+    /// Ripristina il contesto bot aprendo una conversazione archiviata con
+    /// chiave identita (forever-chat canonica): profilo, sessione stabile,
+    /// connessione e nome visualizzato. Niente re-POST: la sessione server
+    /// per profilo e stabile. Se il server ruota le sessioni, il flusso di
+    /// invio fallisce con errore esplicito e si riapre da Bot Hermes.
+    /// </summary>
+    private void RestoreBotContextFromRecord(ConversationRecord? conversation)
+    {
+        if (conversation is null || string.IsNullOrWhiteSpace(conversation.BotIdentityKey))
+        {
+            return;
+        }
+        var parts = conversation.BotIdentityKey.Split("::", StringSplitOptions.RemoveEmptyEntries);
+        // Formato "conn::{connection}::{profile}".
+        var profile = parts.Length >= 3 ? parts[2] : string.Empty;
+        if (string.IsNullOrWhiteSpace(profile))
+        {
+            return;
+        }
+        _botProfile = profile;
+        _botSessionId = string.IsNullOrWhiteSpace(conversation.BotSessionId) ? null : conversation.BotSessionId;
+        _botDisplayName = string.IsNullOrWhiteSpace(conversation.BotDisplayName) ? profile : conversation.BotDisplayName;
+        _botIdentityKey = conversation.BotIdentityKey;
+        _botConnectionId = string.IsNullOrWhiteSpace(conversation.BotConnectionId) ? "primary" : conversation.BotConnectionId;
+        // Il bot chat server-side richiede multiplex (validato all'apertura);
+        // senza, ProfileScopedUri rifiuta il routing del profilo.
+        _botMultiplexEnabled = true;
+        _botEndpoint = string.Empty;
+        BotActiveText.Text = $"Bot attivo · {_botDisplayName} · Bot Chat";
+        BotActiveText.Visibility = Visibility.Visible;
+        UpdateIdentitySelector();
+        UpdateArchivedBotGuard();
+    }
+
     private void OpenBotHermes_Click(object sender, RoutedEventArgs e)
     {
         Frame?.Navigate(typeof(BotsPage));
+    }
+
+    /// <summary>
+    /// Etichetta del selettore identita: Hermes o nome del bot attivo.
+    /// </summary>
+    private void UpdateIdentitySelector()
+    {
+        if (IdentityButton is null)
+        {
+            return;
+        }
+        IdentityButton.Content = string.IsNullOrWhiteSpace(_botProfile)
+            ? "Hermes"
+            : (string.IsNullOrWhiteSpace(_botDisplayName) ? _botProfile : _botDisplayName);
+    }
+
+    private async void IdentityButton_Click(object sender, RoutedEventArgs e)
+    {
+        var flyout = new MenuFlyout { Placement = FlyoutPlacementMode.BottomEdgeAlignedLeft };
+        var hermesItem = new MenuFlyoutItem { Text = "Hermes" };
+        hermesItem.Click += (_, _) => ResetForNewChat();
+        flyout.Items.Add(hermesItem);
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        var loadingItem = new MenuFlyoutItem { Text = "Caricamento bot...", IsEnabled = false };
+        flyout.Items.Add(loadingItem);
+        flyout.ShowAt(IdentityButton);
+        try
+        {
+            var roster = await HermesBotConnectionService.LoadAllRostersAsync(AppSettingsStore.Load());
+            flyout.Items.Remove(loadingItem);
+            foreach (var bot in roster.Items)
+            {
+                var current = bot;
+                var item = new MenuFlyoutItem { Text = $"{current.DisplayName} · {current.Profile}" };
+                item.Click += async (_, _) => await SwitchToBotAsync(current);
+                flyout.Items.Add(item);
+            }
+            if (roster.Items.Count == 0)
+            {
+                flyout.Items.Add(new MenuFlyoutItem { Text = "Nessun bot disponibile", IsEnabled = false });
+            }
+        }
+        catch (Exception ex)
+        {
+            loadingItem.Text = $"Bot non disponibili: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Passa alla forever-chat canonica del bot (stesso percorso
+    /// dell'apertura da BotsPage: riuso, mai duplicati).
+    /// </summary>
+    private async Task SwitchToBotAsync(HermesBotRecord bot)
+    {
+        try
+        {
+            var nav = await HermesBotConnectionService.ResolveCanonicalBotNavigationAsync(AppSettingsStore.Load(), bot);
+            BotNavigationContext.SetPending(new BotChatNavigation(
+                nav.Chat.Profile,
+                nav.Chat.SessionId,
+                bot.DisplayName,
+                nav.LocalConversationId,
+                nav.Chat.MultiplexEnabled,
+                nav.Connection.Id,
+                nav.Connection.Endpoint,
+                nav.BotIdentityKey));
+            Frame.Navigate(typeof(HomePage), new HomeNavigationRequest());
+        }
+        catch (Exception ex)
+        {
+            ShowError($"Apertura bot fallita: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Salvataggio chat con identita bot corrente: le conversazioni bot
+    /// restano legate alla forever-chat canonica (chiave conn::conn::profilo).
+    /// Chat Hermes normale: nessun marcatore. La chiave e auto-riparata dal
+    /// profilo se mancante (contesti bot legacy senza chiave salvata).
+    /// </summary>
+    private ConversationRecord SaveSnapshotWithBotIdentity(
+        string? conversationId,
+        string sendMode,
+        string prompt,
+        IReadOnlyList<ChatMessageRecord> messages,
+        string source,
+        string? previousResponseId = null,
+        string? projectId = null)
+    {
+        var hasBot = !string.IsNullOrWhiteSpace(_botProfile);
+        var key = hasBot
+            ? (string.IsNullOrWhiteSpace(_botIdentityKey)
+                ? HermesBotConnectionService.CanonicalBotKey(_botConnectionId, _botProfile)
+                : _botIdentityKey)
+            : null;
+        return ChatArchiveStore.SaveSnapshot(
+            conversationId,
+            sendMode,
+            prompt,
+            messages,
+            source,
+            previousResponseId,
+            projectId,
+            botIdentityKey: key,
+            botDisplayName: hasBot ? _botDisplayName : null,
+            botConnectionId: hasBot ? _botConnectionId : null,
+            botSessionId: hasBot ? _botSessionId : null);
     }
 
     private void AddBubble(
@@ -1749,10 +1903,20 @@ public sealed partial class HomePage : Page
             };
             assistantLabel.Children.Add(new Border
             {
-                Width = 7,
-                Height = 7,
-                CornerRadius = new CornerRadius(4),
-                Background = (Brush)Application.Current.Resources["AccentBrush"]
+                Width = 24,
+                Height = 24,
+                CornerRadius = new CornerRadius(12),
+                Background = (Brush)Application.Current.Resources["PanelBrush"],
+                BorderBrush = (Brush)Application.Current.Resources["BorderBrushSoft"],
+                BorderThickness = new Thickness(1),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new Image
+                {
+                    Source = new BitmapImage(new Uri("ms-appx:///Assets/ChatClawLogo.png")),
+                    Stretch = Stretch.UniformToFill,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
             });
             assistantLabel.Children.Add(new TextBlock
             {

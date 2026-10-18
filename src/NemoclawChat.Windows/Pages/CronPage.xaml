@@ -15,33 +15,36 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <StackPanel Spacing="8">
-                        <TextBlock
-                            FontSize="30"
-                            FontWeight="SemiBold"
-                            Foreground="White"
-                            Text="Automation Studio" />
-                        <TextBlock
-                            Foreground="{StaticResource MutedTextBrush}"
-                            Text="Crea, modifica, prova e controlla automazioni Hermes sul gateway." />
+                    <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                        <Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13">
+                            <FontIcon FontSize="19" Glyph="&#xE7C1;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock
+                                Style="{StaticResource PageTitleStyle}"
+                                Text="Automation Studio" />
+                            <TextBlock
+                                Style="{StaticResource PageSubtitleStyle}"
+                                Text="Crea, modifica, prova e controlla automazioni Hermes sul gateway." />
+                        </StackPanel>
                     </StackPanel>
                     <Button
                         Grid.Column="1"
                         MinWidth="110"
                         Click="Refresh_Click"
+                        Style="{StaticResource TextButtonStyle}"
                         Content="Aggiorna" />
                 </Grid>
 
-                <Border Padding="18" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="20">
-                    <StackPanel Spacing="12">
-                        <Grid ColumnSpacing="10">
+                <StackPanel Spacing="16">
+                    <Grid ColumnSpacing="10">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                            <TextBlock x:Name="EditorTitle" Foreground="White" FontSize="20" FontWeight="SemiBold" Text="Nuova automazione" />
-                            <Button Grid.Column="1" Click="ClearEditor_Click" Content="Nuova" />
+                            <TextBlock x:Name="EditorTitle" Style="{StaticResource SectionTitleStyle}" Text="Nuova automazione" />
+                            <Button Grid.Column="1" Click="ClearEditor_Click" Style="{StaticResource TextButtonStyle}" Content="Nuova" />
                         </Grid>
                         <TextBox x:Name="NameBox" Header="Nome" MaxLength="120" />
                         <ComboBox x:Name="BotProfileBox" Header="Profilo routine" SelectionChanged="BotProfileBox_SelectionChanged" />
-                        <TextBlock x:Name="BotScopeHint" Foreground="{StaticResource MutedTextBrush}" Text="Routine globali sul profilo predefinito." TextWrapping="Wrap" />
+                        <TextBlock x:Name="BotScopeHint" Style="{StaticResource CaptionStyle}" Text="Routine globali sul profilo predefinito." TextWrapping="Wrap" />
                         <TextBox x:Name="TaskPromptBox" Header="Attività" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="100" MaxLength="12000" />
                         <Grid ColumnSpacing="10">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
@@ -52,7 +55,7 @@
                             <TextBox x:Name="DaysBox" Grid.Column="2" Header="Giorni cron" PlaceholderText="1,2,3,4,5" Text="1,2,3,4,5" />
                         </Grid>
                         <TextBox x:Name="AdvancedCronBox" Header="Espressione cron avanzata" PlaceholderText="0 8 * * 1-5" Visibility="Collapsed" />
-                        <TextBlock x:Name="SchedulePreviewText" Foreground="{StaticResource MutedTextBrush}" Text="Prossime esecuzioni: ogni giorno alle 08:00" TextWrapping="Wrap" />
+                        <TextBlock x:Name="SchedulePreviewText" Style="{StaticResource CaptionStyle}" Text="Prossime esecuzioni: ogni giorno alle 08:00" TextWrapping="Wrap" />
                         <TextBox x:Name="ConditionBox" Header="Condizione opzionale" PlaceholderText="Esegui solo se temperatura server &gt; 85 C" />
                         <Grid ColumnSpacing="10">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
@@ -64,34 +67,24 @@
                         <TextBox x:Name="ProjectBox" Header="Progetto associato" />
                         <TextBox x:Name="DependenciesBox" Header="Dipendenze" PlaceholderText="ID job separati da virgola" />
                         <StackPanel Orientation="Horizontal" Spacing="10">
-                            <Button Click="SaveEditor_Click" Content="Salva" />
-                            <Button Click="TestEditor_Click" Content="Prova senza salvare" />
-                            <Button Click="DuplicateEditor_Click" Content="Duplica" />
+                            <Button Click="SaveEditor_Click" Style="{StaticResource PrimaryButtonStyle}" Content="Salva" />
+                            <Button Click="TestEditor_Click" Style="{StaticResource TextButtonStyle}" Content="Prova senza salvare" />
+                            <Button Click="DuplicateEditor_Click" Style="{StaticResource TextButtonStyle}" Content="Duplica" />
                         </StackPanel>
-                    </StackPanel>
-                </Border>
+                </StackPanel>
 
-                <Border
-                    Padding="18"
-                    Background="{StaticResource SurfaceBrush}"
-                    BorderBrush="{StaticResource BorderBrushSoft}"
-                    BorderThickness="1"
-                    CornerRadius="18">
-                    <StackPanel Spacing="8">
-                        <TextBlock
+                <StackPanel Spacing="16">
+                    <TextBlock
                             x:Name="StatusText"
-                            Foreground="White"
-                            FontSize="18"
-                            FontWeight="SemiBold"
+                            Style="{StaticResource SectionTitleStyle}"
                             Text="Caricamento cron..." />
                         <TextBlock
-                            Foreground="{StaticResource MutedTextBrush}"
+                            Style="{StaticResource CaptionStyle}"
                             Text="Fonte: API Hermes jobs. Scegli Globale / default oppure un profilo bot; le routine bot usano /p/{profilo}/api/jobs solo con multiplexing dichiarato."
                             TextWrapping="Wrap" />
-                    </StackPanel>
-                </Border>
+                </StackPanel>
 
-                <StackPanel x:Name="CronPanel" Spacing="14" />
+                <StackPanel x:Name="CronPanel" Spacing="16" />
             </StackPanel>
         </Grid>
     </ScrollViewer>

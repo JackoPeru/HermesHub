@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="NemoclawChat_Windows.Pages.ScreenPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Background="{StaticResource AppBackgroundBrush}">
+        <ScrollViewer>
+            <Grid Padding="44,36" RowSpacing="22">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                    <Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13">
+                        <FontIcon FontSize="19" Glyph="&#xE7B4;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource PageTitleStyle}" Text="Schermo bot" />
+                        <TextBlock x:Name="SubtitleText" MaxWidth="920" Style="{StaticResource PageSubtitleStyle}" Text="Connessione…" />
+                    </StackPanel>
+                </StackPanel>
+
+                <Grid Grid.Row="1" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            x:Name="DetailText"
+                            VerticalAlignment="Center"
+                            Foreground="{StaticResource MutedTextBrush}"
+                            Text="Leggo lo stato del display…"
+                            TextWrapping="Wrap" />
+                        <Button
+                            Grid.Column="1"
+                            x:Name="TakeoverButton"
+                            Click="Takeover_Click"
+                            Content="Take over"
+                            Style="{StaticResource GhostButtonStyle}"
+                            IsEnabled="False" />
+                        <Button
+                            Grid.Column="2"
+                            x:Name="HandBackButton"
+                            Click="HandBack_Click"
+                            Content="Hand back"
+                            Style="{StaticResource GhostButtonStyle}"
+                            Visibility="Collapsed" />
+                        <Button
+                            Grid.Column="3"
+                            Click="Refresh_Click"
+                            Content="Aggiorna"
+                            Style="{StaticResource TextButtonStyle}" />
+                </Grid>
+
+                <Border
+                    Grid.Row="2"
+                    MinHeight="420"
+                    Background="Black">
+                    <Grid>
+                        <WebView2
+                            x:Name="ScreenViewer"
+                            MinHeight="420"
+                            Visibility="Collapsed" />
+                        <StackPanel
+                            x:Name="ViewerPlaceholder"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="10">
+                            <ProgressRing IsActive="True" Width="36" Height="36" />
+                            <TextBlock
+                                x:Name="PlaceholderText"
+                                Foreground="{StaticResource MutedTextBrush}"
+                                Text="Connessione allo schermo…" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <TextBlock
+                    Grid.Row="3"
+                    MaxWidth="920"
+                    Style="{StaticResource PageSubtitleStyle}"
+                    Text="Guardando non disturbi il bot. Take over mette in pausa i suoi tool schermo; Hand back (o chiudere) restituisce il controllo."
+                    TextWrapping="Wrap" />
+            </Grid>
+        </ScrollViewer>
+    </Grid>
+</Page>

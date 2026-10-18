@@ -5,7 +5,9 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -19,8 +21,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
@@ -28,19 +28,21 @@ import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -55,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,6 +70,62 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import kotlin.math.roundToInt
+
+private val AmberDarkText = Color(0xFF171009)
+
+@Composable
+private fun HeaderTile(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String?) {
+    Surface(modifier = Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = Color(0xFF302517)) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+            Icon(icon, contentDescription = desc, tint = AppColors.Accent, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text.uppercase(java.util.Locale.ROOT),
+        color = AppColors.Accent,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.sp
+    )
+}
+
+@Composable
+private fun darkFieldColors() = TextFieldDefaults.colors(
+    focusedContainerColor = AppColors.Panel,
+    unfocusedContainerColor = AppColors.Panel,
+    disabledContainerColor = AppColors.Panel,
+    focusedTextColor = Color.White,
+    unfocusedTextColor = Color.White,
+    cursorColor = AppColors.Accent,
+    focusedPlaceholderColor = AppColors.Faint,
+    unfocusedPlaceholderColor = AppColors.Faint,
+    focusedLabelColor = AppColors.Muted,
+    unfocusedLabelColor = AppColors.Muted
+)
+
+@Composable
+private fun amberPrimaryColors() = ButtonDefaults.buttonColors(
+    containerColor = AppColors.Accent,
+    contentColor = AmberDarkText,
+    disabledContainerColor = AppColors.Border,
+    disabledContentColor = AppColors.Faint
+)
+
+@Composable
+private fun amberTextColors() = ButtonDefaults.textButtonColors(
+    contentColor = AppColors.Accent,
+    disabledContentColor = AppColors.Faint
+)
+
+@Composable
+private fun redTextColors() = ButtonDefaults.textButtonColors(
+    contentColor = AppColors.Error,
+    disabledContentColor = AppColors.Faint
+)
 
 @Composable
 internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVideo: () -> Unit) {
@@ -102,35 +161,42 @@ internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVid
         true
     }
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
-        contentPadding = PaddingValues(top = 18.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Column {
-                    Text("Personaggi", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                    Text("Identità persistenti per i video H3, tutte locali.", color = AppColors.Muted, fontSize = 13.sp)
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                HeaderTile(Icons.Rounded.Person, "Personaggi")
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Personaggi", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Identità persistenti per i video H3, tutte locali.", color = AppColors.Muted, fontSize = 14.sp)
                 }
-                Row {
-                    IconButton(onClick = { refresh++; reload() }) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna", tint = Color.White)
-                    }
-                    IconButton(onClick = { wizardOpen = true }) {
-                        Icon(Icons.Rounded.Add, contentDescription = "Crea personaggio", tint = Color.White)
-                    }
+                IconButton(onClick = { refresh++; reload() }) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna", tint = AppColors.Muted)
+                }
+                IconButton(onClick = { wizardOpen = true }) {
+                    Icon(Icons.Rounded.Add, contentDescription = "Crea personaggio", tint = AppColors.Accent)
                 }
             }
         }
         item { Text(status, color = AppColors.Faint, fontSize = 12.sp) }
         if (items.isEmpty()) {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                    Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Nessun personaggio", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text("Tocca + : dai un nome, carica 20-80 foto della stessa persona, Hermes fa il resto.", color = AppColors.Muted, fontSize = 13.sp)
-                        Button(onClick = { wizardOpen = true }) { Text("Crea personaggio") }
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(modifier = Modifier.size(64.dp), shape = RoundedCornerShape(18.dp), color = AppColors.Accent.copy(alpha = 0.16f)) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Icon(Icons.Rounded.Person, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(30.dp))
+                        }
                     }
+                    Text("Nessun personaggio", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, textAlign = TextAlign.Center)
+                    Text("Tocca + : dai un nome, carica 20-80 foto della stessa persona, Hermes fa il resto.", color = AppColors.Muted, fontSize = 14.sp, textAlign = TextAlign.Center)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Button(onClick = { wizardOpen = true }, colors = amberPrimaryColors()) { Text("Crea personaggio") }
                 }
             }
         } else {
@@ -145,11 +211,11 @@ internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVid
 private fun CharacterGrid(items: List<CharacterSummary>, onOpen: (String) -> Unit, onUse: (String) -> Unit) {
     // Righe da 2 nella LazyColumn madre: niente griglia annidata, niente clip
     // con molti personaggi (il calcolo altezza fissa tagliava oltre ~14 card).
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         items.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                 row.forEach { item ->
-                    androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f)) {
+                    Box(modifier = Modifier.weight(1f)) {
                         CharacterCard(item = item, onOpen = { onOpen(item.id) }, onUse = { onUse(item.id) })
                     }
                 }
@@ -164,14 +230,15 @@ private fun CharacterGrid(items: List<CharacterSummary>, onOpen: (String) -> Uni
 @Composable
 private fun CharacterCard(item: CharacterSummary, onOpen: () -> Unit, onUse: () -> Unit) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        border = BorderStroke(1.dp, AppColors.Border),
+        shape = RoundedCornerShape(16.dp),
         onClick = onOpen
     ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Surface(shape = CircleShape, color = AppColors.Panel, modifier = Modifier.size(44.dp)) {
-                    androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Surface(shape = RoundedCornerShape(13.dp), color = AppColors.Accent.copy(alpha = 0.16f), modifier = Modifier.size(44.dp)) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                         Text(item.name.take(1).uppercase(), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -186,9 +253,10 @@ private fun CharacterCard(item: CharacterSummary, onOpen: () -> Unit, onUse: () 
                 else "Foto: ${item.imageCount}",
                 color = AppColors.Muted, fontSize = 12.sp
             )
+            HorizontalDivider(color = AppColors.Border)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onUse, enabled = item.status == "ready") { Text("Usa") }
-                TextButton(onClick = onOpen) { Text("Apri") }
+                TextButton(onClick = onUse, enabled = item.status == "ready", colors = amberTextColors()) { Text("Usa") }
+                TextButton(onClick = onOpen, colors = amberTextColors()) { Text("Apri") }
             }
         }
     }
@@ -231,50 +299,51 @@ private fun CreateCharacterWizard(context: Context, settings: AppSettings, onDon
     val pickPhotos = { picker.launch("image/*") }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 18.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onCancel) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Indietro", tint = Color.White) }
-                Text("Crea personaggio · passo $step di 5", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                IconButton(onClick = onCancel) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Indietro", tint = AppColors.Accent) }
+                HeaderTile(Icons.Rounded.Add, "Crea personaggio")
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Crea personaggio", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Passo $step di 5", color = AppColors.Muted, fontSize = 14.sp)
+                }
             }
         }
         when (step) {
             1 -> item {
-                Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Nome", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        TextField(value = name, onValueChange = { name = it }, singleLine = true, placeholder = { Text("Sofia") }, modifier = Modifier.fillMaxWidth())
-                        Button(
-                            enabled = name.isNotBlank() && !busy,
-                            onClick = {
-                                busy = true
-                                scope.launch {
-                                    val (created, info) = createCharacter(settings, managerKey, name.trim())
-                                    busy = false
-                                    if (created != null) {
-                                        characterId = created
-                                        step = 2
-                                        message = ""
-                                    } else message = info
-                                }
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SectionLabel("NOME")
+                    TextField(value = name, onValueChange = { name = it }, singleLine = true, placeholder = { Text("Sofia") }, modifier = Modifier.fillMaxWidth(), colors = darkFieldColors())
+                    Button(
+                        enabled = name.isNotBlank() && !busy,
+                        colors = amberPrimaryColors(),
+                        onClick = {
+                            busy = true
+                            scope.launch {
+                                val (created, info) = createCharacter(settings, managerKey, name.trim())
+                                busy = false
+                                if (created != null) {
+                                    characterId = created
+                                    step = 2
+                                    message = ""
+                                } else message = info
                             }
-                        ) { Text("Continua") }
-                        if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
-                    }
+                        }
+                    ) { Text("Continua") }
+                    if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
                 }
             }
             2 -> item {
-                Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Aggiungi foto", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text("Carica 20-80 foto della stessa persona (jpg/png/webp, max 15MB). Più angoli ed espressioni = identità migliore.", color = AppColors.Muted, fontSize = 13.sp)
-                        Button(enabled = !busy, onClick = { pickPhotos() }) { Text("Scegli foto") }
-                        if (busy) CircularProgressIndicator()
-                        if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
-                    }
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SectionLabel("AGGIUNGI FOTO")
+                    Text("Carica 20-80 foto della stessa persona (jpg/png/webp, max 15MB). Più angoli ed espressioni = identità migliore.", color = AppColors.Muted, fontSize = 14.sp)
+                    TextButton(enabled = !busy, colors = amberTextColors(), onClick = { pickPhotos() }) { Text("Scegli foto") }
+                    if (busy) CircularProgressIndicator(color = AppColors.Accent)
+                    if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
                 }
             }
             3, 4 -> item {
@@ -310,28 +379,27 @@ private fun AnalyzeStep(context: Context, settings: AppSettings, characterId: St
         if (active?.status == "failed") onMessage(active.error.ifBlank { "Analisi fallita" })
         true
     }
-    Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Analisi foto", color = Color.White, fontWeight = FontWeight.SemiBold)
-            val active = job
-            if (active != null && state == "analyzing") {
-                LinearProgressIndicator(progress = { active.progress.toFloat() }, modifier = Modifier.fillMaxWidth())
-                Text("Analisi ${ (active.progress * 100).toInt()}% · ${active.detail}", color = AppColors.Muted, fontSize = 12.sp)
-            } else {
-                Text("Stato: ${characterStatusLabel(state)}", color = AppColors.Muted, fontSize = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = {
-                        scope.launch {
-                            val (code, body) = postCharacterAction(settings, managerKey, characterId ?: return@launch, "analyze")
-                            onMessage(if (code in 200..299) "Analisi avviata" else "Analisi HTTP $code")
-                        }
-                    }) { Text("Avvia analisi") }
-                    OutlinedButton(onClick = onPickPhotos) { Text("Aggiungi foto") }
-                }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionLabel("ANALISI FOTO")
+        HorizontalDivider(color = AppColors.Border)
+        val active = job
+        if (active != null && state == "analyzing") {
+            LinearProgressIndicator(progress = { active.progress.toFloat() }, modifier = Modifier.fillMaxWidth(), color = AppColors.Accent, trackColor = AppColors.Border)
+            Text("Analisi ${ (active.progress * 100).toInt()}% · ${active.detail}", color = AppColors.Muted, fontSize = 12.sp)
+        } else {
+            Text("Stato: ${characterStatusLabel(state)}", color = AppColors.Muted, fontSize = 13.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    scope.launch {
+                        val (code, body) = postCharacterAction(settings, managerKey, characterId ?: return@launch, "analyze")
+                        onMessage(if (code in 200..299) "Analisi avviata" else "Analisi HTTP $code")
+                    }
+                }, colors = amberPrimaryColors()) { Text("Avvia analisi") }
+                TextButton(onClick = onPickPhotos, colors = amberTextColors()) { Text("Aggiungi foto") }
             }
-            if (counts.isNotBlank()) Text(counts, color = Color.White, fontSize = 13.sp)
-            if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
         }
+        if (counts.isNotBlank()) Text(counts, color = Color.White, fontSize = 13.sp)
+        if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
     }
 }
 
@@ -344,29 +412,30 @@ private fun ReadyStep(context: Context, settings: AppSettings, characterId: Stri
     androidx.compose.runtime.LaunchedEffect(characterId) {
         manifest = characterId?.let { loadCharacterManifest(settings, managerKey, it) }
     }
-    Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            val count = manifest?.optInt("image_count", 0) ?: 0
-            Text("Pronto a creare $name", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-            Text("$count foto pronte per il training.", color = AppColors.Muted, fontSize = 13.sp)
-            DatasetQualityView(manifest)
-            Button(
-                enabled = !busy && count >= 20,
-                onClick = {
-                    busy = true
-                    scope.launch {
-                        val (code, body) = postCharacterAction(settings, managerKey, characterId ?: return@launch, "train")
-                        busy = false
-                        if (code in 200..299) onDone(characterId) else onMessage("Training HTTP $code")
-                    }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        val count = manifest?.optInt("image_count", 0) ?: 0
+        Text("Pronto a creare $name", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+        Text("$count foto pronte per il training.", color = AppColors.Muted, fontSize = 14.sp)
+        HorizontalDivider(color = AppColors.Border)
+        DatasetQualityView(manifest)
+        HorizontalDivider(color = AppColors.Border)
+        Button(
+            enabled = !busy && count >= 20,
+            colors = amberPrimaryColors(),
+            onClick = {
+                busy = true
+                scope.launch {
+                    val (code, body) = postCharacterAction(settings, managerKey, characterId ?: return@launch, "train")
+                    busy = false
+                    if (code in 200..299) onDone(characterId) else onMessage("Training HTTP $code")
                 }
-            ) { Text(if (busy) "Avvio…" else "Crea ${name.ifBlank { "personaggio" }}") }
-            if (count < 20) {
-                Text("Servono almeno 20 foto utilizzabili: aggiungine altre e riavvia l'analisi.", color = AppColors.Accent, fontSize = 12.sp)
-                OutlinedButton(onClick = onPickPhotos) { Text("Aggiungi foto") }
             }
-            if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
+        ) { Text(if (busy) "Avvio…" else "Crea ${name.ifBlank { "personaggio" }}") }
+        if (count < 20) {
+            Text("Servono almeno 20 foto utilizzabili: aggiungine altre e riavvia l'analisi.", color = AppColors.Accent, fontSize = 12.sp)
+            TextButton(onClick = onPickPhotos, colors = amberTextColors()) { Text("Aggiungi foto") }
         }
+        if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
     }
 }
 
@@ -375,8 +444,8 @@ private fun DatasetQualityView(manifest: JSONObject?) {
     if (manifest == null) return
     val refs = manifest.optJSONObject("references")
     val slots = listOf("front" to "Frontale", "left_three_quarter" to "3/4 sinistra", "right_three_quarter" to "3/4 destra", "profile_left" to "Profilo sx", "profile_right" to "Profilo dx", "full_body" to "Figura intera")
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Qualità dataset", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SectionLabel("QUALITÀ DATASET")
         slots.forEach { (key, label) ->
             val ok = refs?.optString(key)?.isNotBlank() == true
             Text("${if (ok) "✓" else "·"} $label", color = if (ok) Color.White else AppColors.Muted, fontSize = 12.sp)
@@ -406,111 +475,107 @@ private fun CharacterDetail(context: Context, settings: AppSettings, id: String,
     }
     val name = manifest?.optString("name").orEmpty().ifBlank { "Personaggio" }
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
-        contentPadding = PaddingValues(top = 18.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Indietro", tint = Color.White) }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Indietro", tint = AppColors.Accent) }
+                HeaderTile(Icons.Rounded.Person, null)
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(name, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(characterStatusLabel(state), color = AppColors.Muted, fontSize = 13.sp)
-                }
-                Surface(shape = CircleShape, color = AppColors.Panel, modifier = Modifier.size(48.dp)) {
-                    androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Icon(Icons.Rounded.Person, contentDescription = null, tint = Color.White)
-                    }
+                    Text(name, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(characterStatusLabel(state), color = AppColors.Muted, fontSize = 14.sp)
                 }
             }
         }
         val active = job
         if (active != null) {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Creazione di $name", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        LinearProgressIndicator(progress = { active.progress.toFloat() }, modifier = Modifier.fillMaxWidth())
-                        Text(trainingPhaseLabel(active), color = AppColors.Muted, fontSize = 12.sp)
-                        if (active.detail.isNotBlank()) Text(active.detail, color = AppColors.Faint, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = {
-                                scope.launch {
-                                    val (code, _) = postCharacterAction(settings, managerKey, id, "cancel")
-                                    message = if (code in 200..299) "Creazione annullata" else "Annulla HTTP $code"
-                                }
-                            }) { Text("Annulla") }
-                            TextButton(onClick = { advanced = !advanced }) { Text("Dettagli tecnici") }
-                        }
-                        if (advanced) {
-                            Text("Job ${active.id} · ${active.kind} · ${active.status}", color = AppColors.Faint, fontSize = 11.sp)
-                            if (active.error.isNotBlank()) Text(active.error, color = AppColors.Accent, fontSize = 11.sp)
-                        }
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionLabel("CREAZIONE DI $name")
+                    HorizontalDivider(color = AppColors.Border)
+                    LinearProgressIndicator(progress = { active.progress.toFloat() }, modifier = Modifier.fillMaxWidth(), color = AppColors.Accent, trackColor = AppColors.Border)
+                    Text(trainingPhaseLabel(active), color = AppColors.Muted, fontSize = 12.sp)
+                    if (active.detail.isNotBlank()) Text(active.detail, color = AppColors.Faint, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = {
+                            scope.launch {
+                                val (code, _) = postCharacterAction(settings, managerKey, id, "cancel")
+                                message = if (code in 200..299) "Creazione annullata" else "Annulla HTTP $code"
+                            }
+                        }, colors = amberTextColors()) { Text("Annulla") }
+                        TextButton(onClick = { advanced = !advanced }, colors = amberTextColors()) { Text("Dettagli tecnici") }
+                    }
+                    if (advanced) {
+                        Text("Job ${active.id} · ${active.kind} · ${active.status}", color = AppColors.Faint, fontSize = 11.sp)
+                        if (active.error.isNotBlank()) Text(active.error, color = AppColors.Error, fontSize = 11.sp)
                     }
                 }
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    val count = manifest?.optInt("image_count", 0) ?: 0
-                    val metrics = manifest?.optJSONObject("metrics")
-                    val score = metrics?.optDouble("default_identity_score", Double.NaN)
-                    Text("Foto: $count · Versione: v${manifest?.optInt("training_version", 0) ?: 0}", color = Color.White, fontSize = 13.sp)
-                    if (score != null && !score.isNaN()) Text("Identità ${(score * 100).roundToInt()}% · Consigliato: ${manifest?.optJSONObject("identity")?.optString("recommended_engine")}", color = AppColors.Muted, fontSize = 13.sp)
-                    DatasetQualityView(manifest)
-                }
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val count = manifest?.optInt("image_count", 0) ?: 0
+                val metrics = manifest?.optJSONObject("metrics")
+                val score = metrics?.optDouble("default_identity_score", Double.NaN)
+                Text("Foto: $count · Versione: v${manifest?.optInt("training_version", 0) ?: 0}", color = Color.White, fontSize = 14.sp)
+                if (score != null && !score.isNaN()) Text("Identità ${(score * 100).roundToInt()}% · Consigliato: ${manifest?.optJSONObject("identity")?.optString("recommended_engine")}", color = AppColors.Muted, fontSize = 13.sp)
+                HorizontalDivider(color = AppColors.Border)
+                DatasetQualityView(manifest)
             }
         }
         item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(enabled = state == "ready", onClick = { generateOpen = true }) { Text("Usa personaggio") }
-                OutlinedButton(enabled = state == "draft" || state == "failed" || state == "interrupted", onClick = {
-                    scope.launch {
-                        val (code, _) = postCharacterAction(settings, managerKey, id, "analyze")
-                        message = if (code in 200..299) "Analisi avviata" else "Analisi HTTP $code"
-                    }
-                }) { Text("Analizza") }
-                OutlinedButton(enabled = state == "ready_to_train" || state == "failed" || state == "interrupted" || state == "needs_retrain", onClick = {
-                    scope.launch {
-                        val (code, _) = postCharacterAction(settings, managerKey, id, "train")
-                        message = if (code in 200..299) "Creazione avviata" else "Training HTTP $code"
-                    }
-                }) { Text("Crea / Ripeti") }
-                OutlinedButton(onClick = { renameOpen = !renameOpen }) { Text("Rinomina") }
-                OutlinedButton(onClick = {
-                    scope.launch {
-                        val (code, body) = postCharacterAction(settings, managerKey, id, "export", JSONObject().put("include_originals", false))
-                        message = if (code in 200..299) {
-                            val file = runCatching { JSONObject(body).optString("file") }.getOrDefault("")
-                            "Esportato: $file (scaricalo da /characters/$id/export/download)"
-                        } else "Export HTTP $code"
-                    }
-                }) { Text("Esporta") }
-                OutlinedButton(onClick = {
-                    if (!confirmDelete) {
-                        confirmDelete = true
-                        message = "Tocca di nuovo Elimina per confermare (cancella tutto)."
-                    } else scope.launch {
-                        val (code, _) = deleteCharacter(settings, managerKey, id)
-                        if (code in 200..299) onBack() else message = "Elimina HTTP $code"
-                    }
-                }) { Text(if (confirmDelete) "Confermi?" else "Elimina") }
-            }
-            if (renameOpen) {
-                var newName by rememberSaveable(id) { mutableStateOf(name) }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextField(value = newName, onValueChange = { newName = it }, singleLine = true, modifier = Modifier.weight(1f))
-                    Button(onClick = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(enabled = state == "ready", colors = amberPrimaryColors(), onClick = { generateOpen = true }) { Text("Usa personaggio") }
+                    TextButton(enabled = state == "draft" || state == "failed" || state == "interrupted", colors = amberTextColors(), onClick = {
                         scope.launch {
-                            val (code, _) = renameCharacter(settings, managerKey, id, newName.trim())
-                            message = if (code in 200..299) "Rinominato" else "Rinomina HTTP $code"
-                            renameOpen = false
+                            val (code, _) = postCharacterAction(settings, managerKey, id, "analyze")
+                            message = if (code in 200..299) "Analisi avviata" else "Analisi HTTP $code"
                         }
-                    }) { Text("OK") }
+                    }) { Text("Analizza") }
+                    TextButton(enabled = state == "ready_to_train" || state == "failed" || state == "interrupted" || state == "needs_retrain", colors = amberTextColors(), onClick = {
+                        scope.launch {
+                            val (code, _) = postCharacterAction(settings, managerKey, id, "train")
+                            message = if (code in 200..299) "Creazione avviata" else "Training HTTP $code"
+                        }
+                    }) { Text("Crea / Ripeti") }
+                    TextButton(onClick = { renameOpen = !renameOpen }, colors = amberTextColors()) { Text("Rinomina") }
+                    TextButton(onClick = {
+                        scope.launch {
+                            val (code, body) = postCharacterAction(settings, managerKey, id, "export", JSONObject().put("include_originals", false))
+                            message = if (code in 200..299) {
+                                val file = runCatching { JSONObject(body).optString("file") }.getOrDefault("")
+                                "Esportato: $file (scaricalo da /characters/$id/export/download)"
+                            } else "Export HTTP $code"
+                        }
+                    }, colors = amberTextColors()) { Text("Esporta") }
+                    TextButton(onClick = {
+                        if (!confirmDelete) {
+                            confirmDelete = true
+                            message = "Tocca di nuovo Elimina per confermare (cancella tutto)."
+                        } else scope.launch {
+                            val (code, _) = deleteCharacter(settings, managerKey, id)
+                            if (code in 200..299) onBack() else message = "Elimina HTTP $code"
+                        }
+                    }, colors = redTextColors()) { Text(if (confirmDelete) "Confermi?" else "Elimina") }
                 }
+                if (renameOpen) {
+                    var newName by rememberSaveable(id) { mutableStateOf(name) }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextField(value = newName, onValueChange = { newName = it }, singleLine = true, modifier = Modifier.weight(1f), colors = darkFieldColors())
+                        Button(colors = amberPrimaryColors(), onClick = {
+                            scope.launch {
+                                val (code, _) = renameCharacter(settings, managerKey, id, newName.trim())
+                                message = if (code in 200..299) "Rinominato" else "Rinomina HTTP $code"
+                                renameOpen = false
+                            }
+                        }) { Text("OK") }
+                    }
+                }
+                if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
             }
-            if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
         }
         if (generateOpen) {
             item {
@@ -535,67 +600,66 @@ private fun GenerateSheet(context: Context, settings: AppSettings, id: String, n
     var result by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var modeMenu by remember { mutableStateOf(false) }
-    Card(colors = CardDefaults.cardColors(containerColor = AppColors.Panel), shape = RoundedCornerShape(20.dp)) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Genera con $name", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-            TextField(value = prompt, onValueChange = { prompt = it }, placeholder = { Text("walking through Tokyo at night… (@$name funziona)") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Personaggio", color = AppColors.Muted, fontSize = 13.sp)
-                Surface(shape = RoundedCornerShape(10.dp), color = AppColors.Surface, modifier = Modifier.weight(1f)) {
-                    Text(name, color = Color.White, modifier = Modifier.padding(10.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Identità", color = AppColors.Muted, fontSize = 13.sp)
-                androidx.compose.foundation.layout.Box {
-                    OutlinedButton(onClick = { modeMenu = true }) {
-                        Text(if (identityMode == "auto") "Auto" else if (identityMode == "lora") "Character LoRA" else "Reference")
-                    }
-                    DropdownMenu(expanded = modeMenu, onDismissRequest = { modeMenu = false }) {
-                        DropdownMenuItem(text = { Text("Auto") }, onClick = { identityMode = "auto"; modeMenu = false })
-                        DropdownMenuItem(text = { Text("Character LoRA") }, onClick = { identityMode = "lora"; modeMenu = false })
-                        DropdownMenuItem(text = { Text("Reference") }, onClick = { identityMode = "reference"; modeMenu = false })
-                    }
-                }
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(3, 5, 10).forEach { seconds ->
-                    OutlinedButton(onClick = { duration = seconds }) { Text(if (duration == seconds) "✓ ${seconds}s" else "${seconds}s") }
-                }
-                Spacer(modifier = Modifier.width(4.dp))
-                listOf("16:9", "9:16", "1:1").forEach { ratio ->
-                    OutlinedButton(onClick = { aspect = ratio }) { Text(if (aspect == ratio) "✓ $ratio" else ratio) }
-                }
-            }
-            TextButton(onClick = { advanced = !advanced }) { Text("Impostazioni avanzate identità") }
-            if (advanced) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Seed", color = AppColors.Muted, fontSize = 13.sp)
-                    TextField(value = seedText, onValueChange = { seedText = it.filter { c -> c.isDigit() }.take(9) }, singleLine = true, modifier = Modifier.width(140.dp))
-                }
-                Text("Durata: ${duration}s · Formato: $aspect · Strength: $strength (dal server, non modificabile qui).", color = AppColors.Faint, fontSize = 11.sp)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    enabled = prompt.isNotBlank() && !busy,
-                    onClick = {
-                        busy = true
-                        result = "Accodo generazione…"
-                        scope.launch {
-                            val seed = seedText.toLongOrNull() ?: 42L
-                            val (jobId, info) = generateCharacterVideo(settings, managerKey, id, prompt.trim(), identityMode, duration, aspect, seed)
-                            busy = false
-                            result = if (jobId != null) {
-                                pollCharacterJob(context, settings, managerKey, jobId)
-                            } else info
-                        }
-                    }
-                ) { Text(if (busy) "…" else "Genera") }
-                TextButton(onClick = onClose) { Text("Chiudi") }
-                TextButton(onClick = onOpenVideo) { Text("Video") }
-            }
-            if (result.isNotBlank()) Text(result, color = AppColors.Muted, fontSize = 12.sp)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Genera con $name", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+        HorizontalDivider(color = AppColors.Border)
+        TextField(value = prompt, onValueChange = { prompt = it }, placeholder = { Text("walking through Tokyo at night… (@$name funziona)") }, modifier = Modifier.fillMaxWidth(), minLines = 2, colors = darkFieldColors())
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("PERSONAGGIO")
+            Text(name, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("IDENTITÀ")
+            Box {
+                TextButton(onClick = { modeMenu = true }, colors = amberTextColors()) {
+                    Text(if (identityMode == "auto") "Auto" else if (identityMode == "lora") "Character LoRA" else "Reference")
+                }
+                DropdownMenu(expanded = modeMenu, onDismissRequest = { modeMenu = false }, containerColor = AppColors.Surface) {
+                    DropdownMenuItem(text = { Text("Auto", color = Color.White) }, onClick = { identityMode = "auto"; modeMenu = false })
+                    DropdownMenuItem(text = { Text("Character LoRA", color = Color.White) }, onClick = { identityMode = "lora"; modeMenu = false })
+                    DropdownMenuItem(text = { Text("Reference", color = Color.White) }, onClick = { identityMode = "reference"; modeMenu = false })
+                }
+            }
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(3, 5, 10).forEach { seconds ->
+                TextButton(onClick = { duration = seconds }, colors = amberTextColors()) { Text(if (duration == seconds) "✓ ${seconds}s" else "${seconds}s") }
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            listOf("16:9", "9:16", "1:1").forEach { ratio ->
+                TextButton(onClick = { aspect = ratio }, colors = amberTextColors()) { Text(if (aspect == ratio) "✓ $ratio" else ratio) }
+            }
+        }
+        TextButton(onClick = { advanced = !advanced }, colors = amberTextColors()) { Text("Impostazioni avanzate identità") }
+        if (advanced) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SectionLabel("SEED")
+                TextField(value = seedText, onValueChange = { seedText = it.filter { c -> c.isDigit() }.take(9) }, singleLine = true, modifier = Modifier.width(140.dp), colors = darkFieldColors())
+            }
+            Text("Durata: ${duration}s · Formato: $aspect · Strength: $strength (dal server, non modificabile qui).", color = AppColors.Faint, fontSize = 11.sp)
+        }
+        HorizontalDivider(color = AppColors.Border)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                enabled = prompt.isNotBlank() && !busy,
+                colors = amberPrimaryColors(),
+                onClick = {
+                    busy = true
+                    result = "Accodo generazione…"
+                    scope.launch {
+                        val seed = seedText.toLongOrNull() ?: 42L
+                        val (jobId, info) = generateCharacterVideo(settings, managerKey, id, prompt.trim(), identityMode, duration, aspect, seed)
+                        busy = false
+                        result = if (jobId != null) {
+                            pollCharacterJob(context, settings, managerKey, jobId)
+                        } else info
+                    }
+                }
+            ) { Text(if (busy) "…" else "Genera") }
+            TextButton(onClick = onClose, colors = amberTextColors()) { Text("Chiudi") }
+            TextButton(onClick = onOpenVideo, colors = amberTextColors()) { Text("Video") }
+        }
+        if (result.isNotBlank()) Text(result, color = AppColors.Muted, fontSize = 12.sp)
     }
 }
 

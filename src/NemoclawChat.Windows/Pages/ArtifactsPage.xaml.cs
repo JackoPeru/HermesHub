@@ -24,22 +24,9 @@ public sealed partial class ArtifactsPage : Page
         var artifacts = ChatArchiveStore.Artifacts(SearchBox.Text, ProjectFilterBox.Text);
         foreach (var artifact in artifacts)
         {
-            var button = new Button
-            {
-                Tag = artifact,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-                Padding = new Thickness(14),
-                Content = new StackPanel
-                {
-                    Spacing = 4,
-                    Children =
-                    {
-                        new TextBlock { Text = artifact.Title, Foreground = new SolidColorBrush(Microsoft.UI.Colors.White), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
-                        new TextBlock { Text = $"{artifact.ArtifactType} · v{artifact.Version} · {artifact.ProjectId}", Foreground = (Brush)Application.Current.Resources["MutedTextBrush"], FontSize = 12 }
-                    }
-                }
-            };
+            var row = PremiumRows.LabeledRow("\uE7C3", artifact.Title, $"{artifact.ArtifactType} · v{artifact.Version} · {artifact.ProjectId}");
+            var button = PremiumRows.RowButton(row);
+            button.Tag = artifact;
             button.Click += Select_Click;
             ArtifactPanel.Children.Add(button);
         }

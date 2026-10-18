@@ -259,13 +259,16 @@ public static class AppUpdateService
             }
 
             output.Close();
-            if (!ValidateDownloadedAsset(partialPath, version, out var validationError))
+            // Validare col nome definitivo: l'estensione del file temporaneo
+            // (.partial) non e' riconosciuta come pacchetto aggiornabile.
+            File.Move(partialPath, destinationPath, overwrite: true);
+            if (!ValidateDownloadedAsset(destinationPath, version, out var validationError))
             {
+                try { File.Delete(destinationPath); }
+                catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"[AppUpdateService] Invalid asset cleanup failed: {ex.Message}"); }
                 progress?.Report(new UpdateDownloadProgress(null, "Download non valido.", validationError));
                 return null;
             }
-
-            File.Move(partialPath, destinationPath, overwrite: true);
 
             progress?.Report(new UpdateDownloadProgress(100d, "Download completato.", ToReadableSize(readTotal)));
             return destinationPath;

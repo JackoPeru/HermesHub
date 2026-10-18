@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="NemoclawChat_Windows.Pages.ImagesPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:local="using:NemoclawChat_Windows.Pages"
+    mc:Ignorable="d">
+
+    <Grid Background="{StaticResource AppBackgroundBrush}">
+        <ScrollViewer>
+            <Grid Padding="44,36" RowSpacing="22">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                    <Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13">
+                        <FontIcon FontSize="19" Glyph="&#xE7B8;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource PageTitleStyle}" Text="Immagini" />
+                        <TextBlock MaxWidth="920" Style="{StaticResource PageSubtitleStyle}" Text="Libreria immagini Hermes: ogni immagine salvata nella cartella monitorata compare qui, con anteprime leggere, zoom e scorrimento." />
+                    </StackPanel>
+                </StackPanel>
+
+                <Grid Grid.Row="1" ColumnSpacing="14" RowSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Spacing="6">
+                            <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="CARTELLA MONITORATA" />
+                            <TextBlock x:Name="LibraryPathText" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                            <Button Click="Refresh_Click" Content="Aggiorna feed" Style="{StaticResource TextButtonStyle}" />
+                        </StackPanel>
+
+                        <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox
+                                x:Name="LibraryPathBox"
+                                Header="Percorso libreria (es. ~/.hermes/hub_uploads/denudate)"
+                                PlaceholderText="~/.hermes/hub_uploads/denudate" />
+                            <Button
+                                Grid.Column="1"
+                                VerticalAlignment="Bottom"
+                                Click="LoadPath_Click"
+                                Content="Carica"
+                                Style="{StaticResource TextButtonStyle}" />
+                        </Grid>
+
+                        <TextBlock
+                            x:Name="PageStatusText"
+                            Grid.Row="2"
+                            Grid.ColumnSpan="2"
+                            Foreground="{StaticResource MutedTextBrush}"
+                            Text="Pronto." />
+                    </Grid>
+
+                <Grid Grid.Row="2" ColumnSpacing="20" RowSpacing="20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.1*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Spacing="16">
+                        <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="FEED IMMAGINI" />
+                            <GridView
+                                x:Name="ImageGridView"
+                                IsItemClickEnabled="True"
+                                ItemClick="ImageGridView_ItemClick"
+                                SelectionMode="Single"
+                                SelectionChanged="ImageGridView_SelectionChanged">
+                                <GridView.ItemTemplate>
+                                    <DataTemplate x:DataType="local:ImageGridItem">
+                                        <Grid Width="180" RowSpacing="6">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="135" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Border
+                                                Background="{StaticResource ElevatedSurfaceBrush}"
+                                                BorderBrush="#33FFFFFF"
+                                                BorderThickness="1"
+                                                CornerRadius="8">
+                                                <Image Stretch="UniformToFill">
+                                                    <Image.Source>
+                                                        <BitmapImage UriSource="{x:Bind ThumbUri}" DecodePixelWidth="256" />
+                                                    </Image.Source>
+                                                </Image>
+                                            </Border>
+                                            <StackPanel Grid.Row="1" Spacing="2">
+                                                <TextBlock
+                                                    Foreground="White"
+                                                    FontWeight="SemiBold"
+                                                    MaxLines="1"
+                                                    Text="{x:Bind Title}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Style="{StaticResource CaptionStyle}"
+                                                    MaxLines="1"
+                                                    Text="{x:Bind Meta}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </GridView.ItemTemplate>
+                            </GridView>
+                    </StackPanel>
+
+                    <StackPanel
+                        Grid.Column="1"
+                        Spacing="16">
+                        <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="IMMAGINE SELEZIONATA" />
+                            <FlipView
+                                x:Name="ImagePager"
+                                Height="380"
+                                Background="Black"
+                                SelectionChanged="ImagePager_SelectionChanged">
+                                <FlipView.ItemTemplate>
+                                    <DataTemplate x:DataType="local:ImageGridItem">
+                                        <ScrollViewer
+                                            ZoomMode="Enabled"
+                                            MinZoomFactor="1"
+                                            MaxZoomFactor="6"
+                                            HorizontalScrollBarVisibility="Auto"
+                                            VerticalScrollBarVisibility="Auto"
+                                            DoubleTapped="Viewer_DoubleTapped">
+                                            <Image Stretch="Uniform">
+                                                <Image.Source>
+                                                    <BitmapImage UriSource="{x:Bind FullUri}" />
+                                                </Image.Source>
+                                            </Image>
+                                        </ScrollViewer>
+                                    </DataTemplate>
+                                </FlipView.ItemTemplate>
+                            </FlipView>
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Button Click="Prev_Click" Content="‹" Style="{StaticResource TextButtonStyle}" />
+                                <TextBlock
+                                    x:Name="PagerCounterText"
+                                    Grid.Column="1"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Foreground="{StaticResource MutedTextBrush}"
+                                    Text="-" />
+                                <Button Grid.Column="2" Click="Next_Click" Content="›" Style="{StaticResource TextButtonStyle}" />
+                            </Grid>
+                            <TextBlock x:Name="SelectedImageTitleText" Foreground="White" FontSize="20" FontWeight="SemiBold" Text="Seleziona un'immagine" />
+                            <TextBlock x:Name="SelectedImageMetaText" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Button
+                                    HorizontalAlignment="Stretch"
+                                    Click="FullScreen_Click"
+                                    Content="Schermo intero"
+                                    Style="{StaticResource GhostButtonStyle}" />
+                                <Button Grid.Column="1" Click="CopyPath_Click" Content="Copia path" Style="{StaticResource TextButtonStyle}" />
+                            </Grid>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </ScrollViewer>
+
+        <Grid
+            x:Name="FullScreenImageOverlay"
+            Background="{StaticResource AppBackgroundBrush}"
+            Padding="28"
+            RowSpacing="16"
+            Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="4">
+                    <TextBlock
+                        x:Name="FullScreenImageTitleText"
+                        FontSize="26"
+                        FontWeight="SemiBold"
+                        Foreground="White"
+                        Text="Immagine" />
+                    <TextBlock
+                        x:Name="FullScreenImageMetaText"
+                        Foreground="{StaticResource MutedTextBrush}"
+                        Text="Zoom con rotella/pinch, doppio tocco per ripristinare."
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <Button Click="FullPrev_Click" Content="‹" Style="{StaticResource TextButtonStyle}" />
+                    <TextBlock
+                        x:Name="FullScreenCounterText"
+                        VerticalAlignment="Center"
+                        Foreground="{StaticResource MutedTextBrush}"
+                        Text="-" />
+                    <Button Click="FullNext_Click" Content="›" Style="{StaticResource TextButtonStyle}" />
+                    <Button Click="ResetZoom_Click" Content="Ripristina zoom" Style="{StaticResource TextButtonStyle}" />
+                    <Button Click="CloseFullScreen_Click" Content="Chiudi" Style="{StaticResource TextButtonStyle}" />
+                </StackPanel>
+            </Grid>
+
+            <Border
+                Grid.Row="1"
+                Background="Black"
+                BorderBrush="{StaticResource BorderBrushSoft}"
+                BorderThickness="1"
+                CornerRadius="0">
+                <ScrollViewer
+                    x:Name="FullScreenScroller"
+                    ZoomMode="Enabled"
+                    MinZoomFactor="1"
+                    MaxZoomFactor="6"
+                    HorizontalScrollBarVisibility="Auto"
+                    VerticalScrollBarVisibility="Auto"
+                    DoubleTapped="Viewer_DoubleTapped">
+                    <Image x:Name="FullScreenImage" Stretch="Uniform" />
+                </ScrollViewer>
+            </Border>
+        </Grid>
+    </Grid>
+</Page>

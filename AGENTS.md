@@ -1,4 +1,4 @@
-# AGENTS.md
+﻿# AGENTS.md
 
 ## Comunicazione
 
@@ -174,4 +174,4 @@ Prima della pubblicazione:
 
 ## Release corrente
 
-Versione corrente: `0.6.261`.
+Versione corrente: `0.6.276`.

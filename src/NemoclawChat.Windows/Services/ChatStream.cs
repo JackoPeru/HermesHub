@@ -53,6 +53,13 @@ public sealed record StreamDone(ChatStreamStats Stats, string AccumulatedText, s
 public sealed record StreamError(string Message) : ChatStreamEvent;
 public sealed record StreamCancelled : ChatStreamEvent;
 public sealed record StreamStatus(string Message) : ChatStreamEvent;
+/// <summary>
+/// Marcatore di evento terminale osservato nello stream (response.completed,
+/// finish_reason, run terminale, [DONE]). Consumato internamente da
+/// StreamChatAsync per distinguere fine pulita da morte del transport:
+/// la UI lo ignora. Mai emesso come contenuto.
+/// </summary>
+public sealed record StreamTerminal(string Status) : ChatStreamEvent;
 public sealed record StreamPromptProgress(
     int Percent,
     string Label = "Elaborazione prompt",
@@ -173,6 +180,7 @@ public static class ChatStreamClient
         int? contextPercent = null;
         double? serverTokensPerSecond = null;
         bool sawAnyDelta = false;
+        bool sawTerminal = false;
         bool retriedWithoutPreviousResponseId = false;
         string? lastError = null;
         var nativeMode = HermesHubProtocol.IsNativePreferred(settings);
@@ -228,6 +236,9 @@ public static class ChatStreamClient
                 instructions = HermesHubProtocol.Instructions(settings, mode),
                 store = true,
                 stream = true,
+                // Il turno deve sopravvivere alla morte del client: il gateway
+                // continua il lavoro e il risultato resta leggibile via GET.
+                continue_on_disconnect = true,
                 return_progress = true,
                 timings_per_token = true,
                 conversation = serverConversationId,
@@ -261,6 +272,12 @@ public static class ChatStreamClient
                     {
                         lastError = err.Message;
                         break;
+                    }
+                    if (ev is StreamTerminal)
+                    {
+                        // Marcatore interno di fine pulita: non va alla UI.
+                        sawTerminal = true;
+                        continue;
                     }
 
                     if (ev is StreamTextDelta td)
@@ -394,6 +411,9 @@ public static class ChatStreamClient
             {
                 model = settings.Model,
                 stream = true,
+                // Il turno deve sopravvivere alla morte del client (stesso
+                // contratto del percorso Responses).
+                continue_on_disconnect = true,
                 return_progress = true,
                 timings_per_token = true,
                 session_id = serverConversationId,
@@ -492,6 +512,51 @@ public static class ChatStreamClient
 
         stopwatch.Stop();
 
+        if (!sawTerminal && !string.IsNullOrWhiteSpace(responseId) && !cancellationToken.IsCancellationRequested && !IsClientHttpError(lastError))
+        {
+            // Transport morto a turno vivo: il server continua per
+            // continue_on_disconnect. Prima di chiudere il turno con il
+            // parziale, recupera la risposta archiviata via GET — il merge
+            // in StreamDone/HomePage non duplica il testo gia mostrato.
+            yield return new StreamStatus("Connessione persa a turno vivo: recupero la risposta dal server...");
+            var recovery = await TryRecoverStoredResponseAsync(settings, responseId, botProfile, botMultiplexEnabled, authCandidates, cancellationToken);
+            if (recovery.Failed)
+            {
+                yield return new StreamError("Il turno recuperato risulta fallito sul server.");
+                yield break;
+            }
+            if (recovery.Found && !string.IsNullOrEmpty(recovery.Text))
+            {
+                sawAnyDelta = true;
+                foreach (var extractedEvent in thinkExtractor.Process(recovery.Text))
+                {
+                    if (extractedEvent is StreamTextDelta etd)
+                    {
+                        AppendBounded(accumulatedText, etd.Delta);
+                        yield return etd;
+                    }
+                    else if (extractedEvent is StreamThinkingDelta eth)
+                    {
+                        AppendBounded(accumulatedThinking, eth.Delta);
+                        yield return eth;
+                    }
+                }
+                foreach (var extractedEvent in thinkExtractor.Flush())
+                {
+                    if (extractedEvent is StreamTextDelta fetd)
+                    {
+                        AppendBounded(accumulatedText, fetd.Delta);
+                        yield return fetd;
+                    }
+                    else if (extractedEvent is StreamThinkingDelta feth)
+                    {
+                        AppendBounded(accumulatedThinking, feth.Delta);
+                        yield return feth;
+                    }
+                }
+            }
+        }
+
         if (!sawAnyDelta)
         {
             yield return new StreamError(lastError ?? "Stream Hermes vuoto.");
@@ -515,6 +580,113 @@ public static class ChatStreamClient
             new ChatStreamStats(ttft, totalMs, tokensOut, tps, promptTokens, contextTokens, contextLength, contextPercent),
             StripReasoningArtifacts(accumulatedText.ToString()),
             accumulatedThinking.ToString());
+    }
+
+    private const int StoredRecoveryAttempts = 30;
+    private static readonly TimeSpan StoredRecoveryDelay = TimeSpan.FromSeconds(10);
+    private const int StoredRecoveryMaxFailures = 5;
+
+    private sealed record StoredRecovery(bool Found, bool Failed, string Text);
+
+    private static bool IsClientHttpError(string? message) =>
+        message is not null && (message.Contains("HTTP 400", StringComparison.Ordinal) ||
+                                message.Contains("HTTP 401", StringComparison.Ordinal) ||
+                                message.Contains("HTTP 403", StringComparison.Ordinal) ||
+                                message.Contains("HTTP 404", StringComparison.Ordinal));
+
+    /// <summary>
+    /// Recupero turno dopo morte del transport: poll GET della response
+    /// archiviata (il server continua per continue_on_disconnect) fino a
+    /// terminale. Found+testo = risposta completa da fondere; Failed = il
+    /// server dichiara il turno fallito; altrimenti turno perso (il chiamante
+    /// tiene il parziale gia mostrato). Mai su stop utente: il token
+    /// cancella poll e attesa. Errori 401/403/404 = stop immediato.
+    /// </summary>
+    private static async Task<StoredRecovery> TryRecoverStoredResponseAsync(
+        AppSettings settings,
+        string responseId,
+        string? botProfile,
+        bool botMultiplexEnabled,
+        IEnumerable<string?>? authCandidates,
+        CancellationToken cancellationToken)
+    {
+        var escapedId = Uri.EscapeDataString(responseId);
+        var statusUrl = string.IsNullOrWhiteSpace(botProfile)
+            ? $"{settings.GatewayUrl.TrimEnd('/')}/responses/{escapedId}"
+            : HermesHubProtocol.ProfileScopedUri(settings, $"/responses/{escapedId}", botProfile, botMultiplexEnabled);
+        var failures = 0;
+        for (var attempt = 0; attempt < StoredRecoveryAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (attempt > 0)
+            {
+                await Task.Delay(StoredRecoveryDelay, cancellationToken);
+            }
+
+            (int StatusCode, string Body) result;
+            try
+            {
+                result = await SendJsonAsync(HttpMethod.Get, statusUrl, null, true, cancellationToken, authCandidates);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                failures++;
+                if (failures >= StoredRecoveryMaxFailures)
+                {
+                    return new StoredRecovery(false, false, string.Empty);
+                }
+                continue;
+            }
+
+            if (result.StatusCode is 401 or 403 or 404)
+            {
+                return new StoredRecovery(false, false, string.Empty);
+            }
+            if (result.StatusCode is < 200 or > 299)
+            {
+                failures++;
+                if (failures >= StoredRecoveryMaxFailures)
+                {
+                    return new StoredRecovery(false, false, string.Empty);
+                }
+                continue;
+            }
+
+            failures = 0;
+            JsonDocument? document;
+            try
+            {
+                document = JsonDocument.Parse(result.Body);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            using (document)
+            {
+                var root = document.RootElement;
+                var state = (GetString(root, "status") ?? GetString(root, "state") ?? string.Empty).Trim().ToLowerInvariant();
+                if (string.Equals(state, "completed", StringComparison.Ordinal))
+                {
+                    return new StoredRecovery(true, false, ExtractText(root));
+                }
+                if (string.Equals(state, "failed", StringComparison.Ordinal))
+                {
+                    return new StoredRecovery(false, true, string.Empty);
+                }
+                if (string.Equals(state, "cancelled", StringComparison.Ordinal))
+                {
+                    return new StoredRecovery(true, false, string.Empty);
+                }
+            }
+        }
+
+        return new StoredRecovery(false, false, string.Empty);
     }
 
     private static async IAsyncEnumerable<ChatStreamEvent> OpenStreamAsync(
@@ -1121,7 +1293,12 @@ public static class ChatStreamClient
 
     private static IEnumerable<ChatStreamEvent> ParseSseEvent(string? eventName, string data)
     {
-        if (data.Length == 0 || data.Trim() == "[DONE]")
+        if (data.Trim() == "[DONE]")
+        {
+            yield return new StreamTerminal("done");
+            yield break;
+        }
+        if (data.Length == 0)
         {
             yield break;
         }
@@ -1414,6 +1591,16 @@ public static class ChatStreamClient
                         yield return new StreamThinkingDelta(reasoning);
                     }
                 }
+                yield return new StreamTerminal("completed");
+                yield break;
+            }
+
+            if (t.Contains("run.completed") || t.Contains("run.failed") || t.Contains("run.cancelled"))
+            {
+                var runStatus = t.Contains("run.failed") ? "failed" : t.Contains("run.cancelled") ? "cancelled" : "completed";
+                yield return new StreamTerminal(runStatus);
+                // Raw preservato per la vista eventi debug (prima era l'unico segnale).
+                yield return new StreamRawHermesEvent(eventName ?? "run.event", element.GetRawText());
                 yield break;
             }
         }
@@ -1472,7 +1659,9 @@ public static class ChatStreamClient
 
                 if (choice.TryGetProperty("finish_reason", out var finish) && finish.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(finish.GetString()))
                 {
-                    // End of stream message; usage may come on the same chunk or next
+                    // End of stream message; usage may come on the same chunk or next.
+                    // Marcatore terminale per distinguere fine pulita da morte transport.
+                    yield return new StreamTerminal(finish.GetString()!);
                 }
             }
 

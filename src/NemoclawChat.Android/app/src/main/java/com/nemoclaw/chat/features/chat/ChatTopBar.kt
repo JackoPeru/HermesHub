@@ -310,6 +310,7 @@ internal fun TopBar(
 ) {
     val scope = rememberCoroutineScope()
     val onWifiTransport = isWifiTransport(LocalContext.current)
+    val layaContext = LocalContext.current
     val managerBase = remember(settings.gatewayUrl) { gpuManagerBase(settings.gatewayUrl) }
     var menuOpen by remember { mutableStateOf(false) }
     var llmLoaded by remember { mutableStateOf<Boolean?>(null) }
@@ -322,6 +323,10 @@ internal fun TopBar(
     var directActive by remember { mutableStateOf(false) }
     var llmBusy by remember { mutableStateOf(false) }
     var llmError by remember { mutableStateOf("") }
+    var layaOpen by remember { mutableStateOf(false) }
+    var layaText by remember { mutableStateOf("") }
+    var layaReply by remember { mutableStateOf("") }
+    var layaBusy by remember { mutableStateOf(false) }
 
     suspend fun readManagerStatus() {
         // Lettura stato veloce: percorso più rapido (locale vs relay) + timeout brevi.
@@ -429,6 +434,26 @@ internal fun TopBar(
         }
     }
 
+    fun sendLaya() {
+        val text = layaText.trim()
+        if (text.isEmpty() || layaBusy) return
+        scope.launch {
+            layaBusy = true
+            layaReply = runCatching {
+                val bridge = gpuBridgeBase(settings.gatewayUrl)
+                val key = loadGatewaySecret(layaContext)
+                val (code, respBody) = postJson("$bridge/laya", JSONObject().put("text", text), key, allowCompatAuth = false)
+                if (code !in 200..299) {
+                    "Bridge HTTP $code"
+                } else {
+                    JSONObject(respBody).optString("reply").ifBlank { "Nessuna risposta." }
+                }
+            }.getOrElse { "Bridge non raggiungibile (${gpuBridgeBase(settings.gatewayUrl)})." }
+            layaBusy = false
+            refreshLlm()
+        }
+    }
+
     Surface(color = AppColors.Background) {
         Row(
             modifier = Modifier
@@ -443,8 +468,8 @@ internal fun TopBar(
                 contentDescription = "Apri navigazione",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(13.dp))
                     .clickable(role = Role.Button, onClick = onOpenSidebar)
             )
             Column(modifier = Modifier.padding(start = 11.dp).weight(1f)) {
@@ -452,7 +477,7 @@ internal fun TopBar(
                 if (picker != null) {
                     ChatIdentityTitle(picker = picker, title = title)
                 } else {
-                    Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { contentDescription = title })
+                    Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 19.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { contentDescription = title })
                 }
                 // Testo troncato con ellipsis (niente scroll orizzontale: rubava
                 // lo swipe chat/bot); versione integrale al TalkBack.
@@ -594,6 +619,16 @@ internal fun TopBar(
                         enabled = !llmBusy && desiredMode.isNotBlank() && llmError.isBlank(),
                         onClick = { if (!llmBusy && desiredMode.isNotBlank()) setDirectWanted(!direct) }
                     )
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text("Chat laya")
+                                Text("Chiedi in linguaggio naturale cosa fare al manager", color = AppColors.Muted, fontSize = 12.sp)
+                            }
+                        },
+                        leadingIcon = { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, tint = AppColors.Accent) },
+                        onClick = { menuOpen = false; layaOpen = true }
+                    )
                     val comfySubtitle = when {
                         llmError.isNotBlank() -> "Non raggiungibile"
                         llmState.isBlank() -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
@@ -625,6 +660,40 @@ internal fun TopBar(
             }
             ContextMeter(usage = contextUsage, modifier = Modifier.size(40.dp))
         }
+    }
+    if (layaOpen) {
+        AlertDialog(
+            onDismissRequest = { if (!layaBusy) layaOpen = false },
+            title = { Text("Chat laya") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Chiedi in linguaggio naturale: \"metti l'LLM ready\", \"attiva comfy\", \"metti in auto\", \"come sta?\".",
+                        color = AppColors.Muted,
+                        fontSize = 12.sp
+                    )
+                    TextField(
+                        value = layaText,
+                        onValueChange = { layaText = it },
+                        singleLine = true,
+                        placeholder = { Text("Chiedi a laya...") },
+                        enabled = !layaBusy,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (layaReply.isNotBlank()) {
+                        Text(layaReply, color = Color.White, fontSize = 13.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { sendLaya() }, enabled = !layaBusy && layaText.isNotBlank()) {
+                    Text(if (layaBusy) "..." else "Invia")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { layaOpen = false }, enabled = !layaBusy) { Text("Chiudi") }
+            }
+        )
     }
     HorizontalDivider(color = AppColors.Border.copy(alpha = 0.72f))
 }
@@ -747,7 +816,7 @@ internal fun ChatIdentityTitle(picker: ChatIdentityPicker, title: String) {
                 title,
                 color = Color.White,
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 17.sp,
+                fontSize = 19.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false)

@@ -177,7 +177,7 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (selected) AppColors.Accent else AppColors.Elevated,
-                                contentColor = if (selected) Color.Black else Color.White
+                                contentColor = if (selected) Color(0xFF171009) else Color.White
                             )
                         ) {
                             Text(initiativeModeLabel(mode), fontSize = 11.sp, maxLines = 2)
@@ -311,7 +311,7 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                     IconButton(
                         onClick = { JarvisSessionController.stop(context) }
                     ) {
-                        Icon(Icons.Rounded.Stop, contentDescription = "Termina sessione", tint = Color(0xFFFF7B8E))
+                        Icon(Icons.Rounded.Stop, contentDescription = "Termina sessione", tint = AppColors.Error)
                     }
                 }
             } else {
@@ -355,7 +355,13 @@ private fun JarvisPanel(title: String, content: @Composable ColumnScope.() -> Un
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            Text(
+                title.uppercase(),
+                color = AppColors.Accent,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                letterSpacing = 1.sp
+            )
             content()
         }
     }

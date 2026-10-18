@@ -155,8 +155,15 @@ try {
 
         $certPath = Join-Path $releaseDir "HermesHub-AppPublisher.cer"
         Export-Certificate -Cert $cert -FilePath $certPath | Out-Null
-        Import-Certificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\TrustedPeople | Out-Null
-        Import-Certificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+        # Import idempotente: l'import in Root mostra un avviso di sicurezza che
+        # in shell non interattiva fallisce, quindi non lo ripetiamo se il cert
+        # e' gia' attendibile (Cert:\CurrentUser\Root e' la vista unificata).
+        if (-not (Get-ChildItem Cert:\CurrentUser\TrustedPeople | Where-Object { $_.Thumbprint -eq $cert.Thumbprint })) {
+            Import-Certificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\TrustedPeople | Out-Null
+        }
+        if (-not (Get-ChildItem Cert:\CurrentUser\Root | Where-Object { $_.Thumbprint -eq $cert.Thumbprint })) {
+            Import-Certificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+        }
 
         $lmRootCert = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
         if (-not $lmRootCert) {

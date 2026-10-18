@@ -107,9 +107,13 @@ public sealed partial class MainWindow : Window
     private void ApplyGatewayRuntime(GatewayRuntimeInfo runtime)
     {
         if (_closing) return;
+        var okBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SuccessBrush"];
+        var faintBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["FaintTextBrush"];
+        var warnBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["WarningBrush"];
         if (!runtime.Available)
         {
             GatewayRuntimeStatus.Text = "Gateway non disponibile";
+            GatewayStatusDot.Fill = warnBrush;
             return;
         }
 
@@ -123,7 +127,8 @@ public sealed partial class MainWindow : Window
             "updating" => " · aggiornamento in corso",
             _ => string.Empty
         };
-        GatewayRuntimeStatus.Text = $"Gateway disponibile · Agent {version}{updateStatus}";
+        GatewayRuntimeStatus.Text = $"Gateway · Agent {version}{updateStatus}";
+        GatewayStatusDot.Fill = string.IsNullOrEmpty(updateStatus) ? okBrush : warnBrush;
     }
 
     private void SaveWindowState()
@@ -230,6 +235,11 @@ public sealed partial class MainWindow : Window
         ContentFrame.Navigate(typeof(HardwarePage));
     }
 
+    private void Screen_Click(object sender, RoutedEventArgs e)
+    {
+        ContentFrame.Navigate(typeof(ScreenPage));
+    }
+
     private void Voice_Click(object sender, RoutedEventArgs e)
     {
         ContentFrame.Navigate(typeof(VoicePage));
@@ -281,6 +291,21 @@ public sealed partial class MainWindow : Window
     private void News_Click(object sender, RoutedEventArgs e)
     {
         ContentFrame.Navigate(typeof(NewsPage));
+    }
+
+    private void Images_Click(object sender, RoutedEventArgs e)
+    {
+        ContentFrame.Navigate(typeof(ImagesPage));
+    }
+
+    private void Comfy_Click(object sender, RoutedEventArgs e)
+    {
+        ContentFrame.Navigate(typeof(ComfyPage));
+    }
+
+    private void Characters_Click(object sender, RoutedEventArgs e)
+    {
+        ContentFrame.Navigate(typeof(CharactersPage));
     }
 
     private void Settings_Click(object sender, RoutedEventArgs e)
@@ -434,7 +459,9 @@ public sealed partial class MainWindow : Window
                                             ? ("Server", "Stato e controlli Hermes Agent", NavServerButton)
                                             : pageType == typeof(HardwarePage)
                                                 ? ("Prestazioni", "Hardware del server Hermes", NavHardwareButton)
-                                                : pageType == typeof(VoicePage)
+                                                : pageType == typeof(ScreenPage)
+                                                    ? ("Schermo", "Desktop remoto del bot", NavScreenButton)
+                                                    : pageType == typeof(VoicePage)
                                                     ? ("Voce", "Conversazione vocale live", NavVoiceButton)
                                                     : pageType == typeof(VideoPage)
                                                         ? ("Video", "Libreria e produzione video", NavVideoButton)
@@ -442,7 +469,13 @@ public sealed partial class MainWindow : Window
                                                             ? ("Artifact", "Output strutturati di Hermes", NavArtifactsButton)
                                                             : pageType == typeof(NewsPage)
                                                                 ? ("News", "Articoli e briefing personali", NavNewsButton)
-                                                                : pageType == typeof(SettingsPage)
+                                                                : pageType == typeof(ImagesPage)
+                                                                    ? ("Immagini", "Libreria immagini Hermes", NavImagesButton)
+                                                                    : pageType == typeof(ComfyPage)
+                                                                        ? ("Comfy", "Stato GPU e generazione", NavComfyButton)
+                                                                        : pageType == typeof(CharactersPage)
+                                                                            ? ("Personaggi", "Identità e personaggi Hermes", NavCharactersButton)
+                                                                            : pageType == typeof(SettingsPage)
                                                                     ? ("Impostazioni", "Connessione, voce e preferenze", NavSettingsButton)
                                                                     : pageType == typeof(AboutPage)
                                                                         ? ("Profilo locale", "Hermes Hub", ProfileButton)
@@ -450,6 +483,27 @@ public sealed partial class MainWindow : Window
 
         ShellPageTitle.Text = title;
         ShellPageSubtitle.Text = subtitle;
+        ShellPageIcon.Glyph = pageType == typeof(HomePage) ? "\uE8BD"
+            : pageType == typeof(ArchivePage) ? "\uE8B7"
+            : pageType == typeof(ProjectsPage) || pageType == typeof(ConversationManagerPage) ? "\uE8F1"
+            : pageType == typeof(BotsPage) ? "\uE7B2"
+            : pageType == typeof(CronPage) ? "\uE7C1"
+            : pageType == typeof(NotificationsPage) ? "\uE91C"
+            : pageType == typeof(ContinuityPage) ? "\uE8C8"
+            : pageType == typeof(AuditPage) ? "\uE9D5"
+            : pageType == typeof(SearchPage) ? "\uE721"
+            : pageType == typeof(ServerPage) ? "\uE968"
+            : pageType == typeof(HardwarePage) ? "\uE9D9"
+            : pageType == typeof(ScreenPage) ? "\uE7B4"
+            : pageType == typeof(VoicePage) ? "\uE720"
+            : pageType == typeof(VideoPage) ? "\uE714"
+            : pageType == typeof(ArtifactsPage) ? "\uE8B7"
+            : pageType == typeof(NewsPage) ? "\uE789"
+            : pageType == typeof(ImagesPage) ? "\uE7B8"
+            : pageType == typeof(ComfyPage) ? "\uE768"
+            : pageType == typeof(CharactersPage) ? "\uE77B"
+            : pageType == typeof(SettingsPage) ? "\uE713"
+            : "\uE8BD";
         var normalStyle = (Style)Application.Current.Resources["SidebarButtonStyle"];
         var selectedStyle = (Style)Application.Current.Resources["SidebarSelectedButtonStyle"];
         foreach (var button in NavigationButtons())
@@ -471,10 +525,14 @@ public sealed partial class MainWindow : Window
         yield return NavSearchButton;
         yield return NavServerButton;
         yield return NavHardwareButton;
+        yield return NavScreenButton;
         yield return NavVoiceButton;
         yield return NavVideoButton;
         yield return NavArtifactsButton;
         yield return NavNewsButton;
+        yield return NavImagesButton;
+        yield return NavComfyButton;
+        yield return NavCharactersButton;
         yield return NavSettingsButton;
         yield return ProfileButton;
     }

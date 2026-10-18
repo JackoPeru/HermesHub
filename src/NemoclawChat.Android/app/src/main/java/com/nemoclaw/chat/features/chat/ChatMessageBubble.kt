@@ -41,6 +41,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.activity.ComponentActivity
@@ -299,14 +300,15 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 2.dp, vertical = 2.dp),
+                    .animateContentSize()
+                    .padding(horizontal = 2.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     Box(modifier = Modifier.size(7.dp).background(AppColors.Accent, CircleShape))
-                    Text("HERMES", color = AppColors.Faint, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
+                    Text("HERMES", color = AppColors.Faint, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
                 }
-                MarkdownText(displayText, color = Color.White, fontSize = 15.sp)
+                MarkdownText(displayText, color = Color.White, fontSize = 16.sp)
                 ArchivedActivityDisclosure(message.activityTimeline, message.thinking, settings.showToolCalls)
                 if (message.visualBlocks.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

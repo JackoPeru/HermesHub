@@ -1,11 +1,10 @@
-Hermes Hub 0.6.261 (audit seconda ondata)
+Hermes Hub 0.6.276 (fix archivio hub oltre 10 MB + retry auth puliti)
 
-- Android: WebView news senza JS/bridge, screen bridge blindato; copia archivio con conferma, import validato (kind, Bot, malformati scartati).
-- Android: sidebar ricaricata a ogni apertura, deep-link con cap e MIME allowlist, TTS con rifiuto onesto oltre 4000 char, note vocali max 10min/100MB, news con singolo GET.
-- Server: SQLite sotto lock, training wall-clock 12h, workflow raw con cap 480p/3600, retention release/backup (5), digest su bytes.
-- Test: 528 python + 480 android + lint verdi.
-- Versioni: Windows/AdminBridge 0.6.261; Android versionName 0.6.261, versionCode 265 (stessa firma: aggiornamento normale).
-- Asset ufficiali: APK Android con Meta DAT HermesHub-0.6.261-android.apk; MSIX NemoclawChat.Windows_0.6.261.0_x64.msix; gateway Linux HermesHub-0.6.261-linux-gateway.tar.gz.
-- SHA-256 Android: `9f3758360b1f987a165e8ffa2287d5f56ddaa0a060bf2d39584ed782d1874ca4`.
-- SHA-256 gateway: `a1d794070e30a1119286e739e22e8487459000c1ad46d7c0aeb72de7e0e27754`.
-- SHA-256 MSIX: `525060e5e6fa79016d2800300906e6a9a18b6b638100653bef5587194742e7b4`.
+- Windows: ChatArchiveSync tornato operativo: GET /v1/hub/conversations e POST import ora accettano risposte oltre 10 MB (cap dedicato a 32 MB); l'archivio condiviso include conversazioni bot/Jarvis mirrorate da SQLiteHubStateStore e ha superato il vecchio limite, bloccando pull/push/events con "Risposta gateway oltre il limite di 10240 KB".
+- Windows: il poller events/archivio non riprova piu senza Authorization quando esiste una chiave gateway salvata: era la causa dei ~1800 rifiuti 401/giorno nel log hub (impatto nullo sul canale autenticato, ma log inquinati e storm di retry inutili).
+- Android: nessuna modifica di codice rispetto a 0.6.274 (bump di versionName/versionCode per allineamento di release; cap archivio Android gia a 64 MB).
+- Versioni: Windows/AdminBridge 0.6.276; Android versionName 0.6.276, versionCode 280.
+- Asset ufficiali: APK Android HermesHub-0.6.276-android.apk; MSIX NemoclawChat.Windows_0.6.276.0_x64.msix; gateway Linux HermesHub-0.6.276-linux-gateway.tar.gz.
+- SHA-256 Android: `275cd1b43c6bc6900d57402a0df8d525633ce4f81dd74c55ffa0512514d38f13`.
+- SHA-256 MSIX: `49c186b4e1f7fab4dc133419a532c9fe8170d4c3bbcd3ec4a3bb10372700b57c`.
+- SHA-256 gateway Linux: `c27df4a084daefd262f73a12ec9aed507b346400a3c8a32d5568ba3c29020c7a`.

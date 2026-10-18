@@ -107,6 +107,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Dns
@@ -314,29 +315,54 @@ internal fun SectionTopBar(tab: Tab, onOpenSidebar: () -> Unit, onBackToChat: ()
                 .fillMaxWidth()
                 .statusBarsPadding()
                 .height(68.dp)
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Image(
                 painter = painterResource(id = R.drawable.chatclaw_logo),
                 contentDescription = "Apri navigazione",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(13.dp))
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(11.dp))
                     .clickable(role = Role.Button, onClick = onOpenSidebar)
             )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(tab.label, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-                Text("Hermes Hub", color = AppColors.Faint, fontSize = 11.sp)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
+            ) {
+                Text(
+                    tab.label,
+                    color = Color.White,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = (-0.2).sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    "Hermes Hub",
+                    color = AppColors.Faint,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
-            IconButton(onClick = onBackToChat, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Torna alla chat", tint = AppColors.Muted)
+            IconButton(onClick = onBackToChat, modifier = Modifier.size(38.dp)) {
+                Icon(
+                    Icons.Rounded.ChatBubbleOutline,
+                    contentDescription = "Torna alla chat",
+                    tint = AppColors.Muted,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }
-    HorizontalDivider(color = AppColors.Border.copy(alpha = 0.8f))
+    HorizontalDivider(
+        color = AppColors.Border.copy(alpha = 0.7f),
+        thickness = 0.75.dp
+    )
 }
 
 @Composable
@@ -395,12 +421,14 @@ internal fun HermesSidebar(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             item {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
@@ -409,22 +437,42 @@ internal fun HermesSidebar(
                         contentDescription = "Hermes Hub",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(34.dp)
-                            .clip(RoundedCornerShape(10.dp))
+                            .size(38.dp)
+                            .clip(CircleShape)
                     )
-                    Text(
-                        "Hermes Hub",
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 16.sp,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        "Chiudi",
-                        color = AppColors.Muted,
-                        fontSize = 12.sp,
-                        modifier = Modifier.clickable(onClick = onClose)
-                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                    ) {
+                        Text(
+                            "Hermes Hub",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 15.sp,
+                            letterSpacing = (-0.1).sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            "Pronto",
+                            color = AppColors.Faint,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    TextButton(
+                        onClick = onClose,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.heightIn(min = 36.dp)
+                    ) {
+                        Text(
+                            "Chiudi",
+                            color = AppColors.Accent,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
             item {
@@ -433,6 +481,7 @@ internal fun HermesSidebar(
                     title = "Nuova chat",
                     subtitle = "Pulisci contesto corrente",
                     selected = false,
+                    primary = true,
                     onClick = onNewChat
                 )
             }
@@ -491,15 +540,19 @@ internal fun HermesSidebar(
                 }
             }
             item {
-                HorizontalDivider(color = AppColors.Border, modifier = Modifier.padding(vertical = 8.dp))
+                HorizontalDivider(
+                    color = AppColors.Border.copy(alpha = 0.7f),
+                    thickness = 0.75.dp,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 6.dp)
+                )
                 SidebarSectionLabel("RECENTI", settings.sidebarRecenti) { onToggleSidebarSection("recenti") }
             }
             if (settings.sidebarRecenti) {
                 if (identityConversations.isEmpty()) {
                     item {
                         Column(
-                            modifier = Modifier.padding(vertical = 10.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             Text("Nessuna chat ancora.", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                             Text("Tocca + per iniziarne una.", color = AppColors.Muted, fontSize = 12.sp)
@@ -507,26 +560,61 @@ internal fun HermesSidebar(
                     }
                 } else {
                     items(identityConversations.take(15), key = { it.id }) { conversation ->
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onOpenConversation(conversation.id) }
-                                .padding(horizontal = 4.dp, vertical = 8.dp)
-                        ) {
-                            Text(
-                                conversation.title,
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                conversation.description.ifBlank { conversation.prompt },
-                                color = AppColors.Muted,
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { onOpenConversation(conversation.id) }
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFF302517)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.ChatBubbleOutline,
+                                        contentDescription = null,
+                                        tint = AppColors.Accent,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(1.dp)
+                                ) {
+                                    Text(
+                                        conversation.title,
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        conversation.description.ifBlank { conversation.prompt },
+                                        color = AppColors.Muted,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Icon(
+                                    Icons.Rounded.ChevronRight,
+                                    contentDescription = null,
+                                    tint = AppColors.Faint,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            HorizontalDivider(
+                                color = AppColors.Border,
+                                thickness = 0.5.dp,
+                                modifier = Modifier.padding(start = 58.dp, end = 8.dp)
                             )
                         }
                     }
@@ -636,95 +724,126 @@ internal fun HermesBotSidebar(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         item {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(
-                    "Bot",
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 16.sp,
-                    modifier = Modifier.weight(1f)
-                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(1.dp)
+                ) {
+                    Text(
+                        "Bot",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp,
+                        letterSpacing = (-0.1).sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        if (bots.isEmpty()) status else if (bots.size == 1) "1 bot · tocca per parlare" else "${bots.size} bot · tocca per parlare",
+                        color = AppColors.Faint,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 TextButton(
                     onClick = { botRefreshNonce++ },
-                    modifier = Modifier.heightIn(min = 48.dp)
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.heightIn(min = 36.dp)
                 ) {
-                    Text("Aggiorna", color = AppColors.Muted, fontSize = 12.sp)
+                    Text("Aggiorna", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
                 TextButton(
                     onClick = onClose,
-                    modifier = Modifier.heightIn(min = 48.dp)
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.heightIn(min = 36.dp)
                 ) {
-                    Text("Chiudi", color = AppColors.Muted, fontSize = 12.sp)
+                    Text("Chiudi", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
             }
-            Text(
-                if (bots.isEmpty()) status else if (bots.size == 1) "1 bot · tocca per parlare" else "${bots.size} bot · tocca per parlare",
-                color = AppColors.Muted,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
-            )
         }
         items(bots, key = { it.identityKey }) { bot ->
             val selected = activeBotKey != null && bot.identityKey == activeBotKey
             val rowInteraction = remember(bot.identityKey) { MutableInteractionSource() }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (selected) AppColors.NavIndicator else Color.Transparent)
-                    .combinedClickable(
-                        onClick = { onOpenBotItem(bot) },
-                        onLongClick = { menuForKey = bot.identityKey; menuPage = 0 },
-                        role = Role.Button,
-                        interactionSource = rowInteraction,
-                        indication = LocalIndication.current
-                    )
-                    .semantics { stateDescription = if (selected) "Bot selezionato" else "Bot non selezionato" }
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                com.nemoclaw.chat.features.bots.BotAvatar(bot.displayName, bot.profile, 40.dp)
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        bot.displayName,
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        "@${bot.handle}",
-                        color = AppColors.Muted,
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 56.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (selected) AppColors.NavIndicator else Color.Transparent)
+                        .combinedClickable(
+                            onClick = { onOpenBotItem(bot) },
+                            onLongClick = { menuForKey = bot.identityKey; menuPage = 0 },
+                            role = Role.Button,
+                            interactionSource = rowInteraction,
+                            indication = LocalIndication.current
+                        )
+                        .semantics { stateDescription = if (selected) "Bot selezionato" else "Bot non selezionato" }
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    com.nemoclaw.chat.features.bots.BotAvatar(bot.displayName, bot.profile, 40.dp)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                    ) {
+                        Text(
+                            bot.displayName,
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            "@${bot.handle}",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (bot.identityKey in botPins) {
+                        Text(
+                            "FISSATO",
+                            color = AppColors.Accent,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                    if (selected) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(AppColors.Accent, CircleShape)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Rounded.ChevronRight,
+                            contentDescription = null,
+                            tint = AppColors.Faint,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
-                if (bot.identityKey in botPins) {
-                    Text(
-                        "FISSATO",
-                        color = AppColors.Accent,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                if (selected) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .background(AppColors.Accent, CircleShape)
-                    )
-                }
+                HorizontalDivider(
+                    color = AppColors.Border,
+                    thickness = 0.5.dp,
+                    modifier = Modifier.padding(start = 58.dp, end = 8.dp)
+                )
             }
             // Menu contestuale long-press (una sola istanza per volta).
             if (menuForKey == bot.identityKey) {
@@ -855,24 +974,77 @@ internal fun HermesBotSidebar(
 }
 
 @Composable
-internal fun SidebarRow(icon: ImageVector, title: String, subtitle: String, selected: Boolean, onClick: () -> Unit) {
-    val background = if (selected) AppColors.NavIndicator else Color.Transparent
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(background)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Icon(icon, contentDescription = title, tint = if (selected) AppColors.Accent else AppColors.Muted, modifier = Modifier.size(19.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = AppColors.Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+internal fun SidebarRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    primary: Boolean = false,
+    onClick: () -> Unit
+) {
+    val background = when {
+        selected -> AppColors.NavIndicator
+        primary -> AppColors.Accent.copy(alpha = 0.13f)
+        else -> Color.Transparent
+    }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(background)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF302517)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = title,
+                    tint = AppColors.Accent,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
+            ) {
+                Text(
+                    title,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    subtitle,
+                    color = AppColors.Muted,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Icon(
+                Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = AppColors.Faint,
+                modifier = Modifier.size(16.dp)
+            )
         }
+        HorizontalDivider(
+            color = AppColors.Border,
+            thickness = 0.5.dp,
+            modifier = Modifier.padding(start = 58.dp, end = 8.dp)
+        )
     }
 }
 
@@ -881,24 +1053,26 @@ internal fun SidebarSectionLabel(title: String, expanded: Boolean, onToggle: () 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onToggle)
-            .padding(start = 12.dp, top = 10.dp, bottom = 2.dp, end = 4.dp),
+            .padding(start = 8.dp, top = 10.dp, bottom = 4.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            title,
-            color = AppColors.Faint,
-            fontSize = 10.sp,
+            title.uppercase(),
+            color = AppColors.Accent,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
-            letterSpacing = 1.1.sp,
+            letterSpacing = 1.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
         Icon(
             if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
             contentDescription = if (expanded) "Chiudi $title" else "Apri $title",
-            tint = AppColors.Muted,
-            modifier = Modifier.size(18.dp)
+            tint = AppColors.Accent,
+            modifier = Modifier.size(16.dp)
         )
     }
 }

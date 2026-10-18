@@ -69,31 +69,22 @@ public sealed partial class NotificationsPage : Page
             var group = string.IsNullOrWhiteSpace(item.AutomationId) ? item.Category : $"Automazione · {item.AutomationId}";
             if (!string.Equals(group, currentGroup, StringComparison.OrdinalIgnoreCase))
             {
-                NotificationsPanel.Children.Add(new TextBlock { Text = group, Foreground = (Brush)Application.Current.Resources["AccentGreenBrush"], FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Margin = new Thickness(0, 8, 0, 0) });
+                NotificationsPanel.Children.Add(PremiumRows.SectionHeader(group));
                 currentGroup = group;
             }
             NotificationsPanel.Children.Add(CreateCard(item));
         }
     }
 
-    private Border CreateCard(HubNotificationRecord item)
+    private StackPanel CreateCard(HubNotificationRecord item)
     {
         var unread = item.ReadAt is null;
-        var title = new TextBlock
+        var header = PremiumRows.LabeledRow("\uE7B8", item.Title, null, PremiumRows.MetaLine(item.Priority));
+        var meta = PremiumRows.MetaLine($"{item.Category} · {item.Source} · {item.CreatedAt.LocalDateTime:g} · {(unread ? "non letta" : "letta")}");
+        if (unread)
         {
-            Text = item.Title,
-            Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-            FontSize = 18,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            TextWrapping = TextWrapping.Wrap
-        };
-        var meta = new TextBlock
-        {
-            Text = $"{item.Category} · {item.Priority} · {item.Source} · {item.CreatedAt.LocalDateTime:g} · {(unread ? "non letta" : "letta")}",
-            Foreground = unread ? (Brush)Application.Current.Resources["AccentGreenBrush"] : (Brush)Application.Current.Resources["MutedTextBrush"],
-            FontSize = 12,
-            TextWrapping = TextWrapping.Wrap
-        };
+            meta.Foreground = (Brush)Application.Current.Resources["AccentGreenBrush"];
+        }
         var message = new TextBlock
         {
             Text = item.Message,
@@ -107,15 +98,7 @@ public sealed partial class NotificationsPage : Page
         actions.Children.Add(Button(item.Archived ? "Ripristina" : "Archivia", item, Archive_Click));
         if (!string.IsNullOrWhiteSpace(item.FileUrl) || !string.IsNullOrWhiteSpace(item.RunId) || !string.IsNullOrWhiteSpace(item.AutomationId) || !string.IsNullOrWhiteSpace(item.ProjectId)) actions.Children.Add(Button("Apri riferimento", item, OpenReference_Click));
 
-        return new Border
-        {
-            Padding = new Thickness(18),
-            Background = (Brush)Application.Current.Resources["SurfaceBrush"],
-            BorderBrush = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(255, unread ? (byte)34 : (byte)58, unread ? (byte)197 : (byte)58, unread ? (byte)94 : (byte)58)),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(16),
-            Child = new StackPanel { Spacing = 10, Children = { title, meta, message, actions } }
-        };
+        return new StackPanel { Spacing = 10, Children = { header, meta, message, actions, PremiumRows.Hairline() } };
     }
 
     private static Button Button(string label, HubNotificationRecord item, RoutedEventHandler handler)

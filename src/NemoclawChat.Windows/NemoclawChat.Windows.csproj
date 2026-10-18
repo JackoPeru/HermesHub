@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.26100.0</TargetFramework>
@@ -15,9 +15,9 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>0.6.261</Version>
-    <AssemblyVersion>0.6.261.0</AssemblyVersion>
-    <FileVersion>0.6.261.0</FileVersion>
+    <Version>0.6.276</Version>
+    <AssemblyVersion>0.6.276.0</AssemblyVersion>
+    <FileVersion>0.6.276.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -31,6 +31,8 @@
     <Content Include="Assets\AppIcon.ico" />
     <Content Include="Assets\ChatClawLogo.png" />
     <Content Include="Assets\Wide310x150Logo.scale-200.png" />
+    <!-- Viewer noVNC locale per Schermo bot (stessi file del client Android). -->
+    <Content Include="Assets\novnc\**" />
   </ItemGroup>
 
   <ItemGroup>

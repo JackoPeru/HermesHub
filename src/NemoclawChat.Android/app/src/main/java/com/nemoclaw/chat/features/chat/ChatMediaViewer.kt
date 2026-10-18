@@ -474,7 +474,7 @@ internal fun ChatImageViewerDialog(
                 onClick = onClose,
                 modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
             ) {
-                Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = Color.White)
+                Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = AppColors.Muted)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (onToggleFullScreen != null) {
@@ -495,7 +495,7 @@ internal fun ChatImageViewerDialog(
                         enabled = !isDownloading,
                         modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
                     ) {
-                        Icon(Icons.Rounded.Download, contentDescription = "Scarica immagine", tint = Color.White)
+                        Icon(Icons.Rounded.Download, contentDescription = "Scarica immagine", tint = AppColors.Accent)
                     }
                 }
             }
@@ -523,9 +523,10 @@ internal fun ChatImageViewerDialog(
                 if (scale > 1f) {
                     TextButton(
                         onClick = { resetZoom() },
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
                     ) {
-                        Text("Ripristina zoom", color = Color.White)
+                        Text("Ripristina zoom", color = AppColors.Accent)
                     }
                 }
             }
@@ -634,11 +635,11 @@ internal fun ChatImageGalleryDialog(
                 onClick = onClose,
                 modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
             ) {
-                Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = Color.White)
+                Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = AppColors.Muted)
             }
             Text(
                 galleryCounterLabel(pagerState.currentPage, items.size),
-                color = Color.White,
+                color = AppColors.Muted,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape).padding(horizontal = 12.dp, vertical = 6.dp)
@@ -660,7 +661,7 @@ internal fun ChatImageGalleryDialog(
                         enabled = !isDownloading,
                         modifier = Modifier.background(Color.Black.copy(alpha = 0.62f), CircleShape)
                     ) {
-                        Icon(Icons.Rounded.Download, contentDescription = "Scarica immagine", tint = Color.White)
+                        Icon(Icons.Rounded.Download, contentDescription = "Scarica immagine", tint = AppColors.Accent)
                     }
                 }
             }
@@ -687,9 +688,10 @@ internal fun ChatImageGalleryDialog(
                 if (scale > 1f) {
                     TextButton(
                         onClick = { resetZoom() },
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
                     ) {
-                        Text("Ripristina zoom", color = Color.White)
+                        Text("Ripristina zoom", color = AppColors.Accent)
                     }
                 }
             }

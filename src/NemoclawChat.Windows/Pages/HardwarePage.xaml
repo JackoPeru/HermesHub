@@ -20,18 +20,22 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <StackPanel Spacing="6">
-                <TextBlock
-                    FontSize="30"
-                    FontWeight="SemiBold"
-                    Foreground="White"
-                    Text="Prestazioni" />
-                <TextBlock x:Name="HostText" Foreground="White" TextWrapping="Wrap" />
-                <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                <Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13">
+                    <FontIcon FontSize="19" Glyph="&#xE9D9;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel VerticalAlignment="Center" Spacing="2">
+                    <TextBlock
+                        Style="{StaticResource PageTitleStyle}"
+                        Text="Prestazioni" />
+                    <TextBlock x:Name="HostText" Foreground="White" TextWrapping="Wrap" />
+                    <TextBlock x:Name="StatusText" Style="{StaticResource CaptionStyle}" TextWrapping="Wrap" />
+                </StackPanel>
             </StackPanel>
             <Button
                 Grid.Column="1"
                 Click="Refresh_Click"
+                Style="{StaticResource TextButtonStyle}"
                 Content="Aggiorna"
                 VerticalAlignment="Top" />
         </Grid>
@@ -42,17 +46,13 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <Border Style="{StaticResource PremiumCardBorderStyle}" Padding="10">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel x:Name="ComponentsPanel" Spacing="8" />
-                </ScrollViewer>
-            </Border>
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="ComponentsPanel" Spacing="16" />
+            </ScrollViewer>
 
-            <Border Grid.Column="1" Style="{StaticResource PremiumCardBorderStyle}">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel x:Name="DetailPanel" Spacing="18" />
-                </ScrollViewer>
-            </Border>
+            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="DetailPanel" Spacing="18" />
+            </ScrollViewer>
         </Grid>
     </Grid>
 </Page>

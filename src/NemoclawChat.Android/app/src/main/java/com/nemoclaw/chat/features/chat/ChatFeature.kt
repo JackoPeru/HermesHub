@@ -131,6 +131,7 @@ import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.SmartToy
@@ -1626,16 +1627,16 @@ internal fun ChatScreen(
         if (showSendChoiceDialog && busyChoice != null) {
             AlertDialog(
                 onDismissRequest = { showSendChoiceDialog = false; state.pendingBusySend = null },
-                title = { Text("Hermes sta lavorando") },
-                text = { Text("Accoda il prompt (parte da solo alla fine) oppure ferma tutto e correggi subito?") },
+                title = { Text("Hermes sta lavorando", color = Color.White, fontWeight = FontWeight.SemiBold) },
+                text = { Text("Accoda il prompt (parte da solo alla fine) oppure ferma tutto e correggi subito?", color = AppColors.Muted) },
                 confirmButton = {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TextButton(onClick = { enqueueBusySend(busyChoice) }) { Text("Accoda") }
-                        TextButton(onClick = { correctNow(busyChoice) }) { Text("Ferma e correggi") }
+                        TextButton(onClick = { enqueueBusySend(busyChoice) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Accoda", color = AppColors.Accent) }
+                        TextButton(onClick = { correctNow(busyChoice) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Error)) { Text("Ferma e correggi", color = AppColors.Error) }
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showSendChoiceDialog = false; state.pendingBusySend = null }) { Text("Annulla") }
+                    TextButton(onClick = { showSendChoiceDialog = false; state.pendingBusySend = null }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Annulla", color = AppColors.Accent) }
                 }
             )
         }
@@ -2650,7 +2651,11 @@ internal fun BotEmptyState(
         )
         if (unreachable && onRetry != null) {
             Spacer(modifier = Modifier.height(14.dp))
-            Button(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) {
+            TextButton(
+                onClick = onRetry,
+                modifier = Modifier.heightIn(min = 48.dp),
+                colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+            ) {
                 Text("Riprova")
             }
         }
@@ -2691,16 +2696,16 @@ internal fun EmptyState(onPrompt: (String) -> Unit) {
             lineHeight = 20.sp
         )
         Spacer(modifier = Modifier.height(28.dp))
-        Text("OPERAZIONI RAPIDE", color = AppColors.Faint, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
+        Text("OPERAZIONI RAPIDE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         Spacer(modifier = Modifier.height(10.dp))
         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            SuggestionButton("Prepara setup Hermes") {
+            SuggestionButton("Prepara setup Hermes", "Avvia Hermes su Tailscale o LAN") {
                 onPrompt("Preparami i passaggi per avviare Hermes Agent API Server su Tailscale/LAN.")
             }
-            SuggestionButton("Controlla server") {
+            SuggestionButton("Controlla server", "Stato, modello e capabilities") {
                 onPrompt("Controlla stato Hermes, modello disponibile e capabilities API.")
             }
-            SuggestionButton("Crea ordine agente") {
+            SuggestionButton("Crea ordine agente", "Task con approve prima dei rischi") {
                 onPrompt("Crea un task agente sicuro con richiesta approve/deny prima di ogni azione rischiosa.")
             }
         }
@@ -2708,7 +2713,7 @@ internal fun EmptyState(onPrompt: (String) -> Unit) {
 }
 
 @Composable
-internal fun SuggestionButton(text: String, onClick: () -> Unit) {
+internal fun SuggestionButton(text: String, subtitle: String, onClick: () -> Unit) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -2723,7 +2728,10 @@ internal fun SuggestionButton(text: String, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(modifier = Modifier.size(7.dp).background(AppColors.Accent, CircleShape))
-            Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 12.dp).weight(1f))
+            Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+                Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(subtitle, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             Text("›", color = AppColors.Faint, fontSize = 22.sp)
         }
     }
@@ -2855,7 +2863,7 @@ internal fun ChatModelSessionBar(
     if (showSteerDialog && runId != null) {
         AlertDialog(
             onDismissRequest = { showSteerDialog = false },
-            title = { Text("Correggi run in corso") },
+            title = { Text("Correggi run in corso", color = Color.White, fontWeight = FontWeight.SemiBold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Inviata al run $runId. Consegna al prossimo tool boundary; non crea un nuovo turno.", fontSize = 12.sp, color = AppColors.Muted)
@@ -2884,9 +2892,9 @@ internal fun ChatModelSessionBar(
                             steerText = ""
                         }
                     }
-                }) { Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Invia correzione", tint = Color.White) }
+                }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Invia correzione", tint = AppColors.Accent) }
             },
-            dismissButton = { IconButton(onClick = { showSteerDialog = false }) { Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = Color.White) } }
+            dismissButton = { IconButton(onClick = { showSteerDialog = false }) { Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = AppColors.Muted) } }
         )
     }
 }
@@ -2955,7 +2963,7 @@ internal fun BackgroundWorkBanner(
                 },
                 modifier = Modifier.size(48.dp)
             ) {
-                Icon(Icons.Rounded.Stop, contentDescription = "Ferma lavoro", tint = Color.White)
+                Icon(Icons.Rounded.Stop, contentDescription = "Ferma lavoro", tint = AppColors.Error)
             }
         }
     }
@@ -3006,8 +3014,11 @@ internal fun DetachedFollowBanner(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            TextButton(onClick = onRecheck) {
-                Text("Ricontrolla", color = Color.White, fontWeight = FontWeight.SemiBold)
+            TextButton(
+                onClick = onRecheck,
+                colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+            ) {
+                Text("Ricontrolla", color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
             }
             IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.Rounded.Close, contentDescription = "Ignora", tint = AppColors.Muted)
@@ -3048,42 +3059,74 @@ internal fun ProjectsScreen(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+        contentPadding = PaddingValues(vertical = 20.dp)
     ) {
         item {
-            Text("Progetti", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.height(6.dp))
-            Text("Scegli un nome e, se serve, un system prompt personalizzato. Il resto e' automatico.", color = AppColors.Muted)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    modifier = Modifier.size(40.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = AppColors.NavIndicator
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
+                    }
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Progetti", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Scegli un nome e, se serve, un system prompt personalizzato. Il resto e' automatico.", color = AppColors.Muted, fontSize = 14.sp)
+                }
+            }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("I tuoi progetti", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        IconButton(onClick = { edit(null); status = "Inserisci nome e system prompt facoltativo." }) { Icon(Icons.Rounded.Add, contentDescription = "Nuovo progetto", tint = Color.White) }
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("I TUOI PROGETTI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = { edit(null); status = "Inserisci nome e system prompt facoltativo." },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) { Text("Nuovo") }
+                }
+                if (projects.isEmpty()) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(32.dp))
+                        Text("Nessun progetto", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Crea il primo progetto per organizzare chat e contesto.", color = AppColors.Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                        Button(
+                            onClick = { edit(null); status = "Inserisci nome e system prompt facoltativo." },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
+                        ) { Text("Crea progetto") }
                     }
-                    if (projects.isEmpty()) {
-                        Text("Nessun progetto.", color = AppColors.Muted)
-                    } else {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            projects.forEach { project ->
-                                VideoFeedChip(project.title, selected = project.id == selectedId) { edit(project) }
-                            }
+                } else {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        projects.forEach { project ->
+                            VideoFeedChip(project.title, selected = project.id == selectedId) { edit(project) }
                         }
                     }
                 }
             }
         }
+        item { HorizontalDivider(color = AppColors.Border) }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(if (selected == null) "Nuovo progetto" else selected.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                    if (selected?.id == settings.activeProjectId) Text("PROGETTO ATTIVO", color = AppColors.Success, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    SettingsField("Nome progetto", title, { title = it })
-                    SettingsField("System prompt (facoltativo)", instructions, { instructions = it })
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IconButton(onClick = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("DETTAGLIO PROGETTO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(if (selected == null) "Nuovo progetto" else selected.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                if (selected?.id == settings.activeProjectId) Text("PROGETTO ATTIVO", color = AppColors.Success, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                SettingsField("Nome progetto", title, { title = it })
+                SettingsField("System prompt (facoltativo)", instructions, { instructions = it })
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
                             runCatching {
                                 saveProjectWorkspace(
                                     context = context,
@@ -3102,16 +3145,29 @@ internal fun ProjectsScreen(
                                 onSettingsChanged(settings.withActiveProject(saved))
                                 status = "Progetto salvato e attivato."
                             }.onFailure { status = it.message ?: "Salvataggio progetto fallito." }
-                        }) { Icon(Icons.Rounded.Save, contentDescription = "Salva progetto", tint = Color.White) }
-                        IconButton(enabled = selected != null, onClick = {
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
+                    ) {
+                        Icon(Icons.Rounded.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Salva e attiva")
+                    }
+                    TextButton(
+                        enabled = selected != null,
+                        onClick = {
                             selected?.let {
                                 onSettingsChanged(settings.withActiveProject(it))
                                 onNewChat()
                             }
-                        }) { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Nuova chat nel progetto", tint = Color.White) }
+                        },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent, disabledContentColor = AppColors.Faint)
+                    ) {
+                        Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Apri chat")
                     }
-                    Text(status, color = AppColors.Muted, fontSize = 12.sp)
                 }
+                Text(status, color = AppColors.Muted, fontSize = 12.sp)
             }
         }
     }
@@ -3178,12 +3234,96 @@ internal fun UniversalSearchScreen(context: Context, settings: AppSettings, onOp
         }
     }
 
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text("Ricerca universale", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold); Text("Chat, tool call, artifact, progetti, memoria, cron e notifiche.", color = AppColors.Muted) }
-        item { Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) { Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { SettingsField("Cerca ovunque", query, { query = it }); Button(onClick = { runSearch() }) { Text("Cerca") }; Text(status, color = AppColors.Muted, fontSize = 12.sp) } } }
-        items(results, key = { "${it.first}-${it.second}" }) { result ->
-            Card(modifier = Modifier.fillMaxWidth().clickable { onOpen(result.first, result.second) }, colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble), shape = RoundedCornerShape(18.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) { Text("${result.first} · ${result.third.first}", color = Color.White, fontWeight = FontWeight.SemiBold); Text(result.third.second, color = AppColors.Muted, fontSize = 12.sp, maxLines = 4, overflow = TextOverflow.Ellipsis) }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+        contentPadding = PaddingValues(vertical = 20.dp)
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    modifier = Modifier.size(40.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = AppColors.NavIndicator
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.ManageSearch, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
+                    }
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Ricerca universale", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Chat, tool call, artifact, progetti, memoria, cron e notifiche.", color = AppColors.Muted, fontSize = 14.sp)
+                }
+            }
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("CERCA", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                SettingsField("Cerca ovunque", query, { query = it })
+                Button(
+                    onClick = { runSearch() },
+                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
+                ) { Text("Cerca") }
+                Text(status, color = AppColors.Muted, fontSize = 12.sp)
+            }
+        }
+        item { HorizontalDivider(color = AppColors.Border) }
+        if (results.isEmpty()) {
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Rounded.ManageSearch, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(32.dp))
+                    Text("Nessun risultato", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(status, color = AppColors.Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                    TextButton(
+                        onClick = { runSearch() },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) { Text("Cerca") }
+                }
+            }
+        } else {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("RISULTATI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    results.forEachIndexed { index, result ->
+                        val kindIcon = when (result.first) {
+                            "Cron" -> Icons.Rounded.Refresh
+                            "Notifica" -> Icons.Rounded.Notifications
+                            "Memoria" -> Icons.Rounded.Memory
+                            "Artifact" -> Icons.Rounded.Description
+                            "Progetto" -> Icons.Rounded.FolderOpen
+                            else -> Icons.Rounded.ChatBubbleOutline
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { onOpen(result.first, result.second) }.padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(40.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                color = AppColors.NavIndicator
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(kindIcon, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(22.dp))
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("${result.first} · ${result.third.first}", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(result.third.second, color = AppColors.Muted, fontSize = 12.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                            }
+                            Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(20.dp))
+                        }
+                        if (index < results.lastIndex) HorizontalDivider(color = AppColors.Border)
+                    }
+                }
             }
         }
     }
@@ -3212,64 +3352,150 @@ internal fun ArtifactLibraryScreen(
     }
     val selected = artifacts.firstOrNull { it.id == selectedId }
 
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+        contentPadding = PaddingValues(vertical = 20.dp)
+    ) {
         item {
-            Text("Artifact", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-            Text("Output persistenti prodotti da chat, run e automazioni.", color = AppColors.Muted)
-        }
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SettingsField("Cerca nome, file o tag", query, { query = it })
-                    SettingsField("Filtra progetto", projectFilter, { projectFilter = it })
-                    Text("${artifacts.size} artifact", color = AppColors.Muted, fontSize = 12.sp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    modifier = Modifier.size(40.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = AppColors.NavIndicator
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Description, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
+                    }
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Artifact", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Output persistenti prodotti da chat, run e automazioni.", color = AppColors.Muted, fontSize = 14.sp)
                 }
             }
         }
-        items(artifacts, key = { it.id }) { artifact ->
-            Card(
-                modifier = Modifier.fillMaxWidth().clickable {
-                    selectedId = artifact.id; rename = artifact.title; tags = artifact.tags.joinToString(", ")
-                },
-                colors = CardDefaults.cardColors(containerColor = if (artifact.id == selectedId) AppColors.Elevated else AppColors.AssistantBubble),
-                shape = RoundedCornerShape(18.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(artifact.title, color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text("${artifact.artifactType} · v${artifact.version} · ${artifact.projectId}", color = AppColors.Muted, fontSize = 12.sp)
-                    Text(artifact.description, color = Color.White, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("FILTRI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                SettingsField("Cerca nome, file o tag", query, { query = it })
+                SettingsField("Filtra progetto", projectFilter, { projectFilter = it })
+                Text("${artifacts.size} artifact", color = AppColors.Muted, fontSize = 12.sp)
+            }
+        }
+        item { HorizontalDivider(color = AppColors.Border) }
+        if (artifacts.isEmpty()) {
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Rounded.Description, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(32.dp))
+                    Text("Nessun artifact", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Prova a modificare ricerca o filtro progetto.", color = AppColors.Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                    TextButton(
+                        onClick = { query = ""; projectFilter = "" },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                    ) { Text("Mostra tutto") }
+                }
+            }
+        } else {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("ARTIFACT", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    artifacts.forEachIndexed { index, artifact ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                selectedId = artifact.id; rename = artifact.title; tags = artifact.tags.joinToString(", ")
+                            }.padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(40.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                color = AppColors.NavIndicator
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.Description, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(22.dp))
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(artifact.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${artifact.artifactType} · v${artifact.version} · ${artifact.projectId}", color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(artifact.description, color = AppColors.Muted, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                            }
+                            if (artifact.id == selectedId) {
+                                Text("SELEZIONATO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            } else {
+                                Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        if (index < artifacts.lastIndex) HorizontalDivider(color = AppColors.Border)
+                    }
                 }
             }
         }
         if (selected != null) {
+            item { HorizontalDivider(color = AppColors.Border) }
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Dettaglio · v${selected.version}", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text("File: ${selected.artifactFileName}\nMIME: ${selected.artifactMimeType}\nChat: ${selected.sourceConversationId}\nRun: ${selected.sourceRunId}", color = AppColors.Muted, fontSize = 12.sp)
-                        SettingsField("Nome", rename, { rename = it })
-                        SettingsField("Tag", tags, { tags = it })
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            IconButton(onClick = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("DETTAGLIO · V${selected.version}", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text("File: ${selected.artifactFileName}\nMIME: ${selected.artifactMimeType}\nChat: ${selected.sourceConversationId}\nRun: ${selected.sourceRunId}", color = AppColors.Muted, fontSize = 12.sp)
+                    SettingsField("Nome", rename, { rename = it })
+                    SettingsField("Tag", tags, { tags = it })
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
                                 saveArtifactMetadata(context, selected.id, rename, tags.split(',', ';').map { it.trim() }.filter { it.isNotBlank() })
                                 refresh++; status = "Metadata salvati; sync gateway in coda."
-                            }) { Icon(Icons.Rounded.Save, contentDescription = "Salva metadata", tint = Color.White) }
-                            IconButton(onClick = { if (selected.sourceConversationId.isNotBlank()) onOpenConversation(selected.sourceConversationId) }) { Icon(Icons.Rounded.Visibility, contentDescription = "Anteprima origine", tint = Color.White) }
-                            IconButton(onClick = {
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
+                        ) {
+                            Icon(Icons.Rounded.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Salva metadata")
+                        }
+                        TextButton(
+                            onClick = { if (selected.sourceConversationId.isNotBlank()) onOpenConversation(selected.sourceConversationId) },
+                            colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                        ) {
+                            Icon(Icons.Rounded.Visibility, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Anteprima")
+                        }
+                        TextButton(
+                            onClick = {
                                 if (selected.artifactUrl.isBlank()) status = "Artifact senza URL apribile." else runCatching {
                                     context.startActivity(Intent(Intent.ACTION_VIEW, resolveHermesUrl(settings, selected.artifactUrl).toUri()))
                                 }.onFailure { status = "Apertura fallita: ${it.message}" }
-                            }) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri artifact", tint = Color.White) }
-                            IconButton(onClick = { onRegenerate("Rigenera artifact '${selected.title}' versione ${selected.version}, progetto ${selected.projectId}, sorgente chat ${selected.sourceConversationId}.") }) { Icon(Icons.Rounded.Refresh, contentDescription = "Rigenera artifact", tint = Color.White) }
+                            },
+                            colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Apri")
                         }
-                        Text("Versioni", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        val key = selected.artifactFileName.ifBlank { selected.title }
-                        loadConversations(context).filter { it.kind == "Artifact" && it.artifactFileName.ifBlank { it.title }.equals(key, true) }
-                            .sortedByDescending { it.version }.forEach { version ->
-                                Text("v${version.version} · ${formatDateTime(version.updatedAt)} · ${version.description}", color = AppColors.Muted, fontSize = 12.sp)
-                            }
-                        Text(status, color = AppColors.Muted, fontSize = 12.sp)
+                        TextButton(
+                            onClick = { onRegenerate("Rigenera artifact '${selected.title}' versione ${selected.version}, progetto ${selected.projectId}, sorgente chat ${selected.sourceConversationId}.") },
+                            colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                        ) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Rigenera")
+                        }
                     }
+                    Text("VERSIONI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    val key = selected.artifactFileName.ifBlank { selected.title }
+                    loadConversations(context).filter { it.kind == "Artifact" && it.artifactFileName.ifBlank { it.title }.equals(key, true) }
+                        .sortedByDescending { it.version }.forEach { version ->
+                            Text("v${version.version} · ${formatDateTime(version.updatedAt)} · ${version.description}", color = AppColors.Muted, fontSize = 12.sp)
+                        }
+                    Text(status, color = AppColors.Muted, fontSize = 12.sp)
                 }
             }
         }

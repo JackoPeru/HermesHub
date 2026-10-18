@@ -75,6 +75,15 @@ public sealed class ConversationRecord
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Title { get; set; } = "Nuova chat";
     public string Kind { get; set; } = "Chat";
+    /// <summary>
+    /// Identita bot canonica "conn::{connectionId}::{profile}" (lowercase).
+    /// Vuoto = chat Hermes normale. 1 bot = 1 forever-chat: la risoluzione
+    /// canonica riusa questa conversazione invece di crearne una nuova.
+    /// </summary>
+    public string BotIdentityKey { get; set; } = string.Empty;
+    public string BotDisplayName { get; set; } = string.Empty;
+    public string BotConnectionId { get; set; } = string.Empty;
+    public string BotSessionId { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public string Prompt { get; set; } = string.Empty;
     public string PreviousResponseId { get; set; } = string.Empty;
@@ -172,6 +181,23 @@ public static class ChatArchiveStore
         return Load().FirstOrDefault(item => item.Id == id);
     }
 
+    /// <summary>
+    /// Forever-chat canonica del bot: la conversazione non cancellata con
+    /// questa chiave identita, piu recente prima. Null = mai chattato.
+    /// </summary>
+    public static ConversationRecord? FindByBotIdentity(string botIdentityKey)
+    {
+        if (string.IsNullOrWhiteSpace(botIdentityKey))
+        {
+            return null;
+        }
+        var key = botIdentityKey.Trim().ToLowerInvariant();
+        return Load()
+            .Where(item => item.DeletedAt is null && string.Equals(item.BotIdentityKey, key, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(item => item.UpdatedAt)
+            .FirstOrDefault();
+    }
+
     public static ConversationRecord SaveSnapshot(
         string? conversationId,
         string mode,
@@ -179,7 +205,11 @@ public static class ChatArchiveStore
         IReadOnlyList<ChatMessageRecord> messages,
         string source,
         string? previousResponseId = null,
-        string? projectId = null)
+        string? projectId = null,
+        string? botIdentityKey = null,
+        string? botDisplayName = null,
+        string? botConnectionId = null,
+        string? botSessionId = null)
     {
         lock (_cacheLock)
         {
@@ -212,6 +242,24 @@ public static class ChatArchiveStore
             if (previousResponseId is not null)
             {
                 conversation.PreviousResponseId = previousResponseId.Trim();
+            }
+            // Identita bot sticky: impostata quando fornita (apertura bot o
+            // invio in contesto bot), mai cancellata dai salvataggi normali.
+            if (!string.IsNullOrWhiteSpace(botIdentityKey))
+            {
+                conversation.BotIdentityKey = botIdentityKey.Trim().ToLowerInvariant();
+                if (!string.IsNullOrWhiteSpace(botDisplayName))
+                {
+                    conversation.BotDisplayName = botDisplayName.Trim();
+                }
+                if (!string.IsNullOrWhiteSpace(botConnectionId))
+                {
+                    conversation.BotConnectionId = botConnectionId.Trim();
+                }
+                if (!string.IsNullOrWhiteSpace(botSessionId))
+                {
+                    conversation.BotSessionId = botSessionId.Trim();
+                }
             }
             conversation.UpdatedAt = DateTimeOffset.Now;
             conversation.Messages = messages.ToList();

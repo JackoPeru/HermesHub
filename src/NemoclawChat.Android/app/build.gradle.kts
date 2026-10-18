@@ -1,4 +1,4 @@
-plugins {
+﻿plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
@@ -69,8 +69,8 @@ android {
         applicationId = "com.nemoclaw.chat"
         minSdk = if (enableMetaDat) 29 else 26
         targetSdk = 36
-        versionCode = 265
-        versionName = "0.6.261"
+        versionCode = 280
+        versionName = "0.6.276"
         resConfigs("en", "it")
         buildConfigField("boolean", "META_DAT_ENABLED", enableMetaDat.toString())
         buildConfigField("String", "HERMES_DEFAULT_API_KEY", "\"${hermesDefaultApiKeyJavaString()}\"")

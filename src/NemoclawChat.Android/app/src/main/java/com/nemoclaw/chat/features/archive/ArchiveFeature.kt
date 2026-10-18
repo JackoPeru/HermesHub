@@ -142,6 +142,7 @@ import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
@@ -322,31 +323,54 @@ internal fun ArchiveScreen(
         modifier = Modifier
             .fillMaxSize()
             .imePadding()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+        contentPadding = PaddingValues(vertical = 16.dp)
     ) {
         item {
-            Text("Archivio", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("Ricerca locale persistente per chat, progetti e task recenti.", color = AppColors.Muted)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(AppColors.Accent.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.FolderOpen, contentDescription = "Archivio", tint = AppColors.Accent)
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Archivio", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Ricerca locale persistente per chat, progetti e task recenti.",
+                        color = AppColors.Muted,
+                        fontSize = 14.sp
+                    )
+                }
+            }
         }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Stato archivio", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "STATO ARCHIVIO",
+                        color = AppColors.Accent,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
                     Text("Conversazioni: $savedChats | Progetti: $savedProjects | Totale salvati: ${savedConversations.size}", color = AppColors.Muted)
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         IconButton(onClick = { confirmCopyArchive = true }) {
-                            Icon(Icons.Rounded.ContentCopy, contentDescription = "Esporta archivio negli appunti", tint = Color.White)
+                            Icon(Icons.Rounded.ContentCopy, contentDescription = "Esporta archivio negli appunti", tint = AppColors.Accent)
                         }
                         IconButton(onClick = {
                             status = importArchiveFromClipboard(context)
                             refreshKey++
                         }) {
-                            Icon(Icons.Rounded.ContentPaste, contentDescription = "Importa archivio dagli appunti", tint = Color.White)
+                            Icon(Icons.Rounded.ContentPaste, contentDescription = "Importa archivio dagli appunti", tint = AppColors.Accent)
                         }
                         IconButton(onClick = {
                             status = "Carico archivio sul gateway..."
@@ -354,7 +378,7 @@ internal fun ArchiveScreen(
                                 status = syncConversationsToHub(context, loadSettings(context), loadGatewaySecret(context))
                             }
                         }) {
-                            Icon(Icons.Rounded.CloudUpload, contentDescription = "Carica archivio sul server", tint = Color.White)
+                            Icon(Icons.Rounded.CloudUpload, contentDescription = "Carica archivio sul server", tint = AppColors.Accent)
                         }
                         IconButton(onClick = {
                             status = "Scarico archivio dal gateway..."
@@ -363,18 +387,30 @@ internal fun ArchiveScreen(
                                 refreshKey++
                             }
                         }) {
-                            Icon(Icons.Rounded.CloudDownload, contentDescription = "Scarica archivio dal server", tint = Color.White)
+                            Icon(Icons.Rounded.CloudDownload, contentDescription = "Scarica archivio dal server", tint = AppColors.Accent)
                         }
-                        Button(onClick = {
-                            filter = "Progetto"
-                            status = "Filtro: Progetto"
-                        }) {
+                        Button(
+                            onClick = {
+                                filter = "Progetto"
+                                status = "Filtro: Progetto"
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (filter == "Progetto") AppColors.Accent else AppColors.Panel,
+                                contentColor = if (filter == "Progetto") Color(0xFF171009) else AppColors.Accent
+                            )
+                        ) {
                             Text("Progetti")
                         }
-                        Button(onClick = {
-                            filter = "Chat"
-                            status = "Filtro: Chat"
-                        }) {
+                        Button(
+                            onClick = {
+                                filter = "Chat"
+                                status = "Filtro: Chat"
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (filter == "Chat") AppColors.Accent else AppColors.Panel,
+                                contentColor = if (filter == "Chat") Color(0xFF171009) else AppColors.Accent
+                            )
+                        ) {
                             Text("Recenti")
                         }
                     }
@@ -384,6 +420,13 @@ internal fun ArchiveScreen(
         item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "RICERCA E FILTRI",
+                        color = AppColors.Accent,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
                     SettingsField("Cerca", query, { query = it })
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -396,8 +439,8 @@ internal fun ArchiveScreen(
                                     status = "Filtro: $option"
                                 },
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (filter == option) AppColors.Accent else AppColors.AssistantBubble,
-                                    contentColor = Color.White
+                                    containerColor = if (filter == option) AppColors.Accent else AppColors.Panel,
+                                    contentColor = if (filter == option) Color(0xFF171009) else AppColors.Accent
                                 )
                             ) {
                                 Text(option, fontSize = 12.sp)
@@ -410,20 +453,56 @@ internal fun ArchiveScreen(
         }
         if (results.isEmpty()) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     if (query.isNotBlank() || filter != "Tutto") {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF302517)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Rounded.ManageSearch, contentDescription = "Nessun risultato", tint = AppColors.Faint)
+                        }
                         Text("Nessun risultato.", color = Color.White, fontWeight = FontWeight.SemiBold)
                         Text(
                             "Niente corrisponde alla ricerca/filtro: l'archivio e intatto. Azzera per vedere tutto.",
                             color = AppColors.Muted,
-                            fontSize = 13.sp
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center
                         )
-                        TextButton(onClick = { query = ""; filter = "Tutto" }) {
-                            Text("Azzera filtri", color = AppColors.Accent)
+                        Button(
+                            onClick = { query = ""; filter = "Tutto" },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AppColors.Accent,
+                                contentColor = Color(0xFF171009)
+                            )
+                        ) {
+                            Text("Azzera filtri")
                         }
                     } else {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF302517)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Rounded.FolderOpen, contentDescription = "Archivio vuoto", tint = AppColors.Faint)
+                        }
                         Text("Archivio vuoto.", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text("Le conversazioni vengono salvate qui automaticamente. Inizia una nuova chat dalla sidebar.", color = AppColors.Muted, fontSize = 13.sp)
+                        Text(
+                            "Le conversazioni vengono salvate qui automaticamente. Inizia una nuova chat dalla sidebar.",
+                            color = AppColors.Muted,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 }
             }
@@ -617,40 +696,77 @@ internal fun ArchiveCard(
 ) {
     var renameText by remember(item.id, item.title) { mutableStateOf(item.title) }
 
-    Card(colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble), shape = RoundedCornerShape(20.dp)) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                Text(item.kind, color = AppColors.Accent, fontSize = 12.sp)
-                if (item.id != null) {
-                    IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-                        Icon(
-                            Icons.Rounded.Delete,
-                            contentDescription = "Elimina elemento archivio",
-                            tint = Color(0xFFFF7B8E)
-                        )
-                    }
-                }
-            }
-            Text(item.description, color = AppColors.Muted)
-            Text(item.prompt, color = Color.White, fontSize = 13.sp)
-            if (item.id != null) {
-                SettingsField("Rinomina", renameText, { renameText = it })
-            }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth().clickable { onOpen() }
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF302517)),
+                contentAlignment = Alignment.Center
             ) {
-                IconButton(onClick = onOpen) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri conversazione", tint = Color.White) }
-                IconButton(onClick = onPin) { Icon(Icons.Rounded.Bookmark, contentDescription = "Segnalibro conversazione", tint = Color.White) }
-                if (item.id != null) {
-                    IconButton(onClick = onManage) { Icon(Icons.Rounded.Settings, contentDescription = "Gestisci conversazione", tint = Color.White) }
-                    IconButton(onClick = { onRename(renameText.trim()) }) { Icon(Icons.Rounded.Edit, contentDescription = "Rinomina conversazione", tint = Color.White) }
-                    if (onForkHermes != null) IconButton(onClick = onForkHermes) { Icon(Icons.Rounded.CloudUpload, contentDescription = "Copia sul server", tint = Color.White) }
-                    IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina conversazione", tint = Color(0xFFFF7B8E)) }
+                val kindIcon = when (item.kind) {
+                    "Progetto" -> Icons.Rounded.FolderOpen
+                    "Task" -> Icons.Rounded.TaskAlt
+                    "Chat" -> Icons.Rounded.ChatBubbleOutline
+                    "Server" -> Icons.Rounded.Dns
+                    else -> Icons.Rounded.Bookmark
                 }
+                Icon(kindIcon, contentDescription = item.kind, tint = AppColors.Accent)
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    item.kind.uppercase(),
+                    color = AppColors.Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp
+                )
+                if (item.description.isNotBlank()) {
+                    Text(item.description, color = AppColors.Muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            IconButton(onClick = onOpen, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Rounded.ChevronRight, contentDescription = "Apri conversazione", tint = AppColors.Faint)
             }
         }
+        if (item.prompt.isNotBlank()) {
+            Text(item.prompt, color = AppColors.Muted, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        }
+        if (item.id != null) {
+            SettingsField("Rinomina", renameText, { renameText = it })
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onOpen,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AppColors.Accent,
+                    contentColor = Color(0xFF171009)
+                )
+            ) { Text("Apri") }
+            Button(
+                onClick = onPin,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AppColors.Accent,
+                    contentColor = Color(0xFF171009)
+                )
+            ) { Text("Salva") }
+            if (item.id != null) {
+                TextButton(onClick = onManage) { Text("Gestisci", color = AppColors.Accent) }
+                TextButton(onClick = { onRename(renameText.trim()) }) { Text("Rinomina", color = AppColors.Accent) }
+                if (onForkHermes != null) TextButton(onClick = onForkHermes) { Text("Fork", color = AppColors.Accent) }
+                TextButton(onClick = onDelete) { Text("Elimina", color = AppColors.Error) }
+            }
+        }
+        HorizontalDivider(color = AppColors.Border)
     }
 }
 @Composable
@@ -675,7 +791,7 @@ internal fun ConversationManagerDialog(
     AlertDialog(
         onDismissRequest = onClose,
         containerColor = AppColors.Surface,
-        title = { Text("Gestisci · ${conversation.title}", color = Color.White) },
+        title = { Text("Gestisci · ${conversation.title}", color = Color.White, fontWeight = FontWeight.SemiBold) },
         text = {
             LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 item {
@@ -686,64 +802,69 @@ internal fun ConversationManagerDialog(
                         SettingsField("Chat collegate (ID)", links, { links = it })
                         SettingsField("Riepilogo", summary, { summary = it })
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            IconButton(onClick = {
+                            Button(
+                                onClick = {
                                 updateLocalConversation(context, conversationId) { item -> item.copy(folder = folder.trim(), tags = splitMetadata(tags), projectId = project.trim(), linkedConversationIds = splitMetadata(links).filter { it != conversationId }, summary = summary.trim(), updatedAt = System.currentTimeMillis()) }
                                 status = "Metadata salvati."; refresh++
-                            }) { Icon(Icons.Rounded.Save, contentDescription = "Salva metadata", tint = Color.White) }
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AppColors.Accent,
+                                    contentColor = Color(0xFF171009)
+                                )
+                            ) { Icon(Icons.Rounded.Save, contentDescription = "Salva metadata") }
                             IconButton(onClick = {
                                 val transcript = conversation.messages.takeLast(40).joinToString("\n") { "${it.author}: ${it.text}" }
                                 onContinue(conversation.id, "Riassumi questa conversazione con decisioni e attività aperte:\n\n$transcript")
-                            }) { Icon(Icons.Rounded.AutoAwesome, contentDescription = "Riassumi conversazione", tint = Color.White) }
-                            listOf("md", "json", "html", "pdf").forEach { format -> Button(onClick = { shareConversationExport(context, conversation, format) }) { Text(format.uppercase()) } }
+                            }) { Icon(Icons.Rounded.AutoAwesome, contentDescription = "Riassumi conversazione", tint = AppColors.Accent) }
+                            listOf("md", "json", "html", "pdf").forEach { format -> TextButton(onClick = { shareConversationExport(context, conversation, format) }) { Text(format.uppercase(), color = AppColors.Accent) } }
                         }
                         Text(status, color = AppColors.Muted, fontSize = 12.sp)
                     }
                 }
                 items(conversation.messages, key = { it.id }) { message ->
                     var text by remember(message.id, refresh) { mutableStateOf(message.text) }
-                    Card(colors = CardDefaults.cardColors(containerColor = AppColors.AssistantBubble)) {
-                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                            Text("${message.author}${if (message.isBookmarked) " · ★" else ""}", color = Color.White, fontWeight = FontWeight.SemiBold)
-                            SettingsField("Testo", text, { text = it })
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Switch(checked = selected.contains(message.id), onCheckedChange = { checked -> if (checked) selected.add(message.id) else selected.remove(message.id) })
-                                Text("Seleziona", color = AppColors.Muted)
-                            }
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                                IconButton(onClick = { updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.map { if (it.id == message.id) it.copy(text = text) else it }, updatedAt = System.currentTimeMillis()) }; refresh++ }) { Icon(Icons.Rounded.Edit, contentDescription = "Modifica messaggio", tint = Color.White) }
-                                IconButton(onClick = { updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.map { if (it.id == message.id) it.copy(isBookmarked = !it.isBookmarked) else it }, updatedAt = System.currentTimeMillis()) }; refresh++ }) { Icon(Icons.Rounded.Bookmark, contentDescription = "Segnalibro messaggio", tint = Color.White) }
-                                IconButton(onClick = { val branch = createLocalBranch(context, conversation, message.id); status = "Ramo ${branch.title} creato."; refresh++ }) { Icon(Icons.AutoMirrored.Rounded.CallSplit, contentDescription = "Crea ramo", tint = Color.White) }
-                                IconButton(onClick = { val branch = createLocalBranch(context, conversation, message.id, "${conversation.title} · alternativa"); onContinue(branch.id, "Rigenera una risposta alternativa all'ultimo messaggio.") }) { Icon(Icons.Rounded.Refresh, contentDescription = "Crea risposta alternativa", tint = Color.White) }
-                                IconButton(onClick = { onContinue(null, "Continua da questo messaggio:\n\n${message.text}") }) { Icon(Icons.Rounded.Add, contentDescription = "Nuova chat da qui", tint = Color.White) }
-                                IconButton(onClick = { saveProjectConversation(context, "Progetto da ${conversation.title}", message.text, message.text); status = "Nuovo progetto creato." }) { Icon(Icons.Rounded.CreateNewFolder, contentDescription = "Crea progetto", tint = Color.White) }
-                            }
+                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text("${message.author}${if (message.isBookmarked) " · ★" else ""}", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        SettingsField("Testo", text, { text = it })
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Switch(checked = selected.contains(message.id), onCheckedChange = { checked -> if (checked) selected.add(message.id) else selected.remove(message.id) })
+                            Text("Seleziona", color = AppColors.Muted)
                         }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                            IconButton(onClick = { updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.map { if (it.id == message.id) it.copy(text = text) else it }, updatedAt = System.currentTimeMillis()) }; refresh++ }) { Icon(Icons.Rounded.Edit, contentDescription = "Modifica messaggio", tint = AppColors.Accent) }
+                            IconButton(onClick = { updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.map { if (it.id == message.id) it.copy(isBookmarked = !it.isBookmarked) else it }, updatedAt = System.currentTimeMillis()) }; refresh++ }) { Icon(Icons.Rounded.Bookmark, contentDescription = "Segnalibro messaggio", tint = AppColors.Accent) }
+                            IconButton(onClick = { val branch = createLocalBranch(context, conversation, message.id); status = "Ramo ${branch.title} creato."; refresh++ }) { Icon(Icons.AutoMirrored.Rounded.CallSplit, contentDescription = "Crea ramo", tint = AppColors.Accent) }
+                            IconButton(onClick = { val branch = createLocalBranch(context, conversation, message.id, "${conversation.title} · alternativa"); onContinue(branch.id, "Rigenera una risposta alternativa all'ultimo messaggio.") }) { Icon(Icons.Rounded.Refresh, contentDescription = "Crea risposta alternativa", tint = AppColors.Accent) }
+                            IconButton(onClick = { onContinue(null, "Continua da questo messaggio:\n\n${message.text}") }) { Icon(Icons.Rounded.Add, contentDescription = "Nuova chat da qui", tint = AppColors.Accent) }
+                            IconButton(onClick = { saveProjectConversation(context, "Progetto da ${conversation.title}", message.text, message.text); status = "Nuovo progetto creato." }) { Icon(Icons.Rounded.CreateNewFolder, contentDescription = "Crea progetto", tint = AppColors.Accent) }
+                        }
+                        HorizontalDivider(color = AppColors.Border)
                     }
                 }
                 item {
-                    IconButton(onClick = { confirmBulkDelete = true }, enabled = selected.isNotEmpty()) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina messaggi selezionati", tint = Color(0xFFFF7B8E)) }
+                    IconButton(onClick = { confirmBulkDelete = true }, enabled = selected.isNotEmpty()) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina messaggi selezionati", tint = AppColors.Error) }
                     val branches = loadConversations(context).filter { it.parentConversationId == conversation.id || conversation.linkedConversationIds.contains(it.id) }
                     branches.forEach { branch -> Text("Ramo: ${branch.title} · ${branch.messages.size} messaggi", color = AppColors.Muted, modifier = Modifier.clickable { onContinue(branch.id, "") }.padding(6.dp)) }
                 }
             }
         },
-        confirmButton = { IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, contentDescription = "Chiudi gestione", tint = Color.White) } }
+        confirmButton = { IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, contentDescription = "Chiudi gestione", tint = AppColors.Accent) } }
     )
 
     if (confirmBulkDelete) {
         AlertDialog(
             onDismissRequest = { confirmBulkDelete = false },
             containerColor = AppColors.Surface,
-            title = { Text("Elimina ${selected.size} messaggi", color = Color.White) },
+            title = { Text("Elimina ${selected.size} messaggi", color = Color.White, fontWeight = FontWeight.SemiBold) },
             text = { Text("Eliminare definitivamente i ${selected.size} messaggi selezionati? L'operazione non si pu├▓ annullare.", color = AppColors.Muted) },
             confirmButton = {
                 IconButton(onClick = {
                     confirmBulkDelete = false
                     updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.filterNot { selected.contains(it.id) }, updatedAt = System.currentTimeMillis()) }
                     selected.clear(); status = "Porzione eliminata."; refresh++
-                }) { Icon(Icons.Rounded.Delete, contentDescription = "Conferma eliminazione", tint = Color(0xFFFF7B8E)) }
+                }) { Icon(Icons.Rounded.Delete, contentDescription = "Conferma eliminazione", tint = AppColors.Error) }
             },
-            dismissButton = { IconButton(onClick = { confirmBulkDelete = false }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla eliminazione", tint = Color.White) } }
+            dismissButton = { IconButton(onClick = { confirmBulkDelete = false }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla eliminazione", tint = AppColors.Accent) } }
         )
     }
 }
@@ -815,7 +936,13 @@ internal fun HermesSessionSection(
 
     Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Sessioni Hermes (server)", color = Color.White, fontWeight = FontWeight.SemiBold)
+            Text(
+                "SESSIONI HERMES (SERVER)",
+                color = AppColors.Accent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
             Text(
                 when (supported) {
                     null -> "Verifico supporto Sessions API..."
@@ -825,39 +952,72 @@ internal fun HermesSessionSection(
                 color = AppColors.Muted, fontSize = 12.sp
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                IconButton(onClick = { refresh() }, enabled = !loading) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna sessioni server", tint = Color.White) }
+                IconButton(onClick = { refresh() }, enabled = !loading) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna sessioni server", tint = AppColors.Accent) }
             }
             sessions.take(15).forEach { s ->
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(s.title.ifBlank { s.id }, color = Color.White, fontSize = 13.sp, maxLines = 1)
-                        Text(s.id, color = AppColors.Faint, fontSize = 10.sp, maxLines = 1)
-                    }
-                    IconButton(onClick = {
-                        scope.launch {
-                            val settings = withContext(Dispatchers.IO) { loadSettings(context) }
-                            // Apri: crea/riusa chat locale collegata alla sessione server.
-                            val localId = "conv_${System.currentTimeMillis()}"
-                            val conv = LocalConversation(
-                                id = localId,
-                                title = s.title.ifBlank { "Sessione Hermes" },
-                                kind = "Chat",
-                                description = "Collegata a sessione Hermes ${s.id}.",
-                                prompt = "",
-                                updatedAt = System.currentTimeMillis(),
-                                messages = emptyList(),
-                                hermesSessionId = s.id
-                            )
-                            withContext(Dispatchers.IO) {
-                                val all = loadConversations(context, includeDeleted = true).toMutableList()
-                                all.add(0, conv)
-                                saveConversations(context, all, syncAfterSave = false)
-                                saveSessionBinding(context, localId, null, s.id)
-                            }
-                            onChanged()
-                            onOpenSession(localId)
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF302517)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Rounded.Dns, contentDescription = "Server", tint = AppColors.Accent)
                         }
-                    }) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri sessione in chat", tint = Color.White) }
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                s.title.ifBlank { s.id },
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                "SERVER",
+                                color = AppColors.Muted,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.8.sp
+                            )
+                            Text(s.id, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(
+                            onClick = {
+                                scope.launch {
+                                    val settings = withContext(Dispatchers.IO) { loadSettings(context) }
+                                    // Apri: crea/riusa chat locale collegata alla sessione server.
+                                    val localId = "conv_${System.currentTimeMillis()}"
+                                    val conv = LocalConversation(
+                                        id = localId,
+                                        title = s.title.ifBlank { "Sessione Hermes" },
+                                        kind = "Chat",
+                                        description = "Collegata a sessione Hermes ${s.id}.",
+                                        prompt = "",
+                                        updatedAt = System.currentTimeMillis(),
+                                        messages = emptyList(),
+                                        hermesSessionId = s.id
+                                    )
+                                    withContext(Dispatchers.IO) {
+                                        val all = loadConversations(context, includeDeleted = true).toMutableList()
+                                        all.add(0, conv)
+                                        saveConversations(context, all, syncAfterSave = false)
+                                        saveSessionBinding(context, localId, null, s.id)
+                                    }
+                                    onChanged()
+                                    onOpenSession(localId)
+                                }
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) { Icon(Icons.Rounded.ChevronRight, contentDescription = "Apri sessione in chat", tint = AppColors.Faint) }
+                    }
+                    HorizontalDivider(color = AppColors.Border)
                 }
             }
             if (sessions.size > 15) Text("+${sessions.size - 15} altre...", color = AppColors.Muted, fontSize = 11.sp)

@@ -193,6 +193,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -434,6 +435,7 @@ internal fun Composer(
     }
 
     var showSheet by remember { mutableStateOf(false) }
+    var composerFocused by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -495,7 +497,10 @@ internal fun Composer(
                 .heightIn(min = (104 * fontScale).dp, max = (214 * fontScale).dp),
             color = AppColors.Composer,
             shape = RoundedCornerShape(26.dp),
-            border = BorderStroke(1.dp, AppColors.Border)
+            border = BorderStroke(
+                1.dp,
+                if (composerFocused) AppColors.Accent.copy(alpha = 0.65f) else AppColors.Border
+            )
         ) {
             Column(
                 modifier = Modifier
@@ -527,7 +532,9 @@ internal fun Composer(
                             keyboardType = KeyboardType.Text,
                             imeAction = ImeAction.Default
                         ),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { composerFocused = it.isFocused }
                     )
                     if (value.isEmpty()) {
                         Text("Chiedi a Hermes", color = AppColors.Faint, fontSize = 16.sp)

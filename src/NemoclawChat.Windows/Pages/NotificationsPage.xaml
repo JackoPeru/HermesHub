@@ -15,30 +15,33 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <StackPanel Spacing="8">
-                        <TextBlock FontSize="30" FontWeight="SemiBold" Foreground="White" Text="Notifiche" />
-                        <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Messaggi autonomi che Hermes lascia quando cron o agenti devono avvisarti." TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                        <Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13">
+                            <FontIcon FontSize="19" Glyph="&#xE91C;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Style="{StaticResource PageTitleStyle}" Text="Notifiche" />
+                            <TextBlock Style="{StaticResource PageSubtitleStyle}" Text="Messaggi autonomi che Hermes lascia quando cron o agenti devono avvisarti." TextWrapping="Wrap" />
+                        </StackPanel>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                        <Button MinWidth="110" Click="MarkAllAsRead_Click" Content="Segna tutto come letto" />
-                        <Button MinWidth="110" Click="Refresh_Click" Content="Aggiorna" />
+                        <Button MinWidth="110" Click="MarkAllAsRead_Click" Style="{StaticResource TextButtonStyle}" Content="Segna tutto come letto" />
+                        <Button MinWidth="110" Click="Refresh_Click" Style="{StaticResource TextButtonStyle}" Content="Aggiorna" />
                     </StackPanel>
                 </Grid>
 
-                <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedTextBrush}" Text="Caricamento notifiche..." />
-                <Border Padding="14" Background="{StaticResource SurfaceBrush}" CornerRadius="14">
-                    <StackPanel Spacing="10">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <ComboBox x:Name="CategoryFilterBox" Width="180" SelectionChanged="Filter_Changed" SelectedIndex="0"><ComboBoxItem Content="Tutte le categorie" /><ComboBoxItem Content="Automazioni" /><ComboBoxItem Content="Run" /><ComboBoxItem Content="Sistema" /><ComboBoxItem Content="File" /><ComboBoxItem Content="Progetti" /></ComboBox>
-                            <ComboBox x:Name="PriorityFilterBox" Width="150" SelectionChanged="Filter_Changed" SelectedIndex="0"><ComboBoxItem Content="Tutte le priorità" /><ComboBoxItem Content="Critica" /><ComboBoxItem Content="Alta" /><ComboBoxItem Content="Normale" /><ComboBoxItem Content="Bassa" /></ComboBox>
-                            <CheckBox x:Name="UnreadOnlyBox" Content="Solo non lette" Checked="Filter_Changed" Unchecked="Filter_Changed" />
-                            <CheckBox x:Name="ArchivedBox" Content="Archiviate" Checked="Filter_Changed" Unchecked="Filter_Changed" />
-                            <ToggleSwitch x:Name="DoNotDisturbSwitch" Header="Non disturbare" Toggled="DoNotDisturbSwitch_Toggled" />
-                        </StackPanel>
-                        <TextBlock x:Name="BadgesText" Foreground="{StaticResource MutedTextBrush}" />
+                <TextBlock x:Name="StatusText" Style="{StaticResource CaptionStyle}" Text="Caricamento notifiche..." />
+                <StackPanel Spacing="16">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ComboBox x:Name="CategoryFilterBox" Width="180" SelectionChanged="Filter_Changed" SelectedIndex="0"><ComboBoxItem Content="Tutte le categorie" /><ComboBoxItem Content="Automazioni" /><ComboBoxItem Content="Run" /><ComboBoxItem Content="Sistema" /><ComboBoxItem Content="File" /><ComboBoxItem Content="Progetti" /></ComboBox>
+                        <ComboBox x:Name="PriorityFilterBox" Width="150" SelectionChanged="Filter_Changed" SelectedIndex="0"><ComboBoxItem Content="Tutte le priorità" /><ComboBoxItem Content="Critica" /><ComboBoxItem Content="Alta" /><ComboBoxItem Content="Normale" /><ComboBoxItem Content="Bassa" /></ComboBox>
+                        <CheckBox x:Name="UnreadOnlyBox" Content="Solo non lette" Checked="Filter_Changed" Unchecked="Filter_Changed" />
+                        <CheckBox x:Name="ArchivedBox" Content="Archiviate" Checked="Filter_Changed" Unchecked="Filter_Changed" />
+                        <ToggleSwitch x:Name="DoNotDisturbSwitch" Header="Non disturbare" Toggled="DoNotDisturbSwitch_Toggled" />
                     </StackPanel>
-                </Border>
-                <StackPanel x:Name="NotificationsPanel" Spacing="12" />
+                    <TextBlock x:Name="BadgesText" Style="{StaticResource CaptionStyle}" />
+                </StackPanel>
+                <StackPanel x:Name="NotificationsPanel" Spacing="16" />
             </StackPanel>
         </Grid>
     </ScrollViewer>

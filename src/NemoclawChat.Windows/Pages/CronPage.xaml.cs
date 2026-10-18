@@ -118,29 +118,19 @@ public sealed partial class CronPage : Page
         CronPanel.Children.Clear();
         if (_jobs.Count == 0)
         {
-            CronPanel.Children.Add(new Border
+            CronPanel.Children.Add(new StackPanel
             {
-                Padding = new Thickness(20),
-                Background = (Brush)Application.Current.Resources["AssistantBubbleBrush"],
-                CornerRadius = new CornerRadius(18),
-                Child = new StackPanel
+                Spacing = 8,
+                Children =
                 {
-                    Spacing = 8,
-                    Children =
+                    PremiumRows.SectionHeader("Nessun cron trovato"),
+                    new TextBlock
                     {
-                        new TextBlock
-                        {
-                            Text = "Nessun cron trovato.",
-                            Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-                            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-                        },
-                        new TextBlock
-                        {
-                            Text = "Crea automazioni dalla chat, per esempio: programma un briefing ogni mattina alle 8.",
-                            Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
-                            TextWrapping = TextWrapping.WrapWholeWords
-                        }
-                    }
+                        Text = "Crea automazioni dalla chat, per esempio: programma un briefing ogni mattina alle 8.",
+                        Foreground = (Brush)Application.Current.Resources["MutedTextBrush"],
+                        TextWrapping = TextWrapping.WrapWholeWords
+                    },
+                    PremiumRows.Hairline()
                 }
             });
             return;
@@ -152,23 +142,12 @@ public sealed partial class CronPage : Page
         }
     }
 
-    private Border CreateJobCard(CronJobRecord job)
+    private StackPanel CreateJobCard(CronJobRecord job)
     {
         var stateBrush = job.Enabled
             ? (Brush)Application.Current.Resources["AccentGreenBrush"]
             : new SolidColorBrush(Microsoft.UI.Colors.Goldenrod);
 
-        var header = new Grid { ColumnSpacing = 12 };
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.Children.Add(new TextBlock
-        {
-            Text = job.Name,
-            Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-            FontSize = 18,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            TextWrapping = TextWrapping.WrapWholeWords
-        });
         var state = new TextBlock
         {
             Text = job.Enabled ? "Attivo" : "In pausa",
@@ -176,8 +155,12 @@ public sealed partial class CronPage : Page
             FontSize = 13,
             VerticalAlignment = VerticalAlignment.Center
         };
-        Grid.SetColumn(state, 1);
-        header.Children.Add(state);
+
+        var header = PremiumRows.LabeledRow(
+            "\uE7BE",
+            job.Name,
+            string.IsNullOrWhiteSpace(job.Schedule) ? job.NextRunAt : job.Schedule,
+            state);
 
         var details = new StackPanel { Spacing = 6 };
         AddDetail(details, "ID", job.Id);
@@ -196,28 +179,21 @@ public sealed partial class CronPage : Page
         actions.Children.Add(CreateActionButton(job.Enabled ? "Pausa" : "Riprendi", job.Id, job.Enabled ? Pause_Click : Resume_Click));
         actions.Children.Add(CreateActionButton("Elimina", job.Id, Delete_Click));
 
-        return new Border
+        return new StackPanel
         {
-            Padding = new Thickness(20),
-            Background = (Brush)Application.Current.Resources["SurfaceBrush"],
-            BorderBrush = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(255, 58, 58, 58)),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
-            Child = new StackPanel
+            Spacing = 12,
+            Children =
             {
-                Spacing = 12,
-                Children =
+                header,
+                details,
+                new TextBlock
                 {
-                    header,
-                    details,
-                    new TextBlock
-                    {
-                        Text = string.IsNullOrWhiteSpace(job.Prompt) ? "Prompt non disponibile." : job.Prompt,
-                        Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-                        TextWrapping = TextWrapping.WrapWholeWords
-                    },
-                    actions
-                }
+                    Text = string.IsNullOrWhiteSpace(job.Prompt) ? "Prompt non disponibile." : job.Prompt,
+                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                    TextWrapping = TextWrapping.WrapWholeWords
+                },
+                actions,
+                PremiumRows.Hairline()
             }
         };
     }

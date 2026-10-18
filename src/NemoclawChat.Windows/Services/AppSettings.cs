@@ -13,6 +13,7 @@ public sealed class AppSettings
     public string AccessMode { get; set; } = "Tailscale/LAN";
     public string VisualBlocksMode { get; set; } = "auto";
     public string VideoLibraryPath { get; set; } = string.Empty;
+    public string ImageLibraryPath { get; set; } = string.Empty;
     public string NewsLibraryPath { get; set; } = string.Empty;
     public string ActiveProjectId { get; set; } = string.Empty;
     public string ActiveProjectName { get; set; } = string.Empty;

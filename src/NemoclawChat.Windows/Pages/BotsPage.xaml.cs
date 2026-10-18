@@ -12,7 +12,8 @@ public sealed record BotChatNavigation(
     string LocalConversationId,
     bool MultiplexEnabled,
     string ConnectionId = "primary",
-    string Endpoint = "");
+    string Endpoint = "",
+    string BotIdentityKey = "");
 
 public static class BotNavigationContext
 {
@@ -84,16 +85,16 @@ public sealed partial class BotsPage : Page
         StatusText.Text = $"Apro Bot Chat di {bot.DisplayName}...";
         try
         {
-            var context = await HermesBotConnectionService.OpenBotChatAsync(AppSettingsStore.Load(), bot);
-            var chat = context.Chat;
+            var nav = await HermesBotConnectionService.ResolveCanonicalBotNavigationAsync(AppSettingsStore.Load(), bot);
             BotNavigationContext.SetPending(new BotChatNavigation(
-                chat.Profile,
-                chat.SessionId,
+                nav.Chat.Profile,
+                nav.Chat.SessionId,
                 bot.DisplayName,
-                context.LocalConversationId,
-                chat.MultiplexEnabled,
-                context.Connection.Id,
-                context.Connection.Endpoint));
+                nav.LocalConversationId,
+                nav.Chat.MultiplexEnabled,
+                nav.Connection.Id,
+                nav.Connection.Endpoint,
+                nav.BotIdentityKey));
             Frame.Navigate(typeof(HomePage), new HomeNavigationRequest());
         }
         catch (Exception ex)

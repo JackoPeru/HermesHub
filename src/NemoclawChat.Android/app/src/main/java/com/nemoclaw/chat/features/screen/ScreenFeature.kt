@@ -17,10 +17,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,8 +33,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -52,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -355,20 +354,28 @@ internal fun ScreenScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(AppColors.Background).padding(16.dp)) {
+    Column(
+        modifier = Modifier.fillMaxSize().background(AppColors.Background).padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (onBack != null) {
                 IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Torna ai bot", tint = Color.White)
                 }
             }
-            Icon(Icons.Rounded.Computer, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(26.dp))
+            Box(
+                modifier = Modifier.size(40.dp).background(Color(0xFF302517), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Computer, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(20.dp))
+            }
             Column(modifier = Modifier.weight(1f)) {
-                Text("Schermo bot", color = Color.White, fontSize = 20.sp)
+                Text("Schermo bot", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
                 val st = status
                 Text(
                     when {
@@ -379,56 +386,91 @@ internal fun ScreenScreen(
                         else -> "Bot is in control"
                     },
                     color = if (st?.humanInControl == true) Color(0xFFFF7B8E) else AppColors.Muted,
-                    fontSize = 12.sp
+                    fontSize = 14.sp
                 )
-            }
-            if (holding) {
-                Button(
-                    onClick = { doRelease() },
-                    enabled = !busy,
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
-                ) { Text("Hand back") }
-            } else {
-                OutlinedButton(onClick = { doTakeover() }, enabled = !busy && status?.running == true) {
-                    Text("Take over")
-                }
             }
             IconButton(onClick = { reloadNonce++ }) {
                 Icon(Icons.Rounded.Refresh, contentDescription = "Ricarica", tint = Color.White)
             }
         }
-        Spacer(modifier = Modifier.height(10.dp))
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color.Black),
-            shape = RoundedCornerShape(18.dp),
-            modifier = Modifier.fillMaxWidth().weight(1f)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            val st = status
-            if (st?.running == true) {
-                androidx.compose.runtime.key(reloadNonce, holding) {
-                    ScreenViewer(
-                        settings = settings,
-                        viewOnly = !holding,
-                        onViewerState = { viewerState = it },
-                        onTicket = { viewerId = it }
+            if (holding) {
+                TextButton(
+                    onClick = { doRelease() },
+                    enabled = !busy,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = AppColors.Accent,
+                        disabledContentColor = AppColors.Faint
                     )
-                }
+                ) { Text("Hand back") }
             } else {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            if (status == null) "Connessione al gateway…" else "Schermo spento: avvialo dal bot o via CLI.",
-                            color = AppColors.Muted, fontSize = 13.sp
+                Button(
+                    onClick = { doTakeover() },
+                    enabled = !busy && status?.running == true,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AppColors.Accent,
+                        contentColor = Color(0xFF171009),
+                        disabledContainerColor = AppColors.Border,
+                        disabledContentColor = AppColors.Faint
+                    )
+                ) { Text("Take over") }
+            }
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "Viewer".uppercase(java.util.Locale.ROOT),
+                color = AppColors.Accent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color.Black),
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f)
+            ) {
+                val st = status
+                if (st?.running == true) {
+                    androidx.compose.runtime.key(reloadNonce, holding) {
+                        ScreenViewer(
+                            settings = settings,
+                            viewOnly = !holding,
+                            onViewerState = { viewerState = it },
+                            onTicket = { viewerId = it }
                         )
-                        if (viewerState.isNotBlank()) Text(viewerState, color = AppColors.Faint, fontSize = 11.sp)
+                    }
+                } else {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                if (status == null) "Connessione al gateway…" else "Schermo spento: avvialo dal bot o via CLI.",
+                                color = AppColors.Muted, fontSize = 13.sp
+                            )
+                            if (viewerState.isNotBlank()) Text(viewerState, color = AppColors.Faint, fontSize = 11.sp)
+                        }
                     }
                 }
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            "Guardando non disturbi il bot. Take over mette in pausa i suoi tool schermo; Hand back (o chiudere) restituisce il controllo.",
-            color = AppColors.Faint, fontSize = 11.sp
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "Note".uppercase(java.util.Locale.ROOT),
+                color = AppColors.Accent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+            Text(
+                "Guardando non disturbi il bot. Take over mette in pausa i suoi tool schermo; Hand back (o chiudere) restituisce il controllo.",
+                color = AppColors.Faint, fontSize = 11.sp
+            )
+        }
     }
 }

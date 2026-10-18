@@ -12,19 +12,33 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <StackPanel Spacing="8">
-                    <TextBlock FontSize="30" FontWeight="SemiBold" Foreground="White" Text="Bot Hermes" />
-                    <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Roster reale dei profili Hermes. Configurazione, memoria, skill e credenziali restano nel profilo upstream; le routine bot richiedono multiplexing attivo." TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                    <Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13">
+                        <FontIcon FontSize="19" Glyph="&#xE7B2;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource PageTitleStyle}" Text="Bot Hermes" />
+                        <TextBlock Style="{StaticResource PageSubtitleStyle}" Text="Roster reale dei profili Hermes. Configurazione, memoria, skill e credenziali restano nel profilo upstream; le routine bot richiedono multiplexing attivo." />
+                    </StackPanel>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                    <Button Click="Create_Click" Content="Nuovo bot" />
-                    <Button Click="AddConnection_Click" Content="Nuova connessione" />
-                    <Button Click="Refresh_Click" Content="Aggiorna" />
+                    <Button Style="{StaticResource PrimaryButtonStyle}" Click="Create_Click" Content="Nuovo bot" />
+                    <Button Style="{StaticResource TextButtonStyle}" Click="AddConnection_Click" Content="Nuova connessione" />
+                    <Button Style="{StaticResource TextButtonStyle}" Click="Refresh_Click" Content="Aggiorna" />
                 </StackPanel>
             </Grid>
-            <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedTextBrush}" Text="Caricamento profili Hermes..." TextWrapping="Wrap" />
-            <TextBlock FontSize="20" FontWeight="SemiBold" Foreground="White" Text="Connessioni" />
+            <TextBlock x:Name="StatusText" Style="{StaticResource CaptionStyle}" Text="Caricamento profili Hermes..." TextWrapping="Wrap" />
+            <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="CONNESSIONI" />
             <ListView x:Name="ConnectionsList" ItemsSource="{x:Bind Connections}" SelectionMode="None" IsItemClickEnabled="False">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="0,12" />
+                        <Setter Property="BorderThickness" Value="0,0,0,1" />
+                        <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+                        <Setter Property="Background" Value="Transparent" />
+                    </Style>
+                </ListView.ItemContainerStyle>
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="local:HermesBotConnection">
                         <Grid Padding="0,6" ColumnSpacing="16">
@@ -36,13 +50,22 @@
                                 <TextBlock Foreground="White" FontWeight="SemiBold" Text="{x:Bind Label}" />
                                 <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="{x:Bind Endpoint}" TextWrapping="Wrap" />
                             </StackPanel>
-                            <Button Grid.Column="1" Tag="{x:Bind}" Click="DeleteConnection_Click" Content="Rimuovi" />
+                            <Button Grid.Column="1" Style="{StaticResource DangerButtonStyle}" Tag="{x:Bind}" Click="DeleteConnection_Click" Content="Rimuovi" />
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>
             </ListView>
-            <TextBlock FontSize="20" FontWeight="SemiBold" Foreground="White" Text="Bot disponibili" />
+            <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="BOT DISPONIBILI" />
             <ListView x:Name="BotsList" ItemsSource="{x:Bind Bots}" SelectionMode="None" IsItemClickEnabled="False">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="0,12" />
+                        <Setter Property="BorderThickness" Value="0,0,0,1" />
+                        <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+                        <Setter Property="Background" Value="Transparent" />
+                    </Style>
+                </ListView.ItemContainerStyle>
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="local:HermesBotRecord">
                         <Grid Padding="0,12" ColumnSpacing="16">
@@ -61,18 +84,27 @@
                                 <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="{x:Bind ChatId, FallbackValue=Bot Chat disponibile dopo apertura}" TextWrapping="Wrap" />
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                <Button Click="Open_Click" Tag="{x:Bind}" Content="Apri Bot Chat" />
-                                <Button Click="Edit_Click" Tag="{x:Bind}" Content="Modifica" />
-                                <Button Click="Delete_Click" Loaded="DeleteButton_Loaded" Tag="{x:Bind}" Content="Elimina" />
+                                <Button Style="{StaticResource TextButtonStyle}" Click="Open_Click" Tag="{x:Bind}" Content="Apri Bot Chat" />
+                                <Button Style="{StaticResource TextButtonStyle}" Click="Edit_Click" Tag="{x:Bind}" Content="Modifica" />
+                                <Button Style="{StaticResource DangerButtonStyle}" Click="Delete_Click" Loaded="DeleteButton_Loaded" Tag="{x:Bind}" Content="Elimina" />
                             </StackPanel>
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>
             </ListView>
-            <TextBlock FontSize="20" FontWeight="SemiBold" Foreground="White" Text="Gruppi Hermes" />
-            <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Seleziona da 2 a 6 bot source-qualified. I gruppi sono locali al client; i turni vengono inviati all'endpoint proprietario di ogni membro." TextWrapping="Wrap" />
+            <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="GRUPPI HERMES" />
+            <TextBlock Style="{StaticResource PageSubtitleStyle}" Text="Seleziona da 2 a 6 bot source-qualified. I gruppi sono locali al client; i turni vengono inviati all'endpoint proprietario di ogni membro." />
             <TextBox x:Name="GroupNameInput" Header="Nome gruppo" PlaceholderText="es. Revisione progetto" MaxLength="160" />
             <ListView x:Name="GroupMembersList" ItemsSource="{x:Bind Bots}" SelectionMode="Multiple" Height="220">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="0,12" />
+                        <Setter Property="BorderThickness" Value="0,0,0,1" />
+                        <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+                        <Setter Property="Background" Value="Transparent" />
+                    </Style>
+                </ListView.ItemContainerStyle>
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="local:HermesBotRecord">
                         <StackPanel Padding="0,5" Spacing="2">
@@ -84,11 +116,20 @@
                 </ListView.ItemTemplate>
             </ListView>
             <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button Click="CreateGroup_Click" Content="Salva gruppo" />
-                <Button Click="RunSelectedGroup_Click" Content="Esegui turno gruppo" />
-                <Button x:Name="CancelGroupTurnButton" Click="CancelGroupTurn_Click" Content="Annulla turno" IsEnabled="False" />
+                <Button Style="{StaticResource PrimaryButtonStyle}" Click="CreateGroup_Click" Content="Salva gruppo" />
+                <Button Style="{StaticResource PrimaryButtonStyle}" Click="RunSelectedGroup_Click" Content="Esegui turno gruppo" />
+                <Button Style="{StaticResource TextButtonStyle}" x:Name="CancelGroupTurnButton" Click="CancelGroupTurn_Click" Content="Annulla turno" IsEnabled="False" />
             </StackPanel>
             <ListView x:Name="GroupsList" ItemsSource="{x:Bind Groups}" SelectionMode="Single">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="0,12" />
+                        <Setter Property="BorderThickness" Value="0,0,0,1" />
+                        <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+                        <Setter Property="Background" Value="Transparent" />
+                    </Style>
+                </ListView.ItemContainerStyle>
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="local:HermesBotGroup">
                         <Grid Padding="0,8" ColumnSpacing="12">
@@ -104,8 +145,8 @@
                                 </StackPanel>
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                                <Button Tag="{x:Bind}" Click="RunGroup_Click" Content="Esegui" />
-                                <Button Tag="{x:Bind}" Click="DeleteGroup_Click" Content="Elimina" />
+                                <Button Style="{StaticResource PrimaryButtonStyle}" Tag="{x:Bind}" Click="RunGroup_Click" Content="Esegui" />
+                                <Button Style="{StaticResource DangerButtonStyle}" Tag="{x:Bind}" Click="DeleteGroup_Click" Content="Elimina" />
                             </StackPanel>
                         </Grid>
                     </DataTemplate>

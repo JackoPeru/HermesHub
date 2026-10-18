@@ -15,33 +15,35 @@
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <StackPanel Grid.ColumnSpan="2" Spacing="6">
-            <TextBlock FontSize="30" FontWeight="SemiBold" Foreground="White" Text="Progetti" />
-            <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Scegli un nome e, se serve, un system prompt personalizzato. Il resto e' automatico." />
+        <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+            <Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13">
+                <FontIcon FontSize="19" Glyph="&#xE8F1;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <StackPanel VerticalAlignment="Center" Spacing="2">
+                <TextBlock Style="{StaticResource PageTitleStyle}" Text="Progetti" />
+                <TextBlock Style="{StaticResource PageSubtitleStyle}" Text="Scegli un nome e, se serve, un system prompt personalizzato. Il resto e' automatico." />
+            </StackPanel>
         </StackPanel>
 
-        <Border Grid.Row="1" Padding="16" Background="{StaticResource SurfaceBrush}" CornerRadius="18">
-            <Grid RowSpacing="12">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <Button HorizontalAlignment="Stretch" Click="NewProject_Click" Content="+ Nuovo progetto" />
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                    <StackPanel x:Name="ProjectListPanel" Spacing="8" />
-                </ScrollViewer>
-            </Grid>
-        </Border>
+        <Grid Grid.Row="1" RowSpacing="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Button HorizontalAlignment="Stretch" Click="NewProject_Click" Style="{StaticResource PrimaryButtonStyle}" Content="+ Nuovo progetto" />
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="ProjectListPanel" Spacing="16" />
+            </ScrollViewer>
+        </Grid>
 
         <ScrollViewer Grid.Row="1" Grid.Column="1" VerticalScrollBarVisibility="Auto">
-            <Border MaxWidth="760" Padding="22" HorizontalAlignment="Stretch" Background="{StaticResource SurfaceBrush}" CornerRadius="18">
-                <StackPanel Spacing="14">
+            <StackPanel MaxWidth="760" HorizontalAlignment="Stretch" Spacing="16">
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="DashboardTitle" FontSize="22" FontWeight="SemiBold" Foreground="White" Text="Nuovo progetto" />
+                        <TextBlock x:Name="DashboardTitle" Style="{StaticResource SectionTitleStyle}" Text="Nuovo progetto" />
                         <TextBlock x:Name="ActiveBadge" Grid.Column="1" VerticalAlignment="Center" Foreground="{StaticResource AccentGreenBrush}" />
                     </Grid>
                     <TextBox x:Name="TitleBox" Header="Nome progetto" MaxLength="180" />
@@ -54,12 +56,11 @@
                         MaxLength="20000"
                         MinHeight="180" />
                     <StackPanel Orientation="Horizontal" Spacing="10">
-                        <Button Click="SaveProject_Click" Content="Salva" />
-                        <Button x:Name="NewChatButton" Click="NewProjectChat_Click" Content="Nuova chat nel progetto" IsEnabled="False" />
+                        <Button Click="SaveProject_Click" Style="{StaticResource PrimaryButtonStyle}" Content="Salva" />
+                        <Button x:Name="NewChatButton" Click="NewProjectChat_Click" Style="{StaticResource TextButtonStyle}" Content="Nuova chat nel progetto" IsEnabled="False" />
                     </StackPanel>
-                    <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedTextBrush}" Text="Pronto." TextWrapping="Wrap" />
-                </StackPanel>
-            </Border>
+                    <TextBlock x:Name="StatusText" Style="{StaticResource CaptionStyle}" Text="Pronto." TextWrapping="Wrap" />
+            </StackPanel>
         </ScrollViewer>
     </Grid>
 </Page>

@@ -3,28 +3,26 @@
     <Grid Padding="32" RowSpacing="16" ColumnSpacing="18">
         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="380" /></Grid.ColumnDefinitions>
-        <StackPanel Grid.ColumnSpan="2" Spacing="6"><TextBlock Text="Artifact" FontSize="30" FontWeight="SemiBold" Foreground="White" /><TextBlock Text="Output persistenti prodotti da chat, run e automazioni." Foreground="{StaticResource MutedTextBrush}" /></StackPanel>
+        <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center"><Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13"><FontIcon FontSize="19" Glyph="&#xE8B7;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border><StackPanel VerticalAlignment="Center" Spacing="2"><TextBlock Text="Artifact" Style="{StaticResource PageTitleStyle}" /><TextBlock Text="Output persistenti prodotti da chat, run e automazioni." Style="{StaticResource PageSubtitleStyle}" /></StackPanel></StackPanel>
         <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnSpacing="10">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="260" /></Grid.ColumnDefinitions>
             <TextBox x:Name="SearchBox" PlaceholderText="Cerca nome, file o tag..." TextChanged="SearchBox_TextChanged" />
             <TextBox x:Name="ProjectFilterBox" Grid.Column="1" PlaceholderText="Filtra ID progetto" TextChanged="SearchBox_TextChanged" />
         </Grid>
-        <ScrollViewer Grid.Row="2"><StackPanel x:Name="ArtifactPanel" Spacing="10" /></ScrollViewer>
-        <Border Grid.Row="2" Grid.Column="1" Padding="18" Background="{StaticResource SurfaceBrush}" CornerRadius="18">
-            <ScrollViewer><StackPanel Spacing="10">
-                <TextBlock x:Name="TitleText" Text="Seleziona artifact" FontSize="20" FontWeight="SemiBold" Foreground="White" TextWrapping="Wrap" />
-                <TextBlock x:Name="MetaText" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+        <ScrollViewer Grid.Row="2"><StackPanel x:Name="ArtifactPanel" Spacing="16" /></ScrollViewer>
+        <ScrollViewer Grid.Row="2" Grid.Column="1"><StackPanel Spacing="16">
+                <TextBlock x:Name="TitleText" Text="Seleziona artifact" Style="{StaticResource SectionTitleStyle}" TextWrapping="Wrap" />
+                <TextBlock x:Name="MetaText" Style="{StaticResource CaptionStyle}" TextWrapping="Wrap" />
                 <TextBlock x:Name="DescriptionText" Foreground="White" TextWrapping="Wrap" />
                 <TextBox x:Name="RenameBox" Header="Nome" />
                 <TextBox x:Name="TagsBox" Header="Tag" PlaceholderText="separati da virgola" />
-                <Button Click="SaveMetadata_Click" Content="Salva nome e tag" />
-                <Button Click="OpenSource_Click" Content="Anteprima nella chat origine" />
-                <Button Click="OpenArtifact_Click" Content="Apri / scarica" />
-                <Button Click="Regenerate_Click" Content="Rigenera in chat" />
-                <TextBlock Text="Versioni" Foreground="White" FontWeight="SemiBold" />
-                <StackPanel x:Name="VersionsPanel" Spacing="6" />
-                <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedTextBrush}" Text="Pronto." TextWrapping="Wrap" />
+                <Button Click="SaveMetadata_Click" Style="{StaticResource PrimaryButtonStyle}" Content="Salva nome e tag" />
+                <Button Click="OpenSource_Click" Style="{StaticResource TextButtonStyle}" Content="Anteprima nella chat origine" />
+                <Button Click="OpenArtifact_Click" Style="{StaticResource TextButtonStyle}" Content="Apri / scarica" />
+                <Button Click="Regenerate_Click" Style="{StaticResource TextButtonStyle}" Content="Rigenera in chat" />
+                <TextBlock Text="VERSIONI" Style="{StaticResource FormSectionHeaderStyle}" />
+                <StackPanel x:Name="VersionsPanel" Spacing="16" />
+                <TextBlock x:Name="StatusText" Style="{StaticResource CaptionStyle}" Text="Pronto." TextWrapping="Wrap" />
             </StackPanel></ScrollViewer>
-        </Border>
     </Grid>
 </Page>

@@ -17,20 +17,17 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <StackPanel Spacing="8">
-                <TextBlock
-                    FontSize="30"
-                    FontWeight="SemiBold"
-                    Foreground="White"
-                    Text="Video" />
-                <TextBlock
-                    MaxWidth="920"
-                    Foreground="{StaticResource MutedTextBrush}"
-                    Text="Feed automatico stile YouTube: ogni video messo nella cartella Hermes compare qui, con player locale, note rapide e feedback che Hermes deve usare per migliorare i prossimi output." />
+            <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                <Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13">
+                    <FontIcon FontSize="19" Glyph="&#xE714;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel VerticalAlignment="Center" Spacing="2">
+                    <TextBlock Style="{StaticResource PageTitleStyle}" Text="Video" />
+                    <TextBlock Style="{StaticResource PageSubtitleStyle}" Text="Feed automatico stile YouTube: ogni video messo nella cartella Hermes compare qui, con player locale, note rapide e feedback che Hermes deve usare per migliorare i prossimi output." />
+                </StackPanel>
             </StackPanel>
 
-            <Border Grid.Row="1" Style="{StaticResource PremiumCardBorderStyle}">
-                <Grid ColumnSpacing="14" RowSpacing="10">
+            <Grid Grid.Row="1" ColumnSpacing="14" RowSpacing="10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
@@ -42,13 +39,13 @@
                     </Grid.RowDefinitions>
 
                     <StackPanel Spacing="6">
-                        <TextBlock FontWeight="SemiBold" Foreground="White" Text="Cartella monitorata" />
+                        <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="CARTELLA MONITORATA" />
                         <TextBlock x:Name="LibraryPathText" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
                     </StackPanel>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
-                        <Button Click="OpenFolder_Click" Content="Apri cartella" />
-                        <Button Click="Refresh_Click" Content="Aggiorna feed" />
+                        <Button Click="OpenFolder_Click" Content="Apri cartella" Style="{StaticResource TextButtonStyle}" />
+                        <Button Click="Refresh_Click" Content="Aggiorna feed" Style="{StaticResource TextButtonStyle}" />
                     </StackPanel>
 
                     <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnSpacing="10">
@@ -64,7 +61,8 @@
                             Grid.Column="1"
                             VerticalAlignment="Bottom"
                             Click="OpenManualVideoUrl_Click"
-                            Content="Apri URL" />
+                            Content="Apri URL"
+                            Style="{StaticResource TextButtonStyle}" />
                     </Grid>
 
                     <TextBlock
@@ -74,13 +72,12 @@
                         Foreground="{StaticResource MutedTextBrush}"
                         Text="Pronto." />
                 </Grid>
-            </Border>
 
                 <Grid
                     x:Name="VideoContentGrid"
                     Grid.Row="2"
-                    ColumnSpacing="18"
-                    RowSpacing="18"
+                    ColumnSpacing="20"
+                    RowSpacing="20"
                     SizeChanged="VideoContentGrid_SizeChanged">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="1.2*" />
@@ -91,16 +88,24 @@
                     <RowDefinition Height="0" />
                 </Grid.RowDefinitions>
 
-                <Border
+                <StackPanel
                     x:Name="VideoFeedPanel"
-                    Style="{StaticResource PremiumCardBorderStyle}">
-                    <StackPanel Spacing="14">
-                        <TextBlock FontWeight="SemiBold" Foreground="White" Text="Feed video" />
+                    Spacing="16">
+                    <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="FEED VIDEO" />
                         <ListView
                             x:Name="VideoListView"
                             IsItemClickEnabled="True"
                             ItemClick="VideoListView_ItemClick"
                             SelectionMode="Single">
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Padding" Value="0,12" />
+                                    <Setter Property="BorderThickness" Value="0,0,0,1" />
+                                    <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+                                    <Setter Property="Background" Value="Transparent" />
+                                </Style>
+                            </ListView.ItemContainerStyle>
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="services:LocalVideoRecord">
                                     <Grid Margin="0,0,0,14" ColumnSpacing="12">
@@ -144,9 +149,7 @@
 
                                         <StackPanel Grid.Column="1" Spacing="6">
                                             <TextBlock
-                                                Foreground="White"
-                                                FontWeight="SemiBold"
-                                                FontSize="16"
+                                                Style="{StaticResource SectionTitleStyle}"
                                                 Text="{x:Bind Title}"
                                                 TextWrapping="WrapWholeWords" />
                                             <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="{x:Bind FileName}" TextWrapping="WrapWholeWords" />
@@ -165,14 +168,12 @@
                             </ListView.ItemTemplate>
                         </ListView>
                     </StackPanel>
-                </Border>
 
-                <Border
+                <StackPanel
                     x:Name="VideoDetailPanel"
                     Grid.Column="1"
-                    Style="{StaticResource PremiumCardBorderStyle}">
-                    <StackPanel Spacing="14">
-                        <TextBlock FontWeight="SemiBold" Foreground="White" Text="Video selezionato" />
+                    Spacing="16">
+                    <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="VIDEO SELEZIONATO" />
                         <Grid
                             Height="260"
                             Background="Black"
@@ -193,6 +194,7 @@
                                 Click="FullScreen_Click"
                                 CornerRadius="16"
                                 Foreground="White"
+                                Style="{StaticResource GhostButtonStyle}"
                                 AutomationProperties.Name="Guarda video a schermo intero">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <FontIcon FontSize="13" Glyph="&#xE740;" />
@@ -212,10 +214,10 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <Button HorizontalAlignment="Stretch" Click="QuickFeedback_Click" Tag="Hook piu' forte nei primi 5 secondi" Content="Hook" />
-                            <Button Grid.Column="1" HorizontalAlignment="Stretch" Click="QuickFeedback_Click" Tag="Ritmo piu' veloce e meno pause" Content="Ritmo" />
-                            <Button Grid.Row="1" HorizontalAlignment="Stretch" Click="QuickFeedback_Click" Tag="Piu' chiarezza didattica e step concreti" Content="Chiarezza" />
-                            <Button Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch" Click="QuickFeedback_Click" Tag="Montaggio piu' pulito e meno ridondanza" Content="Montaggio" />
+                            <Button HorizontalAlignment="Stretch" Click="QuickFeedback_Click" Tag="Hook piu' forte nei primi 5 secondi" Content="Hook" Style="{StaticResource GhostButtonStyle}" />
+                            <Button Grid.Column="1" HorizontalAlignment="Stretch" Click="QuickFeedback_Click" Tag="Ritmo piu' veloce e meno pause" Content="Ritmo" Style="{StaticResource GhostButtonStyle}" />
+                            <Button Grid.Row="1" HorizontalAlignment="Stretch" Click="QuickFeedback_Click" Tag="Piu' chiarezza didattica e step concreti" Content="Chiarezza" Style="{StaticResource GhostButtonStyle}" />
+                            <Button Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch" Click="QuickFeedback_Click" Tag="Montaggio piu' pulito e meno ridondanza" Content="Montaggio" Style="{StaticResource GhostButtonStyle}" />
                         </Grid>
 
                         <TextBox
@@ -236,8 +238,9 @@
                                 BorderThickness="0"
                                 Click="SendFeedback_Click"
                                 Content="Invia feedback a Hermes"
+                                Style="{StaticResource PrimaryButtonStyle}"
                                 Foreground="White" />
-                            <Button Grid.Column="1" Click="CopyPath_Click" Content="Copia path video" />
+                            <Button Grid.Column="1" Click="CopyPath_Click" Content="Copia path video" Style="{StaticResource TextButtonStyle}" />
                         </Grid>
                         <TextBlock x:Name="FeedbackStatusText" Foreground="{StaticResource MutedTextBrush}" Text="Hermes deve usare questi feedback come memoria editoriale stabile quando appropriato." TextWrapping="Wrap" />
                         <TextBox
@@ -246,8 +249,7 @@
                             AcceptsReturn="True"
                             IsReadOnly="True"
                             TextWrapping="Wrap" />
-                    </StackPanel>
-                </Border>
+                </StackPanel>
                 </Grid>
             </Grid>
         </ScrollViewer>
@@ -285,7 +287,8 @@
                     Grid.Column="1"
                     VerticalAlignment="Center"
                     Click="CloseFullScreen_Click"
-                    Content="Chiudi" />
+                    Content="Chiudi"
+                    Style="{StaticResource TextButtonStyle}" />
             </Grid>
 
             <Border

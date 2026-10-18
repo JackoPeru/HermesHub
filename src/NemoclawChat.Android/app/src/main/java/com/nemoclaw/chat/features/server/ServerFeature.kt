@@ -343,31 +343,35 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            Text("Hermes Server", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("Dashboard Hermes Agent API: health, detailed health, models e capabilities.", color = AppColors.Muted)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(AppColors.Accent.copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.Dns, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
+                    Text("Hermes Server", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Dashboard Hermes Agent API: health, detailed health, models e capabilities.", color = AppColors.Muted, fontSize = 14.sp)
+                }
+            }
         }
         item {
-            ServerMetric("Hermes API", snapshot.gateway, "Health endpoint: ${hermesRoot(settings)}/health")
-        }
-        item {
-            ServerMetric("Capabilities", wsProbe.wsUrl, wsProbe.status)
-        }
-        item {
-            ServerMetric("Modello", snapshot.model, snapshot.providerDetail)
-        }
-        item {
-            ServerMetric("API lato server", snapshot.inferenceEndpoint, "Il client parla a Hermes API, non direttamente al runtime modello.")
-        }
-        item {
-            ServerMetric("Sicurezza", snapshot.policy, "Client usa solo la API key Bearer salvata dall'utente.")
-        }
-        item {
-            ServerMetric("Cartella video Hermes", snapshot.videoLibraryPath.ifBlank { "In attesa di sync server" }, "Hermes decide path e app lo recepisce da /health/detailed.")
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ServerMetric("Hermes API", snapshot.gateway, "Health endpoint: ${hermesRoot(settings)}/health", valueColor = AppColors.Success)
+                ServerMetric("Capabilities", wsProbe.wsUrl, wsProbe.status, valueColor = if (wsProbe.status.contains("lette", ignoreCase = true)) AppColors.Success else AppColors.Warning)
+                ServerMetric("Modello", snapshot.model, snapshot.providerDetail)
+                ServerMetric("API lato server", snapshot.inferenceEndpoint, "Il client parla a Hermes API, non direttamente al runtime modello.")
+                ServerMetric("Sicurezza", snapshot.policy, "Client usa solo la API key Bearer salvata dall'utente.")
+                ServerMetric("Cartella video Hermes", snapshot.videoLibraryPath.ifBlank { "In attesa di sync server" }, "Hermes decide path e app lo recepisce da /health/detailed.", valueColor = if (snapshot.videoLibraryPath.isBlank()) AppColors.Warning else Color.White)
+            }
         }
         item {
             GpuComputeCard(context = context, settings = settings)
@@ -375,38 +379,48 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
         item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Azioni", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("AZIONI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     Text(snapshot.statusMessage, color = AppColors.Muted)
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        IconButton(onClick = {
-                            val error = validateHttpUrl(settings.gatewayUrl, "Indirizzo server Hermes")
-                            if (error != null) {
-                                snapshot = snapshot.copy(statusMessage = error)
-                                return@IconButton
-                            }
-                            val healthUrl = "${hermesRoot(settings)}/health"
-                            snapshot = snapshot.copy(statusMessage = "Test: $healthUrl")
-                            scope.launch {
-                                snapshot = snapshot.copy(statusMessage = testGateway(healthUrl, loadGatewaySecret(context)))
-                            }
-                        }) {
-                            Icon(Icons.Rounded.NetworkCheck, contentDescription = "Test Hermes", tint = Color.White)
+                        Button(
+                            onClick = {
+                                val error = validateHttpUrl(settings.gatewayUrl, "Indirizzo server Hermes")
+                                if (error != null) {
+                                    snapshot = snapshot.copy(statusMessage = error)
+                                    return@Button
+                                }
+                                val healthUrl = "${hermesRoot(settings)}/health"
+                                snapshot = snapshot.copy(statusMessage = "Test: $healthUrl")
+                                scope.launch {
+                                    snapshot = snapshot.copy(statusMessage = testGateway(healthUrl, loadGatewaySecret(context)))
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Test Hermes", fontWeight = FontWeight.SemiBold)
                         }
-                        IconButton(onClick = {
-                            scope.launch {
-                                snapshot = loadServerSnapshot(context, settings, loadGatewaySecret(context))
-                                diagnostics = runDiagnostics(settings, loadGatewaySecret(context))
-                            }
-                        }) {
-                            Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna stato", tint = Color.White)
+                        TextButton(
+                            onClick = {
+                                scope.launch {
+                                    snapshot = loadServerSnapshot(context, settings, loadGatewaySecret(context))
+                                    diagnostics = runDiagnostics(settings, loadGatewaySecret(context))
+                                }
+                            },
+                            colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                        ) {
+                            Text("Aggiorna stato")
                         }
-                        IconButton(onClick = {
-                            snapshot = snapshot.copy(statusMessage = "Contratto Hermes: GET /health, GET /health/detailed, GET /v1/models, GET /v1/capabilities, POST /v1/responses, POST /v1/chat/completions, POST /v1/runs, GET/POST /api/jobs cron.")
-                        }) {
-                            Icon(Icons.Rounded.Visibility, contentDescription = "Mostra API", tint = Color.White)
+                        TextButton(
+                            onClick = {
+                                snapshot = snapshot.copy(statusMessage = "Contratto Hermes: GET /health, GET /health/detailed, GET /v1/models, GET /v1/capabilities, POST /v1/responses, POST /v1/chat/completions, POST /v1/runs, GET/POST /api/jobs cron.")
+                            },
+                            colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                        ) {
+                            Text("Mostra API")
                         }
                     }
                 }
@@ -415,20 +429,30 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
         item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Centro controllo server", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("CENTRO CONTROLLO SERVER", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     Text("Azioni tipizzate per Hermes, gateway, llama.cpp e Tailscale; nessuna shell arbitraria.", color = AppColors.Muted)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("hermes", "gateway", "llama", "tailscale").forEach { service -> Button(onClick = { controlService = service }, colors = ButtonDefaults.buttonColors(containerColor = if (controlService == service) AppColors.Accent else AppColors.AssistantBubble)) { Text(service) } }
+                        listOf("hermes", "gateway", "llama", "tailscale").forEach { service ->
+                            Button(
+                                onClick = { controlService = service },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (controlService == service) AppColors.Accent else AppColors.Panel,
+                                    contentColor = if (controlService == service) Color(0xFF171009) else Color.White
+                                ),
+                                border = if (controlService == service) null else BorderStroke(1.dp, AppColors.Border),
+                                shape = RoundedCornerShape(10.dp)
+                            ) { Text(service) }
+                        }
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IconButton(onClick = { pendingControlAction = controlService to "start" }) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Avvia servizio", tint = Color.White) }
-                        IconButton(onClick = { pendingControlAction = controlService to "stop" }) { Icon(Icons.Rounded.Stop, contentDescription = "Ferma servizio", tint = Color.White) }
-                        IconButton(onClick = { pendingControlAction = controlService to "restart" }) { Icon(Icons.Rounded.Refresh, contentDescription = "Riavvia servizio", tint = Color.White) }
-                        IconButton(onClick = { scope.launch { controlOutput = runCatching { httpGet(resolveHermesUrl(settings, "/v1/hub/server/control") + "?filter=${java.net.URLEncoder.encode(logFilter, "UTF-8")}", loadGatewaySecret(context)) }.getOrElse { it.message ?: "Errore" } } }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna output", tint = Color.White) }
+                        TextButton(onClick = { pendingControlAction = controlService to "start" }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Avvia") }
+                        TextButton(onClick = { pendingControlAction = controlService to "stop" }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Ferma") }
+                        TextButton(onClick = { pendingControlAction = controlService to "restart" }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Error)) { Text("Riavvia") }
+                        TextButton(onClick = { scope.launch { controlOutput = runCatching { httpGet(resolveHermesUrl(settings, "/v1/hub/server/control") + "?filter=${java.net.URLEncoder.encode(logFilter, "UTF-8")}", loadGatewaySecret(context)) }.getOrElse { it.message ?: "Errore" } } }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Aggiorna output") }
                     }
                     SettingsField("Filtro log", logFilter, { logFilter = it })
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("update", "rollback", "backup", "restore", "diagnostic").forEach { operation -> Button(onClick = { pendingMaintenanceAction = operation }) { Text(maintenanceLabels[operation] ?: operation) } }
+                        listOf("update", "rollback", "backup", "restore", "diagnostic").forEach { operation -> TextButton(onClick = { pendingMaintenanceAction = operation }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text(maintenanceLabels[operation] ?: operation) } }
                     }
                     SelectionContainer { Text(controlOutput, color = AppColors.Muted, fontSize = 11.sp) }
                 }
@@ -437,19 +461,32 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
         item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Diagnostica gateway", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("DIAGNOSTICA GATEWAY", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     if (diagnostics.isEmpty()) {
-                        Text("Nessuna diagnostica eseguita.", color = AppColors.Muted)
+                        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Rounded.NetworkCheck, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(40.dp))
+                            Text("Nessuna diagnostica eseguita.", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text("Esegui un controllo per verificare Hermes.", color = AppColors.Muted, fontSize = 12.sp)
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        snapshot = loadServerSnapshot(context, settings, loadGatewaySecret(context))
+                                        diagnostics = runDiagnostics(settings, loadGatewaySecret(context))
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                                shape = RoundedCornerShape(12.dp)
+                            ) { Text("Esegui diagnostica", fontWeight = FontWeight.SemiBold) }
+                        }
                     } else {
                         diagnostics.forEach { check ->
-                            Surface(color = AppColors.Panel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, if (check.ok) AppColors.Accent.copy(alpha = 0.55f) else Color(0xFF8A3A3A))) {
-                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text("${if (check.ok) "OK" else "Errore"} - ${check.label}", color = Color.White, fontWeight = FontWeight.SemiBold)
-                                    Text(check.endpoint, color = AppColors.Faint, fontSize = 11.sp)
-                                    Text(check.message, color = AppColors.Muted, fontSize = 12.sp)
-                                    if (!check.ok) Text("Azione: ${check.action}", color = AppColors.Accent, fontSize = 12.sp)
-                                }
+                            Column(modifier = Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("${if (check.ok) "OK" else "Errore"} - ${check.label}", color = if (check.ok) AppColors.Success else AppColors.Error, fontWeight = FontWeight.SemiBold)
+                                Text(check.endpoint, color = AppColors.Faint, fontSize = 11.sp)
+                                Text(check.message, color = AppColors.Muted, fontSize = 12.sp)
+                                if (!check.ok) Text("Azione: ${check.action}", color = AppColors.Accent, fontSize = 12.sp)
                             }
+                            HorizontalDivider(color = AppColors.Border)
                         }
                     }
                 }
@@ -458,23 +495,27 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
         item {
             Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Capabilities Hermes", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("CAPABILITIES HERMES", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     Text(wsProbe.detail, color = AppColors.Muted)
-                    IconButton(onClick = {
-                        wsProbe = wsProbe.copy(status = "Lettura capabilities...", detail = "Chiamata a /v1/capabilities e /v1/models.")
-                        scope.launch {
-                            val capabilities = runCatching { httpGet(resolveHermesUrl(settings, "/v1/capabilities"), loadGatewaySecret(context)) }.getOrElse { it.message ?: it.javaClass.simpleName }
-                            val models = runCatching { httpGet(resolveHermesUrl(settings, "/v1/models"), loadGatewaySecret(context)) }.getOrElse { it.message ?: it.javaClass.simpleName }
-                            wsProbe = GatewayWsProbe(
-                wsUrl = resolveHermesUrl(settings, "/v1/capabilities"),
-                                connected = true,
-                                status = "Capabilities lette.",
-                                detail = "Capabilities e models letti da Hermes.",
-                                capabilityLines = listOf("Capabilities: ${capabilities.limitText(240)}", "Models: ${models.limitText(240)}")
-                            )
-                        }
-                    }) {
-                        Icon(Icons.Rounded.Visibility, contentDescription = "Leggi capabilities", tint = Color.White)
+                    Button(
+                        onClick = {
+                            wsProbe = wsProbe.copy(status = "Lettura capabilities...", detail = "Chiamata a /v1/capabilities e /v1/models.")
+                            scope.launch {
+                                val capabilities = runCatching { httpGet(resolveHermesUrl(settings, "/v1/capabilities"), loadGatewaySecret(context)) }.getOrElse { it.message ?: it.javaClass.simpleName }
+                                val models = runCatching { httpGet(resolveHermesUrl(settings, "/v1/models"), loadGatewaySecret(context)) }.getOrElse { it.message ?: it.javaClass.simpleName }
+                                wsProbe = GatewayWsProbe(
+                                    wsUrl = resolveHermesUrl(settings, "/v1/capabilities"),
+                                    connected = true,
+                                    status = "Capabilities lette.",
+                                    detail = "Capabilities e models letti da Hermes.",
+                                    capabilityLines = listOf("Capabilities: ${capabilities.limitText(240)}", "Models: ${models.limitText(240)}")
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Leggi capabilities", fontWeight = FontWeight.SemiBold)
                     }
                     if (wsProbe.capabilityLines.isNotEmpty()) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -494,8 +535,17 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             containerColor = AppColors.Surface,
             title = { Text("Conferma $action", color = Color.White) },
             text = { Text("Eseguire $action su $service? Le sessioni attive possono interrompersi.", color = AppColors.Muted) },
-            confirmButton = { IconButton(onClick = { pendingControlAction = null; scope.launch { controlOutput = runCatching { postJson(resolveHermesUrl(settings, "/v1/hub/server/action"), JSONObject().put("service", service).put("action", action), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } }) { Icon(Icons.Rounded.Check, contentDescription = "Conferma azione server", tint = Color.White) } },
-            dismissButton = { IconButton(onClick = { pendingControlAction = null }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
+            confirmButton = {
+                Button(
+                    onClick = { pendingControlAction = null; scope.launch { controlOutput = runCatching { postJson(resolveHermesUrl(settings, "/v1/hub/server/action"), JSONObject().put("service", service).put("action", action), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (action == "restart") AppColors.Error else AppColors.Accent,
+                        contentColor = if (action == "restart") Color.White else Color(0xFF171009)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("Conferma") }
+            },
+            dismissButton = { TextButton(onClick = { pendingControlAction = null }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Annulla") } }
         )
     }
 
@@ -505,20 +555,30 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             containerColor = AppColors.Surface,
             title = { Text("Conferma ${maintenanceLabels[operation] ?: operation}", color = Color.White) },
             text = { Text("Eseguire \"${maintenanceLabels[operation] ?: operation}\" sul server? Update, rollback e restore possono interrompere il servizio.", color = AppColors.Muted) },
-            confirmButton = { IconButton(onClick = { pendingMaintenanceAction = null; scope.launch { controlOutput = runCatching { postJson(resolveHermesUrl(settings, "/v1/hub/server/maintenance"), JSONObject().put("operation", operation), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } }) { Icon(Icons.Rounded.Check, contentDescription = "Conferma manutenzione", tint = Color.White) } },
-            dismissButton = { IconButton(onClick = { pendingMaintenanceAction = null }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
+            confirmButton = {
+                Button(
+                    onClick = { pendingMaintenanceAction = null; scope.launch { controlOutput = runCatching { postJson(resolveHermesUrl(settings, "/v1/hub/server/maintenance"), JSONObject().put("operation", operation), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (operation == "update" || operation == "rollback" || operation == "restore") AppColors.Error else AppColors.Accent,
+                        contentColor = if (operation == "update" || operation == "rollback" || operation == "restore") Color.White else Color(0xFF171009)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("Conferma") }
+            },
+            dismissButton = { TextButton(onClick = { pendingMaintenanceAction = null }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Annulla") } }
         )
     }
 }
 
 @Composable
-internal fun ServerMetric(title: String, value: String, detail: String) {
-    Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, color = Color.White, fontWeight = FontWeight.SemiBold)
-            Text(value, color = Color.White)
-            Text(detail, color = AppColors.Muted, fontSize = 12.sp)
+internal fun ServerMetric(title: String, value: String, detail: String, valueColor: Color = Color.White) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(title.uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
+            Text(value, color = valueColor, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End, modifier = Modifier.weight(1f), maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
+        Text(detail, color = AppColors.Muted, fontSize = 12.sp)
+        HorizontalDivider(color = AppColors.Border)
     }
 }
 
@@ -566,20 +626,31 @@ internal fun HardwareScreen(context: Context, settings: AppSettings) {
     }
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            Text("Prestazioni", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("${snapshot.hostname} - ${snapshot.operatingSystem} ${snapshot.architecture}. Uptime ${formatHardwareUptime(snapshot.uptimeSeconds)}. Processi ${snapshot.processCount}.", color = AppColors.Muted)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(AppColors.Accent.copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.Speed, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Prestazioni", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                    Text("${snapshot.hostname} - ${snapshot.operatingSystem} ${snapshot.architecture}. Uptime ${formatHardwareUptime(snapshot.uptimeSeconds)}. Processi ${snapshot.processCount}.", color = AppColors.Muted, fontSize = 14.sp)
+                }
+            }
         }
         item {
             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                 if (maxWidth > 720.dp) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                         HardwareComponentList(
                             components = components,
                             selectedId = selectedComponent?.id.orEmpty(),
@@ -593,7 +664,7 @@ internal fun HardwareScreen(context: Context, settings: AppSettings) {
                         )
                     }
                 } else {
-                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                         HardwareComponentList(
                             components = components,
                             selectedId = selectedComponent?.id.orEmpty(),
@@ -619,32 +690,45 @@ internal fun HardwareComponentList(
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(modifier = modifier, color = AppColors.Surface, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, AppColors.Border)) {
-        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            components.forEach { component ->
-                val selected = component.id == selectedId
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onSelect(component.id) },
-                    color = if (selected) AppColors.Accent.copy(alpha = 0.18f) else AppColors.Panel,
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, if (selected) AppColors.Accent else AppColors.Border)
-                ) {
-                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text(component.title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                            Text(component.primaryValue, color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
-                        }
-                        Text(component.subtitle, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        LinearProgressIndicator(
-                            progress = { (component.utilizationPercent / 100.0).toFloat().coerceIn(0f, 1f) },
-                            modifier = Modifier.fillMaxWidth().height(4.dp),
-                            color = AppColors.Accent,
-                            trackColor = Color(0xFF424242)
-                        )
-                    }
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("COMPONENTI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        if (components.isEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Rounded.Speed, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(40.dp))
+                Text("Nessun componente", color = Color.White, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                Text("In attesa di dati hardware dal server.", color = AppColors.Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+            }
+        }
+        components.forEachIndexed { index, component ->
+            val selected = component.id == selectedId
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelect(component.id) }
+                    .padding(vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text(component.title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(component.primaryValue, color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
                 }
+                Text(component.subtitle, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                LinearProgressIndicator(
+                    progress = { (component.utilizationPercent / 100.0).toFloat().coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(4.dp),
+                    color = AppColors.Accent,
+                    trackColor = AppColors.Border
+                )
+                if (selected) {
+                    Text("SELEZIONATO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                }
+            }
+            if (index != components.lastIndex) {
+                HorizontalDivider(color = AppColors.Border)
             }
         }
     }
@@ -652,29 +736,36 @@ internal fun HardwareComponentList(
 
 @Composable
 internal fun HardwareComponentDetail(component: HardwareComponentView?, history: List<HardwareHistoryPoint>, modifier: Modifier = Modifier) {
-    Surface(modifier = modifier, color = AppColors.Surface, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, AppColors.Border)) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            if (component == null) {
-                Text("Nessun componente disponibile.", color = AppColors.Muted)
-                return@Column
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        if (component == null) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Rounded.Speed, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(40.dp))
+                Text("Nessun componente disponibile.", color = Color.White, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                Text("Seleziona un componente per vederne i dettagli.", color = AppColors.Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
             }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(component.title, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
-                    Text(component.subtitle, color = AppColors.Muted)
-                }
-                Text(component.primaryValue, color = AppColors.Accent, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+            return@Column
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(component.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                Text(component.subtitle, color = AppColors.Muted, fontSize = 13.sp)
             }
-            HardwareLineChart("Utilizzo", history.map { it.utilizationPercent }, 100.0, "%", AppColors.Accent)
-            HardwareLineChart("Temperatura", history.mapNotNull { it.temperatureC }, 100.0, " C", Color(0xFFFF7062))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                component.stats.forEach { stat ->
-                    Surface(color = AppColors.Panel, shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, AppColors.Border)) {
-                        Column(modifier = Modifier.widthIn(min = 120.dp, max = 220.dp).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(stat.label, color = AppColors.Muted, fontSize = 12.sp)
-                            Text(stat.value, color = Color.White, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
+            Text(component.primaryValue, color = AppColors.Accent, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+        }
+        HorizontalDivider(color = AppColors.Border)
+        HardwareLineChart("Utilizzo", history.map { it.utilizationPercent }, 100.0, "%", AppColors.Accent)
+        HardwareLineChart("Temperatura", history.mapNotNull { it.temperatureC }, 100.0, " C", Color(0xFFFF7062))
+        HorizontalDivider(color = AppColors.Border)
+        Text("DETTAGLI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            component.stats.forEach { stat ->
+                Column(modifier = Modifier.widthIn(min = 120.dp, max = 220.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(stat.label.uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text(stat.value, color = Color.White, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -684,8 +775,8 @@ internal fun HardwareComponentDetail(component: HardwareComponentView?, history:
 @Composable
 internal fun HardwareLineChart(title: String, values: List<Double>, maxValue: Double, unit: String, color: Color) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(if (values.isEmpty()) "$title: n/d" else "$title: ${String.format(java.util.Locale.US, "%.1f", values.last())}$unit", color = Color.White, fontWeight = FontWeight.SemiBold)
-        Canvas(modifier = Modifier.fillMaxWidth().height(170.dp).background(AppColors.Panel, RoundedCornerShape(10.dp)).border(1.dp, AppColors.Border, RoundedCornerShape(10.dp)).padding(8.dp)) {
+        Text((if (values.isEmpty()) "$title: n/d" else "$title: ${String.format(java.util.Locale.US, "%.1f", values.last())}$unit").uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Canvas(modifier = Modifier.fillMaxWidth().height(170.dp).padding(vertical = 8.dp)) {
             val chartWidth = size.width
             val chartHeight = size.height
             repeat(5) { index ->
@@ -1012,7 +1103,9 @@ internal fun OperatorScreen(context: Context, settings: AppSettings) {
                                         summary = result.summary
                                         raw = result.rawJson.ifBlank { result.summary }
                                     }
-                                }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Elevated, contentColor = Color.White),
+                                shape = RoundedCornerShape(12.dp)
                             ) {
                                 Text(preset.label)
                             }
@@ -1098,7 +1191,9 @@ internal fun OperatorScreen(context: Context, settings: AppSettings) {
 internal fun OperatorActionButton(label: String, onClick: () -> Unit) {
     Button(
         modifier = Modifier.fillMaxWidth(),
-        onClick = onClick
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Elevated, contentColor = Color.White),
+        shape = RoundedCornerShape(12.dp)
     ) {
         Text(label)
     }
@@ -1149,24 +1244,36 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 20.dp),
         contentPadding = PaddingValues(top = 18.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("Hermes Video", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(AppColors.Accent.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.Videocam, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Hermes Video", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(settings.videoLibraryPath.ifBlank { "Sincronizzo cartella video Hermes..." }, color = AppColors.Muted, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
                 IconButton(onClick = {
                     onOpenChatPrompt(
                         "Modalita Video Hermes Hub. Usa la cartella video monitorata del PC Hermes: ${settings.videoLibraryPath}. " +
                             "Crea, scarica o prepara un video e salva sempre il file finale in quella cartella, cosi appare automaticamente nella sezione Video. Richiesta: "
                     )
                 }) {
-                    Icon(Icons.Rounded.Add, contentDescription = "Nuovo video", tint = Color.White)
+                    Icon(Icons.Rounded.Add, contentDescription = "Nuovo video", tint = AppColors.Accent)
                 }
             }
             Spacer(modifier = Modifier.height(14.dp))
@@ -1174,19 +1281,22 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
                 VideoFeedChip("Tutti", selected = videoFilter == "Tutti") { videoFilter = "Tutti" }
                 VideoFeedChip("Recenti", selected = videoFilter == "Recenti") { videoFilter = "Recenti" }
                 VideoFeedChip("Feedback", selected = videoFilter == "Feedback") { videoFilter = "Feedback" }
-                IconButton(onClick = {
-                    status = "Aggiorno feed video..."
-                    refreshKey++
-                }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna feed video", tint = Color.White) }
+                TextButton(
+                    onClick = {
+                        status = "Aggiorno feed video..."
+                        refreshKey++
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                ) { Text("Aggiorna", fontWeight = FontWeight.SemiBold) }
             }
         }
         item {
             Text(status, color = AppColors.Faint, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         item {
-            Surface(color = AppColors.Panel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, AppColors.Border)) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("URL video manuale", color = Color.White, fontWeight = FontWeight.SemiBold)
+            Surface(color = AppColors.Panel, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, AppColors.Border)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("URL VIDEO MANUALE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     TextField(
                         value = manualVideoUrl,
                         onValueChange = {
@@ -1198,16 +1308,21 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
                         modifier = Modifier.fillMaxWidth()
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = {
-                            val manual = createManualVideoItem(manualVideoUrl)
-                            if (manual == null) {
-                                manualVideoError = "URL non valido. Usa un link http/https diretto."
-                            } else {
-                                manualVideoError = ""
-                                selectedVideoId = manual.id
-                            }
-                        }) {
-                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri URL video", tint = Color.White)
+                        Button(
+                            onClick = {
+                                val manual = createManualVideoItem(manualVideoUrl)
+                                if (manual == null) {
+                                    manualVideoError = "URL non valido. Usa un link http/https diretto."
+                                } else {
+                                    manualVideoError = ""
+                                    selectedVideoId = manual.id
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Apri video", fontWeight = FontWeight.SemiBold)
                         }
                         if (manualVideoError.isNotBlank()) {
                             Text(manualVideoError, color = AppColors.Accent, fontSize = 12.sp)
@@ -1218,16 +1333,39 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
         }
         if (displayedItems.isEmpty()) {
             item {
-                Surface(color = AppColors.Panel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, AppColors.Border)) {
-                    Text(
-                        modifier = Modifier.padding(16.dp),
-                        text = if (items.isEmpty()) {
-                            "Nessun video trovato. Metti un file video nella cartella video Hermes sul PC e premi Aggiorna feed."
-                        } else {
-                            "Nessun video con feedback salvato."
-                        },
-                        color = AppColors.Muted
-                    )
+                Surface(color = AppColors.Panel, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, AppColors.Border)) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Rounded.Videocam, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(40.dp))
+                        Text(
+                            if (items.isEmpty()) "Nessun video trovato" else "Nessun video con feedback salvato",
+                            color = Color.White,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            if (items.isEmpty()) {
+                                "Metti un file video nella cartella video Hermes sul PC e premi Aggiorna feed."
+                            } else {
+                                "Nessun video con feedback salvato."
+                            },
+                            color = AppColors.Muted,
+                            fontSize = 14.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Button(
+                            onClick = {
+                                status = "Aggiorno feed video..."
+                                refreshKey++
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
+                        ) { Text("Aggiorna feed", fontWeight = FontWeight.SemiBold) }
+                    }
                 }
             }
         }
@@ -1322,7 +1460,7 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 20.dp),
         contentPadding = PaddingValues(top = 18.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
@@ -1330,77 +1468,144 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("Hermes Immagini", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = {
-                        status = "Aggiorno cartella..."
-                        refreshKey++
-                    }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna cartella", tint = Color.White) }
-                    IconButton(onClick = {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(AppColors.Accent.copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.Image, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Hermes Immagini", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(status, color = AppColors.Muted, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
                         onOpenChatPrompt(
                             "Modalita Immagini Hermes Hub. Usa la cartella immagini monitorata del PC Hermes: ${settings.imageLibraryPath.ifBlank { "quella del server" }}. " +
                                 "Crea o modifica un'immagine e salva sempre il file finale in quella cartella, cosi appare automaticamente nella sezione Immagini. Richiesta: "
                         )
-                    }) {
-                        Icon(Icons.Rounded.Add, contentDescription = "Nuova immagine", tint = Color.White)
-                    }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Nuova immagine", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                }
+                TextButton(onClick = {
+                    status = "Aggiorno cartella..."
+                    refreshKey++
+                }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Aggiorna", color = AppColors.Accent, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
+            Text("PERCORSO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Spacer(modifier = Modifier.height(8.dp))
             // Navigazione: Home (radice) + Su (parent server) + segmenti.
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                VideoFeedChip("Home") { currentPath = startPath.ifBlank { null } }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { currentPath = startPath.ifBlank { null } }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Home", color = AppColors.Accent, fontWeight = FontWeight.SemiBold, fontSize = 14.sp) }
                 if (parent != null) {
-                    VideoFeedChip("↑ Su") { currentPath = parent }
+                    Text("·", color = AppColors.Faint, fontSize = 14.sp)
+                    TextButton(onClick = { currentPath = parent }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("↑ Su", color = AppColors.Accent, fontWeight = FontWeight.SemiBold, fontSize = 14.sp) }
                 }
                 val shown = currentPath
                 if (!shown.isNullOrBlank()) {
                     browseSegments(shown).takeLast(3).forEach { (label, segmentPath) ->
-                        VideoFeedChip(label, selected = segmentPath == shown) { currentPath = segmentPath }
+                        Text("·", color = AppColors.Faint, fontSize = 14.sp)
+                        TextButton(onClick = { currentPath = segmentPath }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) {
+                            Text(label, color = if (segmentPath == shown) Color.White else AppColors.Accent, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
             }
         }
-        item {
-            Text(status, color = AppColors.Muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
         if (folders.isNotEmpty()) {
+            item {
+                Text("CARTELLE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            }
             items(folders, key = { "folder|" + it.path }) { folder ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(AppColors.Panel)
-                        .clickable { currentPath = folder.path }
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = AppColors.Accent)
-                    Text(
-                        folder.name,
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Apri cartella", tint = AppColors.Muted)
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { currentPath = folder.path }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(AppColors.NavIndicator),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(22.dp))
+                        }
+                        Text(
+                            folder.name,
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Apri cartella", tint = AppColors.Muted)
+                    }
+                    HorizontalDivider(color = AppColors.Border)
                 }
             }
         }
         if (items.isEmpty() && folders.isEmpty()) {
             item {
-                Surface(color = AppColors.Panel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, AppColors.Border)) {
-                    Text(
-                        modifier = Modifier.padding(16.dp),
-                        text = "Niente qui. Entra in una cartella o genera immagini con Hermes.",
-                        color = AppColors.Muted
-                    )
+                Surface(color = AppColors.Surface, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, AppColors.Border)) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Rounded.Image, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(40.dp))
+                        Text("Niente qui", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                        Text(
+                            text = "Entra in una cartella o genera immagini con Hermes.",
+                            color = AppColors.Muted,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Button(
+                            onClick = {
+                                onOpenChatPrompt(
+                                    "Modalita Immagini Hermes Hub. Usa la cartella immagini monitorata del PC Hermes: ${settings.imageLibraryPath.ifBlank { "quella del server" }}. " +
+                                        "Crea o modifica un'immagine e salva sempre il file finale in quella cartella, cosi appare automaticamente nella sezione Immagini. Richiesta: "
+                                )
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
+                        ) {
+                            Text("Genera con Hermes", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
+            }
+        } else if (items.isNotEmpty()) {
+            item {
+                Text("FOTO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             }
         }
         items(items.chunked(2), key = { row -> row.joinToString("|") { it.folder + "#" + it.id } }) { row ->
@@ -1538,9 +1743,9 @@ internal fun resolveVideoCompatUrl(settings: AppSettings, item: VideoLibraryItem
 internal fun VideoFeedChip(label: String, selected: Boolean = false, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.clickable(onClick = onClick),
-        color = if (selected) Color.White else AppColors.Panel,
-        contentColor = if (selected) Color.Black else Color.White,
-        shape = RoundedCornerShape(8.dp),
+        color = if (selected) AppColors.Accent else AppColors.Panel,
+        contentColor = if (selected) Color(0xFF171009) else Color.White,
+        shape = RoundedCornerShape(20.dp),
         border = if (selected) null else BorderStroke(1.dp, AppColors.Border)
     ) {
         Text(
@@ -1554,16 +1759,14 @@ internal fun VideoFeedChip(label: String, selected: Boolean = false, onClick: ()
 
 @Composable
 internal fun VideoFeedCard(settings: AppSettings, item: VideoLibraryItem, apiKey: String?, onClick: () -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        VideoThumbnail(settings, item, apiKey, modifier = Modifier.fillMaxWidth())
-        Spacer(modifier = Modifier.height(10.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = AppColors.Accent.copy(alpha = 0.18f)) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.PlayCircle, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
-                }
-            }
-            Column(modifier = Modifier.weight(1f)) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            VideoThumbnail(settings, item, apiKey, modifier = Modifier.width(120.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     item.title,
                     color = Color.White,
@@ -1572,7 +1775,6 @@ internal fun VideoFeedCard(settings: AppSettings, item: VideoLibraryItem, apiKey
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     "Hermes Hub - ${item.sizeBytes.toReadableFileSize()} - ${formatVideoTimestamp(item.modifiedAt)}",
                     color = AppColors.Muted,
@@ -1581,7 +1783,9 @@ internal fun VideoFeedCard(settings: AppSettings, item: VideoLibraryItem, apiKey
                     overflow = TextOverflow.Ellipsis
                 )
             }
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(22.dp))
         }
+        HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
     }
 }
 
@@ -1600,7 +1804,7 @@ internal fun VideoThumbnail(settings: AppSettings, item: VideoLibraryItem, apiKe
     Box(
         modifier = modifier
             .aspectRatio(16f / 9f)
-            .clip(RoundedCornerShape(4.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(Color.Black),
         contentAlignment = Alignment.Center
     ) {
@@ -1803,12 +2007,12 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             item {
-                Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = Color.White)
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = AppColors.Accent)
                     }
                 }
                 Box(
@@ -1842,14 +2046,34 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                 }
             }
             item {
-                Column(modifier = Modifier.padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(item.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "Hermes Hub - ${item.filename} - ${item.sizeBytes.toReadableFileSize()} - ${formatVideoTimestamp(item.modifiedAt)}",
-                        color = AppColors.Muted,
-                        fontSize = 13.sp
-                    )
+                Column(modifier = Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(13.dp))
+                                .background(AppColors.Accent.copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Rounded.Videocam, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(item.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                "Hermes Hub - ${item.filename} - ${item.sizeBytes.toReadableFileSize()} - ${formatVideoTimestamp(item.modifiedAt)}",
+                                color = AppColors.Muted,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                     Text(status, color = AppColors.Faint, fontSize = 12.sp)
+                    Text("FEEDBACK", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         VideoReactionButton(
                             label = "Mi piace",
@@ -1884,19 +2108,28 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                         VideoFeedChip("Chiarezza") { feedback = appendFeedbackSnippet(feedback, "Piu' chiarezza didattica e step concreti") }
                         VideoFeedChip("Montaggio") { feedback = appendFeedbackSnippet(feedback, "Montaggio piu' pulito e meno ridondanza") }
                     }
+                    Text("FEEDBACK PER HERMES", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     SettingsField("Feedback per Hermes", feedback, { feedback = it })
-                    IconButton(onClick = {
-                        if (feedback.isBlank()) {
-                            status = "Scrivi feedback prima di inviare."
-                            return@IconButton
-                        }
-                        status = "Invio feedback a Hermes..."
-                        scope.launch {
-                            val result = sendVideoLibraryFeedback(settings, item, feedback, reaction, loadGatewaySecret(context))
-                            saveVideoFeedback(context, item.id, feedback, reaction, result)
-                            status = result
-                        }
-                    }) { Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Invia feedback", tint = Color.White) }
+                    Button(
+                        onClick = {
+                            if (feedback.isBlank()) {
+                                status = "Scrivi feedback prima di inviare."
+                                return@Button
+                            }
+                            status = "Invio feedback a Hermes..."
+                            scope.launch {
+                                val result = sendVideoLibraryFeedback(settings, item, feedback, reaction, loadGatewaySecret(context))
+                                saveVideoFeedback(context, item.id, feedback, reaction, result)
+                                status = result
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Invia feedback", fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
         }
@@ -1986,21 +2219,16 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
 
 @Composable
 internal fun VideoReactionButton(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(22.dp),
-        color = if (selected) Color.White else AppColors.Panel,
-        contentColor = if (selected) Color.Black else Color.White,
-        border = if (selected) null else BorderStroke(1.dp, AppColors.Border)
+    TextButton(
+        onClick = onClick,
+        colors = ButtonDefaults.textButtonColors(
+            containerColor = if (selected) AppColors.Accent else AppColors.Panel,
+            contentColor = if (selected) Color(0xFF171009) else Color.White
+        )
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(icon, contentDescription = label, modifier = Modifier.size(18.dp))
-            Text(label, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-        }
+        Icon(icon, contentDescription = label, modifier = Modifier.size(18.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(label, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
     }
 }
 
@@ -2032,40 +2260,67 @@ internal fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPromp
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp),
-        contentPadding = PaddingValues(top = 18.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .padding(horizontal = 20.dp),
+        contentPadding = PaddingValues(top = 20.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("Hermes News", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                IconButton(onClick = { onOpenChatPrompt("Crea un articolo per la sezione News di Hermes Hub: ") }) {
-                    Icon(Icons.Rounded.Add, contentDescription = "Nuovo articolo", tint = Color.White)
+                Surface(
+                    modifier = Modifier.size(44.dp),
+                    shape = RoundedCornerShape(13.dp),
+                    color = AppColors.Accent.copy(alpha = 0.18f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Newspaper, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
+                    }
                 }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Hermes News", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                    Text(status, color = AppColors.Muted, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = { onOpenChatPrompt("Crea un articolo per la sezione News di Hermes Hub: ") }) {
+                    Icon(Icons.Rounded.Add, contentDescription = "Nuovo articolo", tint = AppColors.Accent)
+                }
+                // Un solo GET per refresh: basta il bump di refreshKey, il
+                // LaunchedEffect sopra ricarica (niente doppio load diretto).
+                IconButton(onClick = {
+                    status = "Sincronizzo articoli Hermes..."
+                    refreshKey++
+                }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna news", tint = AppColors.Muted) }
             }
-            Spacer(modifier = Modifier.height(14.dp))
-            // Un solo GET per refresh: basta il bump di refreshKey, il
-            // LaunchedEffect sopra ricarica (niente doppio load diretto).
-            IconButton(onClick = {
-                status = "Sincronizzo articoli Hermes..."
-                refreshKey++
-            }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna news", tint = Color.White) }
         }
         item {
-            Text(status, color = AppColors.Faint, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text("ARTICOLI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         }
         if (htmlItems.isEmpty()) {
             item {
-                Surface(color = AppColors.Panel, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, AppColors.Border)) {
-                    Text(
-                        modifier = Modifier.padding(16.dp),
-                        text = "Nessun articolo HTML trovato. Chiedi a Hermes di creare un giornale HTML e salvarlo in ${settings.newsLibraryPath}.",
-                        color = AppColors.Muted
-                    )
+                Surface(color = AppColors.Panel, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, AppColors.Border)) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Rounded.Newspaper, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(40.dp))
+                        Text("Nessun articolo HTML trovato.", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                        Text(
+                            text = "Chiedi a Hermes di creare un giornale HTML e salvarlo in ${settings.newsLibraryPath}.",
+                            color = AppColors.Muted,
+                            fontSize = 14.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Button(
+                            onClick = { onOpenChatPrompt("Crea un articolo per la sezione News di Hermes Hub: ") },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Nuovo articolo", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
             }
         }
@@ -2082,22 +2337,22 @@ internal fun NewsArticleCard(article: WorkspaceRequest, onClick: () -> Unit) {
             .fillMaxWidth()
             .clickable(onClick = onClick),
         color = AppColors.Panel,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, AppColors.Border)
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = AppColors.Accent.copy(alpha = 0.18f)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Surface(modifier = Modifier.size(44.dp), shape = RoundedCornerShape(13.dp), color = AppColors.Accent.copy(alpha = 0.18f)) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(22.dp))
+                        Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
                     }
                 }
-                Column(modifier = Modifier.weight(1f)) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         article.title,
                         color = Color.White,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 18.sp,
+                        fontSize = 17.sp,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -2109,7 +2364,9 @@ internal fun NewsArticleCard(article: WorkspaceRequest, onClick: () -> Unit) {
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(20.dp))
             }
+            HorizontalDivider(color = AppColors.Border)
             val preview = article.result.ifBlank { article.prompt }.limitText(420)
             MarkdownText(preview, color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp)
             if (article.feedback.isNotBlank()) {
@@ -2121,26 +2378,20 @@ internal fun NewsArticleCard(article: WorkspaceRequest, onClick: () -> Unit) {
 
 @Composable
 internal fun NewsHtmlCard(item: NewsHtmlItem, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        color = AppColors.Panel,
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, AppColors.Border)
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Surface(modifier = Modifier.size(44.dp), shape = CircleShape, color = AppColors.Accent.copy(alpha = 0.18f)) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Language, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(23.dp))
-                }
+            Box(
+                modifier = Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(AppColors.NavIndicator),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Language, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(22.dp))
             }
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(
                     "${item.filename} - ${item.sizeBytes.toReadableFileSize()} - ${formatVideoTimestamp(item.modifiedAt)}",
                     color = AppColors.Muted,
@@ -2149,7 +2400,9 @@ internal fun NewsHtmlCard(item: NewsHtmlItem, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis
                 )
             }
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(20.dp))
         }
+        HorizontalDivider(color = AppColors.Border)
     }
 }
 
@@ -2251,19 +2504,28 @@ internal fun NewsHtmlScreen(context: Context, settings: AppSettings, item: NewsH
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = Color.White)
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = AppColors.Accent)
                     }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(status, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Surface(
+                        modifier = Modifier.size(44.dp),
+                        shape = RoundedCornerShape(13.dp),
+                        color = AppColors.Accent.copy(alpha = 0.18f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.Language, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(status, color = AppColors.Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     IconButton(onClick = { fullScreen = true }) {
-                        Icon(Icons.Rounded.CropFree, contentDescription = "Apri a schermo intero", tint = Color.White)
+                        Icon(Icons.Rounded.CropFree, contentDescription = "Apri a schermo intero", tint = AppColors.Accent)
                     }
                 }
                 HorizontalDivider(color = AppColors.Border)
@@ -2289,13 +2551,14 @@ internal fun NewsHtmlScreen(context: Context, settings: AppSettings, item: NewsH
                     update = { updateNewsWebView(it, pageUrl, html) },
                     onRelease = ::releaseNewsWebView
                 )
-                Button(
+                TextButton(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(16.dp),
-                    onClick = { fullScreen = false }
+                    onClick = { fullScreen = false },
+                    colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
                 ) {
-                    Text("Chiudi")
+                    Text("Chiudi", color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -2315,27 +2578,45 @@ internal fun NewsArticleScreen(
     var status by remember(article.id) { mutableStateOf("Lascia feedback: Hermes lo usera' per migliorare articoli e briefing futuri.") }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        modifier = Modifier.fillMaxSize().background(AppColors.Background),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = Color.White) }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = AppColors.Accent) }
+                Surface(
+                    modifier = Modifier.size(44.dp),
+                    shape = RoundedCornerShape(13.dp),
+                    color = AppColors.Accent.copy(alpha = 0.18f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
+                    }
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(article.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        "${article.source} - ${article.status} - ${formatVideoTimestamp(article.updatedAt)}",
+                        color = AppColors.Muted,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
         item {
-            Column(modifier = Modifier.padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(article.title, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    "${article.source} - ${article.status} - ${formatVideoTimestamp(article.updatedAt)}",
-                    color = AppColors.Muted,
-                    fontSize = 13.sp
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(status, color = AppColors.Faint, fontSize = 12.sp)
                 HorizontalDivider(color = AppColors.Border)
                 MarkdownText(article.result.ifBlank { article.prompt }, color = Color.White, fontSize = 16.sp)
                 HorizontalDivider(color = AppColors.Border)
+                Text("FEEDBACK", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     VideoFeedChip("Piu' fonti") { feedback = appendFeedbackSnippet(feedback, "Aggiungi piu' fonti verificabili") }
                     VideoFeedChip("Piu' breve") { feedback = appendFeedbackSnippet(feedback, "Sintesi piu' breve e densa") }
@@ -2343,19 +2624,27 @@ internal fun NewsArticleScreen(
                     VideoFeedChip("Tono") { feedback = appendFeedbackSnippet(feedback, "Tono piu' chiaro, diretto e operativo") }
                 }
                 SettingsField("Feedback per Hermes", feedback, { feedback = it })
-                IconButton(onClick = {
-                    if (feedback.isBlank()) {
-                        status = "Scrivi feedback prima di inviare."
-                        return@IconButton
-                    }
-                    status = "Invio feedback a Hermes..."
-                    scope.launch {
-                        val result = sendWorkspaceFeedback(settings, article, feedback, loadGatewaySecret(context))
-                        saveWorkspaceFeedback(context, article.id, feedback, result)
-                        status = result
-                        onChanged(result)
-                    }
-                }) { Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Invia feedback", tint = Color.White) }
+                Button(
+                    onClick = {
+                        if (feedback.isBlank()) {
+                            status = "Scrivi feedback prima di inviare."
+                            return@Button
+                        }
+                        status = "Invio feedback a Hermes..."
+                        scope.launch {
+                            val result = sendWorkspaceFeedback(settings, article, feedback, loadGatewaySecret(context))
+                            saveWorkspaceFeedback(context, article.id, feedback, result)
+                            status = result
+                            onChanged(result)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Invia feedback", modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Invia feedback", fontWeight = FontWeight.SemiBold)
+                }
             }
         }
     }
@@ -2555,21 +2844,33 @@ internal fun ProfileScreen(
     }
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            Text("Profilo", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("Profilo locale. Nessun account cloud, nessun token provider nel client.", color = AppColors.Muted)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(AppColors.Accent.copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.AccountCircle, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Profilo", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Profilo locale. Nessun account cloud, nessun token provider nel client.", color = AppColors.Muted, fontSize = 14.sp)
+                }
+            }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(24.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
-                    modifier = Modifier.padding(18.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Image(
                         painter = painterResource(id = R.drawable.chatclaw_logo),
@@ -2579,12 +2880,13 @@ internal fun ProfileScreen(
                             .size(64.dp)
                             .clip(RoundedCornerShape(18.dp))
                     )
-                    Column(modifier = Modifier.padding(start = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("Profilo locale", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Home-server Hermes Agent locale", color = AppColors.Muted)
+                        Text("Home-server Hermes Agent locale", color = AppColors.Muted, fontSize = 14.sp)
                         Text("App: $version", color = AppColors.Muted, fontSize = 12.sp)
                     }
                 }
+                HorizontalDivider(color = AppColors.Border)
             }
         }
         item {
@@ -2600,102 +2902,118 @@ internal fun ProfileScreen(
             ServerMetric("Parita Windows", "Allineata", "Chat, archivio, progetti/recenti, cron, Hermes server, prestazioni, video, news, settings e profilo presenti anche su Android.")
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Aree rapide", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text("Schermate secondarie spostate qui per lasciare la barra bassa pulita.", color = AppColors.Muted, fontSize = 12.sp)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IconButton(onClick = { onOpenTab(Tab.Server) }) { Icon(Icons.Rounded.SmartToy, contentDescription = "Hermes", tint = Color.White) }
-                        IconButton(onClick = { onOpenTab(Tab.Cron) }) { Icon(Icons.Rounded.Schedule, contentDescription = "Cron", tint = Color.White) }
-                        IconButton(onClick = { onOpenTab(Tab.Notifications) }) { Icon(Icons.Rounded.Notifications, contentDescription = "Notifiche", tint = Color.White) }
-                        IconButton(onClick = { onOpenTab(Tab.Hardware) }) { Icon(Icons.Rounded.Speed, contentDescription = "Prestazioni", tint = Color.White) }
-                        IconButton(onClick = { onOpenTab(Tab.News) }) { Icon(Icons.Rounded.Newspaper, contentDescription = "News", tint = Color.White) }
-                        IconButton(onClick = { onOpenTab(Tab.Settings) }) { Icon(Icons.Rounded.Settings, contentDescription = "Impostazioni", tint = Color.White) }
-                        IconButton(onClick = { onOpenTab(Tab.Projects) }) { Icon(Icons.Rounded.Folder, contentDescription = "Progetti", tint = Color.White) }
-                        IconButton(onClick = { onOpenTab(Tab.Archive) }) { Icon(Icons.Rounded.Archive, contentDescription = "Archivio", tint = Color.White) }
-                    }
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("AREE RAPIDE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("Schermate secondarie spostate qui per lasciare la barra bassa pulita.", color = AppColors.Muted, fontSize = 12.sp)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { onOpenTab(Tab.Server) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Hermes") }
+                    TextButton(onClick = { onOpenTab(Tab.Cron) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Cron") }
+                    TextButton(onClick = { onOpenTab(Tab.Notifications) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Notifiche") }
+                    TextButton(onClick = { onOpenTab(Tab.Hardware) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Prestazioni") }
+                    TextButton(onClick = { onOpenTab(Tab.News) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("News") }
+                    TextButton(onClick = { onOpenTab(Tab.Settings) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Impostazioni") }
+                    TextButton(onClick = { onOpenTab(Tab.Projects) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Progetti") }
+                    TextButton(onClick = { onOpenTab(Tab.Archive) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Archivio") }
                 }
+                HorizontalDivider(color = AppColors.Border)
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Server Hermes", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "Riavvio completo del server (come sudo reboot now). Da usare se il server non risponde più.",
-                        color = AppColors.Muted,
-                        fontSize = 12.sp
-                    )
-                    if (rebootStatus.isNotBlank()) {
-                        Text(rebootStatus, color = AppColors.Muted, fontSize = 12.sp)
-                    }
-                    Button(
-                        onClick = { showRebootConfirm = true },
-                        enabled = !rebootBusy,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9E2424))
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("SERVER HERMES", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(
+                    "Riavvio completo del server (come sudo reboot now). Da usare se il server non risponde più.",
+                    color = AppColors.Muted,
+                    fontSize = 12.sp
+                )
+                if (rebootStatus.isNotBlank()) {
+                    Text(rebootStatus, color = AppColors.Muted, fontSize = 12.sp)
+                }
+                Button(
+                    onClick = { showRebootConfirm = true },
+                    enabled = !rebootBusy,
+                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(if (rebootBusy) "Riavvio in corso..." else "Riavvia server", fontWeight = FontWeight.SemiBold)
+                }
+                HorizontalDivider(color = AppColors.Border)
+            }
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("PROGETTO ATTIVO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                if (settings.activeProjectId.isBlank()) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(if (rebootBusy) "Riavvio in corso..." else "Riavvia server")
+                        Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(40.dp))
+                        Text("Nessun progetto selezionato.", color = Color.White, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                        Text("Scegli un progetto per continuare.", color = AppColors.Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+                        Button(onClick = { onOpenTab(Tab.Projects) }, colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)), shape = RoundedCornerShape(12.dp)) { Text("Apri Progetti", fontWeight = FontWeight.SemiBold) }
                     }
+                } else {
+                    Text("Attivo: ${settings.activeProjectName}", color = AppColors.Muted, fontSize = 14.sp)
+                    TextButton(onClick = { onOpenTab(Tab.Projects) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Apri Progetti") }
                 }
+                HorizontalDivider(color = AppColors.Border)
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Progetto attivo", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text(if (settings.activeProjectId.isBlank()) "Nessun progetto selezionato." else "Attivo: ${settings.activeProjectName}", color = AppColors.Muted)
-                    IconButton(onClick = { onOpenTab(Tab.Projects) }) { Icon(Icons.Rounded.FolderOpen, contentDescription = "Apri Progetti", tint = Color.White) }
-                }
-            }
-        }
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Memoria Hermes", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text(memoryStatus, color = AppColors.Muted, fontSize = 12.sp)
-                    SettingsField("Preferenze video", memory.videoPreferences, { memory = memory.copy(videoPreferences = it) })
-                    SettingsField("Preferenze news", memory.newsPreferences, { memory = memory.copy(newsPreferences = it) })
-                    SettingsField("Stile risposta", memory.responseStyle, { memory = memory.copy(responseStyle = it) })
-                    SettingsField("Regole progetto", memory.projectRules, { memory = memory.copy(projectRules = it) })
-                    SettingsField("Note generali", memory.generalNotes, { memory = memory.copy(generalNotes = it) })
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IconButton(onClick = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("MEMORIA HERMES", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(memoryStatus, color = AppColors.Muted, fontSize = 12.sp)
+                SettingsField("Preferenze video", memory.videoPreferences, { memory = memory.copy(videoPreferences = it) })
+                SettingsField("Preferenze news", memory.newsPreferences, { memory = memory.copy(newsPreferences = it) })
+                SettingsField("Stile risposta", memory.responseStyle, { memory = memory.copy(responseStyle = it) })
+                SettingsField("Regole progetto", memory.projectRules, { memory = memory.copy(projectRules = it) })
+                SettingsField("Note generali", memory.generalNotes, { memory = memory.copy(generalNotes = it) })
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
                             memoryStatus = "Salvo memoria gateway..."
                             scope.launch {
                                 memoryStatus = saveHubMemory(settings, memory, loadGatewaySecret(context))
                             }
-                        }) { Icon(Icons.Rounded.Save, contentDescription = "Salva memoria", tint = Color.White) }
-                        IconButton(onClick = {
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) { Text("Salva memoria", fontWeight = FontWeight.SemiBold) }
+                    TextButton(
+                        onClick = {
                             memory = HubMemoryState()
                             memoryStatus = "Contenuti locali svuotati. Premi Salva memoria per cancellare sul gateway."
-                        }) { Icon(Icons.Rounded.Delete, contentDescription = "Svuota memoria", tint = Color(0xFFFF7B8E)) }
-                    }
+                        },
+                        colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Error)
+                    ) { Text("Svuota memoria") }
                 }
+                HorizontalDivider(color = AppColors.Border)
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Aggiornamenti", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text("Installata: $version", color = AppColors.Muted, fontSize = 12.sp)
-                    updateState.latestVersion?.let { Text("Latest: $it", color = AppColors.Muted, fontSize = 12.sp) }
-                    updateState.releaseAssetUrl?.let { Text("Asset: ${it.substringAfterLast('/')}", color = AppColors.Muted, fontSize = 12.sp) }
-                    updateState.downloadedApkPath?.let { Text("APK pronto: $it", color = AppColors.Muted, fontSize = 12.sp) }
-                    Text(updateState.status, color = AppColors.Muted)
-                    if (updateState.releaseSummary.isNotBlank()) {
-                        Text(
-                            "Changelog:\n${updateState.releaseSummary}",
-                            color = Color.White,
-                            fontSize = 13.sp
-                        )
-                    }
-                    if (updateState.progress != null) {
-                        LinearProgressIndicator(
-                            progress = { updateState.progress ?: 0f },
-                            modifier = Modifier.fillMaxWidth(),
-                            color = AppColors.Accent,
-                            trackColor = Color(0xFF424242)
-                        )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("AGGIORNAMENTI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("Installata: $version", color = AppColors.Muted, fontSize = 12.sp)
+                updateState.latestVersion?.let { Text("Latest: $it", color = AppColors.Muted, fontSize = 12.sp) }
+                updateState.releaseAssetUrl?.let { Text("Asset: ${it.substringAfterLast('/')}", color = AppColors.Muted, fontSize = 12.sp) }
+                updateState.downloadedApkPath?.let { Text("APK pronto: $it", color = AppColors.Muted, fontSize = 12.sp) }
+                Text(updateState.status, color = AppColors.Muted)
+                if (updateState.releaseSummary.isNotBlank()) {
+                    Text(
+                        "Changelog:\n${updateState.releaseSummary}",
+                        color = Color.White,
+                        fontSize = 13.sp
+                    )
+                }
+                if (updateState.progress != null) {
+                    LinearProgressIndicator(
+                        progress = { updateState.progress ?: 0f },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = AppColors.Accent,
+                        trackColor = AppColors.Border
+                    )
                         Text(
                             downloadProgressLabel(updateState.progress, updateState.downloadLabel),
                             color = AppColors.Muted,
@@ -2706,113 +3024,126 @@ internal fun ProfileScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        IconButton(onClick = {
-                            updateState = updateState.copy(
-                                status = "Controllo GitHub Releases...",
-                                progress = null,
-                                downloadLabel = "",
-                                downloadedApkPath = null,
-                                isDownloading = false,
-                                releaseSummary = ""
-                            )
-                            scope.launch {
-                                val result = checkGithubUpdate(version)
-                                val downloadedApk = if (result.hasUpdate) {
-                                    result.latestVersion?.let { findDownloadedUpdateApk(context, it) }
-                                } else {
-                                    null
-                                }
+                        TextButton(
+                            onClick = {
                                 updateState = updateState.copy(
-                                    status = if (downloadedApk != null) {
-                                        "Aggiornamento gia' scaricato. Premi Aggiorna per installarlo."
-                                    } else if (result.hasUpdate && result.assetUrl != null) {
-                                        "${result.message} Scarica l'APK dentro l'app e poi premi Aggiorna."
-                                    } else {
-                                        result.message
-                                    },
-                                    releaseAssetUrl = result.assetUrl,
-                                    latestVersion = result.latestVersion,
-                                    hasUpdate = result.hasUpdate,
-                                    progress = if (downloadedApk != null) 1f else null,
-                                    downloadLabel = downloadedApk?.length()?.toReadableFileSize() ?: "",
-                                    downloadedApkPath = downloadedApk?.absolutePath,
-                                    releaseSummary = result.releaseSummary
+                                    status = "Controllo GitHub Releases...",
+                                    progress = null,
+                                    downloadLabel = "",
+                                    downloadedApkPath = null,
+                                    isDownloading = false,
+                                    releaseSummary = ""
                                 )
-                            }
-                        }) {
-                            Icon(Icons.Rounded.Refresh, contentDescription = "Controlla aggiornamenti", tint = Color.White)
+                                scope.launch {
+                                    val result = checkGithubUpdate(version)
+                                    val downloadedApk = if (result.hasUpdate) {
+                                        result.latestVersion?.let { findDownloadedUpdateApk(context, it) }
+                                    } else {
+                                        null
+                                    }
+                                    updateState = updateState.copy(
+                                        status = if (downloadedApk != null) {
+                                            "Aggiornamento gia' scaricato. Premi Aggiorna per installarlo."
+                                        } else if (result.hasUpdate && result.assetUrl != null) {
+                                            "${result.message} Scarica l'APK dentro l'app e poi premi Aggiorna."
+                                        } else {
+                                            result.message
+                                        },
+                                        releaseAssetUrl = result.assetUrl,
+                                        latestVersion = result.latestVersion,
+                                        hasUpdate = result.hasUpdate,
+                                        progress = if (downloadedApk != null) 1f else null,
+                                        downloadLabel = downloadedApk?.length()?.toReadableFileSize() ?: "",
+                                        downloadedApkPath = downloadedApk?.absolutePath,
+                                        releaseSummary = result.releaseSummary
+                                    )
+                                }
+                            },
+                            colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                        ) {
+                            Text("Controlla aggiornamenti")
                         }
                         if (updateState.hasUpdate && updateState.releaseAssetUrl != null && updateState.downloadedApkPath == null && !updateState.isDownloading) {
-                            Button(onClick = {
-                                val assetUrl = updateState.releaseAssetUrl ?: return@Button
-                                scope.launch {
-                                    updateState = updateState.copy(
-                                        status = "Scaricamento APK in corso...",
-                                        isDownloading = true,
-                                        progress = 0f,
-                                        downloadLabel = ""
-                                    )
-                                    val downloaded = downloadUpdateApk(
-                                        context = context,
-                                        assetUrl = assetUrl,
-                                        version = updateState.latestVersion ?: version
-                                    ) { fraction, status, label ->
+                            Button(
+                                onClick = {
+                                    val assetUrl = updateState.releaseAssetUrl ?: return@Button
+                                    scope.launch {
                                         updateState = updateState.copy(
-                                            progress = fraction,
-                                            status = status,
-                                            downloadLabel = label,
-                                            isDownloading = true
-                                        )
-                                    }
-
-                                    updateState = if (downloaded != null) {
-                                        updateState.copy(
-                                            status = "APK pronto. Premi Aggiorna per avviare l'installazione Android.",
-                                            downloadedApkPath = downloaded.absolutePath,
-                                            isDownloading = false,
-                                            progress = 1f,
-                                            downloadLabel = downloaded.length().toReadableFileSize()
-                                        )
-                                    } else {
-                                        updateState.copy(
-                                            status = "Download non riuscito. Premi Controlla e riprova.",
-                                            downloadedApkPath = null,
-                                            isDownloading = false,
-                                            progress = null,
+                                            status = "Scaricamento APK in corso...",
+                                            isDownloading = true,
+                                            progress = 0f,
                                             downloadLabel = ""
                                         )
+                                        val downloaded = downloadUpdateApk(
+                                            context = context,
+                                            assetUrl = assetUrl,
+                                            version = updateState.latestVersion ?: version
+                                        ) { fraction, status, label ->
+                                            updateState = updateState.copy(
+                                                progress = fraction,
+                                                status = status,
+                                                downloadLabel = label,
+                                                isDownloading = true
+                                            )
+                                        }
+
+                                        updateState = if (downloaded != null) {
+                                            updateState.copy(
+                                                status = "APK pronto. Premi Aggiorna per avviare l'installazione Android.",
+                                                downloadedApkPath = downloaded.absolutePath,
+                                                isDownloading = false,
+                                                progress = 1f,
+                                                downloadLabel = downloaded.length().toReadableFileSize()
+                                            )
+                                        } else {
+                                            updateState.copy(
+                                                status = "Download non riuscito. Premi Controlla e riprova.",
+                                                downloadedApkPath = null,
+                                                isDownloading = false,
+                                                progress = null,
+                                                downloadLabel = ""
+                                            )
+                                        }
                                     }
-                                }
-                            }) {
-                                Icon(Icons.Rounded.Download, contentDescription = "Scarica APK", tint = Color.White)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Scarica APK", fontWeight = FontWeight.SemiBold)
                             }
                         }
                         if (updateState.downloadedApkPath != null && !updateState.isDownloading) {
-                            IconButton(onClick = {
-                                val apkPath = updateState.downloadedApkPath ?: return@IconButton
-                                val status = installDownloadedApk(context, apkPath)
-                                updateState = updateState.copy(status = status)
-                            }) {
-                                Icon(Icons.Rounded.SystemUpdate, contentDescription = "Installa aggiornamento", tint = Color.White)
+                            TextButton(
+                                onClick = {
+                                    val apkPath = updateState.downloadedApkPath ?: return@TextButton
+                                    val status = installDownloadedApk(context, apkPath)
+                                    updateState = updateState.copy(status = status)
+                                },
+                                colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+                            ) {
+                                Text("Installa aggiornamento")
                             }
                         }
                     }
+                    HorizontalDivider(color = AppColors.Border)
                 }
-            }
         }
     }
     if (showRebootConfirm) {
         AlertDialog(
             onDismissRequest = { showRebootConfirm = false },
-            title = { Text("Riavviare il server?") },
-            text = { Text("Il server Hermes si riavvierà completamente (come sudo reboot now). Chat, modelli e code media si interromperanno e torneranno online da soli.") },
+            containerColor = AppColors.Surface,
+            title = { Text("Riavviare il server?", color = Color.White) },
+            text = { Text("Il server Hermes si riavvierà completamente (come sudo reboot now). Chat, modelli e code media si interromperanno e torneranno online da soli.", color = AppColors.Muted) },
             confirmButton = {
-                TextButton(onClick = { showRebootConfirm = false; doReboot() }) {
-                    Text("Riavvia ora", color = Color(0xFFFF8A7A))
-                }
+                Button(
+                    onClick = { showRebootConfirm = false; doReboot() },
+                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Error, contentColor = Color.White),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("Riavvia ora", fontWeight = FontWeight.SemiBold) }
             },
             dismissButton = {
-                TextButton(onClick = { showRebootConfirm = false }) { Text("Annulla") }
+                TextButton(onClick = { showRebootConfirm = false }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Annulla") }
             }
         )
     }
@@ -2839,35 +3170,54 @@ internal fun HealthDashboardScreen(context: Context, settings: AppSettings, onOp
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("Salute", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    "Dati letti dal telefono tramite Samsung Health e Health Connect. Riepiloghi wellness, non diagnosi mediche.",
-                    color = AppColors.Muted,
-                    fontSize = 13.sp
-                )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(AppColors.Accent.copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.FavoriteBorder, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Salute", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Dati letti dal telefono tramite Samsung Health e Health Connect. Riepiloghi wellness, non diagnosi mediche.",
+                        color = AppColors.Muted,
+                        fontSize = 14.sp
+                    )
+                }
             }
         }
         item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                IconButton(onClick = { refreshRevision++ }, enabled = !loading) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna dati salute", tint = Color.White) }
-                IconButton(onClick = onOpenSettings) { Icon(Icons.Rounded.Settings, contentDescription = "Impostazioni salute", tint = Color.White) }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { refreshRevision++ }, enabled = !loading, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Aggiorna dati") }
+                TextButton(onClick = onOpenSettings, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Impostazioni salute") }
             }
         }
         when (val current = history) {
             null -> item { HealthLoadingPanel() }
             is HealthHistoryResult.Unavailable -> item {
-                PremiumPanel {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Dati non disponibili", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text(current.message, color = AppColors.Muted, fontSize = 13.sp)
-                        Text("Apri Impostazioni salute, collega Health Connect e abilita almeno una categoria.", color = AppColors.Faint, fontSize = 12.sp)
-                        IconButton(onClick = onOpenSettings) { Icon(Icons.Rounded.Link, contentDescription = "Collega Health Connect", tint = Color.White) }
-                    }
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Rounded.Link, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(40.dp))
+                    Text("Dati non disponibili", color = Color.White, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                    Text(current.message, color = AppColors.Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                    Text("Apri Impostazioni salute, collega Health Connect e abilita almeno una categoria.", color = AppColors.Faint, fontSize = 12.sp, textAlign = TextAlign.Center)
+                    Button(
+                        onClick = onOpenSettings,
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) { Text("Collega Health Connect", fontWeight = FontWeight.SemiBold) }
+                    HorizontalDivider(color = AppColors.Border)
                 }
             }
             is HealthHistoryResult.Success -> {
@@ -2923,23 +3273,23 @@ internal fun HealthDashboardScreen(context: Context, settings: AppSettings, onOp
 
 @Composable
 internal fun HealthLoadingPanel() {
-    PremiumPanel {
+    Column {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             LinearProgressIndicator(modifier = Modifier.width(84.dp), color = AppColors.Accent, trackColor = AppColors.Border)
             Text("Lettura dati Health Connect...", color = AppColors.Muted, fontSize = 13.sp)
         }
+        HorizontalDivider(color = AppColors.Border)
     }
 }
 
 @Composable
 internal fun HealthTodayPanel(summary: DailyWellbeingSummary) {
-    PremiumPanel {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text("Oggi · ${summary.date}", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(("Oggi · ${summary.date}").uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 HealthMetric("Passi", summary.steps?.toString() ?: "—", Modifier.weight(1f))
                 HealthMetric("Calorie", summary.activeCaloriesKcal?.let { String.format(java.util.Locale.ITALY, "%.0f kcal", it) } ?: "—", Modifier.weight(1f))
@@ -2959,20 +3309,17 @@ internal fun HealthTodayPanel(summary: DailyWellbeingSummary) {
                     fontSize = 12.sp
                 )
             }
+            HorizontalDivider(color = AppColors.Border)
         }
-    }
 }
 
 @Composable
 internal fun HealthMetric(label: String, value: String, modifier: Modifier = Modifier) {
     Column(
-        modifier = modifier
-            .background(AppColors.Background, RoundedCornerShape(12.dp))
-            .border(1.dp, AppColors.Border, RoundedCornerShape(12.dp))
-            .padding(12.dp),
+        modifier = modifier.padding(vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        Text(label, color = AppColors.Faint, fontSize = 11.sp)
+        Text(label.uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         Text(value, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
@@ -2987,20 +3334,17 @@ internal fun WellbeingBarChart(
 ) {
     val values = items.map { value(it)?.coerceAtLeast(0f) ?: 0f }
     val peak = (values.maxOrNull() ?: 0f).coerceAtLeast(1f)
-    PremiumPanel {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Text("max ${String.format(java.util.Locale.ITALY, "%.0f", peak)} $unit", color = AppColors.Faint, fontSize = 11.sp)
-            }
-            Canvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(132.dp)
-                    .background(AppColors.Background, RoundedCornerShape(10.dp))
-                    .border(1.dp, AppColors.Border, RoundedCornerShape(10.dp))
-                    .padding(horizontal = 8.dp, vertical = 10.dp)
-            ) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(title.uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Text("max ${String.format(java.util.Locale.ITALY, "%.0f", peak)} $unit", color = AppColors.Faint, fontSize = 11.sp)
+        }
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(132.dp)
+                .padding(horizontal = 8.dp, vertical = 10.dp)
+        ) {
                 val gap = 8.dp.toPx()
                 val width = ((size.width - gap * (values.size - 1)) / values.size.coerceAtLeast(1)).coerceAtLeast(2.dp.toPx())
                 values.forEachIndexed { index, current ->
@@ -3016,8 +3360,8 @@ internal fun WellbeingBarChart(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 items.forEach { item -> Text(item.date.takeLast(2), color = AppColors.Faint, fontSize = 10.sp) }
             }
+            HorizontalDivider(color = AppColors.Border)
         }
-    }
 }
 
 /**
@@ -3037,14 +3381,32 @@ internal fun gpuManagerBase(gatewayUrl: String): String {    val trimmed = gatew
     }
 }
 
+/**
+ * Base del bridge laya (hermes-laya-bridge, :8645): sempre attivo e indipendente
+ * dal manager, così il canale risponde anche se il manager è bloccato.
+ */
+internal fun gpuBridgeBase(gatewayUrl: String): String {
+    val trimmed = gatewayUrl.trim().trimEnd('/')
+    val noPath = trimmed.substringBefore("/v1").substringBefore("/api")
+    return if (Regex(":[0-9]+$").containsMatchIn(noPath)) {
+        noPath.replace(Regex(":[0-9]+$"), ":8645")
+    } else {
+        "$noPath:8645"
+    }
+}
+
 @Composable
 internal fun GpuComputeCard(context: Context, settings: AppSettings) {
     val scope = rememberCoroutineScope()
     val base = remember(settings.gatewayUrl) { gpuManagerBase(settings.gatewayUrl) }
+    val bridge = remember(settings.gatewayUrl) { gpuBridgeBase(settings.gatewayUrl) }
     var body by remember(base) { mutableStateOf<JSONObject?>(null) }
     var jobsBody by remember(base) { mutableStateOf<JSONArray?>(null) }
     var error by remember(base) { mutableStateOf("") }
     var busy by remember(base) { mutableStateOf(false) }
+    var layaText by remember(bridge) { mutableStateOf("") }
+    var layaReply by remember(bridge) { mutableStateOf("") }
+    var layaBusy by remember(bridge) { mutableStateOf(false) }
 
     suspend fun refreshSuspend(): Boolean {
         busy = true
@@ -3074,6 +3436,25 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
         }
     }
 
+    fun sendLaya() {
+        val text = layaText.trim()
+        if (text.isEmpty() || layaBusy) return
+        scope.launch {
+            layaBusy = true
+            layaReply = runCatching {
+                val key = loadGatewaySecret(context)
+                val (code, respBody) = postJson("$bridge/laya", JSONObject().put("text", text), key, allowCompatAuth = false)
+                if (code !in 200..299) {
+                    "Bridge HTTP $code"
+                } else {
+                    JSONObject(respBody).optString("reply").ifBlank { "Nessuna risposta." }
+                }
+            }.getOrElse { "Bridge non raggiungibile ($bridge)." }
+            layaBusy = false
+            refresh()
+        }
+    }
+
     PollWhileStarted(base, baseIntervalMs = 10_000L) {
         if (busy) return@PollWhileStarted true
         refreshSuspend()
@@ -3081,14 +3462,14 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
 
     Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Modalità GPU (Qwen / ComfyUI)", color = Color.White, fontWeight = FontWeight.SemiBold)
+            Text("MODALITÀ GPU (QWEN / COMFYUI)", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             if (body == null) {
                 Text(
                     if (error.isBlank()) "Lettura stato GPU..." else "GPU Manager non raggiungibile ($base). Verifica che hermes-gpu-manager sia attivo.",
                     color = AppColors.Muted,
                     fontSize = 12.sp
                 )
-                IconButton(onClick = { refresh() }, enabled = !busy) { Icon(Icons.Rounded.Refresh, contentDescription = "Riprova lettura GPU", tint = Color.White) }
+                IconButton(onClick = { refresh() }, enabled = !busy) { Icon(Icons.Rounded.Refresh, contentDescription = "Riprova lettura GPU", tint = AppColors.Accent) }
             } else {
             val status = body ?: JSONObject()
             val desired = status.optString("desired_mode", "?")
@@ -3103,8 +3484,11 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                             }
                         },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (desired == mode) AppColors.Accent else AppColors.AssistantBubble
-                        )
+                            containerColor = if (desired == mode) AppColors.Accent else AppColors.Panel,
+                            contentColor = if (desired == mode) Color(0xFF171009) else Color.White
+                        ),
+                        border = if (desired == mode) null else BorderStroke(1.dp, AppColors.Border),
+                        shape = RoundedCornerShape(10.dp)
                     ) { Text(if (desired == mode) "$mode ✓" else mode) }
                 }
             }
@@ -3133,7 +3517,7 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                 color = AppColors.Muted,
                 fontSize = 12.sp
             )
-            Text("Media jobs recenti", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Text("MEDIA JOBS RECENTI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             val recentJobs = jobsBody ?: JSONArray()
             if (recentJobs.length() == 0) {
                 Text("Nessun job media.", color = AppColors.Muted, fontSize = 12.sp)
@@ -3159,12 +3543,37 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                 }
             }
             status.optString("last_error", "").takeIf { it.isNotBlank() }?.let {
-                Text("Ultimo errore: $it", color = Color(0xFFFF9A7A), fontSize = 12.sp)
+                Text("Ultimo errore: $it", color = AppColors.Error, fontSize = 12.sp)
             }
             status.optString("h3_license_state", "").takeIf { it.isNotBlank() }?.let {
                 Text("Video H3: $it", color = AppColors.Muted, fontSize = 12.sp)
             }
-            Button(onClick = { refresh() }, enabled = !busy) { Text("Aggiorna") }
+                TextButton(onClick = { refresh() }, enabled = !busy, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Aggiorna") }
+            }
+            HorizontalDivider(color = AppColors.Border)
+            Text("CHAT LAYA (canale diretto)", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Text(
+                "Chiedi in linguaggio naturale: \"metti l'LLM ready\", \"attiva comfy\", \"metti in auto\", \"come sta?\".",
+                color = AppColors.Muted,
+                fontSize = 12.sp
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextField(
+                    value = layaText,
+                    onValueChange = { layaText = it },
+                    singleLine = true,
+                    placeholder = { Text("Chiedi a laya...") },
+                    modifier = Modifier.weight(1f),
+                    enabled = !layaBusy
+                )
+                Button(
+                    onClick = { sendLaya() },
+                    enabled = !layaBusy && layaText.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
+                ) { Text(if (layaBusy) "..." else "Invia") }
+            }
+            if (layaReply.isNotBlank()) {
+                Text(layaReply, color = Color.White, fontSize = 13.sp)
             }
         }
     }

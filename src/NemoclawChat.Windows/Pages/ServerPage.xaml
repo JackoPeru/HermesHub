@@ -10,15 +10,18 @@
     <ScrollViewer Background="{StaticResource AppBackgroundBrush}" VerticalScrollBarVisibility="Auto">
         <Grid Padding="44,36">
             <StackPanel MaxWidth="980" HorizontalAlignment="Left" Spacing="24">
-                <StackPanel Spacing="8">
-                    <TextBlock
-                        FontSize="30"
-                        FontWeight="SemiBold"
-                        Foreground="White"
-                        Text="Hermes Server" />
-                    <TextBlock
-                        Foreground="{StaticResource MutedTextBrush}"
-                        Text="Dashboard Hermes Agent API: health, detailed health, models e capabilities." />
+                <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                    <Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13">
+                        <FontIcon FontSize="19" Glyph="&#xE968;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <TextBlock
+                            Style="{StaticResource PageTitleStyle}"
+                            Text="Hermes Server" />
+                        <TextBlock
+                            Style="{StaticResource PageSubtitleStyle}"
+                            Text="Dashboard Hermes Agent API: health, detailed health, models e capabilities." />
+                    </StackPanel>
                 </StackPanel>
 
                 <Grid ColumnSpacing="16" RowSpacing="16">
@@ -31,140 +34,100 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Border Padding="20" Background="{StaticResource SurfaceBrush}" CornerRadius="18">
-                        <StackPanel Spacing="8">
-                            <TextBlock Foreground="White" FontWeight="SemiBold" Text="Hermes API" />
-                            <TextBlock x:Name="GatewayText" Foreground="White" TextWrapping="Wrap" />
-                            <TextBlock x:Name="GatewayDetailText" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
-                    <Border Grid.Column="1" Padding="20" Background="{StaticResource SurfaceBrush}" CornerRadius="18">
-                        <StackPanel Spacing="8">
-                            <TextBlock Foreground="White" FontWeight="SemiBold" Text="Modello" />
-                            <TextBlock x:Name="ModelText" Foreground="White" TextWrapping="Wrap" />
-                            <TextBlock x:Name="ProviderText" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
-                    <Border Grid.Row="1" Padding="20" Background="{StaticResource SurfaceBrush}" CornerRadius="18">
-                        <StackPanel Spacing="8">
-                            <TextBlock Foreground="White" FontWeight="SemiBold" Text="Inferenza lato server" />
-                            <TextBlock x:Name="InferenceText" Foreground="White" TextWrapping="Wrap" />
-                            <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="12" Text="Il client parla a Hermes API, non direttamente al runtime modello." TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
-                    <Border Grid.Row="1" Grid.Column="1" Padding="20" Background="{StaticResource SurfaceBrush}" CornerRadius="18">
-                        <StackPanel Spacing="8">
-                            <TextBlock Foreground="White" FontWeight="SemiBold" Text="Sicurezza" />
-                            <TextBlock x:Name="PolicyText" Foreground="White" TextWrapping="Wrap" />
-                            <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="12" Text="API key Hermes lato app: Bearer configurato dall'utente. Esposizione consigliata solo LAN/Tailscale." TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
+                    <StackPanel Spacing="8">
+                        <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="HERMES API" />
+                        <TextBlock x:Name="GatewayText" Foreground="White" TextWrapping="Wrap" />
+                        <TextBlock x:Name="GatewayDetailText" Style="{StaticResource CaptionStyle}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="8">
+                        <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="MODELLO" />
+                        <TextBlock x:Name="ModelText" Foreground="White" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ProviderText" Style="{StaticResource CaptionStyle}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Spacing="8">
+                        <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="INFERENZA LATO SERVER" />
+                        <TextBlock x:Name="InferenceText" Foreground="White" TextWrapping="Wrap" />
+                        <TextBlock Style="{StaticResource CaptionStyle}" Text="Il client parla a Hermes API, non direttamente al runtime modello." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="1" Spacing="8">
+                        <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="SICUREZZA" />
+                        <TextBlock x:Name="PolicyText" Foreground="White" TextWrapping="Wrap" />
+                        <TextBlock Style="{StaticResource CaptionStyle}" Text="API key Hermes lato app: Bearer configurato dall'utente. Esposizione consigliata solo LAN/Tailscale." TextWrapping="Wrap" />
+                    </StackPanel>
                 </Grid>
 
-                <Border
-                    Padding="22"
-                    Background="{StaticResource SurfaceBrush}"
-                    BorderBrush="{StaticResource BorderBrushSoft}"
-                    BorderThickness="1"
-                    CornerRadius="18">
-                    <StackPanel Spacing="14">
-                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="Azioni Hermes" />
-                        <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <Button
-                                Background="{StaticResource AccentGreenBrush}"
-                                BorderThickness="0"
-                                Click="TestGateway_Click"
-                                Content="Test Hermes"
-                                Foreground="White" />
-                            <Button Click="Refresh_Click" Content="Ricarica settings" />
-                            <Button Click="ShowApiContract_Click" Content="Mostra API" />
-                        </StackPanel>
-                        <Border Padding="14" Background="{StaticResource AssistantBubbleBrush}" CornerRadius="12">
-                            <TextBlock
-                                x:Name="ContractText"
-                                Foreground="{StaticResource MutedTextBrush}"
-                                Text="Contratto API nascosto. Premi Mostra API."
-                                TextWrapping="Wrap" />
-                        </Border>
+                <StackPanel Spacing="16">
+                    <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="AZIONI HERMES" />
+                    <TextBlock x:Name="StatusText" Style="{StaticResource CaptionStyle}" TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Button
+                            Style="{StaticResource TextButtonStyle}"
+                            Click="TestGateway_Click"
+                            Content="Test Hermes" />
+                        <Button Style="{StaticResource TextButtonStyle}" Click="Refresh_Click" Content="Ricarica settings" />
+                        <Button Style="{StaticResource TextButtonStyle}" Click="ShowApiContract_Click" Content="Mostra API" />
                     </StackPanel>
-                </Border>
+                    <TextBlock
+                        x:Name="ContractText"
+                        Foreground="{StaticResource MutedTextBrush}"
+                        Text="Contratto API nascosto. Premi Mostra API."
+                        TextWrapping="Wrap" />
+                </StackPanel>
 
-                <Border
-                    Padding="22"
-                    Background="{StaticResource SurfaceBrush}"
-                    BorderBrush="{StaticResource BorderBrushSoft}"
-                    BorderThickness="1"
-                    CornerRadius="18">
-                    <StackPanel Spacing="14">
-                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="Capabilities Hermes" />
-                        <TextBlock x:Name="GatewayWsText" Foreground="White" TextWrapping="Wrap" />
-                        <TextBlock
-                            Foreground="{StaticResource MutedTextBrush}"
-                            FontSize="12"
-                            Text="Lettura reale di /v1/capabilities e /v1/models usando solo URL Hermes."
-                            TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <PasswordBox
-                                x:Name="GatewaySecretBox"
-                                Width="1"
-                                Height="1"
-                                Visibility="Collapsed" />
-                            <Button
-                                Background="{StaticResource AccentGreenBrush}"
-                                BorderThickness="0"
-                                Click="TestGatewayWs_Click"
-                                Content="Leggi capabilities"
-                                Foreground="White" />
-                        </StackPanel>
-                        <Border Padding="14" Background="{StaticResource AssistantBubbleBrush}" CornerRadius="12">
-                            <TextBlock
-                                x:Name="GatewayWsResultText"
-                                Foreground="{StaticResource MutedTextBrush}"
-                                Text="Nessun controllo capabilities eseguito."
-                                TextWrapping="Wrap" />
-                        </Border>
+                <StackPanel Spacing="16">
+                    <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="CAPABILITIES HERMES" />
+                    <TextBlock x:Name="GatewayWsText" Foreground="White" TextWrapping="Wrap" />
+                    <TextBlock
+                        Style="{StaticResource CaptionStyle}"
+                        Text="Lettura reale di /v1/capabilities e /v1/models usando solo URL Hermes."
+                        TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <PasswordBox
+                            x:Name="GatewaySecretBox"
+                            Width="1"
+                            Height="1"
+                            Visibility="Collapsed" />
+                        <Button
+                            Style="{StaticResource TextButtonStyle}"
+                            Click="TestGatewayWs_Click"
+                            Content="Leggi capabilities" />
                     </StackPanel>
-                </Border>
+                    <TextBlock
+                        x:Name="GatewayWsResultText"
+                        Foreground="{StaticResource MutedTextBrush}"
+                        Text="Nessun controllo capabilities eseguito."
+                        TextWrapping="Wrap" />
+                </StackPanel>
 
-                <Border
-                    Padding="22"
-                    Background="{StaticResource SurfaceBrush}"
-                    BorderBrush="{StaticResource BorderBrushSoft}"
-                    BorderThickness="1"
-                    CornerRadius="18">
-                    <StackPanel Spacing="14">
-                        <TextBlock Foreground="White" FontWeight="SemiBold" Text="Diagnostica gateway" />
-                        <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="12" Text="Controlla health, key, modelli, capabilities, media, video library, memoria e hub state." TextWrapping="Wrap" />
-                        <Button Click="RunDiagnostics_Click" Content="Esegui diagnostica" />
-                        <StackPanel x:Name="DiagnosticsPanel" Spacing="10" />
-                    </StackPanel>
-                </Border>
+                <StackPanel Spacing="16">
+                    <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="DIAGNOSTICA GATEWAY" />
+                    <TextBlock Style="{StaticResource CaptionStyle}" Text="Controlla health, key, modelli, capabilities, media, video library, memoria e hub state." TextWrapping="Wrap" />
+                    <Button Style="{StaticResource PrimaryButtonStyle}" Click="RunDiagnostics_Click" Content="Esegui diagnostica" />
+                    <StackPanel x:Name="DiagnosticsPanel" Spacing="10" />
+                </StackPanel>
 
-                <Border Padding="22" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="20">
-                    <StackPanel Spacing="12">
-                        <TextBlock Foreground="White" FontSize="20" FontWeight="SemiBold" Text="Centro controllo server" />
-                        <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Azioni tipizzate e allowlist: Hermes, gateway, llama.cpp e Tailscale. Stop e restart richiedono conferma." TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <ComboBox x:Name="ServiceBox" Width="180" SelectedIndex="0"><ComboBoxItem Content="hermes" /><ComboBoxItem Content="gateway" /><ComboBoxItem Content="llama" /><ComboBoxItem Content="tailscale" /></ComboBox>
-                            <Button Click="StartService_Click" Content="Avvia" />
-                            <Button Click="StopService_Click" Content="Ferma" />
-                            <Button Click="RestartService_Click" Content="Riavvia" />
-                            <Button Click="RefreshControl_Click" Content="Aggiorna" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Click="Maintenance_Click" Tag="update" Content="Aggiorna server" />
-                            <Button Click="Maintenance_Click" Tag="rollback" Content="Rollback" />
-                            <Button Click="Maintenance_Click" Tag="backup" Content="Backup" />
-                            <Button Click="Maintenance_Click" Tag="restore" Content="Ripristina" />
-                            <Button Click="Maintenance_Click" Tag="diagnostic" Content="Pacchetto diagnostico" />
-                            <Button Click="IntegrationTests_Click" Content="Test STT/TTS/media/tool" />
-                        </StackPanel>
-                        <TextBox x:Name="LogFilterBox" Header="Filtro log live" TextChanged="LogFilterBox_TextChanged" />
-                        <TextBox x:Name="ControlOutputBox" Header="Servizi · coda · run · GPU · log" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="340" FontFamily="Consolas" />
-                        <TextBlock x:Name="CompatibilityWarningText" Foreground="#FFFFB86B" TextWrapping="Wrap" />
+                <StackPanel Spacing="16">
+                    <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="CENTRO CONTROLLO SERVER" />
+                    <TextBlock Style="{StaticResource PageSubtitleStyle}" Text="Azioni tipizzate e allowlist: Hermes, gateway, llama.cpp e Tailscale. Stop e restart richiedono conferma." TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ComboBox x:Name="ServiceBox" Width="180" SelectedIndex="0"><ComboBoxItem Content="hermes" /><ComboBoxItem Content="gateway" /><ComboBoxItem Content="llama" /><ComboBoxItem Content="tailscale" /></ComboBox>
+                        <Button Style="{StaticResource PrimaryButtonStyle}" Click="StartService_Click" Content="Avvia" />
+                        <Button Style="{StaticResource TextButtonStyle}" Click="StopService_Click" Content="Ferma" />
+                        <Button Style="{StaticResource TextButtonStyle}" Click="RestartService_Click" Content="Riavvia" />
+                        <Button Style="{StaticResource TextButtonStyle}" Click="RefreshControl_Click" Content="Aggiorna" />
                     </StackPanel>
-                </Border>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Style="{StaticResource TextButtonStyle}" Click="Maintenance_Click" Tag="update" Content="Aggiorna server" />
+                        <Button Style="{StaticResource TextButtonStyle}" Click="Maintenance_Click" Tag="rollback" Content="Rollback" />
+                        <Button Style="{StaticResource TextButtonStyle}" Click="Maintenance_Click" Tag="backup" Content="Backup" />
+                        <Button Style="{StaticResource TextButtonStyle}" Click="Maintenance_Click" Tag="restore" Content="Ripristina" />
+                        <Button Style="{StaticResource TextButtonStyle}" Click="Maintenance_Click" Tag="diagnostic" Content="Pacchetto diagnostico" />
+                        <Button Style="{StaticResource TextButtonStyle}" Click="IntegrationTests_Click" Content="Test STT/TTS/media/tool" />
+                    </StackPanel>
+                    <TextBox x:Name="LogFilterBox" Header="Filtro log live" TextChanged="LogFilterBox_TextChanged" />
+                    <TextBox x:Name="ControlOutputBox" Header="Servizi · coda · run · GPU · log" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="340" FontFamily="Consolas" />
+                    <TextBlock x:Name="CompatibilityWarningText" Foreground="#FFFFB86B" TextWrapping="Wrap" />
+                </StackPanel>
             </StackPanel>
         </Grid>
     </ScrollViewer>

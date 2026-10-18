@@ -122,6 +122,15 @@ public static class AppSettingsStore
                 changed = true;
             }
         }
+        if (!string.IsNullOrWhiteSpace(settings.ImageLibraryPath))
+        {
+            var normalizedImagePath = settings.ImageLibraryPath.Trim();
+            if (!string.Equals(settings.ImageLibraryPath, normalizedImagePath, StringComparison.Ordinal))
+            {
+                settings.ImageLibraryPath = normalizedImagePath;
+                changed = true;
+            }
+        }
         var normalizedAttachmentMb = Math.Clamp(settings.MaxAttachmentMb <= 0 || settings.MaxAttachmentMb == 6 ? 150 : settings.MaxAttachmentMb, 1, 150);
         if (settings.MaxAttachmentMb != normalizedAttachmentMb)
         {

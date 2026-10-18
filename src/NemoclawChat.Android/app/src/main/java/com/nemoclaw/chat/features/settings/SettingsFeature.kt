@@ -541,7 +541,7 @@ internal fun SettingsScreen(
             title = { Text("Eliminare riepiloghi salute?") },
             text = { Text("Verranno eliminati dal gateway Hermes tutti i riepiloghi salute sincronizzati. I dati in Samsung Health e Health Connect non vengono toccati.") },
             confirmButton = {
-                IconButton(onClick = {
+                TextButton(onClick = {
                     showEraseHealthConfirm = false
                     scope.launch {
                         when (val result = HealthSync.eraseAllFromHermes(context)) {
@@ -552,9 +552,9 @@ internal fun SettingsScreen(
                             is HealthEraseResult.Failed -> status = result.message
                         }
                     }
-                }) { Icon(Icons.Rounded.Delete, contentDescription = "Conferma eliminazione salute", tint = Color(0xFFFF7B8E)) }
+                }) { Text("Elimina", color = AppColors.Error) }
             },
-            dismissButton = { IconButton(onClick = { showEraseHealthConfirm = false }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla", tint = Color.White) } }
+            dismissButton = { TextButton(onClick = { showEraseHealthConfirm = false }) { Text("Annulla", color = AppColors.Accent) } }
         )
     }
 
@@ -569,7 +569,7 @@ internal fun SettingsScreen(
                 "Il backup ripristina solo preferenze di visualizzazione e dati archiviati. Indirizzi server, credenziali, " +
                 "connessioni profilo e opzioni privacy/sicurezza restano invariate.") },
             confirmButton = {
-                IconButton(onClick = {
+                Button(onClick = {
                     val pending = restorePendingJson
                     showRestoreConfirm = false
                     restorePendingJson = null
@@ -596,14 +596,19 @@ internal fun SettingsScreen(
                             }
                         }
                     }
-                }) { Icon(Icons.Rounded.Sync, contentDescription = "Conferma ripristino", tint = Color.White) }
+                },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AppColors.Accent,
+                        contentColor = Color(0xFF171009)
+                    )
+                ) { Text("Ripristina", color = Color(0xFF171009)) }
             },
             dismissButton = {
-                IconButton(onClick = {
+                TextButton(onClick = {
                     showRestoreConfirm = false
                     restorePendingJson = null
                     status = "Ripristino annullato."
-                }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla ripristino", tint = Color.White) }
+                }) { Text("Annulla", color = AppColors.Accent) }
             }
         )
     }
@@ -614,8 +619,8 @@ internal fun SettingsScreen(
             title = { Text("Report ripristino") },
             text = { Text(restoreReportText) },
             confirmButton = {
-                IconButton(onClick = { showRestoreReport = false }) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Chiudi report", tint = Color.White)
+                TextButton(onClick = { showRestoreReport = false }) {
+                    Text("Chiudi", color = AppColors.Accent)
                 }
             },
             dismissButton = null
@@ -626,21 +631,43 @@ internal fun SettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .imePadding()
-            .padding(24.dp),
+            .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.Top
     ) {
-        Text("Impostazioni", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(10.dp))
-        Text("Impostazioni salvate sul dispositivo. Le nuove installazioni non includono endpoint o credenziali preconfigurati.", color = AppColors.Muted)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(AppColors.Accent.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.Tune,
+                    contentDescription = null,
+                    tint = AppColors.Accent,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Impostazioni", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Impostazioni salvate sul dispositivo. Le nuove installazioni non includono endpoint o credenziali preconfigurati.",
+                    color = AppColors.Muted,
+                    fontSize = 14.sp
+                )
+            }
+        }
         Spacer(modifier = Modifier.height(18.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item {
                 SettingsSectionHeader(title = "Connessione", subtitle = "Il tuo server Hermes.")
             }
             item {
-                PremiumPanel {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Connessione Hermes", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(
                             "Dove vive il tuo server e con quale chiave parlarci. Senza questi due, niente funziona.",
                             color = AppColors.Muted,
@@ -676,23 +703,20 @@ internal fun SettingsScreen(
                             color = AppColors.Muted,
                             fontSize = 12.sp
                         )
-                    }
                 }
             }
             item {
                 SettingsSectionHeader(title = "Voce e chiamata", subtitle = "Voci, velocita, wake word e Bluetooth.")
             }
             item {
-                PremiumPanel {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Voce", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(
                             "Profilo progetto: ${settings.activeProjectName.ifBlank { "Generale" }}",
                             color = AppColors.Muted,
                             fontSize = 12.sp
                         )
                         SettingsField("Modello dedicato Voce", voiceModel, { voiceModel = it })
-                        Text("Voce Kokoro", color = Color.White)
+                        Text("VOCE KOKORO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -701,13 +725,14 @@ internal fun SettingsScreen(
                                 Button(
                                     onClick = { voiceName = candidate },
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (voiceName == candidate) AppColors.Accent else AppColors.Composer
+                                        containerColor = if (voiceName == candidate) AppColors.Accent else AppColors.Composer,
+                                        contentColor = if (voiceName == candidate) Color(0xFF171009) else Color.White
                                     )
                                 ) {
-                                    Text(candidate)
+                                    Text(candidate, color = if (voiceName == candidate) Color(0xFF171009) else Color.White)
                                 }
                             }
-                            Button(onClick = {
+                            TextButton(onClick = {
                                 status = "Genero anteprima voce..."
                                 scope.launch {
                                     status = runCatching {
@@ -715,7 +740,11 @@ internal fun SettingsScreen(
                                         "Anteprima completata."
                                     }.getOrElse { "Anteprima non disponibile: ${it.message ?: it.javaClass.simpleName}" }
                                 }
-                            }) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Anteprima voce", tint = Color.White) }
+                            }) {
+                                Icon(Icons.Rounded.PlayArrow, contentDescription = "Anteprima voce", tint = AppColors.Accent)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Anteprima", color = AppColors.Accent)
+                            }
                         }
                         Text("Velocita: ${String.format(java.util.Locale.ROOT, "%.2f", voiceSpeed)}x", color = Color.White)
                         Slider(
@@ -723,7 +752,7 @@ internal fun SettingsScreen(
                             onValueChange = { voiceSpeed = it },
                             valueRange = 0.75f..1.35f
                         )
-                        Text("Forma particelle", color = Color.White)
+                        Text("FORMA PARTICELLE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -732,14 +761,15 @@ internal fun SettingsScreen(
                                 Button(
                                     onClick = { voiceParticleShape = candidate },
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (voiceParticleShape == candidate) AppColors.Accent else AppColors.Composer
+                                        containerColor = if (voiceParticleShape == candidate) AppColors.Accent else AppColors.Composer,
+                                        contentColor = if (voiceParticleShape == candidate) Color(0xFF171009) else Color.White
                                     )
                                 ) {
-                                    Text(particleShapeLabel(candidate))
+                                    Text(particleShapeLabel(candidate), color = if (voiceParticleShape == candidate) Color(0xFF171009) else Color.White)
                                 }
                             }
                         }
-                        Text("Parola di attivazione", color = Color.White)
+                        Text("PAROLA DI ATTIVAZIONE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -748,10 +778,11 @@ internal fun SettingsScreen(
                                 Button(
                                     onClick = { voiceWakePhrase = candidate },
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (voiceWakePhrase.equals(candidate, ignoreCase = true)) AppColors.Accent else AppColors.Composer
+                                        containerColor = if (voiceWakePhrase.equals(candidate, ignoreCase = true)) AppColors.Accent else AppColors.Composer,
+                                        contentColor = if (voiceWakePhrase.equals(candidate, ignoreCase = true)) Color(0xFF171009) else Color.White
                                     )
                                 ) {
-                                    Text(candidate)
+                                    Text(candidate, color = if (voiceWakePhrase.equals(candidate, ignoreCase = true)) Color(0xFF171009) else Color.White)
                                 }
                             }
                         }
@@ -771,7 +802,6 @@ internal fun SettingsScreen(
                         MetricSwitch("Tieni premuto per parlare", voicePushToTalk) { voicePushToTalk = it }
                         MetricSwitch("Mostra trascrizione", voiceTranscript) { voiceTranscript = it }
                         MetricSwitch("Audio su Bluetooth", voiceBluetooth) { voiceBluetooth = it }
-                    }
                 }
             }
             item {
@@ -781,15 +811,14 @@ internal fun SettingsScreen(
                         Icon(
                             if (advancedVisible) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                             contentDescription = if (advancedVisible) "Nascondi avanzate" else "Mostra avanzate",
-                            tint = Color.White
+                            tint = AppColors.Accent
                         )
                     }
                 }
             }
             if (advancedVisible) {
                 item {
-                    PremiumPanel {
-                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(
                                 "Parametri letti dal server: cambiali solo se Hermes non risponde o su indicazione specifica.",
                                 color = AppColors.Muted,
@@ -813,7 +842,7 @@ internal fun SettingsScreen(
                                 color = AppColors.Muted, fontSize = 12.sp
                             )
                             Text(modelCatalogStatus, color = AppColors.Muted, fontSize = 12.sp)
-                            Button(onClick = {
+                            TextButton(onClick = {
                                 scope.launch {
                                     modelCatalogStatus = "Leggo capabilities e catalogo Hermes..."
                                     try {
@@ -842,7 +871,11 @@ internal fun SettingsScreen(
                                         modelCatalogStatus = "Errore picker: ${ex.message ?: ex.javaClass.simpleName}"
                                     }
                                 }
-                            }) { Icon(Icons.Rounded.Download, contentDescription = "Carica picker Hermes", tint = Color.White) }
+                            }) {
+                                Icon(Icons.Rounded.Download, contentDescription = "Carica picker Hermes", tint = AppColors.Accent)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Carica modelli", color = AppColors.Accent)
+                            }
                             if (modelCatalogModels.isNotEmpty()) {
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     modelCatalogModels.take(12).forEach { opt ->
@@ -878,7 +911,6 @@ internal fun SettingsScreen(
                                 color = AppColors.Muted,
                                 fontSize = 12.sp
                             )
-                        }
                     }
                 }
             }
@@ -886,8 +918,7 @@ internal fun SettingsScreen(
                 SettingsSectionHeader(title = "Chat e risposte", subtitle = "Come si presenta la conversazione.")
             }
             item {
-                PremiumPanel {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Tool call in chat", color = Color.White, modifier = Modifier.weight(1f))
                             Switch(checked = showToolCalls, onCheckedChange = { showToolCalls = it })
@@ -898,7 +929,7 @@ internal fun SettingsScreen(
                             Switch(checked = showMessageMetrics, onCheckedChange = { showMessageMetrics = it })
                         }
                         Text("ON = mostra sotto ogni messaggio tempi e token (TTFT, token, velocita).", color = AppColors.Muted, fontSize = 12.sp)
-                        Text("Dettaglio metriche", color = Color.White)
+                        Text("DETTAGLIO METRICHE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                         MetricSwitch("Tempo primo token", metricTtft) { metricTtft = it }
                         MetricSwitch("Token/sec", metricTokensPerSecond) { metricTokensPerSecond = it }
                         MetricSwitch("Token output", metricOutputTokens) { metricOutputTokens = it }
@@ -930,38 +961,32 @@ internal fun SettingsScreen(
                             color = AppColors.Muted,
                             fontSize = 12.sp
                         )
-                    }
                 }
             }
             item {
                 SettingsSectionHeader(title = "Aspetto", subtitle = "Dimensione del testo in app.")
             }
             item {
-                PremiumPanel {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        FontScaleControl(
-                            value = fontScale,
-                            onValueChange = { scale ->
-                                fontScale = scale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
-                                status = "Dimensione caratteri: ${(fontScale * 100).toInt()}%. Premi Salva per applicare."
-                            }
-                        )
+                FontScaleControl(
+                    value = fontScale,
+                    onValueChange = { scale ->
+                        fontScale = scale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+                        status = "Dimensione caratteri: ${(fontScale * 100).toInt()}%. Premi Salva per applicare."
                     }
-                }
+                )
             }
             item {
                 SettingsSectionHeader(title = "Automazione", subtitle = "Lavoro senza mani: background, approvazioni, media.")
             }
             item {
-                PremiumPanel {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Lavoro in background", color = Color.White, modifier = Modifier.weight(1f))
                             Switch(checked = backgroundWork, onCheckedChange = { backgroundWork = it })
                         }
                         Text("ON = se esci dall'app Hermes continua il lavoro sul gateway e ti avvisa alla fine.", color = AppColors.Muted, fontSize = 12.sp)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Auto-approvazione run", color = Color.White)
+                            Text("AUTO-APPROVAZIONE RUN", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         AutoApproveChip("Chiedi", "off", autoApprove) { autoApprove = it }
                         AutoApproveChip("Sessione", "session", autoApprove) { autoApprove = it }
@@ -974,7 +999,7 @@ internal fun SettingsScreen(
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Fast path media", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Text("FAST PATH MEDIA", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
                         Switch(checked = smartFastPath, onCheckedChange = { smartFastPath = it })
                     }
                     Text(
@@ -1005,26 +1030,24 @@ internal fun SettingsScreen(
                         prompt = smartVideoPrompt,
                         onPromptChange = { smartVideoPrompt = it }
                     )
-                    Text("4. Domande sulla foto", color = Color.White)
+                    Text("4. DOMANDE SULLA FOTO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     Text(
                         "Vanno sempre in chat normale: nessuna generazione, nessun fast path.",
                         color = AppColors.Muted, fontSize = 12.sp
                     )
-                    Text("5. Foto senza istruzioni", color = Color.White)
+                    Text("5. FOTO SENZA ISTRUZIONI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         AutoApproveChip("Chat normale", "chat", smartBlankPhoto) { smartBlankPhoto = it }
                         AutoApproveChip("Video preview", "video", smartBlankPhoto) { smartBlankPhoto = it }
                     }
                 } // Column fast path
-                    } // Column pannello Automazione
-                } // PremiumPanel Automazione
+                } // Column Automazione
             } // item Automazione
             item {
                 SettingsSectionHeader(title = "Privacy e dati", subtitle = "Screenshot, backup e ripristino.")
             }
             item {
-                PremiumPanel {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Blocca screenshot", color = Color.White, modifier = Modifier.weight(1f))
                             Switch(checked = blockScreenshots, onCheckedChange = { blockScreenshots = it })
@@ -1041,30 +1064,33 @@ internal fun SettingsScreen(
                             fontSize = 12.sp
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = {
-                                status = runCatching {
-                                    if (backupPassword.isNotEmpty()) exportLocalBackupWithPassword(context, backupPassword)
-                                    else exportLocalBackup(context)
-                                }.getOrElse { "Backup non riuscito: ${it.message ?: it.javaClass.simpleName}" }
-                            }) { Text("Esporta") }
-                            Button(onClick = { backupImportPicker.launch(arrayOf("application/json")) }) { Text("Verifica") }
-                            Button(onClick = { backupRestorePicker.launch(arrayOf("application/json")) }) { Text("Ripristina") }
+                            Button(
+                                onClick = {
+                                    status = runCatching {
+                                        if (backupPassword.isNotEmpty()) exportLocalBackupWithPassword(context, backupPassword)
+                                        else exportLocalBackup(context)
+                                    }.getOrElse { "Backup non riuscito: ${it.message ?: it.javaClass.simpleName}" }
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AppColors.Accent,
+                                    contentColor = Color(0xFF171009)
+                                )
+                            ) { Text("Esporta", color = Color(0xFF171009)) }
+                            TextButton(onClick = { backupImportPicker.launch(arrayOf("application/json")) }) { Text("Verifica", color = AppColors.Accent) }
+                            TextButton(onClick = { backupRestorePicker.launch(arrayOf("application/json")) }) { Text("Ripristina", color = AppColors.Accent) }
                         }
                         Text(
                             "Esporta = salva una copia. Verifica = controlla un file senza toccare nulla. Ripristina = sovrascrive le impostazioni attuali (chiede conferma).",
                             color = AppColors.Muted,
                             fontSize = 12.sp
                         )
-                    }
                 }
             }
             item {
                 SettingsSectionHeader(title = "Salute", subtitle = "Dati dal Galaxy Watch.")
             }
             item {
-                PremiumPanel {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                        Text("Salute Galaxy Watch", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(
                             "Watch → Samsung Health → Health Connect → Hermes. Solo riepiloghi giornalieri; nessun battito grezzo viene salvato o inviato.",
                             color = AppColors.Muted,
@@ -1077,7 +1103,7 @@ internal fun SettingsScreen(
                         MetricSwitch("Frequenza cardiaca aggregata", healthIncludeHeartRate) { healthIncludeHeartRate = it }
                         Text(HealthSync.sdkStatus(context), color = AppColors.Muted, fontSize = 12.sp)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            IconButton(onClick = {
+                            TextButton(onClick = {
                                 val candidate = currentSettings().copy(healthSyncEnabled = true)
                                 val error = validateHttpUrl(candidate.gatewayUrl, "Hermes API URL")
                                 if (error != null) {
@@ -1087,11 +1113,11 @@ internal fun SettingsScreen(
                                 } else {
                                     healthPermissionLauncher.launch(HealthSync.permissionsForRequest(context, candidate))
                                 }
-                            }) { Icon(Icons.Rounded.Link, contentDescription = "Collega e autorizza salute", tint = Color.White) }
-                            IconButton(onClick = {
+                            }) { Text("Collega", color = AppColors.Accent) }
+                            TextButton(onClick = {
                                 if (!HealthSync.openSettings(context)) status = "Impossibile aprire Health Connect."
-                            }) { Icon(Icons.Rounded.Key, contentDescription = "Gestisci accesso salute", tint = Color.White) }
-                            IconButton(onClick = {
+                            }) { Text("Gestisci", color = AppColors.Accent) }
+                            TextButton(onClick = {
                                 val candidate = currentSettings()
                                 if (!candidate.healthSyncEnabled) {
                                     status = "Attiva e autorizza prima la sincronizzazione salute."
@@ -1108,20 +1134,17 @@ internal fun SettingsScreen(
                                         }
                                     }
                                 }
-                            }) { Icon(Icons.Rounded.Sync, contentDescription = "Sincronizza ora", tint = Color.White) }
-                            IconButton(onClick = { showEraseHealthConfirm = true }) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina da Hermes", tint = Color(0xFFFF7B8E)) }
+                            }) { Text("Sincronizza", color = AppColors.Accent) }
+                            TextButton(onClick = { showEraseHealthConfirm = true }) { Text("Elimina", color = AppColors.Error) }
                         }
-                    }
                 }
             }
             item {
-                PremiumPanel {
-                    Text(
-                        modifier = Modifier.padding(14.dp),
+                Text(
                         text = status,
-                        color = AppColors.Muted
+                        color = AppColors.Muted,
+                        fontSize = 12.sp
                     )
-                }
             }
             item {
                 SettingsSectionHeader(title = "Azioni e manutenzione", subtitle = "Salva, verifica, reset.")
@@ -1132,7 +1155,7 @@ internal fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        IconButton(onClick = {
+                        Button(onClick = {
                             val candidate = currentSettings()
                             val error = validateSettings(candidate)
                             if (error == null) {
@@ -1171,15 +1194,22 @@ internal fun SettingsScreen(
                             } else {
                                 status = error
                             }
-                        }) {
-                            Icon(Icons.Rounded.Save, contentDescription = "Salva impostazioni", tint = Color.White)
+                        },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AppColors.Accent,
+                                contentColor = Color(0xFF171009)
+                            )
+                        ) {
+                            Icon(Icons.Rounded.Save, contentDescription = "Salva impostazioni", tint = Color(0xFF171009))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Salva", color = Color(0xFF171009), fontWeight = FontWeight.SemiBold)
                         }
-                        IconButton(onClick = {
+                        TextButton(onClick = {
                             val candidate = currentSettings()
                             val error = validateHttpUrl(candidate.gatewayUrl, "Hermes API URL")
                             if (error != null) {
                                 status = error
-                                return@IconButton
+                                return@TextButton
                             }
                         status = "Leggo capabilities Hermes..."
                         scope.launch {
@@ -1187,14 +1217,14 @@ internal fun SettingsScreen(
                                 .getOrElse { "Capabilities non leggibili: ${it.message ?: it.javaClass.simpleName}" }
                         }
                         }) {
-                            Icon(Icons.Rounded.Visibility, contentDescription = "Leggi capabilities", tint = Color.White)
+                            Text("Capabilities", color = AppColors.Accent)
                         }
                     }
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        IconButton(onClick = {
+                        TextButton(onClick = {
                             apiKey = ""
                             scope.launch {
                                 val removed = withContext(Dispatchers.IO) { saveGatewaySecret(context, null) }
@@ -1206,13 +1236,13 @@ internal fun SettingsScreen(
                                 }
                             }
                         }) {
-                            Icon(Icons.Rounded.Clear, contentDescription = "Rimuovi API key", tint = Color.White)
+                            Text("Rimuovi key", color = AppColors.Error)
                         }
-                        IconButton(onClick = {
+                        TextButton(onClick = {
                             val error = validateHttpUrl(gatewayUrl, "Indirizzo server Hermes")
                             if (error != null) {
                                 status = error
-                                return@IconButton
+                                return@TextButton
                             }
 
                             val healthUrl = "${hermesRoot(AppSettings(gatewayUrl = gatewayUrl.trim()))}/health"
@@ -1221,10 +1251,10 @@ internal fun SettingsScreen(
                                 status = testGateway(healthUrl, apiKey)
                             }
                         }) {
-                            Icon(Icons.Rounded.NetworkCheck, contentDescription = "Test Hermes", tint = Color.White)
+                            Text("Test Hermes", color = AppColors.Accent)
                         }
-                        IconButton(onClick = { showResetConfirm = true }) {
-                            Icon(Icons.Rounded.DeleteForever, contentDescription = "Reset impostazioni", tint = Color(0xFFFF7B8E))
+                        TextButton(onClick = { showResetConfirm = true }) {
+                            Text("Reset", color = AppColors.Error)
                         }
                         if (showResetConfirm) {
                             AlertDialog(
@@ -1250,9 +1280,9 @@ internal fun SettingsScreen(
                                             }
                                             onReset()
                                         }
-                                    }) { Text("Ripristina", color = Color(0xFFFF7B8E)) }
+                                    }) { Text("Ripristina", color = AppColors.Error) }
                                 },
-                                dismissButton = { IconButton(onClick = { showResetConfirm = false }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla reset", tint = Color.White) } }
+                                dismissButton = { TextButton(onClick = { showResetConfirm = false }) { Text("Annulla", color = AppColors.Accent) } }
                             )
                         }
                     }
@@ -1285,10 +1315,9 @@ internal fun FontScaleControl(
         if (!editingPercent) percentText = "${(value * 100).toInt()}"
     }
 
-    PremiumPanel {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Dimensione caratteri", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text("DIMENSIONE CARATTERI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
                 if (editingPercent) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         BasicTextField(
@@ -1327,61 +1356,68 @@ internal fun FontScaleControl(
                 valueRange = MIN_FONT_SCALE..MAX_FONT_SCALE
             )
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Anteprima testo conversazione", color = Color.White, fontSize = 16.sp)
+                Text("ANTEPRIMA TESTO CONVERSAZIONE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 Text("Questo e' il modo in cui leggerai chat, sezioni e impostazioni.", color = AppColors.Muted, fontSize = 13.sp)
             }
-        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SettingsField(label: String, value: String, onValueChange: (String) -> Unit, readOnly: Boolean = false) {
-    TextField(
-        modifier = Modifier.fillMaxWidth(),
-        value = value,
-        onValueChange = { v -> onValueChange(v.take(SETTINGS_FIELD_MAX_LENGTH)) },
-        readOnly = readOnly,
-        label = { Text(label, color = AppColors.Muted) },
-        colors = TextFieldDefaults.colors(
-            focusedContainerColor = AppColors.Composer,
-            unfocusedContainerColor = AppColors.Composer,
-            focusedTextColor = Color.White,
-            unfocusedTextColor = Color.White,
-            focusedIndicatorColor = AppColors.Accent,
-            unfocusedIndicatorColor = Color.Transparent
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, color = AppColors.Muted, fontSize = 13.sp)
+        TextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = value,
+            onValueChange = { v -> onValueChange(v.take(SETTINGS_FIELD_MAX_LENGTH)) },
+            readOnly = readOnly,
+            shape = RoundedCornerShape(10.dp),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = AppColors.Composer,
+                unfocusedContainerColor = AppColors.Composer,
+                disabledContainerColor = AppColors.Composer,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedIndicatorColor = AppColors.Accent,
+                unfocusedIndicatorColor = Color.Transparent
+            )
         )
-    )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SettingsPasswordField(label: String, value: String, onValueChange: (String) -> Unit) {
     var visible by remember { mutableStateOf(false) }
-    TextField(
-        modifier = Modifier.fillMaxWidth(),
-        value = value,
-        onValueChange = { v -> onValueChange(v.take(SETTINGS_FIELD_MAX_LENGTH)) },
-        label = { Text(label, color = AppColors.Muted) },
-        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-        trailingIcon = {
-            IconButton(onClick = { visible = !visible }) {
-                Icon(
-                    imageVector = if (visible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                    contentDescription = if (visible) "Nascondi chiave" else "Mostra chiave",
-                    tint = AppColors.Muted
-                )
-            }
-        },
-        colors = TextFieldDefaults.colors(
-            focusedContainerColor = AppColors.Composer,
-            unfocusedContainerColor = AppColors.Composer,
-            focusedTextColor = Color.White,
-            unfocusedTextColor = Color.White,
-            focusedIndicatorColor = AppColors.Accent,
-            unfocusedIndicatorColor = Color.Transparent
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, color = AppColors.Muted, fontSize = 13.sp)
+        TextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = value,
+            onValueChange = { v -> onValueChange(v.take(SETTINGS_FIELD_MAX_LENGTH)) },
+            shape = RoundedCornerShape(10.dp),
+            visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { visible = !visible }) {
+                    Icon(
+                        imageVector = if (visible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                        contentDescription = if (visible) "Nascondi chiave" else "Mostra chiave",
+                        tint = AppColors.Muted
+                    )
+                }
+            },
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = AppColors.Composer,
+                unfocusedContainerColor = AppColors.Composer,
+                disabledContainerColor = AppColors.Composer,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedIndicatorColor = AppColors.Accent,
+                unfocusedIndicatorColor = Color.Transparent
+            )
         )
-    )
+    }
 }
 
 @Composable

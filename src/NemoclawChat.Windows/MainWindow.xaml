@@ -13,9 +13,19 @@
             <KeyboardAccelerator Key="K" Modifiers="Control" Invoked="SearchAccelerator_Invoked" />
         </Grid.KeyboardAccelerators>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition x:Name="SidebarColumn" Width="280" />
+            <ColumnDefinition x:Name="SidebarColumn" Width="252" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
+
+        <!-- Profondità: alone ambra quasi invisibile in alto, dietro tutto. -->
+        <Grid Grid.Column="0" Grid.ColumnSpan="2" IsHitTestVisible="False">
+            <Grid.Background>
+                <RadialGradientBrush Center="0.12,0.0" RadiusX="0.55" RadiusY="0.38" MappingMode="RelativeToBoundingBox">
+                    <GradientStop Color="#0DF5A524" Offset="0" />
+                    <GradientStop Color="#00000000" Offset="1" />
+                </RadialGradientBrush>
+            </Grid.Background>
+        </Grid>
 
         <Border
             x:Name="Sidebar"
@@ -49,17 +59,25 @@
                     <StackPanel
                         Grid.Column="1"
                         VerticalAlignment="Center"
-                        Spacing="1">
+                        Spacing="3">
                         <TextBlock
                             FontSize="18"
                             FontWeight="SemiBold"
                             Foreground="White"
                             Text="Hermes Hub" />
-                        <TextBlock
-                            x:Name="GatewayRuntimeStatus"
-                            FontSize="11"
-                            Foreground="{StaticResource FaintTextBrush}"
-                            Text="Hermes Agent · desktop" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse
+                                x:Name="GatewayStatusDot"
+                                Width="8"
+                                Height="8"
+                                VerticalAlignment="Center"
+                                Fill="{StaticResource FaintTextBrush}" />
+                            <TextBlock
+                                x:Name="GatewayRuntimeStatus"
+                                FontSize="11"
+                                Foreground="{StaticResource FaintTextBrush}"
+                                Text="Hermes Agent · desktop" />
+                        </StackPanel>
                     </StackPanel>
                     <Button
                         Grid.Column="2"
@@ -127,6 +145,9 @@
                         <Button x:Name="NavHardwareButton" Click="Hardware_Click" Style="{StaticResource SidebarButtonStyle}" AutomationProperties.Name="Prestazioni hardware" ToolTipService.ToolTip="Prestazioni hardware">
                             <StackPanel Orientation="Horizontal" Spacing="11"><FontIcon FontSize="16" Glyph="&#xE9D9;" /><TextBlock Text="Prestazioni" /></StackPanel>
                         </Button>
+                        <Button x:Name="NavScreenButton" Click="Screen_Click" Style="{StaticResource SidebarButtonStyle}" AutomationProperties.Name="Schermo bot" ToolTipService.ToolTip="Schermo bot">
+                            <StackPanel Orientation="Horizontal" Spacing="11"><FontIcon FontSize="16" Glyph="&#xE7B4;" /><TextBlock Text="Schermo" /></StackPanel>
+                        </Button>
 
                         <TextBlock Style="{StaticResource SidebarSectionLabelStyle}" Text="CREAZIONE" />
                         <Button x:Name="NavVoiceButton" Click="Voice_Click" Style="{StaticResource SidebarButtonStyle}" AutomationProperties.Name="Voce" ToolTipService.ToolTip="Voce">
@@ -140,6 +161,15 @@
                         </Button>
                         <Button x:Name="NavNewsButton" Click="News_Click" Style="{StaticResource SidebarButtonStyle}" AutomationProperties.Name="News" ToolTipService.ToolTip="News">
                             <StackPanel Orientation="Horizontal" Spacing="11"><FontIcon FontSize="16" Glyph="&#xE789;" /><TextBlock Text="News" /></StackPanel>
+                        </Button>
+                        <Button x:Name="NavImagesButton" Click="Images_Click" Style="{StaticResource SidebarButtonStyle}" AutomationProperties.Name="Immagini" ToolTipService.ToolTip="Immagini">
+                            <StackPanel Orientation="Horizontal" Spacing="11"><FontIcon FontSize="16" Glyph="&#xE7B8;" /><TextBlock Text="Immagini" /></StackPanel>
+                        </Button>
+                        <Button x:Name="NavComfyButton" Click="Comfy_Click" Style="{StaticResource SidebarButtonStyle}" AutomationProperties.Name="Comfy" ToolTipService.ToolTip="Comfy">
+                            <StackPanel Orientation="Horizontal" Spacing="11"><FontIcon FontSize="16" Glyph="&#xE768;" /><TextBlock Text="Comfy" /></StackPanel>
+                        </Button>
+                        <Button x:Name="NavCharactersButton" Click="Characters_Click" Style="{StaticResource SidebarButtonStyle}" AutomationProperties.Name="Personaggi" ToolTipService.ToolTip="Personaggi">
+                            <StackPanel Orientation="Horizontal" Spacing="11"><FontIcon FontSize="16" Glyph="&#xE77B;" /><TextBlock Text="Personaggi" /></StackPanel>
                         </Button>
 
                         <TextBlock Style="{StaticResource SidebarSectionLabelStyle}" Text="RECENTI" />
@@ -218,18 +248,36 @@
                     <StackPanel
                         Grid.Column="1"
                         VerticalAlignment="Center"
-                        Spacing="1">
-                        <TextBlock
-                            x:Name="ShellPageTitle"
-                            FontSize="19"
-                            FontWeight="SemiBold"
-                            Foreground="White"
-                            Text="Chat" />
-                        <TextBlock
-                            x:Name="ShellPageSubtitle"
-                            FontSize="11"
-                            Foreground="{StaticResource FaintTextBrush}"
-                            Text="Hermes Hub" />
+                        Orientation="Horizontal"
+                        Spacing="12">
+                        <Border
+                            Width="36"
+                            Height="36"
+                            Background="{StaticResource AccentSubtleBrush}"
+                            BorderBrush="#44F5A524"
+                            BorderThickness="1"
+                            CornerRadius="11">
+                            <FontIcon
+                                x:Name="ShellPageIcon"
+                                FontSize="16"
+                                Glyph="&#xE8BD;"
+                                Foreground="{StaticResource AccentBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel VerticalAlignment="Center" Spacing="1">
+                            <TextBlock
+                                x:Name="ShellPageTitle"
+                                FontSize="22"
+                                FontWeight="SemiBold"
+                                Foreground="White"
+                                Text="Chat" />
+                            <TextBlock
+                                x:Name="ShellPageSubtitle"
+                                FontSize="12"
+                                Foreground="{StaticResource FaintTextBrush}"
+                                Text="Hermes Hub" />
+                        </StackPanel>
                     </StackPanel>
                     <StackPanel
                         Grid.Column="2"
@@ -246,7 +294,13 @@
                 </Grid>
             </Border>
 
-            <Frame x:Name="ContentFrame" Grid.Row="1" />
+            <Frame x:Name="ContentFrame" Grid.Row="1">
+                <Frame.ContentTransitions>
+                    <TransitionCollection>
+                        <NavigationThemeTransition />
+                    </TransitionCollection>
+                </Frame.ContentTransitions>
+            </Frame>
         </Grid>
     </Grid>
 </Window>

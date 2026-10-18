@@ -46,16 +46,10 @@ public sealed partial class ProjectsPage : Page
         var activeId = AppSettingsStore.Load().ActiveProjectId;
         foreach (var project in projects)
         {
-            var button = new Button
-            {
-                Tag = project,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-                Padding = new Thickness(12),
-                Content = project.Id.Equals(activeId, StringComparison.OrdinalIgnoreCase)
-                    ? $"{project.Title}  ·  Attivo"
-                    : project.Title
-            };
+            var isActive = project.Id.Equals(activeId, StringComparison.OrdinalIgnoreCase);
+            var row = PremiumRows.LabeledRow("\uE8F1", project.Title, isActive ? "Attivo" : null);
+            var button = PremiumRows.RowButton(row);
+            button.Tag = project;
             button.Click += Project_Click;
             ProjectListPanel.Children.Add(button);
         }

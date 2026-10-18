@@ -7,7 +7,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Background="{StaticResource AppBackgroundBrush}" Padding="36,28" RowSpacing="18">
+    <Grid Background="{StaticResource AppBackgroundBrush}" Padding="36,28" RowSpacing="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -18,40 +18,35 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <StackPanel Spacing="4">
-                <TextBlock
-                    FontSize="30"
-                    FontWeight="SemiBold"
-                    Foreground="White"
-                    Text="News" />
-                <TextBlock
-                    x:Name="NewsStatusText"
-                    Foreground="{StaticResource MutedTextBrush}"
-                    Text="Articoli HTML creati da Hermes."
-                    TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                <Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13">
+                    <FontIcon FontSize="19" Glyph="&#xE789;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel VerticalAlignment="Center" Spacing="2">
+                    <TextBlock Style="{StaticResource PageTitleStyle}" Text="News" />
+                    <TextBlock x:Name="NewsStatusText" Style="{StaticResource PageSubtitleStyle}" Text="Articoli HTML creati da Hermes." TextWrapping="Wrap" />
+                </StackPanel>
             </StackPanel>
             <Button
                 x:Name="NewsHtmlRefreshButton"
                 Grid.Column="1"
                 VerticalAlignment="Center"
                 Click="RefreshNewsHtml_Click"
-                Content="Aggiorna" />
+                Content="Aggiorna"
+                Style="{StaticResource TextButtonStyle}" />
         </Grid>
 
-        <Grid Grid.Row="1" ColumnSpacing="18">
+        <Grid Grid.Row="1" ColumnSpacing="20">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="360" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <Border Style="{StaticResource PremiumCardBorderStyle}">
-                <ScrollViewer>
-                    <StackPanel x:Name="NewsCardsPanel" Spacing="10" />
-                </ScrollViewer>
-            </Border>
+            <ScrollViewer>
+                <StackPanel x:Name="NewsCardsPanel" Spacing="10" />
+            </ScrollViewer>
 
-            <Border Grid.Column="1" Style="{StaticResource PremiumCardBorderStyle}" Padding="0">
-                <Grid RowSpacing="0">
+            <Grid Grid.Column="1" RowSpacing="16">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -65,10 +60,8 @@
                         <StackPanel Spacing="4">
                             <TextBlock
                                 x:Name="NewsReaderTitleText"
-                                FontSize="20"
-                                FontWeight="SemiBold"
-                                Foreground="White"
-                                Text="Seleziona un articolo" />
+                                Style="{StaticResource FormSectionHeaderStyle}"
+                                Text="SELEZIONA UN ARTICOLO" />
                             <TextBlock
                                 x:Name="NewsReaderMetaText"
                                 Foreground="{StaticResource MutedTextBrush}"
@@ -81,14 +74,14 @@
                             VerticalAlignment="Top"
                             Click="OpenNewsFullScreen_Click"
                             Content="Schermo intero"
+                            Style="{StaticResource GhostButtonStyle}"
                             IsEnabled="False" />
                     </Grid>
 
                     <Border Grid.Row="1" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="0,1,0,0">
                         <WebView2 x:Name="NewsWebView" />
                     </Border>
-                </Grid>
-            </Border>
+            </Grid>
         </Grid>
 
         <Grid
@@ -124,7 +117,8 @@
                     Grid.Column="1"
                     VerticalAlignment="Center"
                     Click="CloseNewsFullScreen_Click"
-                    Content="Chiudi" />
+                    Content="Chiudi"
+                    Style="{StaticResource TextButtonStyle}" />
             </Grid>
 
             <Border

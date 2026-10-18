@@ -14,15 +14,18 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <StackPanel Spacing="8">
-            <TextBlock
-                FontSize="30"
-                FontWeight="SemiBold"
-                Foreground="White"
-                Text="Archivio" />
-            <TextBlock
-                Foreground="{StaticResource MutedTextBrush}"
-                Text="Ricerca locale per chat, progetti e task recenti salvati davvero sul dispositivo." />
+        <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+            <Border Width="44" Height="44" Background="{StaticResource AccentSubtleBrush}" BorderBrush="#44F5A524" BorderThickness="1" CornerRadius="13">
+                <FontIcon FontSize="19" Glyph="&#xE8B7;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <StackPanel VerticalAlignment="Center" Spacing="2">
+                <TextBlock
+                    Style="{StaticResource PageTitleStyle}"
+                    Text="Archivio" />
+                <TextBlock
+                    Style="{StaticResource PageSubtitleStyle}"
+                    Text="Ricerca locale per chat, progetti e task recenti salvati davvero sul dispositivo." />
+            </StackPanel>
         </StackPanel>
 
         <Grid Grid.Row="1" ColumnSpacing="12">
@@ -52,6 +55,7 @@
             <Button
                 Grid.Column="2"
                 Margin="0,28,0,0"
+                Style="{StaticResource PrimaryButtonStyle}"
                 Click="NewChat_Click"
                 Content="Nuova chat" />
         </Grid>
@@ -63,61 +67,53 @@
             </Grid.ColumnDefinitions>
 
             <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel x:Name="ResultsPanel" Spacing="12" />
+                <StackPanel x:Name="ResultsPanel" Spacing="16" />
             </ScrollViewer>
 
-            <Border
-                Grid.Column="1"
-                Padding="20"
-                Background="{StaticResource SurfaceBrush}"
-                BorderBrush="{StaticResource BorderBrushSoft}"
-                BorderThickness="1"
-                CornerRadius="18">
-                <StackPanel Spacing="14">
-                    <TextBlock Foreground="White" FontWeight="SemiBold" Text="Dettaglio" />
-                    <TextBlock
-                        x:Name="DetailTitleText"
-                        FontSize="20"
-                        FontWeight="SemiBold"
-                        Foreground="White"
-                        Text="Seleziona elemento" />
-                    <TextBlock
-                        x:Name="DetailBodyText"
-                        Foreground="{StaticResource MutedTextBrush}"
-                        Text="Qui vedi dettagli e prompt dell'elemento selezionato."
-                        TextWrapping="Wrap" />
-                    <Button
-                        x:Name="OpenButton"
-                        Click="OpenSelected_Click"
-                        Content="Apri"
-                        IsEnabled="False" />
-                    <Button
-                        x:Name="PinButton"
-                        Click="PinSelected_Click"
-                        Content="Segna progetto"
-                        IsEnabled="False" />
-                    <Button
-                        x:Name="DeleteButton"
-                        Background="#FF5A1F2B"
-                        BorderBrush="#FF7A2B3A"
-                        Click="DeleteSelected_Click"
-                        Content="Elimina"
-                        Foreground="White"
-                        IsEnabled="False" />
-                    <Button x:Name="ManageButton" Click="ManageSelected_Click" Content="Gestisci conversazione" IsEnabled="False" />
-                    <Button
-                        Click="UploadServer_Click"
-                        Content="Carica server" />
-                    <Button
-                        Click="DownloadServer_Click"
-                        Content="Scarica server" />
-                    <TextBlock
-                        x:Name="StatusText"
-                        Foreground="{StaticResource MutedTextBrush}"
-                        Text="Pronto."
-                        TextWrapping="Wrap" />
-                </StackPanel>
-            </Border>
+            <StackPanel Grid.Column="1" Spacing="16">
+                <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="DETTAGLIO" />
+                <TextBlock
+                    x:Name="DetailTitleText"
+                    Style="{StaticResource SectionTitleStyle}"
+                    Text="Seleziona elemento" />
+                <TextBlock
+                    x:Name="DetailBodyText"
+                    Foreground="{StaticResource MutedTextBrush}"
+                    Text="Qui vedi dettagli e prompt dell'elemento selezionato."
+                    TextWrapping="Wrap" />
+                <Button
+                    x:Name="OpenButton"
+                    Style="{StaticResource TextButtonStyle}"
+                    Click="OpenSelected_Click"
+                    Content="Apri"
+                    IsEnabled="False" />
+                <Button
+                    x:Name="PinButton"
+                    Style="{StaticResource TextButtonStyle}"
+                    Click="PinSelected_Click"
+                    Content="Segna progetto"
+                    IsEnabled="False" />
+                <Button
+                    x:Name="DeleteButton"
+                    Style="{StaticResource DangerButtonStyle}"
+                    Click="DeleteSelected_Click"
+                    Content="Elimina"
+                    IsEnabled="False" />
+                <Button Style="{StaticResource TextButtonStyle}" x:Name="ManageButton" Click="ManageSelected_Click" Content="Gestisci" IsEnabled="False" />
+                <Button
+                    Style="{StaticResource TextButtonStyle}"
+                    Click="UploadServer_Click"
+                    Content="Carica server" />
+                <Button
+                    Style="{StaticResource TextButtonStyle}"
+                    Click="DownloadServer_Click"
+                    Content="Scarica server" />
+                <TextBlock
+                    x:Name="StatusText"
+                    Style="{StaticResource CaptionStyle}"
+                    Text="Pronto."
+                    TextWrapping="Wrap" />
+            </StackPanel>
         </Grid>
     </Grid>
 </Page>

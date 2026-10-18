@@ -64,13 +64,12 @@ public sealed partial class ConversationManagerPage : Page
             actions.Children.Add(ActionButton("Rigenera alternativa", () => RegenerateFrom(message)));
             actions.Children.Add(ActionButton("Nuova chat", () => Frame.Navigate(typeof(HomePage), new HomeNavigationRequest(Prompt: $"Continua da questo messaggio:\n\n{message.Text}"))));
             actions.Children.Add(ActionButton("Nuovo progetto", () => { var project = ChatArchiveStore.SaveProject($"Progetto da {_conversation.Title}", message.Text, message.Text); Frame.Navigate(typeof(ProjectsPage), project.Id); }));
-            MessagesPanel.Children.Add(new Border
+            MessagesPanel.Children.Add(new StackPanel
             {
-                Padding = new Thickness(14),
-                CornerRadius = new CornerRadius(14),
-                Background = (Brush)Application.Current.Resources["SurfaceBrush"],
-                Child = new StackPanel { Spacing = 8, Children = { new TextBlock { Text = $"{message.Author} · {message.Timestamp:g}", Foreground = (Brush)Application.Current.Resources["MutedTextBrush"] }, editor, actions } }
+                Spacing = 8,
+                Children = { PremiumRows.MetaLine($"{message.Author} · {message.Timestamp:g}"), editor, actions }
             });
+            MessagesPanel.Children.Add(PremiumRows.Hairline());
         }
     }
 

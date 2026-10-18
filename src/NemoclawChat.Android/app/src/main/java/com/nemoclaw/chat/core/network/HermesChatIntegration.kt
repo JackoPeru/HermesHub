@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.core.content.edit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
@@ -182,6 +185,10 @@ fun streamHermesSessionChat(
             var httpFailure: SseAttemptSignal.HttpFailure? = null
             var networkFailure: String? = null
             var sawTerminal = false
+            // Run osservato nel flusso: indirizzo per il recupero se il transport
+            // muore prima del terminale (stesso ruolo del response_id nel percorso
+            // Chat Completions). Senza, resta la riconciliazione via history.
+            var observedRunId: String? = null
             try {
                 streamSseAttempt(request).collect { signal ->
                     when (signal) {
@@ -189,7 +196,11 @@ fun streamHermesSessionChat(
                             accepted = true
                             emit(ChatStreamEvent.Status("Sessione Hermes connessa."))
                         }
-                        is SseAttemptSignal.Event -> emit(signal.event)
+                        is SseAttemptSignal.Event -> {
+                            val ev = signal.event
+                            if (ev is ChatStreamEvent.RunId && ev.id.isNotBlank()) observedRunId = ev.id
+                            emit(ev)
+                        }
                         is SseAttemptSignal.HttpFailure -> httpFailure = signal
                         is SseAttemptSignal.NetworkFailure -> networkFailure = signal.message
                         is SseAttemptSignal.Finished -> sawTerminal = signal.terminal
@@ -203,6 +214,24 @@ fun streamHermesSessionChat(
             if (accepted) {
                 terminal = sawTerminal
                 if (!terminal) {
+                    // Transport morto a turno vivo: il server continua per
+                    // continue_on_disconnect. Prima di dichiarare il turno morto,
+                    // recupera (poll run osservato, poi riconciliazione history) —
+                    // stesso contratto del percorso Chat Completions (0.6.258).
+                    if (continueOnDisconnect) {
+                        emit(ChatStreamEvent.Status("Connessione persa a turno vivo: recupero la risposta dal server..."))
+                        val recovered = recoverSessionTurnAfterDisconnect(
+                            emit = { emit(it) },
+                            settings = settings,
+                            apiKey = apiKey,
+                            serverSessionId = serverSessionId,
+                            input = input,
+                            profile = profile,
+                            multiplexEnabled = multiplexEnabled,
+                            observedRunId = observedRunId
+                        )
+                        if (recovered) return@flow
+                    }
                     emit(ChatStreamEvent.Error("Stream sessione chiuso senza evento terminale; risposta non confermata."))
                 }
                 return@flow
@@ -227,4 +256,124 @@ fun streamHermesSessionChat(
         }
     }
     emit(ChatStreamEvent.Error(lastError ?: "Sessione Hermes non raggiungibile."))
+}
+
+/** Poll run osservato: tentativi x intervallo prima della riconciliazione history. */
+internal const val SESSION_RUN_RECOVERY_ATTEMPTS = 30
+internal const val SESSION_RUN_RECOVERY_DELAY_MS = 10_000L
+/** Riconciliazione history senza runId noto: breve, poi errore vero. */
+internal const val SESSION_HISTORY_RECOVERY_ATTEMPTS = 6
+internal const val SESSION_HISTORY_RECOVERY_DELAY_MS = 10_000L
+
+private val SESSION_USER_ROLES = setOf("user", "tu", "human", "me")
+private val SESSION_ASSISTANT_ROLES = setOf("assistant", "hermes", "bot", "ai")
+
+/**
+ * Risposta del turno nella history sessione: ultimo messaggio user che
+ * corrisponde al nostro input + primo assistant non-blank dopo di lui.
+ * null = turno non ancora persistito (server ancora al lavoro o mai partito).
+ * Puro e testabile.
+ */
+internal fun findSessionTurnAnswer(
+    messages: List<HermesSessionMessage>,
+    userInput: String
+): String? {
+    val want = userInput.trim()
+    if (want.isEmpty() || messages.isEmpty()) return null
+    var anchor = -1
+    for (i in messages.indices) {
+        val m = messages[i]
+        if (m.role.trim().lowercase() !in SESSION_USER_ROLES) continue
+        if (m.content.trim() == want) anchor = i
+    }
+    if (anchor < 0) {
+        // Input non trovato nella finestra (history lunga): ultimo user come
+        // fallback, la chat Bot e single-user e il turno occupa la coda.
+        for (i in messages.indices.reversed()) {
+            if (messages[i].role.trim().lowercase() in SESSION_USER_ROLES) {
+                anchor = i
+                break
+            }
+        }
+        if (anchor < 0) return null
+    }
+    for (i in anchor + 1 until messages.size) {
+        val m = messages[i]
+        if (m.role.trim().lowercase() !in SESSION_ASSISTANT_ROLES) continue
+        if (m.content.isNotBlank()) return m.content
+    }
+    return null
+}
+
+/**
+ * Recupero turno Sessions dopo morte del transport (accepted, non terminale).
+ * 1) runId osservato -> poll GET /v1/runs/{id} fino a terminale;
+ * 2) altrimenti -> riconciliazione via history sessione (il server continua
+ *    per continue_on_disconnect e persiste la risposta).
+ * true = turno chiuso con eventi di recupero (niente errore); false = recovery
+ * fallita, il chiamante emette l'errore originale. Mai su stop utente: la
+ * cancellazione della coroutine interrompe i poll (ensureActive + delay).
+ */
+private suspend fun recoverSessionTurnAfterDisconnect(
+    emit: suspend (ChatStreamEvent) -> Unit,
+    settings: AppSettings,
+    apiKey: String?,
+    serverSessionId: String,
+    input: String,
+    profile: String?,
+    multiplexEnabled: Boolean,
+    observedRunId: String?
+): Boolean {
+    val runId = observedRunId?.takeIf { it.isNotBlank() }
+    if (runId != null) {
+        val client = HermesRunClient(settings, apiKey, profile, multiplexEnabled)
+        repeat(SESSION_RUN_RECOVERY_ATTEMPTS) {
+            currentCoroutineContext().ensureActive()
+            if (it > 0) delay(SESSION_RUN_RECOVERY_DELAY_MS)
+            val (code, info) = runCatching { client.status(runId) }
+                .getOrElse { return@repeat }
+            // 401/403/404 permanenti: niente senso a insistere qui.
+            if (code == 401 || code == 403 || code == 404) return false
+            if (code !in 200..299 || info == null) return@repeat
+            when (info.status) {
+                HermesRunStatus.COMPLETED -> {
+                    val output = info.output.orEmpty()
+                    // Snapshot: il merge non duplica i delta gia mostrati.
+                    if (output.isNotBlank()) emit(ChatStreamEvent.TextSnapshot(output))
+                    emit(ChatStreamEvent.RunStatusChanged(runId, "completed", info.pendingSteer))
+                    return true
+                }
+                HermesRunStatus.FAILED -> {
+                    emit(ChatStreamEvent.RunStatusChanged(runId, "failed", info.pendingSteer))
+                    emit(ChatStreamEvent.Error("Il turno recuperato risulta fallito sul server."))
+                    return true
+                }
+                HermesRunStatus.CANCELLED -> {
+                    emit(ChatStreamEvent.RunStatusChanged(runId, "cancelled", info.pendingSteer))
+                    return true
+                }
+                HermesRunStatus.WAITING_FOR_APPROVAL -> {
+                    // La UI approvazioni aggancia activeRunId dal vivo.
+                    emit(ChatStreamEvent.RunStatusChanged(runId, "waiting_for_approval", info.pendingSteer))
+                    return true
+                }
+                else -> return@repeat
+            }
+        }
+    }
+    // Senza history server-side non c'e nulla da riconciliare: errore subito.
+    val caps = loadHermesCapabilitiesCached(settings, apiKey)
+    if (caps != null && !caps.sessionMessages) return false
+    repeat(SESSION_HISTORY_RECOVERY_ATTEMPTS) { attempt ->
+        currentCoroutineContext().ensureActive()
+        if (attempt > 0) delay(SESSION_HISTORY_RECOVERY_DELAY_MS)
+        val history = loadHermesServerHistory(settings, apiKey, serverSessionId, profile, multiplexEnabled)
+            ?: return@repeat
+        val answer = findSessionTurnAnswer(history, input) ?: return@repeat
+        if (answer.isBlank()) return@repeat
+        emit(ChatStreamEvent.TextSnapshot(answer))
+        emit(ChatStreamEvent.RunStatusChanged(runId.orEmpty(), "completed"))
+        return true
+    }
+    return false
 }
