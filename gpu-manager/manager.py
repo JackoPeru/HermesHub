@@ -34,12 +34,20 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 try:
     # Sottosistema Character ID (pacchetto separato, rotte /characters/*).
     from character_id.api import register_character_routes as _register_character_routes
 except ImportError:
     _register_character_routes = None  # type: ignore[assignment] - mai rompere il boot
+
+try:
+    # Supervisore Fase 0 (event store + vocabolario): solo stdlib, mai fastapi.
+    import recovery
+except Exception as _exc:  # noqa: BLE001 - un import rotto non deve fermare il boot
+    recovery = None  # type: ignore[assignment]
+    logging.warning("recovery package non disponibile: %r", _exc)
 
 APP_NAME = "hermes-gpu-manager"
 
@@ -85,6 +93,60 @@ DEFAULT_CONFIG = {
     "recovery": {
         "max_retries": 3,
         "retry_backoff": [10, 30, 60],
+    },
+    # Supervisore di recupero (Fase 1). Le soglie sono replicate da
+    # recovery.self_heal.DEFAULT_LIMITS in modo letterale (non via Name) cosi'
+    # i test che estraggono DEFAULT_CONFIG col solo AST restano validi; un test
+    # di test_recovery_self_heal verifica che le due copie restino identiche.
+    "supervisor": {
+        # Cooldown per-azione (secondi): la stessa azione non si ripete prima,
+        # anche se la regola resta vera. Il manager esegue max 1 azione/tick.
+        "cooldown_s": 300,
+        "self_heal": {
+            "enabled": True,
+            "stale_job_s": 600.0,
+            "media_down_s": 180.0,
+            "error_burst_n": 3,
+            "error_burst_window_s": 600.0,
+            "max_job_retries": 2,
+            "llm_transition_s": 180.0,
+            "cooldown_media_s": 1200.0,
+            "enable_media_rules": False,
+            "enable_current_job_rule": True,
+        },
+        # Advisor laya in ombra (Fase 2): PROPONE un'azione, non la esegue mai.
+        # Throttle separato dal self-heal perche' laya e' un modello locale
+        # (ms/decine di ms per chiamata) e non va interrogato a ogni tick da 2s.
+        "advisor": {
+            "enabled": True,
+            "url": "http://127.0.0.1:11435",
+            "model": "laya:multilingual",
+            "min_confidence": 0.7,
+            "timeout": 15,
+            "interval_s": 120,
+        },
+        # Operator laya (Fase 3): i suggerimenti dell'advisor diventano
+        # ESEGUIBILI, ma solo se il nome e' in allowlist e i parametri si
+        # risolvono dallo snapshot (laya non inventa job_id). Default OFF
+        # (fail-closed): abilitare l'esecuzione guidata dal modello e' una
+        # scelta ESPLICITA dell'installazione, da fare solo dopo aver osservato
+        # i suggerimenti in ombra (Fase 2).
+        "operator": {
+            "enabled": False,
+            "min_confidence": 0.8,
+            "interval_s": 120,
+        },
+        # Canale NL (Fase 4): risponde in linguaggio naturale e PROPONE
+        # un'azione. `allow_execute` default False (fail-closed): di default il
+        # canale spiega e propone, non esegue; l'esecuzione richiede SIA
+        # `confirm=true` nel body SIA questo flag esplicito. Il testo della
+        # risposta lo compone il manager in modo deterministico, mai un modello.
+        "channel": {
+            "enabled": True,
+            "allow_execute": False,
+            "min_confidence": 0.7,
+            "timeout": 15,
+        },
     },
     "character_id": {
         # Root dati Character ID (baseline §11: /var/lib/hermes assente sul
@@ -140,6 +202,33 @@ def _deep_merge(base: dict, override: dict) -> None:
 
 CONFIG = load_config()
 
+# Event store del supervisore (Fase 0). Best-effort: se l'import o l'apertura
+# falliscono il manager prosegue senza (le registrazioni diventano no-op).
+EVENTS = None
+if recovery is not None:
+    try:
+        EVENTS = recovery.EventStore(str(CONFIG["db_path"]))
+    except Exception as _exc:  # noqa: BLE001 - mai fatale al boot
+        EVENTS = None
+        logging.warning("event store non disponibile: %r", _exc)
+
+
+def _events():
+    """Accessore all'event store del supervisore (None se non disponibile)."""
+    return EVENTS
+
+
+def _emit(kind: str, message: str, severity: str = "info", data: dict | None = None) -> None:
+    """Registra un evento del supervisore. Effetto collaterale best-effort."""
+    store = _events()
+    if store is None:
+        return
+    try:
+        store.record(kind, message, severity=severity, data=data)
+    except Exception:  # noqa: BLE001 - mai fatale
+        pass
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
@@ -166,6 +255,7 @@ MODES = ("LLM", "MEDIA", "AUTO", "DIRECT")
 
 _state = {
     "current_state": "BOOT",
+    "state_since": 0.0,
     "desired_mode": str(CONFIG.get("default_mode", "auto")).upper(),
     "current_job": None,
     "current_prompt_id": None,
@@ -181,6 +271,8 @@ _state = {
     "media_progress": 0.0,
     "llm_watch_ts": 0.0,
     "error_retry_ts": 0.0,
+    # Supervisore Fase 1: {nome_azione: monotonic dell'ultima esecuzione}.
+    "supervisor_cooldown": {},
 }
 if _state["desired_mode"] not in MODES:
     _state["desired_mode"] = "AUTO"
@@ -208,9 +300,12 @@ PRESETS = {
     "journey_video_quality": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8", "file": "h3/i2v.json", "disabled": "DISABLED_FULLSTEPS_OOM"},
     "journey_video_first_last": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_fl2va_pruned_int8", "file": "h3/first_last.json", "disabled": "DISABLED_FULLSTEPS_OOM"},
     "journey_video_reference": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_ref2va_pruned_int8", "file": "h3/reference.json", "disabled": "DISABLED_FULLSTEPS_OOM"},
+    "journey_video_reference_fast": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_ref2va_pruned_int8+turbo4+vsa", "file": "h3/ref2va-vsa.json", "needs_input": True, "area_cap_px": 1032192, "default_width": 1344, "default_height": 768},
+    "journey_video_reframe916": {"kind": "video", "backend": "minimax-h3", "model": "minimax_h3_ref2va_pruned_int8", "file": "h3/ref2va-reframe-916.json", "needs_video": True, "area_cap_px": 1032192, "default_width": 768, "default_height": 1344},
 }
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+VIDEO_EXTS = (".mp4", ".webm", ".mkv", ".mov", ".m4v")
 MAX_INPUT_MB = 50
 
 
@@ -224,14 +319,20 @@ ALLOWED_NODE_CLASSES = frozenset({
     "QwenImage21Cache", "ComfySwitchNode",
     "EmptyLatentImage", "KSampler", "VAEDecode", "SaveImage",
     "LoadImage", "LoraLoader", "LoraLoaderModelOnly", "SaveAnimatedPNG",
+    "LoadVideo", "GetVideoComponents", "SaveVideo",
+    "VAEDecodeAudio", "CreateVideo",
+    "KSamplerSelect", "BasicScheduler", "SamplerCustomAdvanced",
+    "BasicGuider", "RandomNoise",
     "MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo",
     "H3MultiStream",
+    "MiniMaxH3SigmaShift", "Ref2VAVSAGatePatch",
 })
 
-# Cap anti-OOM per i workflow raw/custom (stessa soglia dei preset video:
-# area 480p 854x480, lunghezza max 3600 come i job). I workflow raw che
-# eccedono sono rifiutati con errore onesto, mai riscalati in silenzio.
-_WORKFLOW_MAX_AREA = 480 * 854
+# Cap anti-OOM per i workflow raw/custom: stessa soglia dei preset video per
+# length (max 3600). Per l'area raw: 768x1344 (reframe916 ref2va, multi-GPU
+# H3 MultiStream) ammessa oltre 480p (480x854); oltre si rifiuta con errore
+# onesto, mai riscalato in silenzio.
+_WORKFLOW_MAX_AREA = max(480 * 854, 1032192)
 _WORKFLOW_MAX_LENGTH = 3600
 
 # Placeholders filled by trusted server-side values only; caller params
@@ -342,14 +443,32 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
             _h0 = float(params.get("height", 480) or 480)
         except (TypeError, ValueError):
             _w0, _h0 = 854.0, 480.0
-        # Area cap 480x854 (=409920): scala mantenendo l'aspect se
-        # w*h eccede, min 64px per lato (anti-OOM, fail-safe).
-        if _w0 * _h0 > 480 * 854:
-            _scale = (410400.0 / (_w0 * _h0)) ** 0.5
+        # Area cap per-preset (anti-OOM fail-safe): 480x854 (~410k px)
+        # per default; i preset con area_cap_px esplicito (es. journey_video_reframe916
+        # @768x1344) lo alzano. Scala mantenendo l'aspect, min 64px per lato.
+        _area_cap = float(spec.get("area_cap_px", 410400))
+        if _w0 * _h0 > _area_cap:
+            _scale = (_area_cap / (_w0 * _h0)) ** 0.5
             params["width"] = max(64, int(_w0 * _scale))
             params["height"] = max(64, int(_h0 * _scale))
-            log.info("preset %s: clip %.0fs, risoluzione ridotta a %sx%s (anti-OOM area)",
-                     preset, _clamp_dur, params["width"], params["height"])
+            log.info("preset %s: clip %.0fs, risoluzione ridotta a %sx%s (anti-OOM area cap %d)",
+                     preset, _clamp_dur, params["width"], params["height"], int(_area_cap))
+        # MiniMax H3: il latente del VAE (16x) deve essere pari su H e W,
+        # quindi i pixel devono essere multipli di 32 (non basta 16: 528 ->
+        # latente 33, dispari, crash). Un valore non valido fa crashare il
+        # run con RuntimeError shape e il job va 'lost by ComfyUI'.
+        if (PRESETS.get(preset) or {}).get("kind") == "video":
+            try:
+                _w1 = int(float(params.get("width", 854) or 854))
+                _h1 = int(float(params.get("height", 480) or 480))
+            except (TypeError, ValueError):
+                _w1, _h1 = 854, 480
+            _w32 = max(64, _w1 // 32 * 32)
+            _h32 = max(64, _h1 // 32 * 32)
+            if _w32 != _w1 or _h32 != _h1:
+                log.info("preset %s: risoluzione snappata a multipli di 32: %sx%s",
+                         preset, _w32, _h32)
+            params["width"], params["height"] = _w32, _h32
     default_cfg = "6.0" if (PRESETS.get(preset) or {}).get("kind") == "video" else "1.0"
     default_negative = (
         REPO_DEFAULT_NEGATIVE
@@ -422,6 +541,36 @@ def render_preset(preset: str, params: dict, job_id: str) -> tuple[dict | None, 
         mapping["INPUT_IMAGE"] = staged[0]
     elif spec.get("needs_input"):
         return None, f"preset {preset} needs one input photo in input_images"
+    # Video in input (ref2va ref): path assoluto, roots fidati, stage nello
+    # stesso input dir, EXTS video.
+    input_video = params.get("input_video") or (
+        params.get("input_videos") or [None])[0]
+    if input_video:
+        src_path = Path(str(input_video))
+        if not src_path.is_file():
+            return None, f"input video missing: {input_video}"
+        try:
+            resolved = src_path.resolve()
+        except OSError:
+            return None, f"input video unreadable: {input_video}"
+        if src_path.is_symlink() or not any(
+            str(resolved) == str(root) or str(resolved).startswith(str(root) + os.sep)
+            for root in (
+                Path("/home/matteo/.hermes"), Path("/opt/hermes"), Path("/tmp"))
+        ):
+            return None, f"input video outside trusted roots: {input_video}"
+        if src_path.suffix.lower() not in VIDEO_EXTS:
+            return None, f"unsupported input video type: {input_video}"
+        if src_path.stat().st_size > MAX_INPUT_MB * 1024 * 1024:
+            return None, f"input video too large: {input_video}"
+        dest_vname = f"{job_id}_refvideo{src_path.suffix.lower()}"
+        dest_v = Path(str(CONFIG["media"].get("input_dir",
+                           "/opt/hermes/runtimes/comfyui/app/input"))) / dest_vname
+        dest_v.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_path, dest_v)
+        mapping["INPUT_VIDEO"] = dest_vname
+    elif spec.get("needs_video"):
+        return None, f"preset {preset} needs one input video in input_video"
     for key, value in mapping.items():
         workflow_text = workflow_text.replace("{{" + key + "}}", value)
     try:
@@ -580,8 +729,19 @@ def set_state(new_state: str, note: str = "") -> None:
     assert new_state in STATES, new_state
     old = _state["current_state"]
     _state["current_state"] = new_state
+    # Istante monotono d'ingresso nello state: le regole del supervisore (R5/R6)
+    # misurano da qui quanto una transizione e' bloccata.
+    _state["state_since"] = time.monotonic()
     _state["last_transition"] = f"{old}->{new_state} {note}".strip()
     log.info("STATE %s", _state["last_transition"])
+    # Ogni transizione e un evento; l'ingresso in ERROR genera anche un evento
+    # dedicato di severita error (vocabolario del supervisore).
+    _emit("state", f"{old}->{new_state}",
+          severity=("error" if new_state == "ERROR" else "info"),
+          data={"from": old, "to": new_state, "note": note})
+    if new_state == "ERROR":
+        _emit("error", f"{old}->ERROR", severity="error",
+              data={"from": old, "note": note})
 
 
 # ---------------------------------------------------------------- helpers ---
@@ -886,8 +1046,21 @@ async def unload_llm() -> bool:
     code, body = await _http_async("POST", llm_base() + "/v1/model/unload", {}, timeout=120)
     if code == 200:
         log.info("TabbyAPI unload accepted")
+        _emit("llm", "unload accepted", data={"ok": True, "rc": code})
+        return True
+    # Idempotente: se non c'e' alcun modello caricato lo scopo e' gia'
+    # raggiunto. Un 503 "No models are currently loaded." qui NON e' un
+    # errore fatale: trattarlo come tale lasciava il manager in ERROR a
+    # ogni transizione verso MEDIA (con l'LLM offline), perche' il
+    # modello era gia' stato scaricato. Il gate VRAM subito dopo copre
+    # comunque il caso in cui i pesi fossero ancora residenti.
+    low = (body or "").lower()
+    if code in (400, 404, 409, 503) and ("no model" in low or "not loaded" in low):
+        log.info("TabbyAPI unload: nessun modello caricato (rc=%s), gia' a posto", code)
+        _emit("llm", "unload noop (nessun modello)", data={"ok": True, "rc": code})
         return True
     log.warning("TabbyAPI unload rc=%s body=%s", code, body[-300:])
+    _emit("llm", "unload failed", severity="warning", data={"ok": False, "rc": code})
     return False
 
 
@@ -1122,6 +1295,8 @@ def create_job(kind: str, workflow: dict, preset: str = "", backend: str = "",
         )
         db.commit()
     log.info("job %s %s preset=%s queued", jid, kind, preset or "-")
+    _emit("job", f"job {jid} queued",
+          data={"job_id": jid, "kind": kind, "preset": preset or ""})
     return get_job(jid)
 
 
@@ -1156,6 +1331,417 @@ def queued_jobs() -> list[dict]:
     with _db_lock:
         rows = db.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY created").fetchall()
     return [job_row(r) for r in rows]
+
+
+# ------------------------------------------------- supervisore (Fase 1/2) ---
+# Motore pure in recovery.self_heal (snapshot -> Action), eseguito fail-closed,
+# piu' l'advisor laya di recovery.advisor (Fase 2) in sola lettura/ombra. Qui
+# solo lo strato di I/O: costruzione snapshot, esecuzione delle Action e wiring
+# nel worker. NON duplica _drive/watchdog: li complementa.
+
+def _all_jobs(limit: int = 200) -> list[dict]:
+    """Righe job piu' recenti (job_row-like), stesso lock del db condiviso."""
+    try:
+        limit = min(1000, max(1, int(limit)))
+    except (TypeError, ValueError):
+        limit = 200
+    db = _db_conn()
+    with _db_lock:
+        rows = db.execute("SELECT * FROM jobs ORDER BY created DESC LIMIT ?", (limit,)).fetchall()
+    return [job_row(r) for r in rows]
+
+
+def _supervisor_limits() -> dict:
+    """Override delle soglie da CONFIG["supervisor"]["self_heal"] (senza `enabled`)."""
+    cfg = CONFIG.get("supervisor") if isinstance(CONFIG, dict) else None
+    self_heal = cfg.get("self_heal") if isinstance(cfg, dict) else None
+    if not isinstance(self_heal, dict):
+        return {}
+    return {k: v for k, v in self_heal.items() if k != "enabled"}
+
+
+def _recent_events_for_supervisor(limit: int = 200) -> list[dict]:
+    """Eventi recenti come dict piatti per lo snapshot. Best-effort: [] se assenti."""
+    store = _events()
+    if store is None:
+        return []
+    try:
+        rows = store.recent(limit=limit)
+    except Exception:  # noqa: BLE001 - lettura best-effort
+        return []
+    out: list[dict] = []
+    for ev in rows:
+        out.append({
+            "ts": float(getattr(ev, "ts", 0.0) or 0.0),
+            "kind": str(getattr(ev, "kind", "") or ""),
+            "severity": str(getattr(ev, "severity", "") or ""),
+            "message": str(getattr(ev, "message", "") or ""),
+        })
+    return out
+
+
+async def _supervisor_probes(limits: dict, state: str, current_job) -> dict:
+    """Esegue SOLO le probe costose richieste dallo state corrente.
+
+    llm_loaded()/media_online() fanno I/O (HTTP/GPU): chiamarle a ogni tick da
+    2s sarebbe spreco. Le regole le usano in pochi state, quindi si eseguono
+    solo li'. Fail-closed: una probe non eseguita resta False; per R4/R6 False
+    significa "backend giu'", la direzione conservativa.
+    """
+    probes = {"llm_loaded": False, "llm_serving": False, "media_online": False}
+    media_rules = bool(limits.get("enable_media_rules", False))
+    current_rule = bool(limits.get("enable_current_job_rule", True))
+    need_llm_loaded = media_rules and state == "LLM_UNLOADING"
+    need_media_online = (media_rules and state in ("MEDIA_STARTING", "MEDIA_READY", "MEDIA_BUSY")) or (
+        current_rule and bool(current_job)
+    )
+    if need_llm_loaded:
+        try:
+            probes["llm_loaded"] = await llm_loaded()
+        except Exception:  # noqa: BLE001 - probe best-effort
+            probes["llm_loaded"] = False
+    if need_media_online:
+        try:
+            probes["media_online"] = await media_online()
+        except Exception:  # noqa: BLE001 - probe best-effort
+            probes["media_online"] = False
+    return probes
+
+
+async def _supervisor_snapshot() -> dict:
+    """Costruisce lo snapshot del contratto leggendo lo stato reale del manager."""
+    state = str(_state.get("current_state", ""))
+    limits = _supervisor_limits()
+    probes = await _supervisor_probes(limits, state, _state.get("current_job"))
+    return {
+        "now": time.monotonic(),
+        "wall_now": time.time(),
+        "state": state,
+        "state_since": float(_state.get("state_since", 0.0) or 0.0),
+        "desired": str(_state.get("desired_mode", "")),
+        "last_error": str(_state.get("last_error", "") or ""),
+        "current_job": _state.get("current_job"),
+        "current_prompt_id": _state.get("current_prompt_id"),
+        "queue_len": len(queued_jobs()),
+        "llm_loaded": probes["llm_loaded"],
+        "llm_serving": probes["llm_serving"],
+        "media_online": probes["media_online"],
+        "media_consec_failures": int(_state.get("media_consec_failures", 0) or 0),
+        "media_cooldown_until": float(_state.get("media_cooldown_until", 0.0) or 0.0),
+        "jobs": _all_jobs(),
+        "recent_events": _recent_events_for_supervisor(),
+        "limits": limits,
+    }
+
+
+async def _supervisor_execute(action) -> str:
+    """Mappa una `Action` sulle funzioni esistenti del manager. Ritorna lo stato."""
+    name = getattr(action, "name", "")
+    params = getattr(action, "params", {}) or {}
+    if not isinstance(params, dict):
+        params = {}
+    if name == "restore_llm":
+        ok = await restore_llm_with_retries("supervisor")
+        return "restore_llm ok" if ok else "restore_llm failed"
+    if name == "cooldown_media":
+        try:
+            seconds = max(60.0, float(params.get("seconds", 1200) or 1200))
+        except (TypeError, ValueError):
+            seconds = 1200.0
+        until = time.monotonic() + seconds
+        _state["media_cooldown_until"] = max(
+            float(_state.get("media_cooldown_until", 0.0) or 0.0), until
+        )
+        return f"cooldown_media {seconds:.0f}s"
+    if name == "cancel_stale_jobs":
+        job_ids = params.get("job_ids") or []
+        cause = str(params.get("cause") or "stale")
+        if not isinstance(job_ids, list):
+            job_ids = []
+        done = 0
+        for raw_jid in job_ids:
+            jid = str(raw_jid)
+            job = get_job(jid)
+            if not job or job.get("status") != "running":
+                continue
+            if jid == _state.get("current_job"):
+                prompt_id = _state.get("current_prompt_id")
+                _state["current_job"] = None
+                _state["current_prompt_id"] = None
+                if prompt_id:
+                    await comfy_cancel(str(prompt_id))
+            update_job(jid, status="failed", error=f"supervisor: {cause}")
+            done += 1
+        return f"cancel_stale_jobs {done}"
+    if name == "retry_job":
+        jid = str(params.get("job_id") or "")
+        job = get_job(jid) if jid else None
+        if not job or job.get("status") != "failed" or jid == _state.get("current_job"):
+            return "retry_job skipped"
+        try:
+            retries = int(job.get("retries") or 0)
+        except (TypeError, ValueError):
+            retries = 0
+        update_job(jid, status="queued", retries=retries + 1, error="")
+        return f"retry_job {jid} (retry {retries + 1})"
+    if name == "notify_user":
+        message = str(params.get("message") or "supervisore: attenzione richiesta")
+        _emit("supervisor", message, severity="warning")
+        log.warning("supervisor notify_user: %s", message)
+        return "notify_user"
+    return f"azione {name} sconosciuta"
+
+
+# Cache del client advisor laya: {chiave config, istanza}. Ricostruito solo se i
+# parametri rilevanti cambiano; None (mai eccezione) se `recovery` e' assente.
+_ADVISOR_CACHE: dict = {"key": None, "client": None}
+
+
+def _advisor_client():
+    """Crea/cachea `recovery.LayaAdvisor` dai valori di config.
+
+    Best-effort: ritorna None (mai solleva) se `recovery` e' assente, se la
+    config e' incompleta o se la costruzione fallisce. Cosi il boot del manager
+    non dipende MAI dall'advisor laya.
+    """
+    if recovery is None:
+        return None
+    advisor_cls = getattr(recovery, "LayaAdvisor", None)
+    if advisor_cls is None:
+        return None
+    cfg = CONFIG.get("supervisor") if isinstance(CONFIG, dict) else None
+    advisor_cfg = cfg.get("advisor") if isinstance(cfg, dict) else None
+    if not isinstance(advisor_cfg, dict):
+        return None
+    url = str(advisor_cfg.get("url", "http://127.0.0.1:11435"))
+    model = str(advisor_cfg.get("model", "laya:multilingual"))
+    min_confidence = advisor_cfg.get("min_confidence", 0.7)
+    timeout = advisor_cfg.get("timeout", 15)
+    key = (url, model, min_confidence, timeout)
+    if _ADVISOR_CACHE["key"] == key and _ADVISOR_CACHE["client"] is not None:
+        return _ADVISOR_CACHE["client"]
+    try:
+        client = advisor_cls(
+            url=url, model=model,
+            min_confidence=float(min_confidence), timeout=int(timeout),
+        )
+    except Exception as exc:  # noqa: BLE001 - config rotta: nessun advisor
+        log.warning("advisor client non costruibile: %r", exc)
+        return None
+    _ADVISOR_CACHE["key"] = key
+    _ADVISOR_CACHE["client"] = client
+    return client
+
+
+async def _supervisor_advisor_shadow(snapshot: dict, rule_actions) -> None:
+    """Advisor laya in ombra (Fase 2): propone e registra, NON esegue MAI.
+
+    Gated da `supervisor.advisor.enabled` e throttled da `interval_s` (timestamp
+    `advisor_last_ts`). Chiama `advise` (sola lettura) e registra un evento con
+    l'azione scelta da laya, quelle proposte dalle regole e se concordano. NON
+    esegue nessuna azione: nessuna GPU toccata, nessuna mutazione di stato oltre
+    al timestamp di throttle. Mai solleva.
+    """
+    try:
+        cfg = CONFIG.get("supervisor") if isinstance(CONFIG, dict) else None
+        advisor_cfg = cfg.get("advisor") if isinstance(cfg, dict) else None
+        if not isinstance(advisor_cfg, dict) or not bool(advisor_cfg.get("enabled", False)):
+            return
+        client = _advisor_client()
+        if client is None:
+            return
+        try:
+            interval = float(advisor_cfg.get("interval_s", 120) or 120)
+        except (TypeError, ValueError):
+            interval = 120.0
+        now = time.monotonic()
+        try:
+            last = float(_state.get("advisor_last_ts", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            last = 0.0
+        if interval > 0 and now - last < interval:
+            return
+        _state["advisor_last_ts"] = now
+        advice = await asyncio.to_thread(client.advise, snapshot)
+        actions = getattr(advice, "actions", None) or []
+        chosen = actions[0] if actions else None
+        chosen_name = str(getattr(chosen, "name", "none") or "none") if chosen else "none"
+        try:
+            confidence = float(getattr(advice, "confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        rule_names = [str(getattr(a, "name", "")) for a in (rule_actions or [])]
+        agrees = bool(chosen) and chosen_name in rule_names
+        _emit(
+            "supervisor",
+            f"advisor laya: {chosen_name}@{confidence:.2f}",
+            data={
+                "advisor_action": chosen_name,
+                "confidence": confidence,
+                "backend": str(getattr(advice, "backend", "laya") or "laya"),
+                "reasoning": str(getattr(advice, "reasoning", "") or ""),
+                "rule_actions": rule_names,
+                "agrees": agrees,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - shadow mai fatale
+        log.warning("supervisor advisor shadow failed: %r", exc)
+
+
+async def _supervisor_operator_step(snapshot: dict, rule_actions, acted_this_tick: bool) -> bool:
+    """Operator laya (Fase 3): esegue UN'azione risolta dall'allowlist. OPT-IN.
+
+    Gated da `supervisor.operator.enabled` (default False: fail-closed) e
+    throttled da `interval_s` (timestamp `operator_last_ts`). Riusa il client
+    dell'advisor e `_supervisor_execute`, con lo STESSO cooldown per-azione del
+    self-heal: max 1 azione/tick GLOBALE. Se il self-heal ha gia' agito
+    (`acted_this_tick` True) non fa nulla. Mai solleva: ogni errore degrada a
+    False (nessuna azione eseguita).
+
+    Ritorna True se ha eseguito un'azione, altrimenti False.
+    """
+    try:
+        if recovery is None or acted_this_tick:
+            return False
+        cfg = CONFIG.get("supervisor") if isinstance(CONFIG, dict) else None
+        operator_cfg = cfg.get("operator") if isinstance(cfg, dict) else None
+        if not isinstance(operator_cfg, dict) or not bool(operator_cfg.get("enabled", False)):
+            return False
+        client = _advisor_client()
+        if client is None:
+            return False
+        try:
+            interval = float(operator_cfg.get("interval_s", 120) or 120)
+        except (TypeError, ValueError):
+            interval = 120.0
+        now = time.monotonic()
+        try:
+            last = float(_state.get("operator_last_ts", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            last = 0.0
+        if interval > 0 and now - last < interval:
+            return False
+        _state["operator_last_ts"] = now
+
+        decide_actions = getattr(recovery, "decide_actions", None)
+        if decide_actions is None:
+            return False
+        advice = await asyncio.to_thread(client.advise, snapshot)
+        try:
+            min_confidence = float(operator_cfg.get("min_confidence", 0.8) or 0.8)
+        except (TypeError, ValueError):
+            min_confidence = 0.8
+        actions = decide_actions(advice, snapshot, _supervisor_limits(),
+                                 min_confidence=min_confidence)
+        if not actions:
+            # Bassa rumore: nessun bersaglio risolvibile in questo snapshot.
+            _emit("supervisor", "operator laya: nessuna azione risolta",
+                  severity="debug",
+                  data={"rule_actions": [str(getattr(a, "name", "")) for a in (rule_actions or [])]})
+            return False
+
+        # Stesso cooldown per-azione del self-heal (max 1 azione/tick globale).
+        try:
+            cooldown_s = float(cfg.get("cooldown_s", 300) or 300)
+        except (TypeError, ValueError):
+            cooldown_s = 300.0
+        cooldowns = _state.get("supervisor_cooldown")
+        if not isinstance(cooldowns, dict):
+            cooldowns = {}
+            _state["supervisor_cooldown"] = cooldowns
+        for action in actions:
+            try:
+                last_act = float(cooldowns.get(action.name, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                last_act = 0.0
+            if time.monotonic() - last_act < cooldown_s:
+                continue
+            data = {
+                "name": action.name,
+                "params": action.params,
+                "reason": action.reason,
+                "confidence": action.confidence,
+                "source": action.source,
+            }
+            status = await _supervisor_execute(action)
+            cooldowns[action.name] = time.monotonic()
+            _emit("supervisor", f"operator laya: {action.name} eseguita: {status}",
+                  severity="warning", data={**data, "status": status})
+            return True
+        return False
+    except Exception as exc:  # noqa: BLE001 - l'operator non ferma mai il worker
+        log.warning("supervisor operator step failed: %r", exc)
+        return False
+
+
+async def _supervisor_step() -> None:
+    """Un tick del supervisore: snapshot UNA volta, self-heal + shadow + operator.
+
+    Il self-heal (gated da `self_heal.enabled`) esegue al massimo 1 azione/tick
+    in modo fail-closed; l'advisor laya (gated da `advisor.enabled`) resta in
+    ombra e non esegue nulla; l'operator laya (gated da `operator.enabled`,
+    OPT-IN) esegue UNA azione risolta dall'allowlist solo se il self-heal non ha
+    gia' agito. Mai solleva, a prova anche di `recovery is None`.
+    """
+    try:
+        if recovery is None:
+            return
+        cfg = CONFIG.get("supervisor") if isinstance(CONFIG, dict) else None
+        self_heal = cfg.get("self_heal") if isinstance(cfg, dict) else None
+        advisor_cfg = cfg.get("advisor") if isinstance(cfg, dict) else None
+        operator_cfg = cfg.get("operator") if isinstance(cfg, dict) else None
+        self_heal_enabled = (
+            isinstance(self_heal, dict) and bool(self_heal.get("enabled", False))
+        )
+        advisor_enabled = (
+            isinstance(advisor_cfg, dict) and bool(advisor_cfg.get("enabled", False))
+        )
+        operator_enabled = (
+            isinstance(operator_cfg, dict) and bool(operator_cfg.get("enabled", False))
+        )
+        if not self_heal_enabled and not advisor_enabled and not operator_enabled:
+            return
+        evaluate = getattr(recovery, "evaluate", None)
+        snapshot = await _supervisor_snapshot()
+        rule_actions: list = []
+        acted_this_tick = False
+        if self_heal_enabled and evaluate is not None:
+            rule_actions = evaluate(snapshot)
+            if rule_actions:
+                try:
+                    cooldown_s = float(cfg.get("cooldown_s", 300) or 300)
+                except (TypeError, ValueError):
+                    cooldown_s = 300.0
+                cooldowns = _state.get("supervisor_cooldown")
+                if not isinstance(cooldowns, dict):
+                    cooldowns = {}
+                    _state["supervisor_cooldown"] = cooldowns
+                now = time.monotonic()
+                for action in rule_actions:
+                    try:
+                        last = float(cooldowns.get(action.name, 0.0) or 0.0)
+                    except (TypeError, ValueError):
+                        last = 0.0
+                    if now - last < cooldown_s:
+                        continue
+                    data = {
+                        "name": action.name,
+                        "params": action.params,
+                        "reason": action.reason,
+                        "confidence": action.confidence,
+                        "source": action.source,
+                    }
+                    _emit("supervisor", f"azione {action.name} proposta", data=data)
+                    status = await _supervisor_execute(action)
+                    cooldowns[action.name] = time.monotonic()
+                    _emit("supervisor", f"azione {action.name} eseguita: {status}",
+                          severity="warning", data={**data, "status": status})
+                    acted_this_tick = True
+                    break  # al massimo 1 azione per tick
+        await _supervisor_advisor_shadow(snapshot, rule_actions)
+        await _supervisor_operator_step(snapshot, rule_actions, acted_this_tick)
+    except Exception as exc:  # noqa: BLE001 - il supervisore non ferma mai il worker
+        log.warning("supervisor step failed: %r", exc)
 
 
 def validate_workflow(workflow: dict) -> str:
@@ -1237,6 +1823,7 @@ async def transition_to_media() -> bool:
         return False
     log.info("ComfyUI ready")
     set_state("MEDIA_READY")
+    _emit("media", "media ready", data={"backend": "comfyui"})
     return True
 
 
@@ -1265,11 +1852,27 @@ async def transition_to_llm() -> bool:
     return True
 
 
-async def restore_llm_with_retries(context: str) -> bool:
+# Finestra (secondi) in cui un force "LLM"/"AUTO" scavalca i gate che possono
+# impedire il restore (gate "tabby sta generando" e soglia watchdog): l'utente
+# ha chiesto l'LLM, quindi lo si ricarica davvero. Coordinator col bridge/app.
+_FORCE_LLM_WINDOW_S = 180.0
+
+
+def _force_llm_active() -> bool:
+    """True se e' in corso una finestra di force LLM (scavalca i gate di restore)."""
     try:
-        if await _tabby_recent_progress():
+        return time.monotonic() < float(_state.get("force_llm_until") or 0.0)
+    except (TypeError, ValueError):
+        return False
+
+
+async def restore_llm_with_retries(context: str) -> bool:
+    _emit("llm", "restore attempt", data={"context": context})
+    try:
+        if not _force_llm_active() and await _tabby_recent_progress():
             log.info("restore %s skipped: tabby is generating (recent progress)", context)
             _state["llm_notloaded_fails"] = 0
+            _emit("llm", "restore skipped (generating)", data={"context": context})
             return True
     except Exception:  # noqa: BLE001 - gate best effort, never block restore on error
         pass
@@ -1277,6 +1880,7 @@ async def restore_llm_with_retries(context: str) -> bool:
     backoffs: list = CONFIG["recovery"].get("retry_backoff", [10, 30, 60])
     for attempt in range(max_retries + 1):
         if await transition_to_llm():
+            _emit("llm", "restore ok", data={"context": context, "attempts": attempt + 1})
             return True
         _state["retries"] = attempt + 1
         if attempt >= max_retries:
@@ -1285,6 +1889,8 @@ async def restore_llm_with_retries(context: str) -> bool:
         log.warning("restore %s failed (%s), retry %d/%d in %ss", context, _state["last_error"], attempt + 1, max_retries, wait)
         await asyncio.sleep(wait)
     set_state("ERROR", f"Qwen restore failed after {max_retries} retries ({context})")
+    _emit("llm", "restore failed", severity="error",
+          data={"context": context, "retries": max_retries})
     return False
 
 
@@ -1489,6 +2095,54 @@ async def watch_direct() -> None:
     log.warning("direct Comfy unit state unknown; holding DIRECT (no miss counted)")
 
 
+# MiniMax H3 patchify_video (patch 2x2) richiede che il latente del VAE (16x
+# spaziale) sia pari su H e W: quindi width e height in PIXEL devono essere
+# multipli di 32. Un valore multiplo di 16 ma non di 32 (es. 528) fa comunque
+# crashare il run con RuntimeError in _embed_and_pack e il job finisce "lost
+# by ComfyUI". Snap fail-safe verso il basso, come i cap anti-OOM dei preset.
+_VIDEO_DIM_MULTIPLE = 32
+
+
+def snap_video_dims(workflow: dict) -> list:
+    """Snap width/height a multipli di 32 sui workflow MiniMax H3 (in place).
+
+    Pure e testabile (nessun I/O, nessun log): ritorna la lista delle chiavi
+    dei nodi modificati, cosi' il chiamante puo' loggare con contesto job.
+    Tocca solo i workflow che contengono nodi H3 (i video): le immagini
+    restano invariate. Valori non numerici (es. "{{WIDTH}}") sono ignorati.
+    """
+    changed: list = []
+    if not isinstance(workflow, dict):
+        return changed
+    has_h3 = any(
+        isinstance(n, dict) and str(n.get("class_type", "")).startswith("MiniMaxH3")
+        for n in workflow.values()
+    )
+    if not has_h3:
+        return changed
+    for key, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        touched = False
+        for axis in ("width", "height"):
+            try:
+                num = float(inputs.get(axis))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue
+            if num != num or num < _VIDEO_DIM_MULTIPLE:  # NaN o sotto soglia
+                continue
+            snapped = int(num) // _VIDEO_DIM_MULTIPLE * _VIDEO_DIM_MULTIPLE
+            if snapped != int(num):
+                inputs[axis] = snapped
+                touched = True
+        if touched:
+            changed.append(key)
+    return changed
+
+
 # --------------------------------------------------------------- comfyui ---
 
 async def comfy_submit(workflow: dict) -> str | None:
@@ -1531,6 +2185,10 @@ async def run_media_job(job: dict) -> bool:
     except Exception:  # noqa: BLE001
         update_job(jid, status="failed", error="unreadable workflow")
         return False
+    changed_dims = snap_video_dims(workflow)
+    if changed_dims:
+        log.warning("job %s: dimensioni H3 snappate a multipli di 32 (nodi %s)",
+                    jid, ",".join(changed_dims))
     timeout = int(CONFIG["media"]["job_timeout_video" if kind == "video" else "job_timeout_image"])
     prompt_id = await comfy_submit(workflow)
     if not prompt_id:
@@ -1631,6 +2289,8 @@ async def finish_media_job(jid: str, prompt_id: str, entry: dict, vram_peak: flo
     if not saved:
         update_job(jid, status="failed", error="completed but no output files",
                    vram_peak_mb=vram_peak)
+        _emit("job", f"job {jid} failed", severity="warning",
+              data={"job_id": jid, "status": "failed", "reason": "no output files"})
         return False
     derivatives = await make_web_derivatives(kind, saved, dest_root)
     meta = {
@@ -1654,6 +2314,8 @@ async def finish_media_job(jid: str, prompt_id: str, entry: dict, vram_peak: flo
         vram_peak_mb=vram_peak,
     )
     log.info("job %s complete (%d files)", jid, len(saved))
+    _emit("job", f"job {jid} done",
+          data={"job_id": jid, "status": "done", "files": len(saved)})
     try:
         params = (get_job(jid) or {}).get("parameters") or {}
     except Exception:  # noqa: BLE001 - publish is best effort
@@ -1797,6 +2459,10 @@ async def drive_auto_once() -> None:
     if now - float(_state.get("last_cleanup_ts") or 0.0) > 3600:
         _state["last_cleanup_ts"] = now
         await asyncio.to_thread(cleanup_old_artifacts)
+    # Supervisore di recupero (Fase 1): complementa _drive, mai lo sostituisce.
+    # Prima di _drive cosi una sua azione viene riconciliata nello stesso tick;
+    # dopo i gate training/hold sopra, cosi non tocca le GPU del trainer.
+    await _supervisor_step()
     try:
         await _drive()
     except Exception as exc:  # noqa: BLE001 - worker must survive everything
@@ -1832,6 +2498,13 @@ async def llm_watchdog() -> None:
         # gate progress qui sotto (mai restore mentre genera).
         serving = await llm_serving(timeout=20) if loaded else False
         if not (loaded and serving):
+            if _force_llm_active():
+                # Force esplicito in corso: ricarica ORA, senza attendere la
+                # soglia a 4 fallimenti ne' il gate "tabby sta generando".
+                _state["llm_notloaded_fails"] = 0
+                log.warning("watchdog: force window, restoring LLM now")
+                await restore_llm_with_retries("force")
+                return
             fails = int(_state.get("llm_notloaded_fails") or 0) + 1
             _state["llm_notloaded_fails"] = fails
             if await _tabby_recent_progress():
@@ -1926,6 +2599,8 @@ async def _drive() -> None:
             if now - float(_state.get("error_retry_ts") or 0.0) < 120:
                 return
             _state["error_retry_ts"] = now
+            _emit("error", "error recovery tick", severity="error",
+                  data={"desired": desired, "last_error": _state.get("last_error", "")[:160]})
             if desired == "LLM" or (desired == "AUTO" and not queued_jobs()):
                 await restore_llm_with_retries("error-recovery")
             elif desired == "DIRECT":
@@ -2017,6 +2692,10 @@ async def drain_media_queue() -> None:
             # (OOM, crash loop). Failing jobs one by one while the LLM stays
             # down kills chat/voice for nothing: restore the LLM now and cool
             # the media path down instead of flapping on every job.
+            _emit("job", f"job {job['job_id']} failed", severity="warning",
+                  data={"job_id": job["job_id"], "status": "failed"})
+            _emit("media", "media job failed", severity="warning",
+                  data={"job_id": job["job_id"]})
             _state["media_consec_failures"] = int(_state.get("media_consec_failures", 0)) + 1
             threshold = int(CONFIG["switching"].get("media_failure_threshold", 2))
             if _state["media_consec_failures"] >= max(1, threshold) and _state["desired_mode"] == "AUTO":
@@ -2496,6 +3175,123 @@ async def mode_direct(request: Request, _: None = Depends(require_key)) -> dict:
     return _set_desired("DIRECT")
 
 
+# ---------------------------------------------------------------- force ---
+# Canale diretto di emergenza (bridge laya / app): fora il modo richiesto
+# scavalando le guardie che possono lasciare il manager bloccato (cooldown
+# media, throttle di error-retry, gate "tabby sta generando", watchdog a 4
+# fallimenti, miss della direct). NON e' un pin persistente ("solo
+# transizione"): applica ORA la transizione, poi il manager riprende la sua
+# logica normale. Protetto SOLO da require_key (MAI _require_user_control): il
+# bridge gira in locale e DEVE poterlo chiamare; l'autorizzazione resta la
+# manager api_key.
+_FORCE_LLM_WINDOW_SEC = 180.0
+# Oltre questa eta' uno stato transitorio con `_lock` libero significa che
+# nessuna transizione e' piu' in corso (incastro): il force lo riporta a BOOT
+# cosi' reconcile_boot lo ri-deriva dallo stato reale dei backend.
+_FORCE_WEDGE_S = 30.0
+# Riferimenti forti ai task di kick: senza, il GC puo' cancellarli a meta'.
+_force_kick_tasks: set = set()
+
+
+def _force_normalize_mode(raw: str) -> str | None:
+    """Alias/testo -> LLM|MEDIA|AUTO|DIRECT via `recovery.force`, o None."""
+    if recovery is not None and getattr(recovery, "normalize_mode", None) is not None:
+        return recovery.normalize_mode(raw)
+    if isinstance(raw, str):
+        token = raw.strip().upper()
+        if token in MODES:
+            return token
+    return None
+
+
+def _force_reset_blockers(mode: str) -> list:
+    """Azzera i campi che bloccano il manager (logica pura in recovery.force)."""
+    if recovery is None or getattr(recovery, "apply_force_state", None) is None:
+        return []
+    cleared = recovery.apply_force_state(
+        _state, mode, time.monotonic(), llm_window_s=_FORCE_LLM_WINDOW_SEC
+    )
+    return [str(name) for name in cleared] if isinstance(cleared, list) else []
+
+
+def _force_transitional() -> tuple:
+    if recovery is not None and getattr(recovery, "TRANSITIONAL_STATES", None):
+        return tuple(recovery.TRANSITIONAL_STATES)
+    return ("LLM_UNLOADING", "GPU_FREE", "MEDIA_STARTING", "MEDIA_STOPPING", "LLM_LOADING")
+
+
+async def _force_kick() -> None:
+    """Sveglia il driver subito dopo un force (il worker ticka ogni 2s)."""
+    try:
+        await asyncio.sleep(0.2)
+        await _drive()
+    except Exception as exc:  # noqa: BLE001 - il kick non deve mai rompere
+        log.warning("force kick failed: %r", exc)
+
+
+class ForceRequest(BaseModel):
+    """Corpo di POST /force: modo target deciso fuori dal manager.
+
+    `mode` accetta LLM|MEDIA|AUTO|DIRECT (case-insensitive) piu' alias comodi
+    ("llm", "ready", "comfy", "auto", "direct"). `reason` finisce solo nell'evento.
+    """
+
+    mode: str = ""
+    reason: str = ""
+
+
+@app.post("/force")
+async def force_mode(req: ForceRequest, _: None = Depends(require_key)) -> dict:
+    """Forza il modo richiesto ORA, scavalcando i blocchi. Mai pin persistente.
+
+    Flusso: normalizza la mode -> se lo stato e' transitorio e il lock e'
+    libero (incastro) lo riporta a BOOT -> imposta il desired -> azzera i
+    blocker (finestra LLM inclusa) -> sveglia il driver in un task di sfondo.
+    Ritorna sempre `{"ok": ...}`; mode non valida -> 422; recovery assente -> 503.
+    """
+    if recovery is None or getattr(recovery, "normalize_mode", None) is None:
+        raise HTTPException(503, "recovery non disponibile: force non possibile")
+    mode = _force_normalize_mode(req.mode)
+    if mode is None:
+        raise HTTPException(
+            422, f"mode non valida: {req.mode!r} (attese LLM|MEDIA|AUTO|DIRECT)"
+        )
+    reason = req.reason if isinstance(req.reason, str) else ""
+    state_before = _state["current_state"]
+    wedged = False
+    if (state_before in _force_transitional() and not _lock.locked()
+            and time.monotonic() - float(_state.get("state_since") or 0.0) > _FORCE_WEDGE_S):
+        set_state("BOOT", "force-wedge")
+        wedged = True
+    _set_desired(mode)
+    cleared = _force_reset_blockers(mode)
+    _emit("supervisor", f"force -> {mode}", data={
+        "mode": mode,
+        "reason": reason[:160],
+        "state_before": state_before,
+        "wedged": wedged,
+        "cleared": cleared,
+    })
+    log.warning("FORCE mode -> %s (from %s, wedged=%s, reason=%s)",
+                mode, state_before, wedged, reason[:120])
+    try:
+        task = asyncio.create_task(_force_kick())
+        _force_kick_tasks.add(task)
+        task.add_done_callback(_force_kick_tasks.discard)
+    except Exception:  # noqa: BLE001 - il kick e' best effort
+        log.warning("force kick non avviato")
+    return {
+        "ok": True,
+        "mode": mode,
+        "desired_mode": _state["desired_mode"],
+        "state_before": state_before,
+        "state": _state["current_state"],
+        "wedged_reset": wedged,
+        "cleared": cleared,
+        "kicked": True,
+    }
+
+
 # Ticket single-use per /system/reboot: in memoria, validi 120s, consumati
 # all'uso, mai nei log (fail-closed: senza ticket valido niente reboot).
 _REBOOT_TICKET_TTL_S = 120.0
@@ -2707,6 +3503,129 @@ async def list_jobs(request: Request, _: None = Depends(require_key)) -> dict:
     return {"jobs": [job_row(r) for r in rows], "total": total, "limit": limit}
 
 
+@app.get("/events")
+async def list_events(request: Request, _: None = Depends(require_key)) -> dict:
+    """Eventi del supervisore (Fase 0): piu recenti prima, filtrabili per kind."""
+    try:
+        limit = min(1000, max(1, int(request.query_params.get("limit", "100"))))
+    except (TypeError, ValueError):
+        limit = 100
+    kind = request.query_params.get("kind") or None
+    store = _events()
+    if store is None:
+        return {"events": []}
+    try:
+        rows = store.recent(limit=limit, kind=kind)
+    except Exception:  # noqa: BLE001 - lettura best-effort, mai fatale
+        return {"events": []}
+    return {
+        "events": [
+            {"ts": ev.ts, "kind": ev.kind, "severity": ev.severity,
+             "message": ev.message, "data": ev.data}
+            for ev in rows
+        ]
+    }
+
+
+class AskRequest(BaseModel):
+    """Corpo di POST /supervisor/ask (canale NL del supervisore, Fase 4).
+
+    `question` e' la domanda in linguaggio naturale (vuota = "che succede?").
+    `confirm` autorizza l'esecuzione della sola azione PROPOSTA, ma da' il via
+    libera solo insieme a `supervisor.channel.allow_execute` (default False):
+    senza il flag esplicito il canale risponde e propone, non esegue.
+    """
+
+    question: str = ""
+    confirm: bool = False
+
+
+@app.post("/supervisor/ask")
+async def supervisor_ask(req: AskRequest, _: None = Depends(require_key)) -> dict:
+    """Canale NL del supervisore (Fase 4): spiega e PROPONE, mai 500.
+
+    Flusso: snapshot -> `recovery.answer` (testo deterministico grounded) ->
+    `recovery.propose` (azione dall'allowlist con parametri risolti). L'azione
+    viene ESEGUITA solo se `req.confirm` E `channel.allow_execute` sono
+    entrambi veri; riusa `_supervisor_execute` e lo stesso cooldown per-azione
+    del self-heal/operator. Ogni errore degrada a `{"ok": False, ...}`.
+    """
+    try:
+        cfg = CONFIG.get("supervisor") if isinstance(CONFIG, dict) else None
+        channel_cfg = cfg.get("channel") if isinstance(cfg, dict) else None
+        if not isinstance(channel_cfg, dict) or not bool(channel_cfg.get("enabled", False)):
+            return {"ok": False, "error": "channel disabled"}
+        if recovery is None or getattr(recovery, "answer", None) is None:
+            return {"ok": False, "error": "recovery unavailable"}
+
+        question = req.question if isinstance(req.question, str) else ""
+        confirm = bool(req.confirm)
+
+        snapshot = await _supervisor_snapshot()
+        ans = recovery.answer(snapshot, question)
+        if not isinstance(ans, dict):
+            ans = {}
+        text = ans.get("text") if isinstance(ans.get("text"), str) else ""
+        facts = ans.get("facts") if isinstance(ans.get("facts"), dict) else {}
+
+        prop = recovery.propose(snapshot, question, _supervisor_limits())
+        action_out = None
+        if prop is not None:
+            params = getattr(prop, "params", {})
+            action_out = {
+                "name": str(getattr(prop, "name", "")),
+                "reason": str(getattr(prop, "reason", "")),
+                "confidence": float(getattr(prop, "confidence", 0.0) or 0.0),
+                "params": params if isinstance(params, dict) else {},
+            }
+
+        executed = None
+        # Esecuzione SOLO con proposta valida, conferma esplicita e flag di
+        # config: entrambe richieste (fail-closed di default).
+        if prop is not None and confirm and channel_cfg.get("allow_execute") is True:
+            name = str(getattr(prop, "name", ""))
+            try:
+                cooldown_s = float(cfg.get("cooldown_s", 300) or 300)
+            except (TypeError, ValueError):
+                cooldown_s = 300.0
+            cooldowns = _state.get("supervisor_cooldown")
+            if not isinstance(cooldowns, dict):
+                cooldowns = {}
+                _state["supervisor_cooldown"] = cooldowns
+            try:
+                last = float(cooldowns.get(name, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                last = 0.0
+            if time.monotonic() - last >= cooldown_s:
+                status = await _supervisor_execute(prop)
+                cooldowns[name] = time.monotonic()
+                executed = {"name": name, "status": status}
+            else:
+                executed = {"name": name, "status": "cooldown"}
+
+        _emit(
+            "supervisor",
+            f"channel ask: {question[:120]}",
+            data={
+                "question": question[:200],
+                "answer": text[:400],
+                "action": action_out,
+                "executed": executed,
+            },
+        )
+        return {
+            "ok": True,
+            "answer": text,
+            "action": action_out,
+            "executed": executed,
+            "facts": facts,
+            "backend": "rules",
+        }
+    except Exception as exc:  # noqa: BLE001 - il canale non risponde mai 500
+        log.warning("supervisor ask failed: %r", exc)
+        return {"ok": False, "error": "internal error"}
+
+
 @app.get("/jobs/{job_id}")
 async def get_job_api(job_id: str, _: None = Depends(require_key)) -> dict:
     job = get_job(job_id)
@@ -2723,6 +3642,8 @@ async def cancel_job(job_id: str, _: None = Depends(require_key)) -> dict:
     if job["status"] in ("done", "failed", "cancelled"):
         return job
     update_job(job_id, status="cancelled", error="cancelled by user")
+    _emit("job", f"job {job_id} cancelled",
+          data={"job_id": job_id, "status": "cancelled"})
     # If this is the running job, stop it in ComfyUI too and release tracking
     # so the worker does not keep polling a dead prompt.
     if job_id == _state.get("current_job"):

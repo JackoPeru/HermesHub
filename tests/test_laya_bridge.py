@@ -1,0 +1,274 @@
+"""Test del bridge laya (canale diretto: NL -> laya -> /force).
+
+`laya_bridge` e' solo stdlib: si importa direttamente. Si testa la logica pura
+(classify/parse/compose/merge/status) e `handle_command` con I/O finto
+(funzione http iniettata), senza rete ne' server. Chiude con un controllo che il
+modulo NON importi fastapi e che non avvii nulla all'import.
+"""
+from __future__ import annotations
+
+import ast
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "gpu-manager"))
+
+import laya_bridge as lb  # noqa: E402
+
+
+def snap_status(**over):
+    base = {"desired_mode": "LLM", "current_state": "LLM_READY", "queue_length": 0,
+            "llm_loaded": True, "media_online": False}
+    base.update(over)
+    return base
+
+
+def make_http(*, laya_choice=None, laya_conf=0.9, force_status=200,
+              force_body=None, status_status=200, status_body=None,
+              fail_force_times=0):
+    """Fabbrica una `http` finta che registra le chiamate e risponde a comando."""
+    calls: list = []
+    state = {"force_fail": fail_force_times}
+
+    def http(method, url, payload=None, headers=None, timeout=15):
+        calls.append({"method": method, "url": url, "payload": payload,
+                      "headers": headers})
+        if url.endswith("/api/decide"):
+            if laya_choice is None:
+                return 0, "laya down"
+            return 200, {"answers": {lb.LAYA_QID: {
+                "choice": laya_choice, "confidence": laya_conf}}}
+        if url.endswith("/status"):
+            return status_status, (status_body if status_body is not None
+                                   else snap_status())
+        if url.endswith("/force"):
+            if state["force_fail"] > 0:
+                state["force_fail"] -= 1
+                return 0, "refused"
+            return force_status, (force_body if force_body is not None
+                                  else {"ok": True, "mode": payload["mode"],
+                                        "state": "LLM_LOADING"})
+        return 404, {}
+
+    http.calls = calls
+    return http
+
+
+_noop_runner = lambda cmd, timeout=60: (0, "")  # noqa: E731
+_noop_sleep = lambda s: None  # noqa: E731
+
+
+class TestClassifyText(unittest.TestCase):
+    def test_modi(self):
+        cases = {
+            "metti l'llm ready": "LLM",
+            "carica il modello": "LLM",
+            "riavvia tabby": "LLM",
+            "attiva comfy": "MEDIA",
+            "genera un video": "MEDIA",
+            "voglio delle immagini": "MEDIA",
+            "metti in auto": "AUTO",
+            "modalita automatica": "AUTO",
+            "comfy diretto": "DIRECT",
+            "passa in direct": "DIRECT",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                v = lb.classify_text(text)
+                self.assertEqual("mode", v["intent"])
+                self.assertEqual(expected, v["mode"])
+
+    def test_direct_ha_priorita_su_media(self):
+        self.assertEqual("DIRECT", lb.classify_text("comfy diretto")["mode"])
+
+    def test_stato(self):
+        for text in ("che succede?", "come sta il sistema", "dammi lo stato",
+                     "riassunto della situazione"):
+            with self.subTest(text=text):
+                self.assertEqual("status", lb.classify_text(text)["intent"])
+
+    def test_sconosciuto_e_input_ostile(self):
+        for bad in ("", "ciao", 42, None, [], {}):
+            with self.subTest(bad=bad):
+                v = lb.classify_text(bad)  # type: ignore[arg-type]
+                self.assertIn(v["intent"], ("unknown", "status"))
+                self.assertIsInstance(v["intent"], str)
+
+
+class TestParseAndIntent(unittest.TestCase):
+    def test_parse_ok(self):
+        data = {"answers": {lb.LAYA_QID: {"choice": "llm_ready", "confidence": 0.83}}}
+        self.assertEqual(("llm_ready", 0.83), lb.parse_laya_choice(data))
+
+    def test_parse_ostile(self):
+        for bad in (None, 42, {}, {"answers": None}, {"answers": {}},
+                    {"answers": {lb.LAYA_QID: None}},
+                    {"answers": {lb.LAYA_QID: {"choice": 5, "confidence": "x"}}}):
+            with self.subTest(bad=bad):
+                choice, conf = lb.parse_laya_choice(bad)  # type: ignore[arg-type]
+                self.assertIsInstance(choice, str)
+                self.assertIsInstance(conf, float)
+
+    def test_parse_confidence_non_numerica(self):
+        data = {"answers": {lb.LAYA_QID: {"choice": "status", "confidence": "boh"}}}
+        self.assertEqual(("status", 0.0), lb.parse_laya_choice(data))
+
+    def test_intent_map(self):
+        self.assertEqual(("mode", "LLM"), lb.intent_from_choice("llm_ready"))
+        self.assertEqual(("mode", "MEDIA"), lb.intent_from_choice("activate_comfy"))
+        self.assertEqual(("mode", "AUTO"), lb.intent_from_choice("auto_mode"))
+        self.assertEqual(("mode", "DIRECT"), lb.intent_from_choice("direct_mode"))
+        self.assertEqual(("status", None), lb.intent_from_choice("status"))
+        self.assertEqual((None, None), lb.intent_from_choice("none"))
+        self.assertEqual((None, None), lb.intent_from_choice("boh"))
+        self.assertEqual((None, None), lb.intent_from_choice(None))
+
+
+class TestComposeAndStatus(unittest.TestCase):
+    def test_compose_stages(self):
+        self.assertIn("LLM", lb.compose_reply("LLM", {"stage": "forced"}))
+        self.assertIn("riavviato", lb.compose_reply("MEDIA",
+                                                    {"stage": "forced_after_restart"}))
+        self.assertIn("LLM", lb.compose_reply("LLM",
+                                              {"stage": "forced_after_llm_restart"}))
+        self.assertTrue(lb.compose_reply("LLM", {"stage": "auth"}))
+        self.assertTrue(lb.compose_reply("LLM", {"stage": "bad_mode"}))
+        self.assertTrue(lb.compose_reply("LLM", {"stage": "manager_down"}))
+        self.assertTrue(lb.compose_reply("LLM", {}))
+
+    def test_summarize_status(self):
+        text = lb.summarize_status(snap_status(current_state="MEDIA_BUSY", queue_length=2))
+        self.assertIn("MEDIA_BUSY", text)
+        self.assertIn("2", text)
+        self.assertTrue(lb.summarize_status(None))
+        self.assertTrue(lb.summarize_status("junk"))  # type: ignore[arg-type]
+
+
+class TestDeepMerge(unittest.TestCase):
+    def test_merge_profondo(self):
+        base = {"a": 1, "n": {"x": 1, "y": 2}}
+        out = lb._deep_merge(base, {"n": {"y": 9, "z": 3}, "b": 2})
+        self.assertEqual({"a": 1, "b": 2, "n": {"x": 1, "y": 9, "z": 3}}, out)
+        self.assertEqual({"x": 1, "y": 2}, base["n"])  # base intatta
+
+    def test_yaml_scalar_fallback(self):
+        text = "# commento\nport: 8643\napi_key: \"segreto\"\ntrusted_keys: []\n"
+        self.assertEqual("segreto", lb._yaml_scalar(text, "api_key"))
+        self.assertEqual("8643", lb._yaml_scalar(text, "port"))
+        self.assertEqual("", lb._yaml_scalar(text, "assente"))
+
+
+class TestHandleCommand(unittest.TestCase):
+    def test_laya_decide_llm(self):
+        http = make_http(laya_choice="llm_ready", laya_conf=0.9)
+        out = lb.handle_command(lb.DEFAULT_CONFIG, "fai partire il cervello",
+                                http=http, runner=_noop_runner, sleeper=_noop_sleep)
+        self.assertTrue(out["ok"])
+        self.assertEqual("laya", out["backend"])
+        self.assertEqual("LLM", out["mode"])
+        forces = [c for c in http.calls if c["url"].endswith("/force")]
+        self.assertEqual(1, len(forces))
+        self.assertEqual("LLM", forces[0]["payload"]["mode"])
+
+    def test_fallback_regole_se_laya_giu(self):
+        http = make_http(laya_choice=None)
+        out = lb.handle_command(lb.DEFAULT_CONFIG, "attiva comfy",
+                                http=http, runner=_noop_runner, sleeper=_noop_sleep)
+        self.assertEqual("rules", out["backend"])
+        self.assertEqual("MEDIA", out["mode"])
+
+    def test_soglia_bassa_torna_alle_regole(self):
+        http = make_http(laya_choice="llm_ready", laya_conf=0.1)
+        out = lb.handle_command(lb.DEFAULT_CONFIG, "attiva comfy",
+                                http=http, runner=_noop_runner, sleeper=_noop_sleep)
+        self.assertEqual("rules", out["backend"])
+        self.assertEqual("MEDIA", out["mode"])
+
+    def test_status_non_forza(self):
+        http = make_http(laya_choice="status", laya_conf=0.9)
+        out = lb.handle_command(lb.DEFAULT_CONFIG, "come sta?",
+                                http=http, runner=_noop_runner, sleeper=_noop_sleep)
+        self.assertEqual("status", out["intent"])
+        self.assertFalse(any(c["url"].endswith("/force") for c in http.calls))
+
+    def test_execute_false_non_forza(self):
+        http = make_http(laya_choice="auto_mode", laya_conf=0.9)
+        out = lb.handle_command(lb.DEFAULT_CONFIG, "metti in auto", execute=False,
+                                http=http, runner=_noop_runner, sleeper=_noop_sleep)
+        self.assertTrue(out["ok"])
+        self.assertEqual("AUTO", out["mode"])
+        self.assertFalse(any(c["url"].endswith("/force") for c in http.calls))
+
+    def test_testo_vuoto(self):
+        out = lb.handle_command(lb.DEFAULT_CONFIG, "   ")
+        self.assertFalse(out["ok"])
+        self.assertEqual("unknown", out["intent"])
+
+    def test_manager_giu_riavvia_e_riprova(self):
+        http = make_http(laya_choice="llm_ready", laya_conf=0.9, fail_force_times=1)
+        calls = []
+        out = lb.handle_command(
+            lb.DEFAULT_CONFIG, "metti llm ready", http=http,
+            runner=lambda cmd, timeout=60: (calls.append(cmd), (0, ""))[1],
+            sleeper=_noop_sleep)
+        self.assertTrue(out["ok"])
+        self.assertEqual("forced_after_restart", out["manager"]["stage"])
+        # Una restart del servizio manager e' stata tentata.
+        self.assertTrue(any("restart" in c and "hermes-gpu-manager.service" in c
+                            for c in calls))
+        forces = [c for c in http.calls if c["url"].endswith("/force")]
+        self.assertEqual(2, len(forces))
+
+    def test_auth_fallita(self):
+        http = make_http(laya_choice="llm_ready", laya_conf=0.9, force_status=401)
+        out = lb.handle_command(lb.DEFAULT_CONFIG, "metti llm ready",
+                                http=http, runner=_noop_runner, sleeper=_noop_sleep)
+        self.assertFalse(out["ok"])
+        self.assertEqual("auth", out["manager"]["stage"])
+
+    def test_llm_riavvio_diretto_se_manager_non_torna(self):
+        # Force fallisce sempre e /status non torna mai: per LLM, ultima
+        # spiaggia = restart diretto del servizio tabby.
+        http = make_http(laya_choice="llm_ready", laya_conf=0.9,
+                         force_status=502, status_status=0)
+        calls = []
+        out = lb.handle_command(
+            lb.DEFAULT_CONFIG, "metti llm ready", http=http,
+            runner=lambda cmd, timeout=60: (calls.append(cmd), (0, ""))[1],
+            sleeper=_noop_sleep)
+        self.assertTrue(out["ok"])
+        self.assertEqual("forced_after_llm_restart", out["manager"]["stage"])
+        self.assertTrue(any("hermes-tabby.service" in c for c in calls))
+
+
+class TestNoFastapiImport(unittest.TestCase):
+    def test_import_interprete_fresco(self):
+        gp = str(REPO / "gpu-manager")
+        code = (
+            "import sys;"
+            f"sys.path.insert(0, {gp!r});"
+            "import laya_bridge;"
+            "assert 'fastapi' not in sys.modules, 'fastapi importato';"
+            "print(laya_bridge.classify_text('attiva comfy')['mode'])"
+        )
+        proc = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                              text=True, cwd=str(REPO))
+        self.assertEqual(0, proc.returncode, proc.stderr)
+        self.assertEqual("MEDIA", proc.stdout.strip())
+
+    def test_sorgente_senza_fastapi(self):
+        text = (REPO / "gpu-manager" / "laya_bridge.py").read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    self.assertNotEqual("fastapi", alias.name.split(".")[0])
+                    self.assertNotEqual("uvicorn", alias.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom):
+                self.assertNotIn((node.module or "").split(".")[0], ("fastapi", "uvicorn"))
+
+
+if __name__ == "__main__":
+    unittest.main()

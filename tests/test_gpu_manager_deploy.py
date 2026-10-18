@@ -10,6 +10,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 DEPLOY_SCRIPT = REPO / "gpu-manager" / "scripts" / "deploy-gpu-manager.sh"
+LAYA_INSTALL_SCRIPT = REPO / "gpu-manager" / "scripts" / "install-laya-bridge.sh"
 MANAGER = REPO / "gpu-manager" / "manager.py"
 
 
@@ -46,6 +47,20 @@ def run_deploy_shell(body: str) -> subprocess.CompletedProcess[str]:
         text=True,
         capture_output=True,
         timeout=20,
+        env=os.environ.copy(),
+    )
+
+
+def run_script_shell(path: Path, body: str) -> subprocess.CompletedProcess[str]:
+    if not BASH:
+        raise AssertionError("Bash is required for the offline script tests")
+    script = 'source "$1"\n' + body
+    return subprocess.run(
+        [BASH, "--noprofile", "--norc", "-c", script, "script-test",
+         _bash_path(path)],
+        text=True,
+        capture_output=True,
+        timeout=30,
         env=os.environ.copy(),
     )
 
@@ -235,15 +250,23 @@ fi
     @unittest.skipUnless(BASH, "Bash is unavailable")
     def test_compile_failure_restores_all_deployed_code_before_restart(self):
         body = SHELL_SANDBOX + r"""
-REMOTE_LOCK_DIR=/tmp/hermes-gpu-manager-deploy.lock
+        REMOTE_LOCK_DIR=/tmp/hermes-gpu-manager-deploy.lock
 REMOTE_STAGE="$TEST_ROOT/tmp/hermes-gpu-manager.stageone"
 mkdir -p "$REMOTE_DIR/character_id" "$REMOTE_STAGE/character_id"
 printf 'old-manager\n' > "$REMOTE_DIR/manager.py"
 printf 'old-display\n' > "$REMOTE_DIR/display_bridge.py"
 printf 'old-character\n' > "$REMOTE_DIR/character_id/old.py"
+printf 'old-triage\n' > "$REMOTE_DIR/triage.py"
+printf 'old-rollback\n' > "$REMOTE_DIR/rollback-gpu-manager.sh"
+mkdir -p "$REMOTE_DIR/recovery"
+printf 'old-recovery\n' > "$REMOTE_DIR/recovery/self_heal.py"
 printf 'new-manager\n' > "$REMOTE_STAGE/manager.py"
 printf 'new-display\n' > "$REMOTE_STAGE/display_bridge.py"
 printf 'new-character\n' > "$REMOTE_STAGE/character_id/new.py"
+printf 'new-triage\n' > "$REMOTE_STAGE/triage.py"
+printf 'new-rollback\n' > "$REMOTE_STAGE/rollback-gpu-manager.sh"
+mkdir -p "$REMOTE_STAGE/recovery"
+printf 'new-recovery\n' > "$REMOTE_STAGE/recovery/self_heal.py"
 BACKUP_COMPLETE=false
 LIVE_REPLACEMENT_STARTED=false
 if install_with_rollback; then
@@ -255,7 +278,11 @@ fi
 [[ "$(cat "$REMOTE_DIR/display_bridge.py")" == old-display ]]
 [[ "$(cat "$REMOTE_DIR/character_id/old.py")" == old-character ]]
 [[ ! -e "$REMOTE_DIR/character_id/new.py" ]]
+[[ "$(cat "$REMOTE_DIR/triage.py")" == old-triage ]]
+[[ "$(cat "$REMOTE_DIR/recovery/self_heal.py")" == old-recovery ]]
+[[ "$(cat "$REMOTE_DIR/rollback-gpu-manager.sh")" == old-rollback ]]
 [[ "$(cat "$BACKUP_DIR/character_id.state")" == present ]]
+[[ "$(cat "$BACKUP_DIR/recovery.state")" == present ]]
 [[ "$LIVE_REPLACEMENT_STARTED" == false ]]
 [[ "$(cat "$SYSTEMCTL_LOG")" == 'restart hermes-gpu-manager.service' ]]
 [[ "$(cat "$TEST_ROOT/opt/hermes/character-id/keep.txt")" == persistent-data ]]
@@ -371,6 +398,90 @@ program="$(remote_verify_program)"
 [[ "$program" != *'curl'* ]]
 """
         result = run_deploy_shell(body)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class TestLayaBridgeInstaller(unittest.TestCase):
+    @unittest.skipUnless(BASH, "Bash is unavailable")
+    def test_script_syntax_and_referenced_sources(self):
+        self.assertTrue(LAYA_INSTALL_SCRIPT.is_file())
+        result = subprocess.run(
+            [BASH, "-n", _bash_path(LAYA_INSTALL_SCRIPT)],
+            text=True, capture_output=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = LAYA_INSTALL_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("hermes-laya-bridge.service", text)
+        self.assertIn("laya_bridge.py", text)
+        self.assertIn("8645", text)
+
+    @unittest.skipUnless(BASH, "Bash is unavailable")
+    def test_install_payload_and_key_handling(self):
+        body = r'''
+TEST_ROOT=$(mktemp -d /tmp/hgm-laya-test.XXXXXXXX)
+[[ "$TEST_ROOT" == /tmp/hgm-laya-test.* ]] || exit 90
+trap 'rm -rf -- "$TEST_ROOT"' EXIT
+REMOTE_PAYLOAD="$TEST_ROOT/payload.txt"
+export REMOTE_PAYLOAD
+ssh() {
+  local last="${@: -1}"
+  case "$last" in
+    'mktemp -d /tmp/hermes-laya-bridge.XXXXXXXX')
+      echo /tmp/hermes-laya-bridge.fixture ;;
+    "chmod 700 "*) return 0 ;;
+    'sudo bash -s') cat > "$REMOTE_PAYLOAD" ;;
+    "rm -rf -- "*) echo stage-clean >> "$TEST_ROOT/clean.log" ;;
+    *127.0.0.1:8645/health*) printf '{"service": "hermes-laya-bridge", "ok": true}' ;;
+    "python3 -c "*) echo 200 ;;
+    *127.0.0.1:8645/laya*) echo 401 ;;
+    *) echo "unexpected ssh: $last" >&2; return 91 ;;
+  esac
+}
+scp() { return 0; }
+sleep() { :; }
+HERMES_GPU_MANAGER_KEY='offline-test-key-not-for-argv'
+# Subshell: l'EXIT trap del cleanup scatta alla sua chiusura, così possiamo
+# verificare la pulizia dello staging dentro lo stesso test.
+if ! ( install_main fixture-host fixture-user ); then
+  echo 'install_main inatteso fallimento' >&2
+  exit 1
+fi
+
+grep -q "install -o matteo -g matteo -m 0640" "$REMOTE_PAYLOAD"
+grep -q "systemctl enable 'hermes-laya-bridge.service'" "$REMOTE_PAYLOAD"
+grep -q "8645" "$REMOTE_PAYLOAD"
+if grep -q "offline-test-key-not-for-argv" "$REMOTE_PAYLOAD"; then
+  echo 'la chiave non deve finire nel payload remoto' >&2
+  exit 1
+fi
+'''
+        result = run_script_shell(LAYA_INSTALL_SCRIPT, body)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(BASH, "Bash is unavailable")
+    def test_install_cleans_staging_on_failure(self):
+        body = r'''
+TEST_ROOT=$(mktemp -d /tmp/hgm-laya-test.XXXXXXXX)
+[[ "$TEST_ROOT" == /tmp/hgm-laya-test.* ]] || exit 90
+trap 'rm -rf -- "$TEST_ROOT"' EXIT
+ssh() {
+  local last="${@: -1}"
+  case "$last" in
+    'mktemp -d /tmp/hermes-laya-bridge.XXXXXXXX')
+      echo /tmp/hermes-laya-bridge.fixture ;;
+    "chmod 700 "*) return 0 ;;
+    "rm -rf -- "*) echo stage-clean >> "$TEST_ROOT/clean.log" ;;
+    *) echo "unexpected ssh: $last" >&2; return 91 ;;
+  esac
+}
+scp() { return 1; }
+if ( install_main fixture-host fixture-user ); then
+  echo 'scp failure unexpectedly installed' >&2
+  exit 1
+fi
+grep -qx stage-clean "$TEST_ROOT/clean.log"
+'''
+        result = run_script_shell(LAYA_INSTALL_SCRIPT, body)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 

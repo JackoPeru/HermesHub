@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import re
@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.261"
-EXPECTED_ANDROID_VERSION_CODE = 265
+EXPECTED_VERSION = "0.6.276"
+EXPECTED_ANDROID_VERSION_CODE = 280
 
 
 def read(relative_path: str) -> str:

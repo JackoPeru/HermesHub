@@ -1,0 +1,20 @@
+[Unit]
+Description=Hermes laya bridge (NL to force the GPU manager)
+# Indipendente dal manager: deve sopravvivere a un manager bloccato per
+# poterlo forzare/riavviare. Non ha After= sul manager, di proposito.
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=matteo
+Group=matteo
+WorkingDirectory=/opt/hermes/gpu-manager
+ExecStart=/usr/bin/python3 /opt/hermes/gpu-manager/laya_bridge.py
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

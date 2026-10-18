@@ -365,7 +365,7 @@ class TestTrainingWallclock(unittest.TestCase):
 
 
 class TestWorkflowCapsRaw(unittest.TestCase):
-    """FIX3: i workflow raw rispettano area 480p e length max (rifiuto onesto)."""
+    """FIX3: i workflow raw rispettano cap area (max 480p/reframe916) e length (rifiuto onesto)."""
 
     @classmethod
     def setUpClass(cls):
@@ -376,12 +376,19 @@ class TestWorkflowCapsRaw(unittest.TestCase):
         cls.valid = staticmethod(cls.ns["validate_workflow"])
 
     def test_costanti_come_preset(self):
-        self.assertEqual(480 * 854, self.ns["_WORKFLOW_MAX_AREA"])
+        # Cap area = max(480p, reframe916 768x1344=1032192): il preset
+        # reframe916 alza il tetto oltre 480x854 (409920), come sul server.
+        self.assertEqual(1032192, self.ns["_WORKFLOW_MAX_AREA"])
         self.assertEqual(3600, self.ns["_WORKFLOW_MAX_LENGTH"])
 
     def test_area_480p_pass(self):
         wf = {"1": {"class_type": "EmptyLatentImage",
                     "inputs": {"width": 854, "height": 480, "batch_size": 1}}}
+        self.assertEqual("", self.valid(wf))
+
+    def test_area_reframe916_al_cap_pass(self):
+        wf = {"1": {"class_type": "EmptyLatentImage",
+                    "inputs": {"width": 768, "height": 1344, "batch_size": 1}}}
         self.assertEqual("", self.valid(wf))
 
     def test_area_oltre_rifiutata_onesta(self):
@@ -402,6 +409,54 @@ class TestWorkflowCapsRaw(unittest.TestCase):
         wf = {"1": {"class_type": "EmptyLatentImage",
                     "inputs": {"width": "{{WIDTH}}", "height": 480}}}
         self.assertEqual("", self.valid(wf))
+
+
+class TestSnapVideoDims(unittest.TestCase):
+    """I workflow H3 raw snappano width/height a multipli di 32 (VAE 16x + patch 2x)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.ns, _, _ = _load({"_VIDEO_DIM_MULTIPLE", "snap_video_dims"})
+        cls.snap = staticmethod(cls.ns["snap_video_dims"])
+
+    def _wf(self, w, h):
+        return {"4": {"class_type": "MiniMaxH3ImageToVideo",
+                      "inputs": {"width": w, "height": h, "length": 107}}}
+
+    def test_multiplo_costante_32(self):
+        self.assertEqual(32, self.ns["_VIDEO_DIM_MULTIPLE"])
+
+    def test_snap_540x960(self):
+        wf = self._wf(540, 960)
+        self.assertEqual(["4"], self.snap(wf))
+        self.assertEqual(512, wf["4"]["inputs"]["width"])
+        self.assertEqual(960, wf["4"]["inputs"]["height"])
+
+    def test_multiplo16_non32_snappato(self):
+        # 528 e' multiplo di 16 ma non di 32: latente 33 (dispari) -> crash.
+        wf = self._wf(528, 960)
+        self.assertEqual(["4"], self.snap(wf))
+        self.assertEqual(512, wf["4"]["inputs"]["width"])
+
+    def test_multipli_32_invariati(self):
+        wf = self._wf(512, 960)
+        self.assertEqual([], self.snap(wf))
+        self.assertEqual(512, wf["4"]["inputs"]["width"])
+
+    def test_immagine_senza_h3_mai_toccata(self):
+        wf = {"1": {"class_type": "EmptyLatentImage",
+                    "inputs": {"width": 1000, "height": 1000}}}
+        self.assertEqual([], self.snap(wf))
+        self.assertEqual(1000, wf["1"]["inputs"]["width"])
+
+    def test_placeholder_non_numerico_mai_crash(self):
+        wf = {"4": {"class_type": "MiniMaxH3ReferenceToVideo",
+                    "inputs": {"width": "{{WIDTH}}", "height": 960}}}
+        self.assertEqual([], self.snap(wf))
+
+    def test_workflow_non_dict_mai_crash(self):
+        self.assertEqual([], self.snap(None))
+        self.assertEqual([], self.snap({"4": "non-dict"}))
 
 
 if __name__ == "__main__":

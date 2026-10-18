@@ -1,5 +1,9 @@
 """Fast-path triage for media requests: decide BEFORE the big LLM turn.
 
+CANONICAL SOURCE: scripts/hermes_hub_gateway/triage.py
+This copy exists so hermes-gpu-manager stays self-contained (it cannot rely
+on the gateway package path). Keep the two in sync on every change.
+
 A full agentic turn on the 27B for "edit this photo" costs tens of
 thousands of tokens. This module answers one cheap question:
 

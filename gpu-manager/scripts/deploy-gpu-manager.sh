@@ -97,6 +97,15 @@ if [[ -e '$REMOTE_DIR/character_id' || -L '$REMOTE_DIR/character_id' ]]; then
 else
   printf '%s\n' absent > '$BACKUP_DIR/character_id.state'
 fi
+cp -a '$REMOTE_DIR/triage.py' '$BACKUP_DIR/triage.py'
+cp -a '$REMOTE_DIR/rollback-gpu-manager.sh' '$BACKUP_DIR/rollback-gpu-manager.sh'
+if [[ -e '$REMOTE_DIR/recovery' || -L '$REMOTE_DIR/recovery' ]]; then
+  cp -a '$REMOTE_DIR/recovery' '$BACKUP_DIR/recovery'
+  [[ -e '$BACKUP_DIR/recovery' || -L '$BACKUP_DIR/recovery' ]]
+  printf '%s\n' present > '$BACKUP_DIR/recovery.state'
+else
+  printf '%s\n' absent > '$BACKUP_DIR/recovery.state'
+fi
 EOF
 )
   remote_root_script "$script" || return 1
@@ -112,8 +121,12 @@ cp -a '$REMOTE_STAGE/manager.py' '$REMOTE_DIR/manager.py'
 cp -a '$REMOTE_STAGE/display_bridge.py' '$REMOTE_DIR/display_bridge.py'
 rm -rf -- '$REMOTE_DIR/character_id'
 cp -a '$REMOTE_STAGE/character_id' '$REMOTE_DIR/character_id'
+rm -rf -- '$REMOTE_DIR/recovery'
+cp -a '$REMOTE_STAGE/recovery' '$REMOTE_DIR/recovery'
+cp -a '$REMOTE_STAGE/triage.py' '$REMOTE_DIR/triage.py'
+cp -a '$REMOTE_STAGE/rollback-gpu-manager.sh' '$REMOTE_DIR/rollback-gpu-manager.sh'
 '$VENV_PY' -m py_compile '$REMOTE_DIR/manager.py' '$REMOTE_DIR/display_bridge.py'
-'$VENV_PY' -m compileall -q '$REMOTE_DIR/character_id'
+'$VENV_PY' -m compileall -q '$REMOTE_DIR/character_id' '$REMOTE_DIR/recovery'
 EOF
 )
   remote_root_script "$script"
@@ -137,6 +150,19 @@ case "\$(cat '$BACKUP_DIR/character_id.state')" in
     [[ ! -e '$REMOTE_DIR/character_id' && ! -L '$REMOTE_DIR/character_id' ]]
     ;;
   *) echo 'stato backup character_id non valido' >&2; exit 1 ;;
+esac
+cp -a '$BACKUP_DIR/triage.py' '$REMOTE_DIR/triage.py'
+cp -a '$BACKUP_DIR/rollback-gpu-manager.sh' '$REMOTE_DIR/rollback-gpu-manager.sh'
+rm -rf -- '$REMOTE_DIR/recovery'
+case "\$(cat '$BACKUP_DIR/recovery.state')" in
+  present)
+    [[ -e '$BACKUP_DIR/recovery' || -L '$BACKUP_DIR/recovery' ]]
+    cp -a '$BACKUP_DIR/recovery' '$REMOTE_DIR/recovery'
+    ;;
+  absent)
+    [[ ! -e '$REMOTE_DIR/recovery' && ! -L '$REMOTE_DIR/recovery' ]]
+    ;;
+  *) echo 'stato backup recovery non valido' >&2; exit 1 ;;
 esac
 systemctl restart '$SERVICE'
 EOF
@@ -267,10 +293,18 @@ deploy_main() {
     echo "Sorgenti non trovati in ${SRC_DIR} (manager.py/display_bridge.py)." >&2
     return 1
   fi
-  if [[ ! -d "${SRC_DIR}/character_id" ]]; then
-    echo "Pacchetto character_id assente in ${SRC_DIR}." >&2
-    return 1
-  fi
+if [[ ! -d "${SRC_DIR}/character_id" ]]; then
+  echo "Pacchetto character_id assente in ${SRC_DIR}." >&2
+  return 1
+fi
+if [[ ! -d "${SRC_DIR}/recovery" ]]; then
+  echo "Pacchetto recovery assente in ${SRC_DIR}." >&2
+  return 1
+fi
+if [[ ! -f "${SRC_DIR}/triage.py" || ! -f "${SRC_DIR}/rollback-gpu-manager.sh" ]]; then
+  echo "Sorgenti triage.py/rollback-gpu-manager.sh assenti in ${SRC_DIR}." >&2
+  return 1
+fi
   if [[ -z "${HERMES_GPU_MANAGER_KEY:-}" ]]; then
     echo 'HERMES_GPU_MANAGER_KEY non impostata: serve per la verify con chiave giusta.' >&2
     return 1
@@ -292,11 +326,21 @@ deploy_main() {
     echo 'copia sorgenti manager fallita' >&2
     return 1
   fi
-  if ! "${SCP_CMD[@]}" -r "${SRC_DIR}/character_id" \
-      "${DEPLOY_USER}@${DEPLOY_HOST}:${REMOTE_STAGE}/"; then
-    echo 'copia pacchetto character_id fallita' >&2
-    return 1
-  fi
+if ! "${SCP_CMD[@]}" -r "${SRC_DIR}/character_id" \
+    "${DEPLOY_USER}@${DEPLOY_HOST}:${REMOTE_STAGE}/"; then
+  echo 'copia pacchetto character_id fallita' >&2
+  return 1
+fi
+if ! "${SCP_CMD[@]}" "${SRC_DIR}/triage.py" "${SRC_DIR}/rollback-gpu-manager.sh" \
+    "${DEPLOY_USER}@${DEPLOY_HOST}:${REMOTE_STAGE}/"; then
+  echo 'copia sorgenti triage/rollback fallita' >&2
+  return 1
+fi
+if ! "${SCP_CMD[@]}" -r "${SRC_DIR}/recovery" \
+    "${DEPLOY_USER}@${DEPLOY_HOST}:${REMOTE_STAGE}/"; then
+  echo 'copia pacchetto recovery fallita' >&2
+  return 1
+fi
 
   echo '== backup completo + install + py_compile =='
   if ! install_with_rollback; then
