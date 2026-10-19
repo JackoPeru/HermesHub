@@ -3675,6 +3675,104 @@ async def cancel_job(job_id: str, _: None = Depends(require_key)) -> dict:
     return get_job(job_id)
 
 
+# ------------------------------------------------------------------
+# "Workflow live" (client Windows, pagina Comfy): l'utente vede e tocca il
+# workflow esattamente come nella pagina web di Comfy, ma GLI INTERVENTI
+# NON CAMBIANO MAI LA MODALITA' DEL MANAGER (niente set_state, niente
+# desired_mode, niente /mode/*): si tocca solo la riga del job.
+# - POST /jobs/{id}/workflow = riscrive il workflow di un job non ancora
+#   inviato a ComfyUI (QUEUED): sicuro per costruzione, il worker rilegge
+#   la riga solo al momento del submit.
+# - POST /jobs/{id}/resubmit = interrompe il job in esecuzione e ne mette
+#   in coda una COPIA su nuovo job_id (il vecchio resta come record
+#   "superseded"): nessuna corsa col tracker morto del vecchio job, che
+#   l'opostro vede "cancelled" e si ferma da solo al poll successivo.
+# ------------------------------------------------------------------
+
+
+def _read_job_workflow(jid: str) -> dict | None:
+    db = _db_conn()
+    with _db_lock:
+        row = db.execute("SELECT workflow FROM jobs WHERE id=?", (jid,)).fetchone()
+    try:
+        workflow = json.loads(row[0]) if row else None
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return workflow if isinstance(workflow, dict) else None
+
+
+@app.get("/jobs/{job_id}/workflow")
+async def get_job_workflow_api(job_id: str, _: None = Depends(require_key)) -> dict:
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(404, "unknown job")
+    workflow = _read_job_workflow(job_id)
+    if workflow is None:
+        raise HTTPException(409, "workflow unreadable")
+    return {"job_id": job_id, "status": job["status"], "workflow": workflow}
+
+
+@app.post("/jobs/{job_id}/workflow")
+async def set_job_workflow_api(job_id: str, body: dict, _: None = Depends(require_key)) -> dict:
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(404, "unknown job")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "body must be {\"workflow\": {...}}")
+    workflow = body.get("workflow")
+    if not isinstance(workflow, dict) or not workflow:
+        raise HTTPException(400, "body must be {\"workflow\": {...}}")
+    running = (job["status"] == "running" or
+               (job_id == _state.get("current_job") and _state.get("current_prompt_id")))
+    if running:
+        raise HTTPException(409, "job in esecuzione: usa /jobs/{id}/resubmit")
+    if job["status"] not in ("queued", "cancelled", "failed"):
+        raise HTTPException(409, f"job in stato {job['status']}: non modificabile")
+    problem = validate_workflow(workflow)
+    if problem:
+        raise HTTPException(400, problem)
+    update_job(job_id, workflow=json.dumps(workflow), status="queued", error="")
+    _emit("job", f"job {job_id} workflow updated by user",
+          data={"job_id": job_id, "status": "queued"})
+    log.info("job %s workflow updated by user (was %s)", job_id, job["status"])
+    return get_job(job_id)
+
+
+@app.post("/jobs/{job_id}/resubmit")
+async def resubmit_job_api(job_id: str, body: dict | None = None, _: None = Depends(require_key)) -> dict:
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(404, "unknown job")
+    if not isinstance(body, dict):
+        body = {}
+    workflow = body.get("workflow")
+    if workflow is None:
+        workflow = _read_job_workflow(job_id)
+    if not isinstance(workflow, dict) or not workflow:
+        raise HTTPException(400, "workflow unreadable (pass {\"workflow\": {...}} or fix the row)")
+    problem = validate_workflow(workflow)
+    if problem:
+        raise HTTPException(400, problem)
+    status = job["status"]
+    if status == "queued" and job_id != _state.get("current_job"):
+        raise HTTPException(409, "job gia' in coda: usa /jobs/{id}/workflow per modificarlo")
+    if status == "running" or job_id == _state.get("current_job"):
+        _state["current_job"] = None
+        prompt_id = _state.get("current_prompt_id")
+        _state["current_prompt_id"] = None
+        if prompt_id:
+            await comfy_cancel(str(prompt_id))
+        update_job(job_id, status="cancelled", error="superseded by resubmit")
+        _emit("job", f"job {job_id} interrupted for resubmit",
+              data={"job_id": job_id, "status": "cancelled"})
+        log.info("job %s interrupted by user resubmit", job_id)
+    new_job = create_job(job["kind"], workflow, preset=job.get("preset", ""),
+                         backend=job.get("backend", ""), model=job.get("model", ""),
+                         params=job.get("parameters") or None)
+    log.info("job %s resubmitted as new job %s", job_id, new_job["job_id"])
+    return {"cancelled_job": job_id, "queued_job": new_job}
+
+
 # ------------------------------------------------------- browse (read-only) ---
 # Sfoglia cartelle immagini per la sezione Immagini (1 livello, solo
 # lettura): l'agent gateway e manifest-pinned, il manager e ridistribuibile.
