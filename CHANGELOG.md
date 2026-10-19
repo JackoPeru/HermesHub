@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.279 - 2026-10-19
+
+- Windows: "Workflow live" in pagina Comfy — WebView2 incorporata sull'interfaccia web di ComfyUI (:8188) con graph completo e realtime, piu' interventi utente (annulla job, modifica workflow del job in coda, interrompi e risottometti) che NON cambiano mai la modalita' del manager: si tocca solo la riga del job.
+- Manager (gpu-manager): nuovi endpoint `GET/POST /jobs/{id}/workflow` (riscrivi workflow del job in coda, fail-closed su validate_workflow) e `POST /jobs/{id}/resubmit` (interrompe il job in esecuzione e ne mette in coda una copia su NUOVO job_id: il tracker morto del vecchio vede "cancelled" e si ferma, zero race, zero autoplay del workflow originale); nessuno dei due tocca set_state/desired_mode/cooldown.
+- Test: suite 758 OK (nuovo contratto AST test_manager_resubmit.py), build Windows verde, manager deployato sul server con backup .bak-0.6.279. Gateway server non deployato (pende OK utente).
+
 ## 0.6.278 - 2026-10-18
 
 - Manager (gpu-manager): fallback sempre-operativo — qualunque errore riporta il desired su AUTO e il recovery va prima a LLM_READY (l'agente/chat torna operativa prima di ogni retry media/direct); eccezioni non gestite di _drive/_supervisor_step entrano in ERROR con worker che sopravvive; poi resetto media cooldown.

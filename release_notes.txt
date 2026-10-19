@@ -1,10 +1,7 @@
-Hermes Hub 0.6.278 (fallback manager always-operational + menu tre puntini Windows)
+Hermes Hub 0.6.279 (workflow live per Comfy con interventi utente)
 
-- Manager GPU: qualunque errore porta la modalita' desiderata su AUTO e il recovery tenta SEMPRE prima LLM_READY, cosi' l'agente/chat torna operativa prima di ogni retry media/direct (mai piantato); le eccezioni non gestite di _drive e _supervisor_step entrano in ERROR e il worker sopravvive; resetto anche il media cooldown per ripartire puliti.
-- Windows: nel top bar chat i tre puntini rimpiazzano la penna (come Android): nuova chat, switch "LLM su GPU", switch "Gestione automatica GPU", switch "Comfy diretto", "Chat laya" (dialog sul bridge :8645) e "Comfy: cosa sta facendo" con stato aggiornato ogni 3 secondi mentre il menu e aperto.
-- Manager deployato attivo sul server (service riavviato e verde); gateway hub NON aggiornato: si attende il tuo via libera.
-- Versioni: Windows/AdminBridge 0.6.278; Android versionName 0.6.278, versionCode 282.
-- Asset ufficiali: APK Android HermesHub-0.6.278-android.apk; MSIX NemoclawChat.Windows_0.6.278.0_x64.msix; gateway Linux HermesHub-0.6.278-linux-gateway.tar.gz.
-- SHA-256 Android: `0f380cb1a49baee783624b8b85c82dcb5b73861fed52b960345178a10a975334`.
-- SHA-256 MSIX: `de73fc457793c406bfde8eb1e2f5be05474a7cff32d667d573e7e4be833b49de`.
-- SHA-256 gateway Linux: `5ffb74ca5bb3be5f6beb33482eeb7f62641eafa3f2d98c2dd41386f893dca40d`.
+- Windows: nuova sezione "Workflow live" nella pagina Comfy: l'intera interfaccia web di ComfyUI dentro l'app (WebView2 su porta 8188, graph completo, realtime nativo) piu' bottoni per annullare il job, modificare il workflow del job in coda e interrompere/risottomettere quello in esecuzione. Ogni intervento tocca SOLO la riga del job: la modalita' del manager (AUTO/LLM/MEDIA) non viene mai cambiata.
+- Manager GPU: endpoint nuovi per la vista — GET/POST /jobs/{id}/workflow (il workflow del job ancora in coda e' riscrivibile, validato con gli stessi cap dei preset) e POST /jobs/{id}/resubmit (l'interruzione del job in corsa mette in coda una COPIA su nuovo job_id, cosi' il tracker del vecchio job termina pulito e il workflow originale non riparte da solo).
+- Test: suite 758 OK (753 precedenti + 5 nuovi, test_manager_resubmit.py), build Windows senza errori. Manager deployato sul server (backup manager.py.bak-0.6.279), gateway invariato e non deployato.
+
+Asset come al solito: HermesHub-0.6.279-android.apk (Android, versionCode 283), NemoclawChat.Windows_0.6.279.0_x64.msix (x64) e HermesHub-0.6.279-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
