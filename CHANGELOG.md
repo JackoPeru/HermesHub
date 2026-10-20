@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.280 - 2026-10-20
+
+- Gruppi bot sincronizzati server-side: il gateway introduce `GET/POST/DELETE /v1/hub/bot-groups` (auth `_check_auth`, storage JSON limitato `HERMES_HUB_BOT_GROUPS_PATH`, validazione pari alla lista Android: nome 1..160 senza newline, 2..6 membri, identity_key `connection_id::profile` unica, cap 200 gruppi). Android ora usa load/upsert/delete sincronizzati col gateway come fonte di verita' quando raggiungibile, cache locale offline + pending push/delete riverificati al primo load online (nessuna azione utente si perde).
+- Bug visualizzato: un gruppo creato nel desktop ufficiale resta invisibile all'hub (storage separato); da ora i gruppi dell'hub vivono sul gateway e sono condivisi tra telefono e PC.
+- Test: suite 765 OK (nuovi contratti test_bot_groups_gateway.py + test_bot_groups_android_contract.py), patch gateway idempotente su entrambi i fixture upstream.
+
 ## 0.6.279 - 2026-10-19
 
 - Windows: "Workflow live" in pagina Comfy — WebView2 incorporata sull'interfaccia web di ComfyUI (:8188) con graph completo e realtime, piu' interventi utente (annulla job, modifica workflow del job in coda, interrompi e risottometti) che NON cambiano mai la modalita' del manager: si tocca solo la riga del job.

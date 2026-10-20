@@ -1,7 +1,7 @@
-Hermes Hub 0.6.279 (workflow live per Comfy con interventi utente)
+Hermes Hub 0.6.280 (gruppi bot sincronizzati col gateway)
 
-- Windows: nuova sezione "Workflow live" nella pagina Comfy: l'intera interfaccia web di ComfyUI dentro l'app (WebView2 su porta 8188, graph completo, realtime nativo) piu' bottoni per annullare il job, modificare il workflow del job in coda e interrompere/risottomettere quello in esecuzione. Ogni intervento tocca SOLO la riga del job: la modalita' del manager (AUTO/LLM/MEDIA) non viene mai cambiata.
-- Manager GPU: endpoint nuovi per la vista — GET/POST /jobs/{id}/workflow (il workflow del job ancora in coda e' riscrivibile, validato con gli stessi cap dei preset) e POST /jobs/{id}/resubmit (l'interruzione del job in corsa mette in coda una COPIA su nuovo job_id, cosi' il tracker del vecchio job termina pulito e il workflow originale non riparte da solo).
-- Test: suite 758 OK (753 precedenti + 5 nuovi, test_manager_resubmit.py), build Windows senza errori. Manager deployato sul server (backup manager.py.bak-0.6.279), gateway invariato e non deployato.
+- Gruppi bot ora vivono sul gateway: nuovi endpoint GET/POST/DELETE /v1/hub/bot-groups con la stessa auth degli altri endpoint hub, storage JSON limitato e validazione identica alla lista Android (nome 1..160 senza newline, 2..6 membri, identita' "connection_id::profile" unica, cap 200 gruppi).
+- Android: la scheda Bot usava gruppi salvati SOLO sul telefono — un gruppo non esisteva per altri dispositivi e si perdeva se i dati app venivano ripristinati. Ora l'elenco si carica dal gateway (fonte di verita' quando raggiungibile), la cache locale resta come fallback offline, e le azioni fatte offline (crea/elimina) vengono riverificate automaticamente al primo rientro online cosi' nessuna azione si perde.
+- Test: suite 765 OK (nuovi contratti test_bot_groups_gateway.py + test_bot_groups_android_contract.py), patch gateway idempotente sui fixture upstream.
 
-Asset come al solito: HermesHub-0.6.279-android.apk (Android, versionCode 283), NemoclawChat.Windows_0.6.279.0_x64.msix (x64) e HermesHub-0.6.279-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.280-android.apk (Android, versionCode 284), NemoclawChat.Windows_0.6.280.0_x64.msix (x64) e HermesHub-0.6.280-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
