@@ -272,6 +272,20 @@ _RUN_RESUME_END = "# HERMES_HUB_RUN_RESUME_V1_END"
 _RUN_RESUME_EVENT_ANCHOR = (
     "    def _callback(event_type: str, tool_name: str = None, preview: str = None, args=None, **kwargs):\n"
 )
+# hermes-agent ha migrato la firma a PEP 604 (str | None); entrambe le
+# varianti devono restare patchabili finche' i layout convivono.
+_RUN_RESUME_EVENT_ANCHORS = (
+    "    def _callback(event_type: str, tool_name: str | None = None, preview: str | None = None, args=None, **kwargs):\n",
+    _RUN_RESUME_EVENT_ANCHOR,
+)
+
+
+def _resolve_runs_event_anchor(patched: str) -> str | None:
+    """Prima variante di firma _callback presente (nuova e poi legacy)."""
+    for candidate in _RUN_RESUME_EVENT_ANCHORS:
+        if candidate in patched:
+            return candidate
+    return None
 _RUN_RESUME_TRACK_ANCHOR = (
     "    else:\n"
     "        task = self._active_run_tasks[run_id] = asyncio.create_task(_execute_run(self, launch, _api_server=_api_server))\n"
@@ -338,6 +352,10 @@ def _apply_runs_resume_hooks(patched: str) -> tuple[str, list[str]]:
         assert probe.startswith((" ", "\t")) and probe.strip(), label
         if probe in patched:
             continue
+        if anchor not in patched and label == "runs resume event hook":
+            resolved = _resolve_runs_event_anchor(patched)
+            if resolved is not None:
+                anchor = resolved
         if anchor not in patched:
             raise PatchError(f"Patch anchor not found: {label}")
         if prepend:
@@ -2546,10 +2564,14 @@ def _upsert_versioned_block(
     begin: str,
     end: str,
     block: str,
-    anchor: str,
+    anchor: str | tuple[str, ...] | list[str],
     label: str,
 ) -> tuple[str, bool]:
-    """Insert or upgrade one generated block while failing closed on torn markers."""
+    """Insert or upgrade one generated block while failing closed on torn markers.
+
+    L'anchor puo' essere una tupla di varianti (es. firme upstream migrate):
+    esattamente una variante deve comparire esattamente una volta.
+    """
     begin_count = text.count(begin)
     end_count = text.count(end)
     if begin_count != end_count or begin_count > 1:
@@ -2564,9 +2586,12 @@ def _upsert_versioned_block(
             return text, False
         return text[:start] + normalized + text[stop:], True
 
-    if text.count(anchor) != 1:
+    candidates = (anchor,) if isinstance(anchor, str) else tuple(anchor)
+    hits = [candidate for candidate in candidates if text.count(candidate) == 1]
+    if len(hits) != 1 or any(text.count(candidate) > 1 for candidate in candidates):
         raise PatchError(f"Patch anchor not found or ambiguous: {label}")
-    return text.replace(anchor, normalized + "\n" + anchor, 1), True
+    resolved = hits[0]
+    return text.replace(resolved, normalized + "\n" + resolved, 1), True
 
 
 def _patch_jarvis_v1(text: str) -> tuple[str, list[str]]:
@@ -4118,15 +4143,17 @@ async def _hermes_hub_jarvis_session_or_none(
     if changed:
         changes.append("Jarvis runtime v1")
 
-    handler_anchor = '    async def _handle_models(self, request: "web.Request") -> "web.Response":'
+    handler_anchor = _resolve_first_present(
+        text,
+        _HANDLE_MODELS_ANCHORS,
+        "Patch anchor not found or ambiguous: Jarvis handler boundary v1",
+    )
     handler_boundary = '''    async def _handle_jarvis_marker_v1(self) -> None:
         """Stable boundary protecting the generated Jarvis block from legacy handler rewrites."""
         return None
 
 '''
     if "async def _handle_jarvis_marker_v1(" not in text:
-        if text.count(handler_anchor) != 1:
-            raise PatchError("Patch anchor not found or ambiguous: Jarvis handler boundary v1")
         text = text.replace(handler_anchor, handler_boundary + handler_anchor, 1)
         changes.append("Jarvis handler boundary v1")
 
@@ -4576,6 +4603,20 @@ def _patch_modern_capability_endpoints(text: str) -> tuple[str, bool]:
     return text[:insert_at] + block + "\n" + text[insert_at:], True
 
 
+_HANDLE_MODELS_ANCHORS = (
+    '    async def _handle_models(self, request: "web.Request") -> "web.Response":',
+    "    async def _handle_models(self, request: web.Request) -> web.Response:",
+)
+
+
+def _resolve_first_present(text: str, candidates: tuple[str, ...] | list[str], error: str) -> str:
+    """Prima variante presente esattamente una volta, altrimenti PatchError."""
+    hits = [candidate for candidate in candidates if text.count(candidate) == 1]
+    if len(hits) != 1 or any(text.count(candidate) > 1 for candidate in candidates):
+        raise PatchError(error)
+    return hits[0]
+
+
 def _patch_bot_profiles_v1(text: str) -> tuple[str, list[str]]:
     """Expose Hermes' real profiles without adding a second bot runtime."""
     changes: list[str] = []
@@ -4702,7 +4743,7 @@ def _patch_bot_profiles_v1(text: str) -> tuple[str, list[str]]:
         begin=_BOTS_HANDLERS_BEGIN,
         end=_BOTS_HANDLERS_END,
         block=handlers,
-        anchor='    async def _handle_models(self, request: "web.Request") -> "web.Response":',
+        anchor=_HANDLE_MODELS_ANCHORS,
         label="Hermes Hub bot handlers v1",
     )
     if changed:
@@ -5150,7 +5191,7 @@ def _hermes_hub_wellbeing_io(action: str, date: str = "", payload: Any = None) -
         begin=_WELLBEING_HANDLERS_BEGIN,
         end=_WELLBEING_HANDLERS_END,
         block=handlers,
-        anchor='    async def _handle_models(self, request: "web.Request") -> "web.Response":',
+        anchor=_HANDLE_MODELS_ANCHORS,
         label="wellbeing authenticated handlers v1",
     )
     if changed:
@@ -5393,7 +5434,7 @@ def _hermes_hub_bot_groups_io(action: str, name: str = "", payload: Any = None) 
         begin=_BOT_GROUPS_HANDLERS_BEGIN,
         end=_BOT_GROUPS_HANDLERS_END,
         block=handlers,
-        anchor='    async def _handle_models(self, request: "web.Request") -> "web.Response":',
+        anchor=_HANDLE_MODELS_ANCHORS,
         label="bot groups authenticated handlers v1",
     )
     if changed:
@@ -5671,7 +5712,11 @@ def _hermes_hub_conversation_event_payload(reason, result=None):
             return web.json_response({"error": "Hub sync unavailable", "detail": str(exc)[:240]}, status=503)
 
 '''
-    handler_anchor = '    async def _handle_models(self, request: "web.Request") -> "web.Response":'
+    handler_anchor = _resolve_first_present(
+        text,
+        _HANDLE_MODELS_ANCHORS,
+        "Patch anchor not found or ambiguous: Hub sync endpoint handler",
+    )
     if "async def _handle_get_hub_sync" in text:
         # Desired-state upgrade: regenerate an existing handler so older
         # installs pick up the executor paging without reinstalling from scratch.
