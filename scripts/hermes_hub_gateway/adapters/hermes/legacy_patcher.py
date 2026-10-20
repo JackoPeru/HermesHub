@@ -56,6 +56,11 @@ _WELLBEING_RUNTIME_BEGIN = "# WELLBEING_HERMES_HUB_RUNTIME_BEGIN"
 _WELLBEING_RUNTIME_END = "# WELLBEING_HERMES_HUB_RUNTIME_END"
 _WELLBEING_HANDLERS_BEGIN = "    # HERMES_HUB_WELLBEING_HANDLERS_BEGIN"
 _WELLBEING_HANDLERS_END = "    # HERMES_HUB_WELLBEING_HANDLERS_END"
+_BOT_GROUPS_RUNTIME_BEGIN = "# HERMES_HUB_BOT_GROUPS_RUNTIME_BEGIN"
+_BOT_GROUPS_RUNTIME_END = "# HERMES_HUB_BOT_GROUPS_RUNTIME_END"
+_BOT_GROUPS_HANDLERS_BEGIN = "    # HERMES_HUB_BOT_GROUPS_HANDLERS_BEGIN"
+_BOT_GROUPS_HANDLERS_END = "    # HERMES_HUB_BOT_GROUPS_HANDLERS_END"
+_BOT_GROUPS_ROUTE_MARKER = "# HERMES_HUB_BOT_GROUPS_ROUTES_V1"
 _SQLITE_SYNC_MARKER = "# HERMES_HUB_SQLITE_SYNC_V1"
 _CORRELATION_RUNTIME_MARKER = "# HERMES_HUB_CORRELATION_RUNTIME_V1"
 _AGENT_RUNTIME_MARKER = "# HERMES_HUB_AGENT_RUNTIME_ADAPTER_V1"
@@ -4551,6 +4556,7 @@ def _patch_modern_capability_endpoints(text: str) -> tuple[str, bool]:
     ("audio_speech", ("POST", "/v1/audio/speech")),
     ("audio_transcriptions", ("POST", "/v1/audio/transcriptions")),
     ("hub_wellbeing", ("GET/PUT/DELETE", "/v1/hub/wellbeing")),
+    ("hub_bot_groups", ("GET/POST/DELETE", "/v1/hub/bot-groups")),
     ("hub_sync", ("GET", "/v1/hub/sync?since=revision")),
     # HERMES_HUB_CAPABILITY_ENDPOINTS_V1_END'''
     if _HUB_CAPABILITY_ENDPOINTS_BEGIN in text:
@@ -4864,6 +4870,9 @@ def _patch_dynamic_http_routes(text: str) -> tuple[str, bool]:
             ("GET", "/v1/hub/wellbeing/daily/{date}", self._handle_get_hub_wellbeing_daily),
             ("PUT", "/v1/hub/wellbeing/daily/{date}", self._handle_put_hub_wellbeing_daily),
             ("DELETE", "/v1/hub/wellbeing/daily/{date}", self._handle_delete_hub_wellbeing_daily),
+            ("GET", "/v1/hub/bot-groups", self._handle_get_hub_bot_groups),
+            ("POST", "/v1/hub/bot-groups", self._handle_put_hub_bot_group),
+            ("DELETE", "/v1/hub/bot-groups/{group_name}", self._handle_delete_hub_bot_group),
             ("GET", "/v1/hub/conversations", self._handle_get_hub_conversations),
             ("GET", "/v1/hub/conversations/events", self._handle_get_hub_conversations_events),
             ("POST", "/v1/hub/conversations/import", self._handle_post_hub_conversations_import),
@@ -5181,6 +5190,245 @@ def _hermes_hub_wellbeing_io(action: str, date: str = "", payload: Any = None) -
             "router wellbeing collection delete endpoint",
         )
         changes.append("router wellbeing collection delete endpoint")
+    return text, changes
+
+
+_BOT_GROUPS_PROFILE_RE = r"[a-z0-9][a-z0-9_-]{0,63}"
+
+
+def _patch_bot_groups_v1(text: str) -> tuple[str, list[str]]:
+    """Server-synced Hermes bot groups (GET/POST/DELETE /v1/hub/bot-groups).
+
+    Stessa discriminazione della lista Android (nome + 2..6 membri con
+    identity_key "connection_id::profile"), storage JSON limitato e atomico,
+    auth identica agli altri endpoint hub. I membri possono puntare anche a
+    connessioni remote: nessuna validazione vs roster locale.
+    """
+    changes: list[str] = []
+    runtime = r'''# HERMES_HUB_BOT_GROUPS_RUNTIME_BEGIN
+def _hermes_hub_normalize_bot_group_member(raw: Any) -> Dict[str, str]:
+    if not isinstance(raw, dict):
+        raise ValueError("member must be an object")
+    connection_id = str(raw.get("connection_id") or raw.get("connectionId") or "").strip()
+    if not connection_id or re.search(r"[\r\n\\]", connection_id):
+        raise ValueError("member connection_id missing or invalid")
+    connection_id = connection_id[:128]
+    profile = str(raw.get("profile") or "").strip().lower()[:80]
+    if not re.fullmatch(_hermes_hub_bot_groups_profile_re(), profile):
+        raise ValueError("member profile invalid")
+    display_name = str(raw.get("display_name") or raw.get("displayName") or "").strip()[:160] or profile
+    handle = str(raw.get("handle") or "").strip().lstrip("@")[:80] or profile
+    return {
+        "connection_id": connection_id,
+        "profile": profile,
+        "display_name": display_name,
+        "handle": handle,
+        "identity_key": f"{connection_id}::{profile}",
+    }
+
+
+def _hermes_hub_bot_groups_profile_re() -> Any:
+    import re as _re_mod
+    return _re_mod.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+
+
+def _hermes_hub_normalize_bot_group(raw: Any) -> Dict[str, Any]:
+    import re as _re_mod
+
+    if not isinstance(raw, dict):
+        raise ValueError("JSON body must be an object")
+    name = str(raw.get("name") or raw.get("group_name") or "").strip()
+    if not name or len(name) > 160 or any(ch in name for ch in ("\r", "\n")):
+        raise ValueError("group name must be 1..160 chars without newlines")
+    members_raw = raw.get("members")
+    if not isinstance(members_raw, list):
+        raise ValueError("members must be an array")
+    if not 2 <= len(members_raw) <= 6:
+        raise ValueError("a Hermes group needs 2..6 members")
+    members: list[Dict[str, str]] = []
+    seen: set[str] = set()
+    for entry in members_raw:
+        member = _hermes_hub_normalize_bot_group_member(entry)
+        key = str(member["identity_key"]).casefold()
+        if key in seen:
+            raise ValueError("duplicate group member identity")
+        seen.add(key)
+        members.append(member)
+    return {"name": name, "members": members}
+
+
+def _hermes_hub_bot_groups_path() -> "Path":
+    return _hermes_hub_storage_path("HERMES_HUB_BOT_GROUPS_PATH", "hub_bot_groups.json")
+
+
+def _hermes_hub_bot_groups_payload() -> Dict[str, Any]:
+    current = _hermes_hub_read_json(_hermes_hub_bot_groups_path(), {"items": []})
+    items = [item for item in current.get("items", []) if isinstance(item, dict) and item.get("name")]
+    items.sort(key=lambda item: str(item.get("name")).casefold())
+    return {"object": "hermes.hub.bot-groups", "status": "ok", "items": items[:200]}
+
+
+def _hermes_hub_put_bot_group(raw: Any) -> Dict[str, Any]:
+    group = _hermes_hub_normalize_bot_group(raw)
+    key = str(group["name"]).casefold()
+    current = _hermes_hub_read_json(_hermes_hub_bot_groups_path(), {"items": []})
+    items = [
+        item
+        for item in current.get("items", [])
+        if isinstance(item, dict) and str(item.get("name") or "").casefold() != key
+    ]
+    items.append(group)
+    if len(items) > 200:
+        raise ValueError("too many groups (max 200)")
+    items.sort(key=lambda item: str(item.get("name")).casefold())
+    _hermes_hub_write_json(_hermes_hub_bot_groups_path(), {"items": items, "updated_at": time.time()})
+    _hermes_hub_audit_event({"event": "hub.bot-groups.upsert", "summary": str(group["name"])[:160], "risk": "low",
+                             "metadata": {"members": len(group["members"])}})
+    return {"object": "hermes.hub.bot-group", "status": "ok", "item": group}
+
+
+def _hermes_hub_delete_bot_group(name: str) -> Dict[str, Any]:
+    key = str(name or "").strip().casefold()
+    current = _hermes_hub_read_json(_hermes_hub_bot_groups_path(), {"items": []})
+    kept = [
+        item
+        for item in current.get("items", [])
+        if isinstance(item, dict) and str(item.get("name") or "").casefold() != key
+    ]
+    if len(kept) == len(current.get("items", [])):
+        raise KeyError(name)
+    _hermes_hub_write_json(_hermes_hub_bot_groups_path(), {"items": kept, "updated_at": time.time()})
+    _hermes_hub_audit_event({"event": "hub.bot-groups.delete", "summary": key[:160], "risk": "low"})
+    return {"object": "hermes.hub.bot-groups.delete", "status": "ok", "deleted": True, "name": str(name or "").strip()}
+
+
+def _hermes_hub_bot_groups_io(action: str, name: str = "", payload: Any = None) -> Dict[str, Any]:
+    import threading as _threading
+
+    global _hermes_hub_bot_groups_io_lock
+    if "_hermes_hub_bot_groups_io_lock" not in globals():
+        _hermes_hub_bot_groups_io_lock = _threading.RLock()
+    with _hermes_hub_bot_groups_io_lock:
+        if action == "list":
+            return _hermes_hub_bot_groups_payload()
+        if action == "put":
+            return _hermes_hub_put_bot_group(payload)
+        if action == "delete":
+            return _hermes_hub_delete_bot_group(name)
+        raise ValueError("unsupported bot group operation")
+# HERMES_HUB_BOT_GROUPS_RUNTIME_END'''
+    text, changed = _upsert_versioned_block(
+        text,
+        begin=_BOT_GROUPS_RUNTIME_BEGIN,
+        end=_BOT_GROUPS_RUNTIME_END,
+        block=runtime,
+        anchor="def _hermes_hub_number(value: Any, fallback: float = 0.0) -> float:\n",
+        label="bot groups server storage v1",
+    )
+    if changed:
+        changes.append("bot groups server storage v1")
+
+    handlers = r'''    # HERMES_HUB_BOT_GROUPS_HANDLERS_BEGIN
+    async def _handle_get_hub_bot_groups(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            loop = asyncio.get_running_loop()
+            payload = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_bot_groups_io, "list"),
+                timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 30, 2, 300),
+            )
+            return web.json_response(payload)
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Bot groups store timed out"}, status=504)
+        except Exception as exc:
+            return web.json_response({"error": "Bot groups store unavailable", "detail": str(exc)}, status=500)
+
+    async def _handle_put_hub_bot_group(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        if request.content_length is None:
+            return web.json_response({"error": "Content-Length required for bot group payload"}, status=411)
+        if request.content_length > 64 * 1024:
+            return web.json_response({"error": "Bot group payload too large"}, status=413)
+        try:
+            body = await request.json()
+            group = body.get("group") if isinstance(body, dict) and isinstance(body.get("group"), dict) else body
+            loop = asyncio.get_running_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_bot_groups_io, "put", "", group),
+                timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 30, 2, 300),
+            )
+            return web.json_response(result, status=201)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Bot groups store timed out"}, status=504)
+        except Exception as exc:
+            return web.json_response({"error": "Bot group update failed", "detail": str(exc)}, status=500)
+
+    async def _handle_delete_hub_bot_group(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        name = request.match_info.get("group_name", "")
+        try:
+            loop = asyncio.get_running_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(_hermes_hub_io_executor(), _hermes_hub_bot_groups_io, "delete", name),
+                timeout=_hermes_hub_env_int("HERMES_HUB_STORE_TIMEOUT_SECONDS", 30, 2, 300),
+            )
+            return web.json_response(result)
+        except KeyError:
+            return web.json_response({"error": "Bot group not found", "name": name}, status=404)
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "Bot groups store timed out"}, status=504)
+        except Exception as exc:
+            return web.json_response({"error": "Bot group delete failed", "detail": str(exc)}, status=500)
+    # HERMES_HUB_BOT_GROUPS_HANDLERS_END'''
+    text, changed = _upsert_versioned_block(
+        text,
+        begin=_BOT_GROUPS_HANDLERS_BEGIN,
+        end=_BOT_GROUPS_HANDLERS_END,
+        block=handlers,
+        anchor='    async def _handle_models(self, request: "web.Request") -> "web.Response":',
+        label="bot groups authenticated handlers v1",
+    )
+    if changed:
+        changes.append("bot groups authenticated handlers v1")
+
+    if (
+        '"hub_bot_groups": {"method": "GET/POST/DELETE", "path": "/v1/hub/bot-groups"}' not in text
+        and _HUB_CAPABILITY_ENDPOINTS_MARKER not in text
+    ):
+        text, _ = _replace_regex_once(
+            text,
+            r'(^\s+"hub_wellbeing": \{"method": "GET/PUT/DELETE", "path": "/v1/hub/wellbeing"\},\n)',
+            r'\1                "hub_bot_groups": {"method": "GET/POST/DELETE", "path": "/v1/hub/bot-groups"},' "\n",
+            "capabilities bot groups endpoint",
+        )
+        changes.append("capabilities bot groups endpoint")
+
+    if _route_registered(text, "GET", "/v1/hub/bot-groups", "_handle_get_hub_bot_groups"):
+        return text, changes
+    legacy_anchor = '            self._app.router.add_get("/v1/hub/wellbeing/daily/{date}", self._handle_get_hub_wellbeing_daily)\n'
+    if legacy_anchor in text:
+        # Legacy layout: static router lines; segue lo stesso schema wellbeing.
+        text, _ = _replace_once(
+            text,
+            legacy_anchor,
+            legacy_anchor
+            + '            self._app.router.add_get("/v1/hub/bot-groups", self._handle_get_hub_bot_groups)\n'
+            + '            self._app.router.add_post("/v1/hub/bot-groups", self._handle_put_hub_bot_group)\n'
+            + '            self._app.router.add_delete("/v1/hub/bot-groups/{group_name}", self._handle_delete_hub_bot_group)\n'
+            + "    " + _BOT_GROUPS_ROUTE_MARKER + "\n",
+            "router bot groups endpoints",
+        )
+        changes.append("router bot groups endpoints")
+    if _BOT_GROUPS_ROUTE_MARKER not in text:
+        raise PatchError("Patch anchor not found: bot groups routes (dynamic table or legacy router)")
     return text, changes
 
 
@@ -10451,6 +10699,8 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
     changes.extend(jarvis_changes)
     text, wellbeing_changes = _patch_wellbeing_v1(text)
     changes.extend(wellbeing_changes)
+    text, bot_groups_changes = _patch_bot_groups_v1(text)
+    changes.extend(bot_groups_changes)
     text, sqlite_sync_changes = _patch_sqlite_sync_v1(text)
     changes.extend(sqlite_sync_changes)
     text, correlation_changes = _patch_agent_runtime_and_correlation_v1(text)
