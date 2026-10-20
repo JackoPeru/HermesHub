@@ -9000,6 +9000,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
                     '                content = _normalize_chat_content(raw_content)\n',
                     "chat completions ignore hermes hub system prompts",
                 )
+                changes.append("chat completions ignore hermes hub system prompts")
         else:
             text, _ = _replace_once(
                 text,
@@ -9022,7 +9023,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
                 '                # System messages don\'t support images',
                 "chat completions ignore hermes hub system prompts",
             )
-        changes.append("chat completions ignore hermes hub system prompts")
+            changes.append("chat completions ignore hermes hub system prompts")
     else:
         text = text.replace(
             '        system_prompt = None\n'
