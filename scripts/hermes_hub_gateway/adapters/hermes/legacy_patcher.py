@@ -4622,6 +4622,23 @@ def _resolve_first_present(text: str, candidates: tuple[str, ...] | list[str], e
     return hits[0]
 
 
+def _insert_handler_before_models(text: str, new_with_trailer: str, label: str) -> str:
+    """Inserisce un handler prima di _handle_models (qualsiasi stile annotation).
+
+    new_with_trailer e' il blocco handler che termina con la riga _handle_models
+    in uno qualsiasi degli stili noti; il trailer viene normalizzato alla variante
+    presente in text. Upstream ha rimosso le virgolette dalle annotation.
+    """
+    models_anchor = _resolve_first_present(text, _HANDLE_MODELS_ANCHORS, label)
+    block = new_with_trailer
+    for trailer in _HANDLE_MODELS_ANCHORS:
+        if block.endswith(trailer):
+            block = block[: -len(trailer)] + models_anchor
+            break
+    patched, _ = _replace_once(text, models_anchor, block, label)
+    return patched
+
+
 def _patch_bot_profiles_v1(text: str) -> tuple[str, list[str]]:
     """Expose Hermes' real profiles without adding a second bot runtime."""
     changes: list[str] = []
@@ -5815,6 +5832,17 @@ def _patch_source_texts(
     api_runs_text: str | None = None,
 ) -> tuple[str, str | None, list[str]]:
     changes: list[str] = []
+
+    # Upstream ha rimosso le virgolette dalle annotation (web.Request):
+    # canonicalizza la riga _handle_models una volta sola cosi' tutti gli
+    # anchor storici restano validi. Semanticamente nullo (forward reference
+    # identica) e idempotente: alla seconda passata la forma non quotata
+    # non c'e' piu'.
+    _MODELS_DEF_UNQUOTED = "    async def _handle_models(self, request: web.Request) -> web.Response:\n"
+    _MODELS_DEF_QUOTED = '    async def _handle_models(self, request: "web.Request") -> "web.Response":\n'
+    if text.count(_MODELS_DEF_UNQUOTED) == 1 and text.count(_MODELS_DEF_QUOTED) == 0:
+        text = text.replace(_MODELS_DEF_UNQUOTED, _MODELS_DEF_QUOTED, 1)
+        changes.append("normalize quoted models annotation")
 
     text, dynamic_routes_changed = _patch_dynamic_http_routes(text)
     if dynamic_routes_changed:
