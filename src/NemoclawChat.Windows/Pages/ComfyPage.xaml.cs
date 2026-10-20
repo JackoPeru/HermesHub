@@ -188,7 +188,10 @@ public sealed partial class ComfyPage : Page
             (string.IsNullOrWhiteSpace(status.Hint) ? string.Empty : $"\n{status.Hint}") +
             (string.IsNullOrWhiteSpace(status.Error) ? string.Empty : $"\nErrore: {status.Error}");
         QueueText.Text = $"Coda manager: {status.QueueLabel}";
-        LlmText.Text = $"LLM {(status.LlmLoaded ? "caricato" : "scarico")}";
+        var loadedVideo = status.MediaLoadedModels.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m));
+        LlmText.Text = loadedVideo is not null
+            ? $"Video su GPU: {loadedVideo}" + (status.MediaLoadedModels.Count > 1 ? $" +{status.MediaLoadedModels.Count - 1}" : string.Empty)
+            : $"LLM {(status.LlmLoaded ? "caricato" : "scarico")}" + (!string.IsNullOrWhiteSpace(status.LlmModel) && status.LlmLoaded ? $": {status.LlmModel}" : string.Empty);
         PageStatusText.Text = "Aggiornato ogni 5 secondi mentre guardi.";
 
         var showDirect = status.ComfyQueue.HasValue || !string.IsNullOrWhiteSpace(status.ComfyError);

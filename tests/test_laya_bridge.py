@@ -21,7 +21,9 @@ import laya_bridge as lb  # noqa: E402
 
 def snap_status(**over):
     base = {"desired_mode": "LLM", "current_state": "LLM_READY", "queue_length": 0,
-            "llm_loaded": True, "media_online": False}
+            "llm_loaded": True, "llm_online": True, "media_online": False,
+            "llm_model": "qwen", "llm_vram_mb": 14000.0, "media_vram_mb": 0.0,
+            "media_loaded_models": []}
     base.update(over)
     return base
 
@@ -242,6 +244,146 @@ class TestHandleCommand(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertEqual("forced_after_llm_restart", out["manager"]["stage"])
         self.assertTrue(any("hermes-tabby.service" in c for c in calls))
+
+
+class TestSplitCommands(unittest.TestCase):
+    def test_split_congiunzioni_e_punteggiatura(self):
+        self.assertEqual(["carica l'llm", "metti in auto"],
+                         lb.split_commands("carica l'llm e metti in auto"))
+        self.assertEqual(["attiva comfy", "dimmi lo stato"],
+                         lb.split_commands("attiva comfy, dimmi lo stato"))
+        self.assertEqual(["a", "b", "c"], lb.split_commands("a; b\nc"))
+        self.assertEqual(["passa a comfy"], lb.split_commands("passa a comfy"))
+        self.assertEqual([], lb.split_commands("   "))
+        self.assertEqual([], lb.split_commands(None))
+
+    def test_split_rispetta_limite(self):
+        parts = lb.split_commands("a e b e c e d e e", limit=3)
+        self.assertEqual(3, len(parts))
+        self.assertEqual("a", parts[0])
+
+
+class TestMultiIntent(unittest.TestCase):
+    def test_due_modi_in_un_messaggio(self):
+        http = make_http(laya_choice=None,
+                         status_body=snap_status(media_online=True))
+        out = lb.handle_command(lb.DEFAULT_CONFIG, "attiva comfy e metti in auto",
+                                http=http, runner=_noop_runner, sleeper=_noop_sleep)
+        self.assertEqual("multi", out["intent"])
+        self.assertEqual(["MEDIA", "AUTO"], out["modes"])
+        self.assertEqual("AUTO", out["mode"])
+        self.assertTrue(out["ok"])
+        forces = [c["url"] for c in http.calls if c["url"].endswith("/force")]
+        self.assertEqual(2, len(forces))
+        self.assertEqual(2, len(out["actions"]))
+
+    def test_multi_con_stato(self):
+        http = make_http(laya_choice=None,
+                         status_body=snap_status(media_online=True))
+        out = lb.handle_command(lb.DEFAULT_CONFIG, "attiva comfy e dimmi lo stato",
+                                http=http, runner=_noop_runner, sleeper=_noop_sleep)
+        self.assertEqual("multi", out["intent"])
+        self.assertIn("Manager in", out["reply"])
+        self.assertTrue(out["ok"])
+
+    def test_multi_sconosciuto_segnalato(self):
+        http = make_http(laya_choice=None,
+                         status_body=snap_status(media_online=True))
+        out = lb.handle_command(lb.DEFAULT_CONFIG, "attiva comfy e canta una canzone",
+                                http=http, runner=_noop_runner, sleeper=_noop_sleep)
+        self.assertEqual("multi", out["intent"])
+        # L'azione capita riesce (ok=True), la parte ignota e' segnalata.
+        self.assertTrue(out["ok"])
+        self.assertIn("Non ho capito", out["reply"])
+        self.assertIn("Comfy attivo", out["reply"])
+        self.assertFalse(any(a["intent"] == "unknown" and a["ok"]
+                             for a in out["actions"]))
+
+    def test_multi_solo_sconosciuti_fallisce(self):
+        http = make_http(laya_choice=None)
+        out = lb.handle_command(lb.DEFAULT_CONFIG, "canta una canzone e balla",
+                                http=http, runner=_noop_runner, sleeper=_noop_sleep)
+        self.assertFalse(out["ok"])
+
+    def test_multi_dry_run_non_forza(self):
+        http = make_http(laya_choice=None)
+        out = lb.handle_command(lb.DEFAULT_CONFIG, "attiva comfy e metti in auto",
+                                execute=False, http=http,
+                                runner=_noop_runner, sleeper=_noop_sleep)
+        self.assertTrue(out["ok"])
+        self.assertEqual(["MEDIA", "AUTO"], out["modes"])
+        self.assertFalse(any(c["url"].endswith("/force") for c in http.calls))
+        self.assertIn("MEDIA", out["reply"])
+
+    def test_singolo_resta_identico(self):
+        http = make_http(laya_choice=None,
+                         status_body=snap_status(media_online=True))
+        out = lb.handle_command(lb.DEFAULT_CONFIG, "attiva comfy",
+                                http=http, runner=_noop_runner, sleeper=_noop_sleep)
+        self.assertEqual("mode", out["intent"])
+        self.assertEqual("MEDIA", out["mode"])
+        self.assertEqual(["MEDIA"], out["modes"])
+        self.assertEqual(1, len(out["actions"]))
+        self.assertIn("Comfy attivo", out["reply"])
+
+
+class TestWaitBackend(unittest.TestCase):
+    def test_media_pronto_subito(self):
+        http = make_http(laya_choice=None,
+                         status_body=snap_status(media_online=True))
+        ready, status = lb.wait_backend(lb.DEFAULT_CONFIG, "MEDIA", http, _noop_sleep)
+        self.assertTrue(ready)
+        self.assertTrue(status["media_online"])
+
+    def test_media_mai_pronto(self):
+        http = make_http(laya_choice=None, status_body=snap_status())
+        ready, _ = lb.wait_backend(dict(lb.DEFAULT_CONFIG, backend_wait_polls=3),
+                                   "MEDIA", http, _noop_sleep)
+        self.assertFalse(ready)
+
+    def test_auto_non_attende(self):
+        http = make_http(laya_choice=None)
+        before = len(http.calls)
+        ready, status = lb.wait_backend(lb.DEFAULT_CONFIG, "AUTO", http, _noop_sleep)
+        self.assertTrue(ready)
+        self.assertIsNone(status)
+        self.assertEqual(before, len(http.calls))
+
+
+class TestDisambiguazioneComfy(unittest.TestCase):
+    def test_passa_a_comfy_e_media(self):
+        for text in ("passa a comfy", "metti comfy", "usa comfy per generare"):
+            with self.subTest(text=text):
+                self.assertEqual("MEDIA", lb.classify_text(text)["mode"])
+
+    def test_diretto_esplicito_resta_direct(self):
+        for text in ("comfy diretto", "usa il direct", "passa in direct",
+                     "metti diretto"):
+            with self.subTest(text=text):
+                self.assertEqual("DIRECT", lb.classify_text(text)["mode"])
+
+    def test_laya_istruzioni_discriminano(self):
+        instructions = lb.LAYA_QUESTIONS[lb.LAYA_QID]["instructions"]
+        self.assertIn("diretto", instructions)
+        criteria = lb.LAYA_QUESTIONS[lb.LAYA_QID]["criteria"]
+        self.assertIn("diretto", criteria["direct_mode"])
+        self.assertNotIn("diretto", criteria["activate_comfy"])
+
+
+class TestSummarizeModelli(unittest.TestCase):
+    def test_riassunto_con_modello_video(self):
+        text = lb.summarize_status(snap_status(
+            current_state="DIRECT", desired_mode="DIRECT",
+            media_loaded_models=["minimax_h3_fl2va_pruned.safetensors"],
+            llm_loaded=False))
+        self.assertIn("DIRECT", text)
+        self.assertIn("minimax_h3_fl2va_pruned.safetensors", text)
+        self.assertNotIn("llm_loaded", text)
+
+    def test_riassunto_con_llm(self):
+        text = lb.summarize_status(snap_status())
+        self.assertIn("LLM", text)
+        self.assertIn("qwen", text)
 
 
 class TestNoFastapiImport(unittest.TestCase):

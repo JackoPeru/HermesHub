@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -71,16 +72,17 @@ LAYA_QUESTIONS = {
         "instructions": (
             "L utente vuole comandare il GPU manager Hermes. "
             "Se vuole l LLM caricato e pronto (chat, tabby, qwen) scegli llm_ready. "
-            "Se vuole ComfyUI attivo per generare immagini o video scegli "
-            "activate_comfy. Se vuole la modalita automatica scegli auto_mode. "
-            "Se vuole ComfyUI diretto scegli direct_mode. "
+            "Se vuole ComfyUI per generare immagini o video (attiva, passa a, "
+            "usa comfy, metti comfy) scegli activate_comfy. "
+            "Solo se nomina esplicitamente diretto/direct/diretto scegli "
+            "direct_mode. Se vuole la modalita automatica scegli auto_mode. "
             "Se chiede solo lo stato o cosa succede scegli status. Altrimenti none."
         ),
         "criteria": {
             "llm_ready": "caricare o tenere pronto l LLM, la chat, tabby o qwen",
-            "activate_comfy": "attivare ComfyUI per generare immagini o video",
+            "activate_comfy": "attivare o usare ComfyUI per generare immagini o video",
             "auto_mode": "tornare alla modalita automatica",
-            "direct_mode": "usare ComfyUI diretto",
+            "direct_mode": "usare ComfyUI diretto, solo se dice diretto o direct",
             "status": "chiedere lo stato del sistema, cosa succede",
             "none": "altro: nessun comando riconosciuto",
         },
@@ -228,6 +230,30 @@ def classify_text(text: str) -> dict:
         return {"intent": "unknown", "mode": None}
 
 
+_SPLIT_PATTERN = re.compile(
+    r"\s*(?:;|\n|\+|,|\be poi\b|\bpoi\b|\be\b|\bquindi\b|\bper favore\b)\s*"
+)
+
+
+def split_commands(text: str, limit: int = 4) -> list:
+    """Puro/testabile: divide un messaggio in sotto-comandi.
+
+    "carica l'llm e metti in auto" -> ["carica l'llm", "metti in auto"].
+    Mai solleva; un solo segmento se non ci sono separatori.
+    """
+    try:
+        if not isinstance(text, str):
+            return []
+        parts = [p.strip(" ,;\t\n") for p in _SPLIT_PATTERN.split(text)]
+        cleaned = [p for p in (q.strip() for q in parts) if p]
+        if not cleaned:
+            return []
+        return cleaned[: max(1, int(limit))]
+    except Exception:  # noqa: BLE001
+        stripped = str(text or "").strip()
+        return [stripped] if stripped else []
+
+
 def parse_laya_choice(data: dict, qid: str = LAYA_QID) -> tuple[str, float]:
     """Estrae (choice, confidence) da una risposta /api/decide. Mai solleva."""
     try:
@@ -256,7 +282,23 @@ def intent_from_choice(choice: str) -> tuple[str | None, str | None]:
 def compose_reply(mode: str, outcome: dict) -> str:
     """Risposta breve in italiano a partire dall'esito del force."""
     stage = (outcome or {}).get("stage")
+    ready = (outcome or {}).get("backend_ready")
     if stage == "forced":
+        if ready is True:
+            if mode == "MEDIA":
+                return "Comfy attivo e raggiungibile."
+            if mode == "DIRECT":
+                return "Comfy diretto attivo e raggiungibile."
+            if mode == "LLM":
+                return "LLM caricato e raggiungibile."
+            return f"Fatto: il manager e' passato in {mode}."
+        if ready is False:
+            if mode in ("MEDIA", "DIRECT"):
+                return (f"Ho impostato {mode}, ma Comfy non risponde ancora: "
+                        f"sta caricando, ricontrolla tra un minuto.")
+            if mode == "LLM":
+                return ("Ho impostato LLM, ma non risponde ancora: "
+                        "sta caricando, ricontrolla tra un minuto.")
         return f"Fatto: il manager e' passato in {mode}."
     if stage == "forced_after_restart":
         return f"Il manager non rispondeva: l'ho riavviato e l'ho forzato in {mode}."
@@ -280,10 +322,20 @@ def summarize_status(status: dict) -> str:
         desired = status.get("desired_mode", "?")
         state = status.get("current_state", "?")
         queue = status.get("queue_length", 0)
-        return (f"Manager in {state} (modo {desired}), "
-                f"coda {int(queue) if isinstance(queue, (int, float)) else 0}, "
-                f"llm_loaded={bool(status.get('llm_loaded'))}, "
-                f"media_online={bool(status.get('media_online'))}.")
+        parts = [f"Manager in {state} (modo {desired})",
+                 f"coda {int(queue) if isinstance(queue, (int, float)) else 0}"]
+        media_models = status.get("media_loaded_models") or []
+        if isinstance(media_models, list) and media_models:
+            shown = ", ".join(str(m) for m in media_models[:3])
+            more = f" +{len(media_models) - 3}" if len(media_models) > 3 else ""
+            parts.append(f"su GPU: video {shown}{more}")
+        elif status.get("llm_loaded"):
+            llm_model = str(status.get("llm_model") or "").strip()
+            parts.append(f"su GPU: LLM {llm_model}".rstrip() if llm_model
+                         else "su GPU: LLM")
+        else:
+            parts.append("GPU senza workload riconosciuto")
+        return ", ".join(parts) + "."
     except Exception:  # noqa: BLE001
         return "Stato non disponibile."
 
@@ -383,6 +435,47 @@ def restart_manager(cfg: dict, http=http_json, runner=run_cmd, sleeper=time.slee
     return False
 
 
+def wait_backend(cfg: dict, mode: str, http=http_json,
+                 sleeper=time.sleep) -> tuple[bool, dict | None]:
+    """Attende che il backend del modo richiesto risponda. Mai solleva.
+
+    Poll limitati (default 12 x 5s = 60s max): con sleeper finto i test
+    restano istantanei. AUTO non attende mai. Ritorna (pronto, status|None).
+    """
+    try:
+        if mode == "AUTO":
+            return True, None
+        polls = int(cfg.get("backend_wait_polls", 12))
+        interval = float(cfg.get("backend_wait_interval_s", 5.0))
+        polls = max(1, min(polls, 60))
+        interval = max(0.0, min(interval, 30.0))
+        last: dict | None = None
+        for _ in range(polls):
+            ok, status = get_status(cfg, http)
+            last = status if isinstance(status, dict) else None
+            if not ok or last is None:
+                try:
+                    sleeper(interval)
+                except Exception:  # noqa: BLE001
+                    pass
+                continue
+            if mode in ("MEDIA", "DIRECT"):
+                if bool(last.get("media_online")):
+                    return True, last
+            elif mode == "LLM":
+                if bool(last.get("llm_online")):
+                    return True, last
+            else:
+                return True, last
+            try:
+                sleeper(interval)
+            except Exception:  # noqa: BLE001
+                pass
+        return False, last
+    except Exception:  # noqa: BLE001
+        return False, None
+
+
 def force_mode(cfg: dict, mode: str, reason: str, http=http_json, runner=run_cmd,
                sleeper=time.sleep, clock=time.monotonic) -> dict:
     """Forza il modo; se il manager non risponde, riavvia+e riprova. Mai solleva."""
@@ -425,33 +518,40 @@ def force_mode(cfg: dict, mode: str, reason: str, http=http_json, runner=run_cmd
     return {"ok": False, "stage": "manager_down", "status": code}
 
 
-def handle_command(cfg: dict, text: str, *, execute: bool = True, http=http_json,
-                   runner=run_cmd, sleeper=time.sleep, clock=time.monotonic) -> dict:
-    """Interpreta il testo e (se `execute`) forza il modo. Mai solleva.
-
-    Ritorna {ok, reply, intent, mode, backend, ...}: `backend` e' "laya" o
-    "rules" a seconda di chi ha deciso.
-    """
-    text = str(text or "").strip()
-    if not text:
-        return {"ok": False, "reply": "Dimmi cosa fare (es. 'metti l'LLM ready', "
-                                      "'attiva comfy', 'metti in auto').",
-                "intent": "unknown", "mode": None, "backend": "rules"}
-
+def _classify_segment(cfg: dict, segment: str, http=http_json) -> dict:
+    """Puro-ish/testabile: un segmento -> {intent, mode, backend, choice}."""
     backend = "rules"
     intent: str | None = None
     mode: str | None = None
-    laya_ok, choice, confidence = ask_laya(cfg, text, http)
-    min_conf = float(cfg.get("laya_min_confidence", 0.7))
+    choice = ""
+    try:
+        laya_ok, choice, confidence = ask_laya(cfg, segment, http)
+    except Exception:  # noqa: BLE001
+        laya_ok, choice, confidence = False, "", 0.0
+    try:
+        min_conf = float(cfg.get("laya_min_confidence", 0.7))
+    except (TypeError, ValueError):
+        min_conf = 0.7
     if laya_ok and confidence >= min_conf:
         intent, mode = intent_from_choice(choice)
         if intent:
             backend = "laya"
     if not intent:
-        verdict = classify_text(text)
+        verdict = classify_text(segment)
         intent = verdict.get("intent")
         mode = verdict.get("mode")
         backend = "rules"
+    return {"intent": intent, "mode": mode, "backend": backend, "choice": choice}
+
+
+def _handle_single(cfg: dict, text: str, *, execute: bool = True, http=http_json,
+                   runner=run_cmd, sleeper=time.sleep, clock=time.monotonic) -> dict:
+    """Un singolo comando (stessa semantica di prima del multi-intent)."""
+    classified = _classify_segment(cfg, text, http)
+    intent = classified["intent"]
+    mode = classified["mode"]
+    backend = classified["backend"]
+    choice = classified["choice"]
 
     if intent == "status":
         ok, status = get_status(cfg, http)
@@ -468,6 +568,9 @@ def handle_command(cfg: dict, text: str, *, execute: bool = True, http=http_json
                 "reply": f"Ok, forzerei {mode}.", "executed": False}
 
     outcome = force_mode(cfg, mode, text, http, runner, sleeper, clock)
+    if outcome.get("ok"):
+        ready, _snapshot = wait_backend(cfg, mode, http, sleeper)
+        outcome["backend_ready"] = ready
     return {
         "ok": bool(outcome.get("ok")),
         "reply": compose_reply(mode, outcome),
@@ -478,6 +581,96 @@ def handle_command(cfg: dict, text: str, *, execute: bool = True, http=http_json
         "executed": True,
         "manager": outcome,
     }
+
+
+def handle_command(cfg: dict, text: str, *, execute: bool = True, http=http_json,
+                   runner=run_cmd, sleeper=time.sleep, clock=time.monotonic) -> dict:
+    """Interpreta il testo e (se `execute`) forza i modi. Mai solleva.
+
+    Un messaggio puo' contenere piu' comandi ("carica l'llm e metti in
+    auto"): vengono classificati tutti ed eseguiti in ordine. Con un solo
+    segmento il risultato e' identico a prima (`actions` con un elemento).
+    Ritorna {ok, reply, intent, mode, modes, actions, backend, ...}:
+    `backend` e' "laya", "rules" o combinati con "+".
+    """
+    text = str(text or "").strip()
+    if not text:
+        return {"ok": False, "reply": "Dimmi cosa fare (es. 'metti l'LLM ready', "
+                                      "'attiva comfy', 'metti in auto').",
+                "intent": "unknown", "mode": None, "backend": "rules"}
+
+    segments = split_commands(text)
+    if len(segments) <= 1:
+        single = _handle_single(cfg, text, execute=execute, http=http,
+                                runner=runner, sleeper=sleeper, clock=clock)
+        single["modes"] = [single["mode"]] if single.get("mode") else []
+        single["actions"] = [dict(single, segment=text)]
+        return single
+
+    classified = [_classify_segment(cfg, seg, http) for seg in segments]
+    backends = "+".join(dict.fromkeys(c["backend"] for c in classified))
+    modes = [c["mode"] for c in classified
+             if c.get("intent") == "mode" and c.get("mode")]
+
+    if not execute:
+        previews = []
+        for seg, found in zip(segments, classified):
+            if found["intent"] == "mode" and found["mode"]:
+                previews.append(f"forzerei {found['mode']}")
+            elif found["intent"] == "status":
+                previews.append("mostrerei lo stato")
+            else:
+                previews.append(f"non ho capito {seg!r}")
+        ok = all(f["intent"] in ("mode", "status") for f in classified)
+        actions = [dict(segment=seg, intent=f["intent"], mode=f["mode"],
+                        backend=f["backend"], executed=False)
+                   for seg, f in zip(segments, classified)]
+        return {"ok": ok, "reply": "Ok, " + "; ".join(previews) + ".",
+                "intent": "multi", "mode": modes[-1] if modes else None,
+                "modes": modes, "actions": actions, "backend": backends,
+                "executed": False}
+
+    actions = []
+    for seg, found in zip(segments, classified):
+        if found["intent"] == "status":
+            ok, status = get_status(cfg, http)
+            actions.append({
+                "segment": seg, "intent": "status", "mode": None,
+                "backend": found["backend"],
+                "ok": ok,
+                "reply": summarize_status(status) if ok else "Il manager non risponde.",
+                "executed": True,
+            })
+        elif found["intent"] == "mode" and found["mode"]:
+            outcome = force_mode(cfg, found["mode"], seg, http, runner, sleeper, clock)
+            if outcome.get("ok"):
+                ready, _snapshot = wait_backend(cfg, found["mode"], http, sleeper)
+                outcome["backend_ready"] = ready
+            actions.append({
+                "segment": seg, "intent": "mode", "mode": found["mode"],
+                "backend": found["backend"],
+                "choice": found["choice"] if found["backend"] == "laya" else "",
+                "ok": bool(outcome.get("ok")),
+                "reply": compose_reply(found["mode"], outcome),
+                "executed": True,
+                "manager": outcome,
+            })
+        else:
+            actions.append({
+                "segment": seg, "intent": "unknown", "mode": None,
+                "backend": found["backend"], "ok": False,
+                "reply": f"Non ho capito {seg!r}.",
+                "executed": False,
+            })
+    mode_actions = [a for a in actions if a["intent"] == "mode"]
+    status_actions = [a for a in actions if a["intent"] == "status"]
+    ok = all(a["ok"] for a in mode_actions) and all(a["ok"] for a in status_actions)
+    if not mode_actions and not status_actions:
+        ok = False
+    reply = " ".join(a["reply"] for a in actions)
+    return {"ok": ok, "reply": reply, "intent": "multi",
+            "mode": modes[-1] if modes else None, "modes": modes,
+            "actions": actions, "backend": backends, "executed": True}
 
 
 # --------------------------------------------------------------- HTTP ---

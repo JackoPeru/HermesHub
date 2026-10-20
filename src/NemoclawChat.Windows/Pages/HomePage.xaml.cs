@@ -646,6 +646,21 @@ public sealed partial class HomePage : Page
         ChatLlmSubtitle.Text = status.LlmLoaded
             ? "Caricato sulle GPU"
             : status.State is "LLM_LOADING" ? "Caricamento in corso..." : "Scaricato";
+        var video = status.MediaLoadedModels.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m));
+        if (video is not null)
+        {
+            var extra = status.MediaLoadedModels.Count > 1 ? $" +{status.MediaLoadedModels.Count - 1}" : string.Empty;
+            ChatLlmSwitch.Header = "Video su GPU";
+            ChatLlmSubtitle.Text = $"{video}{extra}";
+        }
+        else
+        {
+            ChatLlmSwitch.Header = "LLM su GPU";
+            if (!string.IsNullOrWhiteSpace(status.LlmModel) && status.LlmLoaded)
+            {
+                ChatLlmSubtitle.Text = $"Caricato: {status.LlmModel}";
+            }
+        }
         var queue = status.Queue > 0 ? $" · coda {status.Queue}" : string.Empty;
         ChatAutoSubtitle.Text = status.Desired switch
         {

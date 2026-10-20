@@ -23,6 +23,11 @@ class ComfyStatusTest {
         .put("last_error", "")
         .put("hint", "media up")
         .put("llm_loaded", false)
+        .put("llm_model", "")
+        .put("llm_vram_mb", 0.0)
+        .put("media_vram_mb", 9800.5)
+        .put("media_loaded_models",
+            org.json.JSONArray().put("minimax_h3_video.safetensors"))
         .toString()
 
     @Test
@@ -36,6 +41,24 @@ class ComfyStatusTest {
         assertEquals(2, status.queue)
         assertEquals("journey_video_preview", status.preset)
         assertEquals("minimax_h3", status.model)
+    }
+
+    @Test
+    fun parseGpuTruthFields() {
+        val status = parseComfyStatus(fullBody())!!
+        assertEquals("", status.llmModel)
+        assertEquals(listOf("minimax_h3_video.safetensors"), status.mediaLoadedModels)
+    }
+
+    @Test
+    fun subtitleShowsLoadedVideoModel() {
+        val status = parseComfyStatus(
+            JSONObject().put("current_state", "DIRECT").put("desired_mode", "DIRECT")
+                .put("llm_loaded", true)
+                .put("media_loaded_models",
+                    org.json.JSONArray().put("qwen_image_2.1-Q4_K.gguf")).toString()
+        )!!
+        assertEquals("Video su GPU · qwen_image_2.1-Q4_K.gguf", comfyMenuSubtitle(status))
     }
 
     @Test

@@ -81,6 +81,10 @@ internal data class ComfyStatus(
     val error: String = "",
     val hint: String = "",
     val llmLoaded: Boolean = false,
+    val llmModel: String = "",
+    val llmVramMb: Double = 0.0,
+    val mediaVramMb: Double = 0.0,
+    val mediaLoadedModels: List<String> = emptyList(),
     // ComfyUI diretto (best-effort): coda e ultimi errori dei prompt.
     val comfyQueue: Int? = null,
     val comfyError: String? = null,
@@ -102,7 +106,19 @@ internal fun parseComfyStatus(body: String): ComfyStatus? {
         model = root.optString("active_media_model", ""),
         error = root.optString("last_error", ""),
         hint = root.optString("hint", ""),
-        llmLoaded = root.optBoolean("llm_loaded", false)
+        llmLoaded = root.optBoolean("llm_loaded", false),
+        llmModel = root.optString("llm_model", ""),
+        llmVramMb = root.optDouble("llm_vram_mb", 0.0),
+        mediaVramMb = root.optDouble("media_vram_mb", 0.0),
+        mediaLoadedModels = buildList {
+            val arr = root.optJSONArray("media_loaded_models")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    val name = arr.optString(i).trim()
+                    if (name.isNotBlank()) add(name)
+                }
+            }
+        }
     )
 }
 
@@ -132,7 +148,15 @@ internal fun comfyMenuSubtitle(status: ComfyStatus?): String {
         val what = status.preset.takeIf { it.isNotBlank() } ?: status.model.takeIf { it.isNotBlank() } ?: "lavoro"
         return "Sta generando · $pct · $what"
     }
-    if (status.state == "LLM_READY") return "LLM attivo · ${status.desired.ifBlank { "AUTO" }}"
+    val videoName = status.mediaLoadedModels.firstOrNull()
+    if (videoName != null) {
+        val extra = if (status.mediaLoadedModels.size > 1) " +${status.mediaLoadedModels.size - 1}" else ""
+        return "Video su GPU · $videoName$extra"
+    }
+    if (status.state == "LLM_READY") {
+        val model = status.llmModel.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""
+        return "LLM attivo · ${status.desired.ifBlank { "AUTO" }}$model"
+    }
     if (status.state.isBlank()) return "Stato sconosciuto"
     val base = comfyStateLabel(status.state)
     return if (status.queue > 0) "$base · coda ${status.queue}" else base

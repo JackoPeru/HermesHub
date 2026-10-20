@@ -314,6 +314,8 @@ internal fun TopBar(
     val managerBase = remember(settings.gatewayUrl) { gpuManagerBase(settings.gatewayUrl) }
     var menuOpen by remember { mutableStateOf(false) }
     var llmLoaded by remember { mutableStateOf<Boolean?>(null) }
+    var llmModel by remember { mutableStateOf("") }
+    var mediaModels by remember { mutableStateOf(listOf<String>()) }
     var llmState by remember { mutableStateOf("") }
     var desiredMode by remember { mutableStateOf("") }
     var queueLength by remember { mutableStateOf(0) }
@@ -340,6 +342,16 @@ internal fun TopBar(
         }
         val status = JSONObject(body)
         llmLoaded = status.optBoolean("llm_loaded", false)
+        llmModel = status.optString("llm_model", "")
+        mediaModels = buildList {
+            val arr = status.optJSONArray("media_loaded_models")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    val name = arr.optString(i).trim()
+                    if (name.isNotBlank()) add(name)
+                }
+            }
+        }
         llmState = status.optString("current_state", "")
         desiredMode = status.optString("desired_mode", "")
         queueLength = status.optInt("queue_length", 0)
@@ -541,12 +553,19 @@ internal fun TopBar(
                     )
                     HorizontalDivider()
                     val loaded = llmLoaded
+                    val videoName = mediaModels.firstOrNull()
+                    val gpuTitle = when {
+                        videoName != null -> "Video su GPU"
+                        loaded == true -> "LLM su GPU"
+                        else -> "GPU"
+                    }
                     val subtitle = when {
                         llmError.isNotBlank() && loaded != null -> if (loaded) "Caricato sulle GPU (non aggiornato)" else "Scaricato (non aggiornato)"
                         llmError.isNotBlank() -> "Non raggiungibile"
                         loaded == null -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
                         llmBusy -> "Applicazione in corso..."
-                        loaded -> "Caricato sulle GPU"
+                        videoName != null -> videoName + if (mediaModels.size > 1) " +${mediaModels.size - 1}" else ""
+                        loaded -> if (llmModel.isNotBlank()) "Caricato: $llmModel" else "Caricato sulle GPU"
                         llmState == "LLM_LOADING" -> "Caricamento in corso..."
                         llmState == "MEDIA_STOPPING" || llmState == "LLM_UNLOADING" -> "Scaricamento in corso..."
                         else -> "Scaricato"
@@ -554,7 +573,7 @@ internal fun TopBar(
                     DropdownMenuItem(
                         text = {
                             Column {
-                                Text("LLM su GPU")
+                                Text(gpuTitle)
                                 Text(subtitle, color = AppColors.Muted, fontSize = 12.sp)
                             }
                         },

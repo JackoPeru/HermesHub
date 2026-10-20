@@ -15,6 +15,10 @@ public sealed record ComfyStatusRecord
     public string Error { get; init; } = string.Empty;
     public string Hint { get; init; } = string.Empty;
     public bool LlmLoaded { get; init; }
+    public string LlmModel { get; init; } = string.Empty;
+    public double LlmVramMb { get; init; }
+    public double MediaVramMb { get; init; }
+    public IReadOnlyList<string> MediaLoadedModels { get; init; } = Array.Empty<string>();
     public int? ComfyQueue { get; init; }
     public string ComfyError { get; init; } = string.Empty;
     public bool ComfyDirect { get; init; }
@@ -87,7 +91,11 @@ public static class ComfyStatusService
                 Model = ReadString(root, "active_media_model"),
                 Error = ReadString(root, "last_error"),
                 Hint = ReadString(root, "hint"),
-                LlmLoaded = ReadBool(root, "llm_loaded")
+                LlmLoaded = ReadBool(root, "llm_loaded"),
+                LlmModel = ReadString(root, "llm_model"),
+                LlmVramMb = ReadDouble(root, "llm_vram_mb"),
+                MediaVramMb = ReadDouble(root, "media_vram_mb"),
+                MediaLoadedModels = ReadStringList(root, "media_loaded_models")
             };
 
             var needsDirect = state.StartsWith("MEDIA_", StringComparison.Ordinal) ||
@@ -136,7 +144,14 @@ public static class ComfyStatusService
         if (string.Equals(status.State, "LLM_READY", StringComparison.OrdinalIgnoreCase))
         {
             var mode = string.IsNullOrWhiteSpace(status.Desired) ? "AUTO" : status.Desired;
-            return $"LLM attivo · {mode}";
+            var model = string.IsNullOrWhiteSpace(status.LlmModel) ? string.Empty : $" · {status.LlmModel}";
+            return $"LLM attivo · {mode}{model}";
+        }
+        var video = status.MediaLoadedModels.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m));
+        if (video is not null)
+        {
+            var extra = status.MediaLoadedModels.Count > 1 ? $" +{status.MediaLoadedModels.Count - 1}" : string.Empty;
+            return $"Video su GPU · {video}{extra}";
         }
         if (string.IsNullOrWhiteSpace(status.State))
         {
@@ -267,6 +282,26 @@ public static class ComfyStatusService
         }
 
         return null;
+    }
+
+    private static double ReadDouble(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var v) && v.TryGetDouble(out var d) && !double.IsNaN(d) ? d : 0.0;
+
+    private static List<string> ReadStringList(JsonElement root, string name)
+    {
+        var result = new List<string>();
+        if (root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in v.EnumerateArray())
+            {
+                var text = item.ValueKind == JsonValueKind.String ? item.GetString() ?? string.Empty : string.Empty;
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    result.Add(text.Trim());
+                }
+            }
+        }
+        return result;
     }
 
     private static string Trim(string value, int max) =>

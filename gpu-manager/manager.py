@@ -886,6 +886,164 @@ def _pid_service_owned(pid: int) -> bool:
     return _cgroup_service_owned(cgroup)
 
 
+# Unita' systemd proprietarie dei backend CUDA, per attribuire la VRAM al
+# backend vero invece che al totale (un modello video in Comfy non e' "LLM").
+_LLM_CUDA_UNITS = ("hermes-tabby.service",)
+_MEDIA_CUDA_UNITS = ("hermes-comfyui.service", "hermes-comfyui-direct.service")
+# Pattern cmdline (fallback quando il cgroup non risolve, es. processi figli
+# fuori dalle unit). Ordine: prima LLM, poi media; lowercase entrambi i lati.
+_LLM_CMD_PATTERNS = ("exllamav3", "tabby", "llama-server", "llama_cpp", "llamacpp")
+_MEDIA_CMD_PATTERNS = ("comfyui", "comfyui-direct", "comfy_main", "cuda_malloc_async")
+_MODEL_FILE_SUFFIXES = (".gguf", ".safetensors", ".onnx", ".pt", ".bin", ".pth")
+
+
+def proc_backend_label(cmdline: str, cgroup: str) -> str:
+    """Puro/testabile: backend proprietario di un processo CUDA.
+
+    Ritorna "llm", "media", "other" o "unknown". Il cgroup (unit systemd)
+    vince; in mancanza, i pattern sulla cmdline.
+    """
+    low_cg = str(cgroup or "").lower()
+    if low_cg:
+        for unit in _LLM_CUDA_UNITS:
+            if unit in low_cg:
+                return "llm"
+        for unit in _MEDIA_CUDA_UNITS:
+            if unit in low_cg:
+                return "media"
+    low_cmd = str(cmdline or "").lower()
+    if low_cmd:
+        for pattern in _LLM_CMD_PATTERNS:
+            if pattern in low_cmd:
+                return "llm"
+        for pattern in _MEDIA_CMD_PATTERNS:
+            if pattern in low_cmd:
+                return "media"
+        return "other"
+    return "unknown"
+
+
+def attribute_vram_mb(entries: list) -> dict:
+    """Puro/testabile: somma la VRAM per backend da [(used_mb, backend)]."""
+    totals = {"llm": 0.0, "media": 0.0, "other": 0.0, "unknown": 0.0}
+    for entry in entries or []:
+        try:
+            used = float(entry[0])
+            backend = str(entry[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if backend not in totals:
+            backend = "unknown"
+        totals[backend] += used
+    return totals
+
+
+def model_files_from_targets(targets: list) -> list:
+    """Puro/testabile: basename dei file modello (pesi) da target /proc.
+
+    Serve a dire COSA e' caricato (anche con load manuale in ComfyUI),
+    non solo quanti GB. Deduplica preservando l'ordine, cap a 8.
+    """
+    seen: set = set()
+    result: list = []
+    for target in targets or []:
+        name = str(target or "").split("/")[-1].strip()
+        if not name or name in seen:
+            continue
+        lowered = name.lower()
+        if not any(lowered.endswith(suffix) for suffix in _MODEL_FILE_SUFFIXES):
+            continue
+        seen.add(name)
+        result.append(name)
+        if len(result) >= 8:
+            break
+    return result
+
+
+def llm_model_from_models(data: object) -> str:
+    """Puro/testabile: id del modello da una risposta /v1/models OpenAI."""
+    try:
+        items = data.get("data") if isinstance(data, dict) else None  # type: ignore[union-attr]
+        first = items[0] if isinstance(items, list) and items else None
+        model_id = first.get("id") if isinstance(first, dict) else ""
+        return str(model_id or "").strip()[:160]
+    except (AttributeError, TypeError, IndexError):
+        return ""
+
+
+def proc_cgroup(pid: int) -> str:
+    try:
+        return Path(f"/proc/{pid}/cgroup").read_text(errors="replace")[:500]
+    except Exception:  # noqa: BLE001 - racy /proc
+        return ""
+
+
+def cuda_backend_usage() -> dict:
+    """VRAM per backend dai processi CUDA reali. Mai solleva."""
+    totals = {"llm": 0.0, "media": 0.0, "other": 0.0, "unknown": 0.0}
+    try:
+        procs = gpu_compute_procs()
+    except Exception:  # noqa: BLE001
+        return totals
+    for proc in procs[:32]:
+        try:
+            pid = int(proc.get("pid", -1))
+            used = float(proc.get("used_mb", 0) or 0)
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if pid < 0:
+            continue
+        label = proc_backend_label(_proc_cmd(pid), proc_cgroup(pid))
+        if label not in totals:
+            label = "unknown"
+        totals[label] += used
+    return totals
+
+
+def media_pids(limit: int = 4) -> list:
+    """PID dei backend media (ComfyUI). Mai solleva."""
+    found: list = []
+    try:
+        procs = gpu_compute_procs()
+    except Exception:  # noqa: BLE001
+        return found
+    for proc in procs[:32]:
+        try:
+            pid = int(proc.get("pid", -1))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if pid < 0 or len(found) >= max(1, limit):
+            continue
+        try:
+            if proc_backend_label(_proc_cmd(pid), proc_cgroup(pid)) == "media":
+                found.append(pid)
+        except Exception:  # noqa: BLE001 - racy /proc
+            continue
+    return found
+
+
+def _fd_targets(pid: int, cap: int = 200) -> list:
+    targets: list = []
+    try:
+        names = sorted(os.listdir(f"/proc/{pid}/fd"))[: max(0, cap)]
+    except Exception:  # noqa: BLE001 - processo morto / permessi
+        return targets
+    for name in names:
+        try:
+            targets.append(os.readlink(f"/proc/{pid}/fd/{name}"))
+        except Exception:  # noqa: BLE001 - fd chiuso nel frattempo
+            continue
+    try:
+        for name in sorted(os.listdir(f"/proc/{pid}/map_files"))[: max(0, cap)]:
+            try:
+                targets.append(os.readlink(f"/proc/{pid}/map_files/{name}"))
+            except Exception:  # noqa: BLE001
+                continue
+    except Exception:  # noqa: BLE001 - map_files puo' mancare
+        pass
+    return targets
+
+
 # --------------------------------------------------------------- backends ---
 
 def llm_base() -> str:
@@ -912,17 +1070,76 @@ def vram_total_meets(gpus: list, threshold_mb: float) -> bool:
 async def llm_loaded() -> bool:
     """True only when Qwen weights are really resident (VRAM), not just listed.
 
-    Somma su tutte le GPU: lo split tensoriale varia (visto live 6.6+10.8GB
-    con modello attivo e servente), quindi un gate ALL() per-GPU mente ogni
-    volta che lo split e asimmetrico (BOOT incastrato + restore inutili).
+    La VRAM e' attribuita ai processi del backend LLM (tabby/exllama per
+    PID, non il totale GPU): un modello video caricato in Comfy non deve
+    mai risultare "LLM su GPU". Lo split tensoriale varia (visto live
+    6.6+10.8GB con modello attivo e servente), quindi la somma e' globale
+    ma solo sui processi LLM.
     """
     if not await llm_online():
         return False
     threshold = float(CONFIG["switching"].get("llm_vram_min_mb", 8000))
-    gpus = await asyncio.to_thread(gpu_snapshot)
-    if not gpus:
+    try:
+        llm_mb = await asyncio.to_thread(
+            lambda: float(cuda_backend_usage().get("llm", 0.0)))
+    except Exception:  # noqa: BLE001
         return False
-    return vram_total_meets(gpus, threshold)
+    return llm_mb >= threshold
+
+
+async def llm_vram_mb() -> float:
+    """VRAM attribuita ai processi del backend LLM. Mai solleva."""
+    try:
+        return float((await asyncio.to_thread(cuda_backend_usage)).get("llm", 0.0))
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+async def media_vram_mb() -> float:
+    """VRAM attribuita ai processi ComfyUI (anche con load manuale). Mai solleva."""
+    try:
+        return float((await asyncio.to_thread(cuda_backend_usage)).get("media", 0.0))
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+async def llm_model() -> str:
+    """Id del modello servito dal backend LLM (/v1/models). Mai solleva."""
+    try:
+        code, body = await _http_async("GET", llm_base() + "/v1/models", timeout=10)
+    except Exception:  # noqa: BLE001
+        return ""
+    if code != 200 or not body:
+        return ""
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return ""
+    return llm_model_from_models(data)
+
+
+async def media_loaded_models() -> list:
+    """File modello mappati dai processi ComfyUI (fd + map_files).
+
+    Funziona anche con load manuale da UI (il manager non ha sottomesso
+    il job): dice COSA e' caricato davvero. Mai solleva.
+    """
+    try:
+        pids = await asyncio.to_thread(media_pids)
+    except Exception:  # noqa: BLE001
+        return []
+    targets: list = []
+    for pid in pids[:4]:
+        try:
+            targets.extend(await asyncio.to_thread(_fd_targets, pid))
+        except Exception:  # noqa: BLE001
+            continue
+        if len(targets) >= 400:
+            break
+    try:
+        return model_files_from_targets(targets)
+    except Exception:  # noqa: BLE001
+        return []
 
 
 # Cache della prova di risposta: una completion vera per ogni poll di stato
@@ -3101,6 +3318,10 @@ async def status(_: None = Depends(require_key)) -> dict:
         "llm_online": await llm_online(),
         "llm_loaded": await llm_loaded(),
         "llm_serving": await llm_serving(),
+        "llm_model": await llm_model(),
+        "llm_vram_mb": round(await llm_vram_mb(), 1),
+        "media_vram_mb": round(await media_vram_mb(), 1),
+        "media_loaded_models": await media_loaded_models(),
         "media_online": await media_online(),
         "queue_length": len(queued_jobs()),
         "current_job": _state["current_job"],
