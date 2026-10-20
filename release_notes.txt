@@ -1,8 +1,7 @@
-Hermes Hub 0.6.285 (sidebar istantanea + pagina che si sfoglia)
+Hermes Hub 0.6.286 (job agente visibili anche a Comfy fermo)
 
-- Sidebar: si apre subito con l'elenco precedente e aggiorna in sottofondo — niente piu' secondo di freeze da parse JSON sul thread UI.
-- Reattivita' generale: salvataggi impostazioni e chiave spostati fuori dal main thread (niente piu' scatti ai tap).
-- Transizione Chat <-> Bot come pagina di libro: flip 3D da 380ms con pivot sui dorsi, ombra della pagina e dissolvenza; il lato nascosto non prende tocchi.
-- Test: ArchiveCacheTest (5/5) e ComfyStatusTest (12/12) verdi, build senza errori.
+- Windows, pagina Comfy: nuova sezione JOB AGENTE con tutti i job che l'agente fa in autonomia (stato, avanzamento, dettagli, output), letti dal manager ogni 5 secondi. Non dipende piu' dalla vista workflow diretta, che resta vuota quando il manager tiene Comfy fermo.
+- Dettaglio job: tipo/preset, fase, backend/modello, file di output, errore, orari; pulsante "Apri output" per i job pubblicati su /v1/media.
+- Test: nuovo test_agent_jobs_contract (3/3) sul contratto GET /jobs; build Windows senza errori.
 
-Asset: HermesHub-0.6.285-android.apk (Android, versionCode 289), NemoclawChat.Windows_0.6.285.0_x64.msix (x64) e HermesHub-0.6.285-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.286-android.apk (Android, versionCode 290), NemoclawChat.Windows_0.6.286.0_x64.msix (x64) e HermesHub-0.6.286-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

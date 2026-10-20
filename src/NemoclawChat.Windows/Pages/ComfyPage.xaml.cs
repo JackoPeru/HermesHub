@@ -21,6 +21,25 @@ public sealed partial class ComfyPage : Page
     private string _lastComfyUrl = string.Empty;
     private string _runningJobId = string.Empty;
     private string _firstQueuedJobId = string.Empty;
+    private List<AgentJobInfo> _jobs = new();
+    private string _selectedJobId = string.Empty;
+
+    private sealed record AgentJobInfo
+    {
+        public string JobId { get; init; } = string.Empty;
+        public string Kind { get; init; } = string.Empty;
+        public string Status { get; init; } = string.Empty;
+        public string Preset { get; init; } = string.Empty;
+        public string Backend { get; init; } = string.Empty;
+        public string Model { get; init; } = string.Empty;
+        public string Phase { get; init; } = string.Empty;
+        public double Progress { get; init; }
+        public string Error { get; init; } = string.Empty;
+        public IReadOnlyList<string> ResultPaths { get; init; } = Array.Empty<string>();
+        public IReadOnlyList<string> MediaUrls { get; init; } = Array.Empty<string>();
+        public double CreatedAt { get; init; }
+        public double UpdatedAt { get; init; }
+    }
 
     public ComfyPage()
     {
@@ -217,7 +236,7 @@ public sealed partial class ComfyPage : Page
         WebViewFallbackText.Visibility = e.IsSuccess ? Visibility.Collapsed : Visibility.Visible;
         if (!e.IsSuccess)
         {
-            WebViewFallbackText.Text = "Comfy non è raggiungibile qui (errore di navigazione). La vista workflow serve mentre Comfy genera: se l'LLM è residente, il manager tiene Comfy fermo e qui non si vede nulla finché non riparte un job.";
+            WebViewFallbackText.Text = "Comfy non è raggiungibile qui (errore di navigazione). La vista workflow serve solo mentre Comfy genera: i job dell'agente restano visibili sotto in JOB AGENTE.";
         }
     }
 
@@ -229,11 +248,17 @@ public sealed partial class ComfyPage : Page
             CancelJobButton.IsEnabled = false;
             EditQueuedButton.IsEnabled = false;
             InterruptResubmitButton.IsEnabled = false;
+            _jobs = new List<AgentJobInfo>();
+            RenderJobs();
             return;
         }
 
         _runningJobId = status.JobId;
-        _firstQueuedJobId = await FindFirstQueuedJobIdAsync(token) ?? string.Empty;
+        _jobs = await LoadAgentJobsAsync(token);
+        _firstQueuedJobId = _jobs
+            .FirstOrDefault(j => string.Equals(j.Status, "queued", StringComparison.OrdinalIgnoreCase))
+            ?.JobId ?? string.Empty;
+        RenderJobs();
 
         if (!string.Equals(_lastComfyUrl, GatewayService.ComfyDirectBase(settings), StringComparison.OrdinalIgnoreCase))
         {
@@ -276,44 +301,242 @@ public sealed partial class ComfyPage : Page
 
     private static string ShortJob(string jobId) => jobId.Length <= 8 ? jobId : jobId[..8];
 
-    private static async Task<string?> FindFirstQueuedJobIdAsync(CancellationToken token)
+    // ------------------------------------------------------- job agente ---
+    // Tutti i job che l'agente fa in autonomia (GET /jobs del manager, gli
+    // stessi dati che alimentano "prossimo in coda"): visibili anche quando
+    // Comfy e' fermo e la WebView diretta non puo' mostrare nulla.
+
+    private static async Task<List<AgentJobInfo>> LoadAgentJobsAsync(CancellationToken token)
     {
         try
         {
             var (code, body) = await GatewayService.SendManagerRequestAsync(
-                AppSettingsStore.Load(), HttpMethod.Get, "/jobs?limit=40", null, token);
+                AppSettingsStore.Load(), HttpMethod.Get, "/jobs?limit=30", null, token);
             if (code is < 200 or > 299)
             {
-                return null;
+                return new List<AgentJobInfo>();
             }
+            return ParseAgentJobs(body);
+        }
+        catch (JsonException)
+        {
+            return new List<AgentJobInfo>();
+        }
+        catch (Exception)
+        {
+            return new List<AgentJobInfo>();
+        }
+    }
+
+    private static List<AgentJobInfo> ParseAgentJobs(string body)
+    {
+        var list = new List<AgentJobInfo>();
+        try
+        {
             using var doc = JsonDocument.Parse(body);
             if (doc.RootElement.ValueKind != JsonValueKind.Object ||
                 !doc.RootElement.TryGetProperty("jobs", out var jobs) ||
                 jobs.ValueKind != JsonValueKind.Array)
             {
-                return null;
+                return list;
             }
             foreach (var job in jobs.EnumerateArray())
             {
-                if (job.ValueKind != JsonValueKind.Object || !job.TryGetProperty("status", out var st))
+                if (job.ValueKind != JsonValueKind.Object)
                 {
                     continue;
                 }
-                var stValue = st.ValueKind == JsonValueKind.String ? st.GetString() : null;
-                if (string.Equals(stValue, "queued", StringComparison.OrdinalIgnoreCase) &&
-                    job.TryGetProperty("job_id", out var jid) && jid.ValueKind == JsonValueKind.String)
+                list.Add(new AgentJobInfo
                 {
-                    return jid.GetString();
-                }
+                    JobId = ReadJobString(job, "job_id"),
+                    Kind = ReadJobString(job, "kind"),
+                    Status = ReadJobString(job, "status"),
+                    Preset = ReadJobString(job, "preset"),
+                    Backend = ReadJobString(job, "backend"),
+                    Model = ReadJobString(job, "model"),
+                    Phase = ReadJobString(job, "phase"),
+                    Progress = ReadJobDouble(job, "progress"),
+                    Error = ReadJobString(job, "error"),
+                    ResultPaths = ReadJobStringList(job, "result_paths"),
+                    MediaUrls = ReadJobMediaUrls(job),
+                    CreatedAt = ReadJobDouble(job, "created_at"),
+                    UpdatedAt = ReadJobDouble(job, "updated_at"),
+                });
             }
         }
         catch (JsonException)
         {
         }
-        catch (Exception)
+        return list;
+    }
+
+    private void RenderJobs()
+    {
+        JobsHeaderText.Text = _jobs.Count == 0 ? "JOB AGENTE" : $"JOB AGENTE · {_jobs.Count} recenti";
+        JobsList.ItemsSource = _jobs
+            .Select(j => $"{ShortJob(j.JobId)} · {JobTitle(j)} · {JobStatusLabel(j.Status)}{JobProgressSuffix(j)} · {JobTime(j.UpdatedAt)}")
+            .ToList();
+        var selected = _jobs.FirstOrDefault(j => string.Equals(j.JobId, _selectedJobId, StringComparison.Ordinal))
+            ?? _jobs.FirstOrDefault(j => string.Equals(j.JobId, _runningJobId, StringComparison.Ordinal));
+        if (selected is not null)
+        {
+            _selectedJobId = selected.JobId;
+            JobsList.SelectedIndex = _jobs.IndexOf(selected);
+        }
+        else
+        {
+            _selectedJobId = string.Empty;
+            JobsList.SelectedIndex = -1;
+        }
+        RenderJobDetail();
+    }
+
+    private void RenderJobDetail()
+    {
+        var job = _jobs.FirstOrDefault(j => string.Equals(j.JobId, _selectedJobId, StringComparison.Ordinal));
+        if (job is null)
+        {
+            JobDetailText.Text = _jobs.Count == 0 ? "Nessun job recente dal manager." : "Seleziona un job per i dettagli.";
+            OpenOutputButton.IsEnabled = false;
+            return;
+        }
+        var lines = new List<string>
+        {
+            $"Job {job.JobId}",
+            $"Stato: {JobStatusLabel(job.Status)}{JobProgressSuffix(job)}" +
+                (string.IsNullOrWhiteSpace(job.Phase) ? string.Empty : $" · fase {job.Phase}"),
+            $"Tipo: {JobTitle(job)}" +
+                (string.IsNullOrWhiteSpace(job.Backend) ? string.Empty : $" · {job.Backend}") +
+                (string.IsNullOrWhiteSpace(job.Model) ? string.Empty : $" · {job.Model}"),
+        };
+        if (job.ResultPaths.Count > 0)
+        {
+            lines.Add("Output: " + string.Join(", ", job.ResultPaths.Select(JobFileName)));
+        }
+        if (!string.IsNullOrWhiteSpace(job.Error))
+        {
+            var error = job.Error.Trim();
+            lines.Add("Errore: " + (error.Length <= 300 ? error : error[..300]));
+        }
+        lines.Add($"Creato {JobDateTime(job.CreatedAt)} · aggiornato {JobDateTime(job.UpdatedAt)}");
+        JobDetailText.Text = string.Join("\n", lines);
+        OpenOutputButton.IsEnabled = job.MediaUrls.Count > 0;
+    }
+
+    private void JobsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (JobsList.SelectedIndex >= 0 && JobsList.SelectedIndex < _jobs.Count)
+        {
+            _selectedJobId = _jobs[JobsList.SelectedIndex].JobId;
+        }
+        else
+        {
+            _selectedJobId = string.Empty;
+        }
+        RenderJobDetail();
+    }
+
+    private async void OpenOutput_Click(object sender, RoutedEventArgs e)
+    {
+        var job = _jobs.FirstOrDefault(j => string.Equals(j.JobId, _selectedJobId, StringComparison.Ordinal));
+        var url = job?.MediaUrls.FirstOrDefault(u => !string.IsNullOrWhiteSpace(u));
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+        try
+        {
+            var uri = ImageLibraryService.ResolveImageUri(AppSettingsStore.Load(), url.Trim());
+            _ = await Windows.System.Launcher.LaunchUriAsync(uri);
+        }
+        catch
         {
         }
-        return null;
+    }
+
+    private static string JobTitle(AgentJobInfo job) =>
+        !string.IsNullOrWhiteSpace(job.Preset) ? job.Preset
+        : !string.IsNullOrWhiteSpace(job.Kind) ? job.Kind : "job";
+
+    private static string JobStatusLabel(string status) => status switch
+    {
+        { Length: 0 } => "stato?",
+        var s when string.Equals(s, "queued", StringComparison.OrdinalIgnoreCase) => "in coda",
+        var s when string.Equals(s, "running", StringComparison.OrdinalIgnoreCase) => "in esecuzione",
+        var s when string.Equals(s, "done", StringComparison.OrdinalIgnoreCase) => "completato",
+        var s when string.Equals(s, "failed", StringComparison.OrdinalIgnoreCase) => "fallito",
+        var s when string.Equals(s, "cancelled", StringComparison.OrdinalIgnoreCase) => "annullato",
+        var s => s,
+    };
+
+    private static string JobProgressSuffix(AgentJobInfo job) =>
+        string.Equals(job.Status, "running", StringComparison.OrdinalIgnoreCase)
+            ? $" · {Math.Round(Math.Clamp(job.Progress, 0.0, 1.0) * 100)}%" : string.Empty;
+
+    private static string JobTime(double unixSeconds) => JobDateTime(unixSeconds, "HH:mm");
+
+    private static string JobDateTime(double unixSeconds, string format = "dd/MM HH:mm")
+    {
+        try
+        {
+            if (unixSeconds > 0)
+            {
+                return DateTimeOffset.FromUnixTimeSeconds((long)unixSeconds).ToLocalTime().ToString(format, System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+        }
+        return "—";
+    }
+
+    private static string JobFileName(string path)
+    {
+        var name = (path ?? string.Empty).Replace('\\', '/');
+        var slash = name.LastIndexOf('/');
+        return slash >= 0 ? name[(slash + 1)..] : name;
+    }
+
+    private static string ReadJobString(JsonElement job, string name) =>
+        job.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : string.Empty;
+
+    private static double ReadJobDouble(JsonElement job, string name) =>
+        job.TryGetProperty(name, out var value) && value.TryGetDouble(out var parsed) && !double.IsNaN(parsed) ? parsed : 0.0;
+
+    private static List<string> ReadJobStringList(JsonElement job, string name)
+    {
+        var result = new List<string>();
+        if (job.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in value.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(item.GetString()))
+                {
+                    result.Add(item.GetString()!.Trim());
+                }
+            }
+        }
+        return result;
+    }
+
+    private static IReadOnlyList<string> ReadJobMediaUrls(JsonElement job)
+    {
+        if (job.TryGetProperty("parameters", out var parameters) &&
+            parameters.ValueKind == JsonValueKind.Object &&
+            parameters.TryGetProperty("media_urls", out var urls) &&
+            urls.ValueKind == JsonValueKind.Array)
+        {
+            var result = new List<string>();
+            foreach (var item in urls.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(item.GetString()))
+                {
+                    result.Add(item.GetString()!.Trim());
+                }
+            }
+            return result;
+        }
+        return Array.Empty<string>();
     }
 
     private async void CancelJob_Click(object sender, RoutedEventArgs e) => await CancelJobAsync();

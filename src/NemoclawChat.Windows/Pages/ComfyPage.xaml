@@ -16,6 +16,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
@@ -125,7 +126,7 @@
                                 TextAlignment="Center"
                                 TextWrapping="Wrap"
                                 Margin="24,0"
-                                Text="Comfy non è raggiungibile: la vista workflow serve mentre Comfy genera. Se l'LLM è residente, il manager tiene Comfy fermo e qui non si vede nulla finché non riparte un job."
+                                Text="Comfy non è raggiungibile: la vista workflow serve solo mentre Comfy genera. I job dell'agente restano visibili sotto in JOB AGENTE."
                                 Visibility="Collapsed" />
                         </Grid>
                     </Border>
@@ -162,6 +163,47 @@
                 </StackPanel>
 
                 <StackPanel Grid.Row="4" Spacing="10">
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            x:Name="JobsHeaderText"
+                            Style="{StaticResource FormSectionHeaderStyle}"
+                            VerticalAlignment="Center"
+                            Text="JOB AGENTE" />
+                        <Button
+                            Grid.Column="1"
+                            Click="Refresh_Click"
+                            Content="Aggiorna"
+                            Style="{StaticResource TextButtonStyle}" />
+                    </Grid>
+                    <TextBlock
+                        Foreground="{StaticResource MutedTextBrush}"
+                        TextWrapping="Wrap"
+                        Text="Tutti i job che l'agente fa in autonomia, anche quando Comfy è fermo: arrivano dal manager, non dalla vista workflow." />
+                    <ListView
+                        x:Name="JobsList"
+                        MaxHeight="300"
+                        SelectionChanged="JobsList_SelectionChanged"
+                        SelectionMode="Single" />
+                    <TextBlock
+                        x:Name="JobDetailText"
+                        Foreground="{StaticResource MutedTextBrush}"
+                        TextWrapping="Wrap"
+                        Text="Seleziona un job per i dettagli." />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button
+                            x:Name="OpenOutputButton"
+                            Click="OpenOutput_Click"
+                            Content="Apri output"
+                            IsEnabled="False"
+                            Style="{StaticResource TextButtonStyle}" />
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Row="5" Spacing="10">
                     <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="CHAT LAYA" />
                     <TextBlock
                         Foreground="{StaticResource MutedTextBrush}"

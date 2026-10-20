@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.286 - 2026-10-20
+
+- Windows, pagina Comfy: sezione JOB AGENTE con i job autonomi dell'agente (stato, %, dettagli, output) dal manager, visibili anche quando Comfy e' fermo e la vista workflow diretta e' vuota.
+- Job: dettaglio con tipo/preset, fase, backend/modello, output, errore e orari; "Apri output" apre il media pubblicato su /v1/media.
+- Test: nuovo test_agent_jobs_contract (3/3) sul contratto GET /jobs.
+
 ## 0.6.285 - 2026-10-20
 
 - Android, sidebar istantanea: l'elenco conversazioni si mostra subito (cache precedente) e si aggiorna in sottofondo; mai piu' parse JSON sul thread UI all'apertura.
