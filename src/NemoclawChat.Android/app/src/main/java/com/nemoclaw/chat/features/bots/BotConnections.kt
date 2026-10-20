@@ -49,6 +49,8 @@ private const val CONNECTIONS_PREFS = "hermes_bot_connections"
 private const val CONNECTIONS_JSON_KEY = "items"
 private const val GROUPS_PREFS = "hermes_bot_groups"
 private const val GROUPS_JSON_KEY = "items"
+private const val BOT_GROUPS_PENDING_PUSH_KEY = "pending_push"
+private const val BOT_GROUPS_PENDING_DELETE_KEY = "pending_delete"
 
 internal fun loadHermesBotConnections(context: Context, settings: AppSettings): HermesBotConnectionRegistry {
     val warnings = mutableListOf<String>()
@@ -141,8 +143,12 @@ internal fun deleteHermesBotConnection(context: Context, settings: AppSettings, 
 internal fun loadHermesBotGroups(context: Context): List<HermesBotGroup> {
     val raw = context.applicationContext.getSharedPreferences(GROUPS_PREFS, Context.MODE_PRIVATE)
         .getString(GROUPS_JSON_KEY, null) ?: return emptyList()
-    val result = mutableListOf<HermesBotGroup>()
     val array = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
+    return parseHermesBotGroupsJson(array)
+}
+
+private fun parseHermesBotGroupsJson(array: JSONArray): List<HermesBotGroup> {
+    val result = mutableListOf<HermesBotGroup>()
     for (index in 0 until array.length()) {
         val parsed = runCatching {
             val item = array.getJSONObject(index)
@@ -170,37 +176,62 @@ internal fun loadHermesBotGroups(context: Context): List<HermesBotGroup> {
     return result
 }
 
-internal fun upsertHermesBotGroup(context: Context, group: HermesBotGroup) {
-    val normalized = normalizeHermesBotGroup(group)
-    val existing = loadHermesBotGroups(context).filterNot { it.name.equals(normalized.name, true) }
-    val array = JSONArray()
-    (existing + normalized).forEach { item ->
-        array.put(JSONObject().put("name", item.name).put("members", JSONArray().apply {
-            item.members.forEach { member ->
-                put(JSONObject()
-                    .put("connection_id", member.connectionId)
-                    .put("profile", member.profile)
-                    .put("display_name", member.displayName)
-                    .put("handle", member.handle))
-            }
-        }))
+private fun hermesBotGroupJson(item: HermesBotGroup): JSONObject = JSONObject().put("name", item.name).put("members", JSONArray().apply {
+    item.members.forEach { member ->
+        put(JSONObject()
+            .put("connection_id", member.connectionId)
+            .put("profile", member.profile)
+            .put("display_name", member.displayName)
+            .put("handle", member.handle))
     }
+})
+
+private fun saveHermesBotGroupsCache(context: Context, groups: List<HermesBotGroup>) {
+    val array = JSONArray()
+    groups.forEach { group -> array.put(hermesBotGroupJson(group)) }
     context.applicationContext.getSharedPreferences(GROUPS_PREFS, Context.MODE_PRIVATE)
         .edit { putString(GROUPS_JSON_KEY, array.toString()) }
 }
 
+private fun loadPendingGroupNames(context: Context, key: String): List<String> {
+    val raw = context.applicationContext.getSharedPreferences(GROUPS_PREFS, Context.MODE_PRIVATE)
+        .getString(key, null) ?: return emptyList()
+    val array = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
+    return buildList {
+        for (index in 0 until array.length()) {
+            val name = array.optString(index).trim()
+            if (name.isNotBlank()) add(name)
+        }
+    }
+}
+
+private fun savePendingGroupNames(context: Context, key: String, names: Collection<String>) {
+    val array = JSONArray()
+    names.distinctBy { it.lowercase() }.forEach { array.put(it) }
+    context.applicationContext.getSharedPreferences(GROUPS_PREFS, Context.MODE_PRIVATE)
+        .edit { putString(key, array.toString()) }
+}
+
+private fun addPendingGroupName(context: Context, key: String, name: String) {
+    val current = loadPendingGroupNames(context, key).filterNot { it.equals(name, true) }
+    savePendingGroupNames(context, key, current + name.trim())
+}
+
+private fun removePendingGroupName(context: Context, key: String, name: String) {
+    val remaining = loadPendingGroupNames(context, key).filterNot { it.equals(name, true) }
+    savePendingGroupNames(context, key, remaining)
+}
+
+internal fun upsertHermesBotGroup(context: Context, group: HermesBotGroup) {
+    val normalized = normalizeHermesBotGroup(group)
+    val existing = loadHermesBotGroups(context).filterNot { it.name.equals(normalized.name, true) }
+    saveHermesBotGroupsCache(context, existing + normalized)
+}
+
 internal fun deleteHermesBotGroup(context: Context, name: String) {
     val normalized = name.trim()
-    val array = JSONArray()
-    loadHermesBotGroups(context).filterNot { it.name.equals(normalized, true) }.forEach { group ->
-        array.put(JSONObject().put("name", group.name).put("members", JSONArray().apply {
-            group.members.forEach { member ->
-                put(JSONObject().put("connection_id", member.connectionId).put("profile", member.profile).put("display_name", member.displayName).put("handle", member.handle))
-            }
-        }))
-    }
-    context.applicationContext.getSharedPreferences(GROUPS_PREFS, Context.MODE_PRIVATE)
-        .edit { putString(GROUPS_JSON_KEY, array.toString()) }
+    val remaining = loadHermesBotGroups(context).filterNot { it.name.equals(normalized, true) }
+    saveHermesBotGroupsCache(context, remaining)
 }
 
 private fun normalizeHermesBotGroup(group: HermesBotGroup): HermesBotGroup {
@@ -305,4 +336,108 @@ internal fun clearHermesBotConnections(context: Context, settings: AppSettings) 
             .getSharedPreferences(GROUPS_PREFS, Context.MODE_PRIVATE)
             .edit { clear() }
     }
+}
+
+private fun parseHermesBotGroupsServerPayload(body: String): List<HermesBotGroup> {
+    val json = runCatching { JSONObject(body) }.getOrNull() ?: return emptyList()
+    val array = json.optJSONArray("items") ?: JSONArray()
+    return parseHermesBotGroupsJson(array)
+}
+
+private suspend fun hermesBotGroupsGet(context: Context, settings: AppSettings): Pair<Int, String> =
+    withContext(Dispatchers.IO) {
+        runCatching { executeHttpGet(resolveHermesUrl(settings, "/v1/hub/bot-groups"), loadGatewaySecret(context)) }
+            .getOrElse { 0 to (it.message ?: it.javaClass.simpleName) }
+    }
+
+private suspend fun hermesBotGroupsDelete(context: Context, settings: AppSettings, name: String): Pair<Int, String> =
+    withContext(Dispatchers.IO) {
+        runCatching {
+            val encoded = java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20")
+            executeJsonRequest(resolveHermesUrl(settings, "/v1/hub/bot-groups/$encoded"), JSONObject(), "DELETE", loadGatewaySecret(context))
+        }.getOrElse { 0 to (it.message ?: it.javaClass.simpleName) }
+    }
+
+private suspend fun hermesBotGroupsPut(context: Context, settings: AppSettings, item: HermesBotGroup): Pair<Int, String> =
+    postJson(resolveHermesUrl(settings, "/v1/hub/bot-groups"), hermesBotGroupJson(item), loadGatewaySecret(context))
+
+/**
+ * Elenco gruppi con sincronizzazione gateway: il server è fonte di verità
+ * quando raggiungibile, la cache locale fa da fallback offline. I pending
+ * push/delete catturati offline vengono riverificati al primo load online
+ * prima di sovrascrivere la cache, così nessun'azione utente si perde.
+ */
+internal suspend fun loadHermesBotGroupsSynced(context: Context, settings: AppSettings): List<HermesBotGroup> {
+    val local = loadHermesBotGroups(context)
+    val (status, body) = hermesBotGroupsGet(context, settings)
+    if (status == 0 || status !in 200..299) return local
+
+    val pendingDelete = loadPendingGroupNames(context, BOT_GROUPS_PENDING_DELETE_KEY)
+    if (pendingDelete.isNotEmpty()) {
+        val remaining = mutableListOf<String>()
+        for (name in pendingDelete) {
+            val (deleteStatus, _) = hermesBotGroupsDelete(context, settings, name)
+            if (deleteStatus == 0) remaining += name
+        }
+        savePendingGroupNames(context, BOT_GROUPS_PENDING_DELETE_KEY, remaining)
+    }
+
+    val pendingPush = loadPendingGroupNames(context, BOT_GROUPS_PENDING_PUSH_KEY)
+    if (pendingPush.isNotEmpty()) {
+        val remaining = mutableListOf<String>()
+        for (name in pendingPush) {
+            val group = local.firstOrNull { it.name.equals(name, true) } ?: continue
+            val (putStatus, _) = hermesBotGroupsPut(context, settings, group)
+            if (putStatus == 0) remaining += name
+        }
+        savePendingGroupNames(context, BOT_GROUPS_PENDING_PUSH_KEY, remaining)
+    }
+
+    val (refreshStatus, refreshBody) = hermesBotGroupsGet(context, settings)
+    val items = if (refreshStatus in 200..299) refreshBody else body
+    val parsed = parseHermesBotGroupsServerPayload(items)
+    saveHermesBotGroupsCache(context, parsed)
+    return parsed
+}
+
+/**
+ * Upsert con conferma gateway: 2xx aggiorna la cache speculare, offline
+ * (trasporto 0) scrive solo in locale con push differito, gli altri stati
+ * propaga l'errore senza toccare la cache.
+ */
+internal suspend fun upsertHermesBotGroupSynced(context: Context, settings: AppSettings, group: HermesBotGroup): String {
+    val normalized = normalizeHermesBotGroup(group)
+    val (status, _) = hermesBotGroupsPut(context, settings, normalized)
+    when {
+        status == 0 -> {
+            upsertHermesBotGroup(context, normalized)
+            addPendingGroupName(context, BOT_GROUPS_PENDING_PUSH_KEY, normalized.name)
+            removePendingGroupName(context, BOT_GROUPS_PENDING_DELETE_KEY, normalized.name)
+            return "Gruppo salvato in locale; sincronizzazione con il gateway in sospeso."
+        }
+        status !in 200..299 -> error("Gateway ha rifiutato il gruppo (HTTP $status).")
+    }
+    upsertHermesBotGroup(context, normalized)
+    removePendingGroupName(context, BOT_GROUPS_PENDING_PUSH_KEY, normalized.name)
+    removePendingGroupName(context, BOT_GROUPS_PENDING_DELETE_KEY, normalized.name)
+    return "Gruppo sincronizzato con il gateway."
+}
+
+/**
+ * Cancellazione con conferma gateway: 2xx/404 confermano l'assenza, offline
+ * rimuove in locale con delete differito, 5xx propaga l'errore mantenendo i dati.
+ */
+internal suspend fun deleteHermesBotGroupSynced(context: Context, settings: AppSettings, name: String): String {
+    val normalized = name.trim()
+    val (status, _) = hermesBotGroupsDelete(context, settings, normalized)
+    when {
+        status != 0 && status != 404 && status !in 200..299 ->
+            error("Gateway non ha confermato la cancellazione (HTTP $status).")
+        status == 0 -> addPendingGroupName(context, BOT_GROUPS_PENDING_DELETE_KEY, normalized)
+        else -> removePendingGroupName(context, BOT_GROUPS_PENDING_DELETE_KEY, normalized)
+    }
+    removePendingGroupName(context, BOT_GROUPS_PENDING_PUSH_KEY, normalized)
+    deleteHermesBotGroup(context, normalized)
+    if (status == 0) return "Gruppo rimosso in locale; cancellazione dal gateway in sospeso."
+    return "Gruppo rimosso dal gateway."
 }

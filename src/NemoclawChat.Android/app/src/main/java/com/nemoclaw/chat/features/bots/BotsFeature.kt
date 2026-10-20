@@ -1073,7 +1073,7 @@ internal fun BotsScreen(
 
     LaunchedEffect(settings.gatewayUrl, refreshNonce) {
         connections = loadHermesBotConnections(context, settings)
-        groups = loadHermesBotGroups(context)
+        groups = loadHermesBotGroupsSynced(context, settings)
         reloadBotDisplayPrefs()
         val result = loadAllHermesBotRosters(context, settings)
         roster = result
@@ -1430,21 +1430,24 @@ internal fun BotsScreen(
                 Button(
                     enabled = groupNameInput.isNotBlank() && selectedGroupMemberKeys.size in 2..6,
                     onClick = {
-                        runCatching {
-                            val selected = roster?.items.orEmpty().filter { it.identityKey in selectedGroupMemberKeys }
-                            upsertHermesBotGroup(
-                                context,
-                                HermesBotGroup(
-                                    groupNameInput.trim(),
-                                    selected.map { bot -> HermesBotGroupMember(bot.connectionId, bot.profile, bot.displayName, bot.handle, bot.identityKey) }
+                        scope.launch {
+                            runCatching {
+                                val selected = roster?.items.orEmpty().filter { it.identityKey in selectedGroupMemberKeys }
+                                upsertHermesBotGroupSynced(
+                                    context,
+                                    settings,
+                                    HermesBotGroup(
+                                        groupNameInput.trim(),
+                                        selected.map { bot -> HermesBotGroupMember(bot.connectionId, bot.profile, bot.displayName, bot.handle, bot.identityKey) }
+                                    )
                                 )
-                            )
-                        }.onSuccess {
-                            groups = loadHermesBotGroups(context)
-                            groupNameInput = ""
-                            selectedGroupMemberKeys = emptySet()
-                            status = "Gruppo Hermes salvato."
-                        }.onFailure { status = it.message ?: "Gruppo non salvato." }
+                            }.onSuccess { savedStatus ->
+                                groups = loadHermesBotGroupsSynced(context, settings)
+                                groupNameInput = ""
+                                selectedGroupMemberKeys = emptySet()
+                                status = savedStatus
+                            }.onFailure { status = it.message ?: "Gruppo non salvato." }
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
                     modifier = Modifier.heightIn(min = 48.dp)
@@ -1470,9 +1473,14 @@ internal fun BotsScreen(
                                 groupResult = null
                             }) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Apri gruppo", tint = Color.White) }
                             IconButton(onClick = {
-                                runCatching { deleteHermesBotGroup(context, group.name) }
-                                    .onSuccess { groups = loadHermesBotGroups(context); status = "Gruppo rimosso." }
-                                    .onFailure { status = it.message ?: "Gruppo non rimosso." }
+                                scope.launch {
+                                    runCatching { deleteHermesBotGroupSynced(context, settings, group.name) }
+                                        .onSuccess { removedStatus ->
+                                            groups = loadHermesBotGroupsSynced(context, settings)
+                                            status = removedStatus
+                                        }
+                                        .onFailure { status = it.message ?: "Gruppo non rimosso." }
+                                }
                             }) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina gruppo", tint = AppColors.Error) }
                         }
                     }
