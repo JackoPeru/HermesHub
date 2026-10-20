@@ -45,6 +45,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -328,10 +329,29 @@ private fun Modifier.modeSwipe(
 @Composable
 internal fun ChatApp() {
     val context = LocalContext.current
-    val loadedSettings by produceState<AppSettings?>(initialValue = null, context.applicationContext) {
-        value = withContext(Dispatchers.IO) { loadSettings(context.applicationContext) }
+    // Boot parallelo: settings + secret + profilo voce partono insieme sullo
+    // stesso blocco IO (prima erano tre attese in cascata). La UI si sblocca
+    // appena pronti settings+secret; la voce arriva quando arriva.
+    val loadedBoot by produceState<Triple<AppSettings?, LoadedGatewaySecret?, VoiceProfile?>?>(
+        initialValue = null,
+        context.applicationContext
+    ) {
+        value = withContext(Dispatchers.IO) {
+            val settingsDef = async { loadSettings(context.applicationContext) }
+            val secretDef = async { LoadedGatewaySecret(loadGatewaySecret(context.applicationContext)) }
+            val settings = settingsDef.await()
+            val voiceDef = async {
+                runCatching { loadVoiceProfile(context.applicationContext, settings.activeProjectId) }.getOrNull()
+            }
+            Triple(settings, secretDef.await(), voiceDef.await())
+        }
     }
-    val initialSettings = loadedSettings
+    val boot = loadedBoot
+    if (boot == null) {
+        StartupLoadingScreen()
+        return
+    }
+    val initialSettings = boot.first
     if (initialSettings == null) {
         StartupLoadingScreen()
         return
@@ -339,7 +359,7 @@ internal fun ChatApp() {
     var settings by remember(initialSettings) { mutableStateOf(initialSettings) }
     var gatewaySecretRevision by remember { mutableIntStateOf(0) }
     val loadedGatewaySecret by produceState<LoadedGatewaySecret?>(
-        initialValue = null,
+        initialValue = boot.second,
         context.applicationContext,
         gatewaySecretRevision
     ) {
@@ -371,8 +391,10 @@ internal fun ChatApp() {
         tabNavController.navigateToTab(if (tab == Tab.Bots || tab == Tab.Screen) Tab.Chat else tab)
     }
     val voiceProfileRevision = VoiceProfileEvents.revision
+    // Il profilo voce non blocca piu l'avvio: parte dal valore precaricato
+    // nel boot parallelo e si aggiorna in sottofondo (voce non serve in chat).
     val loadedWakeVoiceProfile by produceState<VoiceProfile?>(
-        initialValue = null,
+        initialValue = boot.third,
         settings.activeProjectId,
         voiceProfileRevision
     ) {
@@ -380,7 +402,7 @@ internal fun ChatApp() {
     }
     val initialGatewaySecret = loadedGatewaySecret
     val wakeVoiceProfile = loadedWakeVoiceProfile
-    if (initialGatewaySecret == null || wakeVoiceProfile == null) {
+    if (initialGatewaySecret == null) {
         StartupLoadingScreen()
         return
     }
@@ -577,12 +599,13 @@ internal fun ChatApp() {
     }
     LaunchedEffect(
         selectedTab,
-        wakeVoiceProfile.wakeWord,
-        wakeVoiceProfile.wakePhrase,
+        wakeVoiceProfile?.wakeWord,
+        wakeVoiceProfile?.wakePhrase,
         settings.gatewayUrl,
         voiceProfileRevision
     ) {
-        if (!wakeVoiceProfile.wakeWord || selectedTab == Tab.Voice || selectedTab == Tab.Jarvis) return@LaunchedEffect
+        val wake = wakeVoiceProfile ?: return@LaunchedEffect
+        if (!wake.wakeWord || selectedTab == Tab.Voice || selectedTab == Tab.Jarvis) return@LaunchedEffect
         if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             return@LaunchedEffect
         }
@@ -590,7 +613,7 @@ internal fun ChatApp() {
         var detected = false
         startVoiceForegroundService(context, mode = "wake")
         try {
-            awaitWakePhrase(context, settings, initialGatewaySecret.value, wakeVoiceProfile.wakePhrase)
+            awaitWakePhrase(context, settings, initialGatewaySecret.value, wake.wakePhrase)
             detected = true
             val activity = context as? Activity
             if (activity != null) {
@@ -894,16 +917,18 @@ internal fun ChatApp() {
                 } else {
                 AnimatedContent(
                 targetState = botSectionVisible,
-                // Sezione Bot entra da destra (qualcosa di diverso), esce a
-                // sinistra; ritorno speculare. Niente slide NavHost (None).
+                // Push stile iOS: 320ms, uscita in parallasse (1/3) + fade,
+                // senza clip durante lo slide (niente "taglio" ai bordi).
                 transitionSpec = {
+                    val slide = tween<androidx.compose.ui.unit.IntOffset>(320, easing = FastOutSlowInEasing)
+                    val fade = tween<Float>(320)
                     if (targetState) {
-                        (slideInHorizontally { it } + fadeIn()) togetherWith
-                            (slideOutHorizontally { -it / 3 } + fadeOut())
+                        (slideInHorizontally(slide) { it } + fadeIn(fade)) togetherWith
+                            (slideOutHorizontally(slide) { -it / 3 } + fadeOut(fade))
                     } else {
-                        (slideInHorizontally { -it / 3 } + fadeIn()) togetherWith
-                            (slideOutHorizontally { it } + fadeOut())
-                    }
+                        (slideInHorizontally(slide) { -it / 3 } + fadeIn(fade)) togetherWith
+                            (slideOutHorizontally(slide) { it } + fadeOut(fade))
+                    }.using(SizeTransform(clip = false))
                 },
                 label = "chat-bot-section"
                 ) { botSection ->
@@ -957,13 +982,15 @@ internal fun ChatApp() {
                 targetState = pendingBot,
                 contentKey = { it?.localConversationId },
                 transitionSpec = {
+                    val slide = tween<androidx.compose.ui.unit.IntOffset>(320, easing = FastOutSlowInEasing)
+                    val fade = tween<Float>(320)
                     if (targetState != null) {
-                        (slideInHorizontally { it } + fadeIn()) togetherWith
-                            (slideOutHorizontally { -it / 3 } + fadeOut())
+                        (slideInHorizontally(slide) { it } + fadeIn(fade)) togetherWith
+                            (slideOutHorizontally(slide) { -it / 3 } + fadeOut(fade))
                     } else {
-                        (slideInHorizontally { -it / 3 } + fadeIn()) togetherWith
-                            (slideOutHorizontally { it } + fadeOut())
-                    }
+                        (slideInHorizontally(slide) { -it / 3 } + fadeIn(fade)) togetherWith
+                            (slideOutHorizontally(slide) { it } + fadeOut(fade))
+                    }.using(SizeTransform(clip = false))
                 },
                 label = "chat-bot-chat"
                 ) { bot ->
@@ -1104,7 +1131,7 @@ internal fun ChatApp() {
                 composable(Tab.Settings.navRoute) { SettingsScreen(
                 settings = settings,
                 gatewaySecret = initialGatewaySecret.value,
-                voiceProfile = wakeVoiceProfile,
+                voiceProfile = wakeVoiceProfile ?: VoiceProfile(),
                 onGatewaySecretChanged = { gatewaySecretRevision++ },
                 onSave = { newSettings ->
                 settings = newSettings

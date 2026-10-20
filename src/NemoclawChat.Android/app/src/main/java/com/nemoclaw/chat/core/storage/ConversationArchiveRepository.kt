@@ -6,6 +6,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal val localArchiveLock = Any()
+/** Cache processo del parse archivio: (chiave blob, conversazioni incluse eliminate). */
+@Volatile private var archiveParseCache: Pair<Long, List<LocalConversation>>? = null
 internal const val CURRENT_ARCHIVE_PREFS = "chatclaw_archive"
 internal const val LEGACY_ARCHIVE_PREFS = "nemoclaw_archive"
 internal const val STREAMING_CHECKPOINT_MAX_CHARS = 50_000
@@ -32,13 +34,32 @@ internal fun loadConversations(context: Context, includeDeleted: Boolean = false
     synchronized(localArchiveLock) {
         val prefs = migratePrefs(context, CURRENT_ARCHIVE_PREFS, LEGACY_ARCHIVE_PREFS)
         val raw = prefs.getString("items", "[]") ?: "[]"
-        return try {
-            val array = JSONArray(raw)
-            val conversations = buildList {
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    add(
-                        LocalConversation(
+        // Cache processo: il blob si rilegge da disco a ogni chiamata, ma il
+        // reparse (JSON + scan payload + eventuale rewrite) scatta solo se il
+        // contenuto e' cambiato. Tutte le letture restano sotto lo stesso lock.
+        val key = archiveCacheKey(raw)
+        val cached = archiveParseCache
+        val conversations = if (cached != null && cached.first == key) {
+            cached.second
+        } else {
+            parseArchiveForCache(prefs, raw).also { archiveParseCache = key to it }
+        }
+        return conversations.filter { includeDeleted || it.deletedAt == null }.sortedByDescending { it.updatedAt }
+    }
+}
+
+/** Chiave cache: lunghezza + hash (collisione 32bit trascurabile in sessione). */
+internal fun archiveCacheKey(raw: String): Long =
+    (raw.length.toLong() shl 32) xor (raw.hashCode().toLong() and 0xffffffffL)
+
+private fun parseArchiveForCache(prefs: android.content.SharedPreferences, raw: String): List<LocalConversation> {
+    return try {
+        val array = JSONArray(raw)
+        val conversations = buildList {
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                add(
+                    LocalConversation(
                             id = obj.optString("id"),
                             title = obj.optString("title", "Nuova chat"),
                             kind = obj.optString("kind", "Chat"),
@@ -85,11 +106,10 @@ internal fun loadConversations(context: Context, includeDeleted: Boolean = false
             if (archiveContainsRawToolPayload(array)) {
                 prefs.edit(commit = true) { putString("items", conversationsToJsonArray(conversations).toString()) }
             }
-            conversations.filter { includeDeleted || it.deletedAt == null }.sortedByDescending { it.updatedAt }
+            conversations
         } catch (_: Exception) {
             emptyList()
         }
-    }
 }
 
 private fun archiveContainsRawToolPayload(conversations: JSONArray): Boolean {
@@ -124,6 +144,7 @@ internal fun saveConversations(context: Context, conversations: List<LocalConver
         context.getSharedPreferences(CURRENT_ARCHIVE_PREFS, Context.MODE_PRIVATE).edit(commit = true) {
             putString("items", conversationsToJsonArray(conversations).toString())
         }
+        archiveParseCache = null
     }
     if (syncAfterSave) {
         ConversationArchiveAutoSync.scheduleUpload(context)
@@ -136,6 +157,7 @@ internal fun saveConversations(context: Context, conversations: List<LocalConver
  */
 internal fun clearLocalArchiveAndTasks(context: Context) {
     synchronized(localArchiveLock) {
+        archiveParseCache = null
         runCatching {
             context.applicationContext
                 .getSharedPreferences(CURRENT_ARCHIVE_PREFS, Context.MODE_PRIVATE)
