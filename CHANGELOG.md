@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.284 - 2026-10-20
+
+- Android, avvio: settings + chiave + profilo voce si caricano in parallelo e la UI si sblocca appena pronti i primi due (la voce non blocca piu' la chat).
+- Android, chat: l'archivio conversazioni si rilegge da disco ma si riparsa solo se cambiato (cache di processo invalidata a ogni scrittura); niente piu' rewrite a ogni lettura.
+- Android, transizione Chat <-> Bot stile iOS: 320ms con easing, uscita in parallasse e niente clip ai bordi.
+- Test: nuovo ArchiveCacheTest (isolamento cache, invalidazioni).
+
 ## 0.6.283 - 2026-10-20
 
 - Gruppi bot: al primo sync i gruppi solo-locali vengono migrati sul gateway invece di essere cancellati; i rifiuti definitivi (4xx) escono dai pending senza riprovare all'infinito.

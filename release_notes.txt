@@ -1,9 +1,8 @@
-Hermes Hub 0.6.283 (gruppi mai persi, GPU veritiera, laya multi-intent)
+Hermes Hub 0.6.284 (app piu' reattiva + transizione iOS)
 
-- Gruppi bot: al primo sync col gateway i gruppi creati sul telefono vengono caricati sul server invece di essere cancellati; i rifiuti definitivi escono dalle code di sincronizzazione. Se la 0.6.282 aveva wipato i gruppi, ricrearli una volta sola basta: da ora restano sincronizzati.
-- Manager GPU: la VRAM e' attribuita al processo che la usa davvero (LLM vs Comfy) e il manager legge i modelli caricati in Comfy anche con load manuale: niente piu' "LLM su GPU" quando c'e' il video. Nuovi campi /status (llm_model, llm_vram_mb, media_vram_mb, media_loaded_models), mostrati nelle app.
-- laya: capisce piu' comandi in un messaggio ("carica llm e metti in auto e dimmi lo stato"), "passa a comfy" attiva davvero Comfy (MEDIA; DIRECT solo se detto esplicitamente) e conferma solo quando il backend risponde.
-- Server: fix runtime gateway nuovo agent (ruamel/pyyaml + stack ML nel python pinnato) gia' applicati; file manager/laya staged, attivazione con restart su OK utente.
-- Test: suite completa verde + nuovi contratti test_gpu_truth.py e casi multi-intent laya.
+- Avvio: impostazioni, chiave gateway e profilo voce si caricano in parallelo e l'app diventa usabile appena pronti i primi due (la voce arriva dopo, senza bloccare la chat).
+- Chat: l'archivio conversazioni si riparsa solo quando cambia davvero (cache invalidata a ogni scrittura): aperture chat e sidebar piu' rapide, niente piu' riscritture a ogni lettura.
+- Transizione Chat <-> Bot stile Apple: 320ms con easing, uscita in parallasse e senza clip ai bordi.
+- Test: nuovo ArchiveCacheTest (isolamento, invalidazioni).
 
-Asset: HermesHub-0.6.283-android.apk (Android, versionCode 287), NemoclawChat.Windows_0.6.283.0_x64.msix (x64) e HermesHub-0.6.283-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.284-android.apk (Android, versionCode 288), NemoclawChat.Windows_0.6.284.0_x64.msix (x64) e HermesHub-0.6.284-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
