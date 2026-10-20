@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.281 - 2026-10-20
+
+- Gateway: patcher tollerante alle firme upstream migrate di hermes-agent (modulo runs separato, annotation non quotate, `str | None`, `list/dict` minuscoli): il deploy 0.6.280 falliva con "Patch anchor not found" contro l'albero agent nuovo del server. Nessun cambio funzionale lato client.
+- Test: suite completa verde + nuovi contratti test_runs_resume_anchor_variants.py (entrambe le firme `_callback`) e sonda --check contro l'albero agent reale del server.
+
 ## 0.6.280 - 2026-10-20
 
 - Gruppi bot sincronizzati server-side: il gateway introduce `GET/POST/DELETE /v1/hub/bot-groups` (auth `_check_auth`, storage JSON limitato `HERMES_HUB_BOT_GROUPS_PATH`, validazione pari alla lista Android: nome 1..160 senza newline, 2..6 membri, identity_key `connection_id::profile` unica, cap 200 gruppi). Android ora usa load/upsert/delete sincronizzati col gateway come fonte di verita' quando raggiungibile, cache locale offline + pending push/delete riverificati al primo load online (nessuna azione utente si perde).

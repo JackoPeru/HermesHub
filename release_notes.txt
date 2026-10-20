@@ -1,7 +1,7 @@
-Hermes Hub 0.6.280 (gruppi bot sincronizzati col gateway)
+Hermes Hub 0.6.281 (patcher gateway tollerante al nuovo agent upstream)
 
-- Gruppi bot ora vivono sul gateway: nuovi endpoint GET/POST/DELETE /v1/hub/bot-groups con la stessa auth degli altri endpoint hub, storage JSON limitato e validazione identica alla lista Android (nome 1..160 senza newline, 2..6 membri, identita' "connection_id::profile" unica, cap 200 gruppi).
-- Android: la scheda Bot usava gruppi salvati SOLO sul telefono — un gruppo non esisteva per altri dispositivi e si perdeva se i dati app venivano ripristinati. Ora l'elenco si carica dal gateway (fonte di verita' quando raggiungibile), la cache locale resta come fallback offline, e le azioni fatte offline (crea/elimina) vengono riverificate automaticamente al primo rientro online cosi' nessuna azione si perde.
-- Test: suite 765 OK (nuovi contratti test_bot_groups_gateway.py + test_bot_groups_android_contract.py), patch gateway idempotente sui fixture upstream.
+- Gateway: il patcher ora accetta le firme migrate di hermes-agent (modulo runs separato, annotation senza virgolette, `str | None`, `list/dict` minuscoli). Il deploy 0.6.280 falliva sul server con "Patch anchor not found" perche' l'albero agent del server e' piu' nuovo dei fixture del repo; nessun cambio funzionale lato client.
+- Gruppi bot sincronizzati (da 0.6.280): endpoint GET/POST/DELETE /v1/hub/bot-groups ora deployabili anche sul nuovo albero agent; Android li usa come fonte di verita' con cache offline e pending push/delete.
+- Test: suite completa verde + nuovi contratti test_runs_resume_anchor_variants.py e sonda --check contro l'albero agent reale del server.
 
-Asset: HermesHub-0.6.280-android.apk (Android, versionCode 284), NemoclawChat.Windows_0.6.280.0_x64.msix (x64) e HermesHub-0.6.280-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.281-android.apk (Android, versionCode 285), NemoclawChat.Windows_0.6.281.0_x64.msix (x64) e HermesHub-0.6.281-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
