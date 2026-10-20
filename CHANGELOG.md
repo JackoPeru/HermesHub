@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.282 - 2026-10-20
+
+- Gateway: patcher tollerante anche all'albero agent piu' nuovo (tabella capability feature-flagged, `_parse_chat_messages` estratto, features standalone): deploy e sonda --check verdi e idempotenti sul candidato origin/main del server. Include i fix 0.6.281 (firme PEP 604, annotation non quotate, `list/dict` minuscoli).
+- Test: suite completa verde + nuovo contratto test_upstream_variant_tolerance.py (resolver, upsert con varianti, regex features, resolver runs-event).
+
 ## 0.6.281 - 2026-10-20
 
 - Gateway: patcher tollerante alle firme upstream migrate di hermes-agent (modulo runs separato, annotation non quotate, `str | None`, `list/dict` minuscoli): il deploy 0.6.280 falliva con "Patch anchor not found" contro l'albero agent nuovo del server. Nessun cambio funzionale lato client.

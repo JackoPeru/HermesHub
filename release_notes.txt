@@ -1,7 +1,7 @@
-Hermes Hub 0.6.281 (patcher gateway tollerante al nuovo agent upstream)
+Hermes Hub 0.6.282 (patcher gateway tollerante al nuovo agent upstream)
 
-- Gateway: il patcher ora accetta le firme migrate di hermes-agent (modulo runs separato, annotation senza virgolette, `str | None`, `list/dict` minuscoli). Il deploy 0.6.280 falliva sul server con "Patch anchor not found" perche' l'albero agent del server e' piu' nuovo dei fixture del repo; nessun cambio funzionale lato client.
-- Gruppi bot sincronizzati (da 0.6.280): endpoint GET/POST/DELETE /v1/hub/bot-groups ora deployabili anche sul nuovo albero agent; Android li usa come fonte di verita' con cache offline e pending push/delete.
-- Test: suite completa verde + nuovi contratti test_runs_resume_anchor_variants.py e sonda --check contro l'albero agent reale del server.
+- Gateway: il patcher accetta anche il layout agent piu' nuovo (tabella capabilities feature-flagged con `entry[0]/entry[1]`, parsing chat estratto in `_parse_chat_messages` con gate al call site, dict features standalone, append change-label solo nei rami che rimpiazzano davvero). Il deploy 0.6.281 restava bloccato con "Patch anchor not found".
+- Gruppi bot sincronizzati (da 0.6.280): endpoint GET/POST/DELETE /v1/hub/bot-groups ora deployabili su tutti gli alberi agent supportati; Android li usa come fonte di verita' con cache offline e pending push/delete.
+- Test: suite completa verde + nuovo contratto test_upstream_variant_tolerance.py; sonda --check e apply idempotenti contro l'albero agent candidato del server.
 
-Asset: HermesHub-0.6.281-android.apk (Android, versionCode 285), NemoclawChat.Windows_0.6.281.0_x64.msix (x64) e HermesHub-0.6.281-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.282-android.apk (Android, versionCode 286), NemoclawChat.Windows_0.6.282.0_x64.msix (x64) e HermesHub-0.6.282-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
