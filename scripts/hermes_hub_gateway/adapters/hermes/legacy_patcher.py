@@ -5782,7 +5782,7 @@ def _hermes_hub_conversation_event_payload(reason, result=None):
         else:
             text, _ = _replace_regex_once(
                 text,
-                r'(^\s+"features": \{\n)',
+                r'(^\s+(?:"features": \{|features = \{)\n)',
                 r'\1                "hub_sync": True,' "\n",
                 "capabilities Hub sync feature",
             )
@@ -9069,30 +9069,50 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
             changes.append("health_detailed native_protocol")
 
     if '"hermes_native": True,' not in text:
-        text, _ = _replace_regex_once(
-            text,
-            r'(^\s+"features": \{\n)(^\s+"chat_completions": True,)',
-            r'\1'
-            r'                "hermes_native": True,' "\n"
-            r'                "native_responses": True,' "\n"
-            r'                "native_endpoint": "/v1/hermes/native",' "\n"
-            r'                "native_event_passthrough": True,' "\n"
-            r'                "raw_hermes_events": True,' "\n"
-            r'                "strict_native_compatible": True,' "\n"
-            r'                "context_owner": "hermes-agent",' "\n"
-            r'                "planner_events": True,' "\n"
-            r'                "memory_events": True,' "\n"
-            r'                "retrieval_events": True,' "\n"
-            r'                "artifact_events": True,' "\n"
-            r'\2',
-            "capabilities hermes_native",
-        )
+        if re.search(r'(?m)^\s+features = \{\n', text):
+            # Newest upstream: standalone features assignment (entries a 12 spazi).
+            text, _ = _replace_regex_once(
+                text,
+                r'(^\s+features = \{\n)',
+                r'\1'
+                r'            "hermes_native": True,' "\n"
+                r'            "native_responses": True,' "\n"
+                r'            "native_endpoint": "/v1/hermes/native",' "\n"
+                r'            "native_event_passthrough": True,' "\n"
+                r'            "raw_hermes_events": True,' "\n"
+                r'            "strict_native_compatible": True,' "\n"
+                r'            "context_owner": "hermes-agent",' "\n"
+                r'            "planner_events": True,' "\n"
+                r'            "memory_events": True,' "\n"
+                r'            "retrieval_events": True,' "\n"
+                r'            "artifact_events": True,' "\n",
+                "capabilities hermes_native",
+            )
+        else:
+            text, _ = _replace_regex_once(
+                text,
+                r'(^\s+"features": \{\n)(^\s+"chat_completions": True,)',
+                r'\1'
+                r'                "hermes_native": True,' "\n"
+                r'                "native_responses": True,' "\n"
+                r'                "native_endpoint": "/v1/hermes/native",' "\n"
+                r'                "native_event_passthrough": True,' "\n"
+                r'                "raw_hermes_events": True,' "\n"
+                r'                "strict_native_compatible": True,' "\n"
+                r'                "context_owner": "hermes-agent",' "\n"
+                r'                "planner_events": True,' "\n"
+                r'                "memory_events": True,' "\n"
+                r'                "retrieval_events": True,' "\n"
+                r'                "artifact_events": True,' "\n"
+                r'\2',
+                "capabilities hermes_native",
+            )
         changes.append("capabilities hermes_native")
 
     if '"hardware_monitoring": True,' not in text:
         text, _ = _replace_regex_once(
             text,
-            r'(^\s+"features": \{\n)',
+            r'(^\s+(?:"features": \{|features = \{)\n)',
             r'\1'
             r'                "hardware_monitoring": True,' "\n",
             "capabilities hardware_monitoring",
@@ -9102,7 +9122,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
     if '"video_library": True,' not in text:
         text, _ = _replace_regex_once(
             text,
-            r'(^\s+"features": \{\n)',
+            r'(^\s+(?:"features": \{|features = \{)\n)',
             r'\1'
             r'                "video_library": True,' "\n"
             r'                "news_library": True,' "\n"
@@ -9118,7 +9138,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         if '"media_proxy": True,' not in text:
             text, _ = _replace_regex_once(
                 text,
-                r'(^\s+"features": \{\n)',
+                r'(^\s+(?:"features": \{|features = \{)\n)',
                 r'\1'
                 r'                "media_proxy": True,' "\n"
                 r'                "media_transcode_mp4": True,' "\n",
@@ -9129,7 +9149,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         if '"news_library": True,' not in text:
             text, _ = _replace_regex_once(
                 text,
-                r'(^\s+"features": \{\n)',
+                r'(^\s+(?:"features": \{|features = \{)\n)',
                 r'\1'
                 r'                "news_library": True,' "\n",
                 "capabilities news library",
@@ -9139,7 +9159,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
         if '"hub_notifications": True,' not in text:
             text, _ = _replace_regex_once(
                 text,
-                r'(^\s+"features": \{\n)',
+                r'(^\s+(?:"features": \{|features = \{)\n)',
                 r'\1'
                 r'                "hub_notifications": True,' "\n",
                 "capabilities hub notifications",
@@ -9149,7 +9169,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
     if '"audio_speech": True,' not in text:
         text, _ = _replace_regex_once(
             text,
-            r'(^\s+"features": \{\n)',
+            r'(^\s+(?:"features": \{|features = \{)\n)',
             r'\1'
             r'                "audio_speech": True,' "\n",
             "capabilities audio speech",
@@ -9159,7 +9179,7 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
     if '"max_upload_mb":' not in text:
         text, _ = _replace_regex_once(
             text,
-            r'(^\s+"features": \{\n)',
+            r'(^\s+(?:"features": \{|features = \{)\n)',
             r'\1'
             r'                "max_upload_mb": int(os.environ.get("HERMES_HUB_MAX_UPLOAD_MB", "0")),' "\n",
             "capabilities max upload mb",
