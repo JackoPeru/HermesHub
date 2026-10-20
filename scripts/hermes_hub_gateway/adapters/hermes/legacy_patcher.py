@@ -4608,6 +4608,11 @@ _HANDLE_MODELS_ANCHORS = (
     "    async def _handle_models(self, request: web.Request) -> web.Response:",
 )
 
+_MULTIMODAL_ERROR_ANCHORS = (
+    'def _multimodal_validation_error(exc: ValueError, *, param: str) -> "web.Response":',
+    "def _multimodal_validation_error(exc: ValueError, *, param: str) -> web.Response:",
+)
+
 
 def _resolve_first_present(text: str, candidates: tuple[str, ...] | list[str], error: str) -> str:
     """Prima variante presente esattamente una volta, altrimenti PatchError."""
@@ -6144,9 +6149,7 @@ def _patch_source_texts(
         changes.append("gateway body limit disable support")
 
     if "def _hermes_hub_api_keys" not in text:
-        text, _ = _replace_once(
-            text,
-            "def _multimodal_validation_error(exc: ValueError, *, param: str) -> \"web.Response\":",
+        api_keys_aliases = (
             'def _hermes_hub_api_keys(primary: str = "") -> List[str]:\n'
             '    """Accepted bearer keys for Hermes Hub Linux gateway deployments."""\n'
             '    keys: List[str] = []\n'
@@ -6165,7 +6168,16 @@ def _patch_source_texts(
             '    return keys\n'
             "\n"
             "\n"
-            "def _multimodal_validation_error(exc: ValueError, *, param: str) -> \"web.Response\":",
+        )
+        multimodal_anchor = _resolve_first_present(
+            text,
+            _MULTIMODAL_ERROR_ANCHORS,
+            "hermes hub api key aliases",
+        )
+        text, _ = _replace_once(
+            text,
+            multimodal_anchor,
+            api_keys_aliases + multimodal_anchor,
             "hermes hub api key aliases",
         )
         changes.append("hermes hub api key aliases")
