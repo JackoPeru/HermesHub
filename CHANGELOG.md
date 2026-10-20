@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.287 - 2026-10-20
+
+- Windows, pagina Comfy: sezione NODI DEL JOB con il grafo del workflow dell'agente (nodi, link, completati verdi dal live di Comfy, dettaglio al tocco).
+- Server: Comfy gestito in ascolto su Tailscale (ufw gia' ristretto), cosi' la vista diretta risponde anche in AUTO.
+
 ## 0.6.286 - 2026-10-20
 
 - Windows, pagina Comfy: sezione JOB AGENTE con i job autonomi dell'agente (stato, %, dettagli, output) dal manager, visibili anche quando Comfy e' fermo e la vista workflow diretta e' vuota.

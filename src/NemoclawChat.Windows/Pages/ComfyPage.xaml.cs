@@ -259,6 +259,7 @@ public sealed partial class ComfyPage : Page
             .FirstOrDefault(j => string.Equals(j.Status, "queued", StringComparison.OrdinalIgnoreCase))
             ?.JobId ?? string.Empty;
         RenderJobs();
+        await RefreshJobGraphAsync(settings, token);
 
         if (!string.Equals(_lastComfyUrl, GatewayService.ComfyDirectBase(settings), StringComparison.OrdinalIgnoreCase))
         {
@@ -452,6 +453,395 @@ public sealed partial class ComfyPage : Page
         catch
         {
         }
+    }
+
+    private List<JobGraphNode> _graphNodes = new();
+    private HashSet<string> _graphCompleted = new(StringComparer.Ordinal);
+    private string _graphJobId = string.Empty;
+    private string _graphNodeId = string.Empty;
+
+    private sealed record JobGraphNode
+    {
+        public string Id { get; init; } = string.Empty;
+        public string ClassType { get; init; } = string.Empty;
+        public List<KeyValuePair<string, string>> Widgets { get; init; } = new();
+        public List<KeyValuePair<string, string>> Incoming { get; init; } = new();
+    }
+
+    // ------------------------------------------------------- nodi del job ---
+    // Grafo del workflow che l'agente ha messo in coda (formato API del
+    // manager: nodi con class_type + inputs, link come ["id", slot]).
+    // Nodi completati dal live di Comfy (/queue -> /history) mentre gira;
+    // niente cambi al server, solo GET gia' usati altrove nella pagina.
+
+    private async Task RefreshJobGraphAsync(AppSettings settings, CancellationToken token)
+    {
+        var target = _jobs.FirstOrDefault(j => string.Equals(j.JobId, _selectedJobId, StringComparison.Ordinal))
+            ?? _jobs.FirstOrDefault(j => string.Equals(j.JobId, _runningJobId, StringComparison.Ordinal))
+            ?? _jobs.FirstOrDefault();
+        if (target is null)
+        {
+            _graphJobId = string.Empty;
+            _graphNodes = new List<JobGraphNode>();
+            _graphCompleted = new HashSet<string>(StringComparer.Ordinal);
+            RenderGraph(null);
+            return;
+        }
+        if (!string.Equals(target.JobId, _graphJobId, StringComparison.Ordinal))
+        {
+            _graphNodes = await LoadJobGraphAsync(target.JobId, token);
+            _graphJobId = target.JobId;
+            _graphNodeId = string.Empty;
+        }
+        if (string.Equals(target.Status, "running", StringComparison.OrdinalIgnoreCase))
+        {
+            _graphCompleted = await LoadCompletedNodesAsync(settings, token);
+        }
+        else if (string.Equals(target.Status, "done", StringComparison.OrdinalIgnoreCase))
+        {
+            _graphCompleted = new HashSet<string>(_graphNodes.Select(n => n.Id), StringComparer.Ordinal);
+        }
+        else
+        {
+            _graphCompleted = new HashSet<string>(StringComparer.Ordinal);
+        }
+        RenderGraph(target);
+    }
+
+    private static async Task<List<JobGraphNode>> LoadJobGraphAsync(string jobId, CancellationToken token)
+    {
+        try
+        {
+            var (code, body) = await GatewayService.SendManagerRequestAsync(
+                AppSettingsStore.Load(), HttpMethod.Get, $"/jobs/{Uri.EscapeDataString(jobId)}/workflow", null, token);
+            if (code is < 200 or > 299)
+            {
+                return new List<JobGraphNode>();
+            }
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("workflow", out var workflow) ||
+                workflow.ValueKind != JsonValueKind.Object)
+            {
+                return new List<JobGraphNode>();
+            }
+            return ParseJobGraph(workflow);
+        }
+        catch (JsonException)
+        {
+            return new List<JobGraphNode>();
+        }
+        catch (Exception)
+        {
+            return new List<JobGraphNode>();
+        }
+    }
+
+    private static List<JobGraphNode> ParseJobGraph(JsonElement workflow)
+    {
+        var nodes = new List<JobGraphNode>();
+        foreach (var prop in workflow.EnumerateObject())
+        {
+            if (prop.Value.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            var node = new JobGraphNode { Id = prop.Name };
+            if (prop.Value.TryGetProperty("class_type", out var classType) && classType.ValueKind == JsonValueKind.String)
+            {
+                node = node with { ClassType = classType.GetString() ?? string.Empty };
+            }
+            if (prop.Value.TryGetProperty("inputs", out var inputs) && inputs.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var input in inputs.EnumerateObject())
+                {
+                    if (input.Value.ValueKind == JsonValueKind.Array &&
+                        input.Value.GetArrayLength() == 2 &&
+                        input.Value[0].ValueKind == JsonValueKind.String)
+                    {
+                        node.Incoming.Add(new KeyValuePair<string, string>(input.Value[0].GetString() ?? string.Empty, input.Name));
+                    }
+                    else
+                    {
+                        node.Widgets.Add(new KeyValuePair<string, string>(input.Name, TrimWidget(input.Value)));
+                    }
+                }
+            }
+            nodes.Add(node);
+        }
+        return nodes;
+    }
+
+    private static string TrimWidget(JsonElement value)
+    {
+        string text = value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString() ?? string.Empty,
+            JsonValueKind.Number => value.ToString(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => value.ValueKind.ToString(),
+        };
+        text = text.Replace("\n", " ", StringComparison.Ordinal).Replace("\r", " ", StringComparison.Ordinal).Trim();
+        return text.Length <= 80 ? text : text[..80];
+    }
+
+    private static async Task<HashSet<string>> LoadCompletedNodesAsync(AppSettings settings, CancellationToken token)
+    {
+        var done = new HashSet<string>(StringComparer.Ordinal);
+        try
+        {
+            var (qCode, qBody) = await GatewayService.SendComfyDirectRequestAsync(settings, "/queue", token);
+            if (qCode is < 200 or > 299)
+            {
+                return done;
+            }
+            var promptId = ExtractRunningPromptId(qBody);
+            if (string.IsNullOrWhiteSpace(promptId))
+            {
+                return done;
+            }
+            var (hCode, hBody) = await GatewayService.SendComfyDirectRequestAsync(
+                settings, $"/history/{Uri.EscapeDataString(promptId)}", token);
+            if (hCode is < 200 or > 299)
+            {
+                return done;
+            }
+            using var doc = JsonDocument.Parse(hBody);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty(promptId, out var entry) &&
+                entry.ValueKind == JsonValueKind.Object &&
+                entry.TryGetProperty("outputs", out var outputs) &&
+                outputs.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var output in outputs.EnumerateObject())
+                {
+                    done.Add(output.Name);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+        }
+        catch (Exception)
+        {
+        }
+        return done;
+    }
+
+    private static string ExtractRunningPromptId(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("queue_running", out var running) ||
+                running.ValueKind != JsonValueKind.Array)
+            {
+                return string.Empty;
+            }
+            foreach (var item in running.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.Array && item.GetArrayLength() > 0 &&
+                    item[0].ValueKind == JsonValueKind.String)
+                {
+                    return item[0].GetString() ?? string.Empty;
+                }
+                if (item.ValueKind == JsonValueKind.Object &&
+                    item.TryGetProperty("prompt_id", out var pid) && pid.ValueKind == JsonValueKind.String)
+                {
+                    return pid.GetString() ?? string.Empty;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+        }
+        return string.Empty;
+    }
+
+    private void RenderGraph(AgentJobInfo? target)
+    {
+        JobGraphCanvas.Children.Clear();
+        if (target is null || _graphNodes.Count == 0)
+        {
+            GraphHeaderText.Text = "NODI DEL JOB";
+            NodeDetailText.Text = target is null
+                ? "Nessun job: il grafo compare appena l'agente mette qualcosa in coda."
+                : $"Grafo di {ShortJob(target.JobId)} illeggibile (workflow non in formato API).";
+            JobGraphCanvas.Width = 0;
+            JobGraphCanvas.Height = 0;
+            return;
+        }
+        GraphHeaderText.Text = $"NODI DEL JOB · {ShortJob(target.JobId)} · {_graphNodes.Count} nodi · {_graphCompleted.Count} completati";
+
+        var byId = _graphNodes.ToDictionary(n => n.Id, StringComparer.Ordinal);
+        var depth = new Dictionary<string, int>(StringComparer.Ordinal);
+        var remaining = _graphNodes.ToDictionary(n => n.Id, n => n.Incoming.Count(i => byId.ContainsKey(i.Key)), StringComparer.Ordinal);
+        var queue = new Queue<string>(remaining.Where(kv => kv.Value == 0).Select(kv => kv.Key));
+        foreach (var id in queue)
+        {
+            depth[id] = 0;
+        }
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            foreach (var node in _graphNodes)
+            {
+                foreach (var incoming in node.Incoming)
+                {
+                    if (!string.Equals(incoming.Key, current, StringComparison.Ordinal) || !remaining.TryGetValue(node.Id, out var left))
+                    {
+                        continue;
+                    }
+                    depth[node.Id] = Math.Max(depth.TryGetValue(node.Id, out var known) ? known : 0, (depth.TryGetValue(current, out var parent) ? parent : 0) + 1);
+                    if (left <= 1)
+                    {
+                        remaining[node.Id] = 0;
+                        queue.Enqueue(node.Id);
+                    }
+                    else
+                    {
+                        remaining[node.Id] = left - 1;
+                    }
+                }
+            }
+        }
+        foreach (var node in _graphNodes)
+        {
+            if (!depth.ContainsKey(node.Id))
+            {
+                depth[node.Id] = 0;
+            }
+        }
+
+        const double nodeWidth = 200;
+        const double nodeHeight = 66;
+        const double colGap = 250;
+        const double rowGap = 88;
+        const double margin = 24;
+        var columns = _graphNodes.GroupBy(n => depth[n.Id]).OrderBy(g => g.Key).ToList();
+        var positions = new Dictionary<string, (double X, double Y)>(StringComparer.Ordinal);
+        var row = 0;
+        foreach (var column in columns)
+        {
+            row = 0;
+            foreach (var node in column.OrderBy(n => n.Id, StringComparer.Ordinal))
+            {
+                positions[node.Id] = (margin + column.Key * colGap, margin + row * rowGap);
+                row++;
+            }
+        }
+        var maxRows = columns.Count == 0 ? 0 : columns.Max(g => g.Count());
+        JobGraphCanvas.Width = margin * 2 + (columns.Count == 0 ? 0 : (columns.Count - 1) * colGap + nodeWidth);
+        JobGraphCanvas.Height = margin * 2 + Math.Max(0, maxRows - 1) * rowGap + nodeHeight;
+
+        var running = string.Equals(target.Status, "running", StringComparison.OrdinalIgnoreCase);
+        var failed = string.Equals(target.Status, "failed", StringComparison.OrdinalIgnoreCase);
+        foreach (var node in _graphNodes)
+        {
+            foreach (var incoming in node.Incoming)
+            {
+                if (!positions.TryGetValue(incoming.Key, out var from) || !positions.TryGetValue(node.Id, out var to))
+                {
+                    continue;
+                }
+                JobGraphCanvas.Children.Add(new Microsoft.UI.Xaml.Shapes.Line
+                {
+                    X1 = from.X + nodeWidth,
+                    Y1 = from.Y + nodeHeight / 2,
+                    X2 = to.X,
+                    Y2 = to.Y + nodeHeight / 2,
+                    Stroke = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x77, 0x77, 0x77)),
+                    StrokeThickness = 1.5,
+                });
+            }
+        }
+        foreach (var node in _graphNodes)
+        {
+            var pos = positions[node.Id];
+            var completed = _graphCompleted.Contains(node.Id);
+            var borderColor = completed ? Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x4C, 0xAF, 0x50)
+                : failed ? Microsoft.UI.ColorHelper.FromArgb(0xFF, 0xFF, 0x7B, 0x8E)
+                : running ? Microsoft.UI.ColorHelper.FromArgb(0xFF, 0xF5, 0xA5, 0x24)
+                : Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x55, 0x55, 0x55);
+            var title = string.IsNullOrWhiteSpace(node.ClassType) ? $"nodo {node.Id}" : node.ClassType;
+            if (title.Length > 24)
+            {
+                title = title[..24];
+            }
+            var state = completed ? "completato" : failed ? "fallito" : running ? "in esecuzione" : JobStatusLabel(target.Status);
+            var panel = new StackPanel { Spacing = 2 };
+            panel.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = 12.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"#{node.Id} · {state}",
+                FontSize = 11,
+                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0xFF, 0xAA, 0xAA, 0xAA)),
+            });
+            var border = new Border
+            {
+                Width = nodeWidth,
+                Height = nodeHeight,
+                CornerRadius = new CornerRadius(8),
+                BorderThickness = new Thickness(2),
+                BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(borderColor),
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x17, 0x17, 0x1C)),
+                Padding = new Thickness(8),
+                Child = panel,
+                Tag = node.Id,
+            };
+            border.PointerPressed += JobGraphNode_Pressed;
+            Microsoft.UI.Xaml.Controls.Canvas.SetLeft(border, pos.X);
+            Microsoft.UI.Xaml.Controls.Canvas.SetTop(border, pos.Y);
+            JobGraphCanvas.Children.Add(border);
+        }
+        RenderNodeDetail();
+    }
+
+    private void JobGraphNode_Pressed(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (sender is Border border && border.Tag is string id && !string.IsNullOrWhiteSpace(id))
+        {
+            _graphNodeId = id;
+            RenderNodeDetail();
+        }
+    }
+
+    private void RenderNodeDetail()
+    {
+        var node = _graphNodes.FirstOrDefault(n => string.Equals(n.Id, _graphNodeId, StringComparison.Ordinal));
+        if (node is null)
+        {
+            NodeDetailText.Text = _graphNodes.Count == 0
+                ? "Seleziona un job sopra, poi tocca un nodo."
+                : "Tocca un nodo per i dettagli.";
+            return;
+        }
+        var byId = _graphNodes.ToDictionary(n => n.Id, StringComparer.Ordinal);
+        var lines = new List<string>
+        {
+            $"Nodo #{node.Id} · {(string.IsNullOrWhiteSpace(node.ClassType) ? "?" : node.ClassType)} · " +
+                (_graphCompleted.Contains(node.Id) ? "completato" : "non completato"),
+        };
+        foreach (var incoming in node.Incoming.Take(6))
+        {
+            var from = byId.TryGetValue(incoming.Key, out var src) && !string.IsNullOrWhiteSpace(src.ClassType)
+                ? src.ClassType : $"nodo {incoming.Key}";
+            lines.Add($"da {from} → {incoming.Value}");
+        }
+        foreach (var widget in node.Widgets.Take(6))
+        {
+            lines.Add($"{widget.Key} = {widget.Value}");
+        }
+        NodeDetailText.Text = string.Join("\n", lines);
     }
 
     private static string JobTitle(AgentJobInfo job) =>

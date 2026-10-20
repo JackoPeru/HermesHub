@@ -17,6 +17,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
@@ -204,6 +205,40 @@
                 </StackPanel>
 
                 <StackPanel Grid.Row="5" Spacing="10">
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            x:Name="GraphHeaderText"
+                            Style="{StaticResource FormSectionHeaderStyle}"
+                            VerticalAlignment="Center"
+                            Text="NODI DEL JOB" />
+                        <Button
+                            Grid.Column="1"
+                            Click="Refresh_Click"
+                            Content="Aggiorna"
+                            Style="{StaticResource TextButtonStyle}" />
+                    </Grid>
+                    <TextBlock
+                        Foreground="{StaticResource MutedTextBrush}"
+                        TextWrapping="Wrap"
+                        Text="Il grafo che l'agente ha messo in coda: nodi, collegamenti e avanzamento. Tocca un nodo per i dettagli." />
+                    <ScrollViewer
+                        MaxHeight="440"
+                        HorizontalScrollBarVisibility="Auto"
+                        VerticalScrollBarVisibility="Auto">
+                        <Canvas x:Name="JobGraphCanvas" />
+                    </ScrollViewer>
+                    <TextBlock
+                        x:Name="NodeDetailText"
+                        Foreground="{StaticResource MutedTextBrush}"
+                        TextWrapping="Wrap"
+                        Text="Seleziona un job sopra, poi tocca un nodo." />
+                </StackPanel>
+
+                <StackPanel Grid.Row="6" Spacing="10">
                     <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="CHAT LAYA" />
                     <TextBlock
                         Foreground="{StaticResource MutedTextBrush}"

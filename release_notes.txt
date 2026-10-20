@@ -1,7 +1,8 @@
-Hermes Hub 0.6.286 (job agente visibili anche a Comfy fermo)
+Hermes Hub 0.6.287 (nodi del job agente nel PC)
 
-- Windows, pagina Comfy: nuova sezione JOB AGENTE con tutti i job che l'agente fa in autonomia (stato, avanzamento, dettagli, output), letti dal manager ogni 5 secondi. Non dipende piu' dalla vista workflow diretta, che resta vuota quando il manager tiene Comfy fermo.
-- Dettaglio job: tipo/preset, fase, backend/modello, file di output, errore, orari; pulsante "Apri output" per i job pubblicati su /v1/media.
-- Test: nuovo test_agent_jobs_contract (3/3) sul contratto GET /jobs; build Windows senza errori.
+- Windows, pagina Comfy: nuova sezione NODI DEL JOB con il grafo del workflow che l'agente ha messo in coda (nodi, collegamenti, layout a colonne). Mentre gira, i nodi completati diventano verdi dal live di Comfy; tocca un nodo per classe, input e provenienza.
+- La vista workflow diretta resta com'era (Comfy in AUTO ora risponde sulla Tailscale).
+- Server: hermes-comfyui.service in ascolto su 0.0.0.0 (firewall gia' ristretto a tailscale0, come il DIRECT); applicato a job finito, nessun lavoro perso.
+- Test: suite verde, build Windows senza errori.
 
-Asset: HermesHub-0.6.286-android.apk (Android, versionCode 290), NemoclawChat.Windows_0.6.286.0_x64.msix (x64) e HermesHub-0.6.286-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.287-android.apk (Android, versionCode 291), NemoclawChat.Windows_0.6.287.0_x64.msix (x64) e HermesHub-0.6.287-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
