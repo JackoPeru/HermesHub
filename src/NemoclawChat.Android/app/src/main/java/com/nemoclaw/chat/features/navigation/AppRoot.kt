@@ -315,20 +315,23 @@ private fun PageFlip(
     )
     val transition = updateTransition(flipped, label = "page-flip")
     val progress by transition.animateFloat(
-        transitionSpec = { tween(380, easing = FastOutSlowInEasing) },
+        transitionSpec = { tween(450, easing = FastOutSlowInEasing) },
         label = "flipProgress"
     ) { visible -> if (visible) 1f else 0f }
     val chatActive = progress < 0.5f
     val showBot = flipped || progress > 0.001f
+    // Parallasse orizzontale: anche se il 3D fosse appiattito, il movimento resta visibile.
+    val densityPx = density.density
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    rotationY = -22f * progress
+                    rotationY = -38f * progress
+                    translationX = -64f * densityPx * progress
                     transformOrigin = TransformOrigin(1f, 0.5f)
-                    scaleX = 1f - 0.03f * progress
-                    scaleY = 1f - 0.03f * progress
+                    scaleX = 1f - 0.04f * progress
+                    scaleY = 1f - 0.04f * progress
                     alpha = 1f - 0.7f * progress
                     cameraDistance = 28f * density.density
                 }
@@ -341,10 +344,11 @@ private fun PageFlip(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        rotationY = 22f * (1f - progress)
+                        rotationY = 38f * (1f - progress)
+                        translationX = 64f * densityPx * (1f - progress)
                         transformOrigin = TransformOrigin(0f, 0.5f)
-                        scaleX = 0.97f + 0.03f * progress
-                        scaleY = 0.97f + 0.03f * progress
+                        scaleX = 0.96f + 0.04f * progress
+                        scaleY = 0.96f + 0.04f * progress
                         alpha = 0.3f + 0.7f * progress
                         cameraDistance = 28f * density.density
                     }
