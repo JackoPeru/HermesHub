@@ -6185,9 +6185,14 @@ def _patch_source_texts(
     # Fail-closed: eventuali limiti upstream restano applicati (nessun default illimitato).
 
     if "def _hermes_hub_save_upload" not in text:
+        multimodal_anchor = _resolve_first_present(
+            text,
+            _MULTIMODAL_ERROR_ANCHORS,
+            "media upload helpers",
+        )
         text, _ = _replace_once(
             text,
-            "def _multimodal_validation_error(exc: ValueError, *, param: str) -> \"web.Response\":",
+            multimodal_anchor,
             '''def _hermes_hub_upload_root() -> "Path":
     from pathlib import Path as _Path
 
