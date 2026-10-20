@@ -1,8 +1,8 @@
-Hermes Hub 0.6.284 (app piu' reattiva + transizione iOS)
+Hermes Hub 0.6.285 (sidebar istantanea + pagina che si sfoglia)
 
-- Avvio: impostazioni, chiave gateway e profilo voce si caricano in parallelo e l'app diventa usabile appena pronti i primi due (la voce arriva dopo, senza bloccare la chat).
-- Chat: l'archivio conversazioni si riparsa solo quando cambia davvero (cache invalidata a ogni scrittura): aperture chat e sidebar piu' rapide, niente piu' riscritture a ogni lettura.
-- Transizione Chat <-> Bot stile Apple: 320ms con easing, uscita in parallasse e senza clip ai bordi.
-- Test: nuovo ArchiveCacheTest (isolamento, invalidazioni).
+- Sidebar: si apre subito con l'elenco precedente e aggiorna in sottofondo — niente piu' secondo di freeze da parse JSON sul thread UI.
+- Reattivita' generale: salvataggi impostazioni e chiave spostati fuori dal main thread (niente piu' scatti ai tap).
+- Transizione Chat <-> Bot come pagina di libro: flip 3D da 380ms con pivot sui dorsi, ombra della pagina e dissolvenza; il lato nascosto non prende tocchi.
+- Test: ArchiveCacheTest (5/5) e ComfyStatusTest (12/12) verdi, build senza errori.
 
-Asset: HermesHub-0.6.284-android.apk (Android, versionCode 288), NemoclawChat.Windows_0.6.284.0_x64.msix (x64) e HermesHub-0.6.284-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.285-android.apk (Android, versionCode 289), NemoclawChat.Windows_0.6.285.0_x64.msix (x64) e HermesHub-0.6.285-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.285 - 2026-10-20
+
+- Android, sidebar istantanea: l'elenco conversazioni si mostra subito (cache precedente) e si aggiorna in sottofondo; mai piu' parse JSON sul thread UI all'apertura.
+- Android, reattivita': tutti i salvataggi impostazioni (inclusa chiave KeyStore) girano in IO, mai sul main thread.
+- Android, transizione Chat <-> Bot stile pagina di libro: flip 3D 380ms con pivot sui dorsi, ombra pagina e fade; il lato nascosto non intercetta tocchi.
+- Test: ArchiveCacheTest verde (5/5), ComfyStatusTest verde (12/12).
+
 ## 0.6.284 - 2026-10-20
 
 - Android, avvio: settings + chiave + profilo voce si caricano in parallelo e la UI si sblocca appena pronti i primi due (la voce non blocca piu' la chat).

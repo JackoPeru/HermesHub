@@ -392,7 +392,15 @@ internal fun HermesSidebar(
     // ricaricamento delle conversazioni, niente fantasmi dopo delete in archivio.
     refreshToken: Int = 0
 ) {
-    val conversations = remember(refreshToken) { loadConversations(context).sortedByDescending { it.updatedAt } }
+    // Apertura istantanea: la lista precedente si mostra subito, il reload
+    // (disco+parse) gira in IO e aggiorna all'arrivo. Mai parse sul main.
+    var conversations by remember { mutableStateOf<List<LocalConversation>>(emptyList()) }
+    LaunchedEffect(refreshToken) {
+        conversations = withContext(Dispatchers.IO) {
+            runCatching { loadConversations(context).sortedByDescending { it.updatedAt } }
+                .getOrElse { conversations }
+        }
+    }
     // Filtro per identita (stamp o legacy via roster): ogni bot ha le sue.
     val identityConversations = remember(conversations, chatIdentityKey, chatRoster) {
         conversationsForIdentity(conversations, chatIdentityKey, chatRoster)

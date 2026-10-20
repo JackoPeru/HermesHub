@@ -46,6 +46,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -288,6 +292,78 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.roundToInt
 import kotlin.random.Random
+
+/**
+ * Volta-pagina 3D stile libro per Chat <-> Bot. Entrambi i rami restano
+ * composti durante i 380ms (niente flash nero), il lato nascosto non
+ * intercetta tocchi (scudo invisibile) e il ramo bot viene smontato a
+ * fine animazione come faceva AnimatedContent. Pivot sui dorsi + ombra
+ * di pagina + leggero scale: sensazione "sfoglia", non slide piatto.
+ */
+@Composable
+private fun PageFlip(
+    flipped: Boolean,
+    chatContent: @Composable () -> Unit,
+    botContent: @Composable () -> Unit
+) {
+    val density = LocalDensity.current
+    val shieldSource = remember { MutableInteractionSource() }
+    val shield = Modifier.clickable(
+        interactionSource = shieldSource,
+        indication = null,
+        onClick = {}
+    )
+    val transition = updateTransition(flipped, label = "page-flip")
+    val progress by transition.animateFloat(
+        transitionSpec = { tween(380, easing = FastOutSlowInEasing) },
+        label = "flipProgress"
+    ) { visible -> if (visible) 1f else 0f }
+    val chatActive = progress < 0.5f
+    val showBot = flipped || progress > 0.001f
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    rotationY = -22f * progress
+                    transformOrigin = TransformOrigin(1f, 0.5f)
+                    scaleX = 1f - 0.03f * progress
+                    scaleY = 1f - 0.03f * progress
+                    alpha = 1f - 0.7f * progress
+                    cameraDistance = 28f * density.density
+                }
+                .then(if (chatActive) Modifier else shield)
+        ) {
+            chatContent()
+        }
+        if (showBot) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        rotationY = 22f * (1f - progress)
+                        transformOrigin = TransformOrigin(0f, 0.5f)
+                        scaleX = 0.97f + 0.03f * progress
+                        scaleY = 0.97f + 0.03f * progress
+                        alpha = 0.3f + 0.7f * progress
+                        cameraDistance = 28f * density.density
+                    }
+                    .then(if (chatActive) shield else Modifier)
+            ) {
+                botContent()
+            }
+        }
+        // Ombra del dorso: scurisce la chat mentre la pagina gira.
+        if (progress > 0.001f && progress < 0.999f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.28f * sin(progress * PI).toFloat()))
+                    .then(shield)
+            )
+        }
+    }
+}
 
 /**
  * Swipe orizzontale per cambiare modalita [Chat | Bot]. Scatta solo su
@@ -892,7 +968,7 @@ internal fun ChatApp() {
                 else -> settings.copy(sidebarRecenti = !settings.sidebarRecenti)
                 }
                 settings = next
-                saveSettings(context.applicationContext, next)
+                chatScope.launch(Dispatchers.IO) { saveSettings(context.applicationContext, next) }
                 }
                 )
                 }
@@ -915,24 +991,9 @@ internal fun ChatApp() {
                 onBack = { showComfy = false }
                 )
                 } else {
-                AnimatedContent(
-                targetState = botSectionVisible,
-                // Push stile iOS: 320ms, uscita in parallasse (1/3) + fade,
-                // senza clip durante lo slide (niente "taglio" ai bordi).
-                transitionSpec = {
-                    val slide = tween<androidx.compose.ui.unit.IntOffset>(320, easing = FastOutSlowInEasing)
-                    val fade = tween<Float>(320)
-                    if (targetState) {
-                        (slideInHorizontally(slide) { it } + fadeIn(fade)) togetherWith
-                            (slideOutHorizontally(slide) { -it / 3 } + fadeOut(fade))
-                    } else {
-                        (slideInHorizontally(slide) { -it / 3 } + fadeIn(fade)) togetherWith
-                            (slideOutHorizontally(slide) { it } + fadeOut(fade))
-                    }.using(SizeTransform(clip = false))
-                },
-                label = "chat-bot-section"
-                ) { botSection ->
-                if (botSection) {
+                PageFlip(
+                flipped = botSectionVisible,
+                botContent = {
                 Column(modifier = Modifier.fillMaxSize()) {
                 ChatBotToggle(
                 botActive = true,
@@ -973,7 +1034,8 @@ internal fun ChatApp() {
                 )
                 }
                 }
-                } else {
+                },
+                chatContent = {
                 // Transizione chat <-> bot chat: stesso slide della sezione
                 // (bot da destra). Chiave = contesto bot: lo switch anima,
                 // lo stesso bot riusato no. Niente doppi effetti: il ramo
@@ -1038,7 +1100,7 @@ internal fun ChatApp() {
                 }
                 }
                 }
-                }
+                )
                 }
                 } }
                 composable(Tab.Voice.navRoute) { VoiceModeScreen(settings, initialGatewaySecret.value, voiceAutoStartToken) }
@@ -1048,7 +1110,7 @@ internal fun ChatApp() {
                 settings = settings,
                 onSettingsChanged = { updated ->
                 settings = updated
-                saveSettings(context, updated)
+                chatScope.launch(Dispatchers.IO) { saveSettings(context, updated) }
                 },
                 onNewChat = {
                 pendingBot = null
