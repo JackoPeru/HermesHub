@@ -4800,7 +4800,23 @@ def _patch_bot_profiles_v1(text: str) -> tuple[str, list[str]]:
                 label="Hermes Hub bot capabilities v1",
             )
         else:
-            raise PatchError("Patch anchor not found: Hermes Hub bot capabilities v1")
+            # Newest upstream: feature-flagged endpoint table
+            # ("endpoints": {name: {"method": entry[0], ...} for name, entry ...}).
+            newest_capabilities_anchor = (
+                '            "endpoints": {\n'
+                '                name: {"method": entry[0], "path": entry[1]}\n'
+            )
+            if newest_capabilities_anchor in text:
+                text, changed = _upsert_versioned_block(
+                    text,
+                    begin=_BOTS_CAPABILITIES_BEGIN,
+                    end=_BOTS_CAPABILITIES_END,
+                    block=capabilities,
+                    anchor=newest_capabilities_anchor,
+                    label="Hermes Hub bot capabilities v1",
+                )
+            else:
+                raise PatchError("Patch anchor not found: Hermes Hub bot capabilities v1")
     if changed:
         changes.append("Hermes Hub bot capabilities v1")
     endpoint_entries = r'''                # HERMES_HUB_BOTS_ENDPOINTS_BEGIN
