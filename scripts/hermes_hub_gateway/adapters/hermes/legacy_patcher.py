@@ -8965,14 +8965,19 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
                 # sostituisce interamente il system prompt client con quello
                 # di progetto; i system message client non raggiungono mai
                 # conversation_messages, quindi nessun secondo replace serve.
-                text, _ = _replace_once(
-                    text,
-                    "        system_prompt, conversation_messages, messages_err = _parse_chat_messages(messages)\n",
-                    "        system_prompt, conversation_messages, messages_err = _parse_chat_messages(messages)\n"
+                hub_gate_new_style = (
                     "        if _is_hermes_hub_request(request, body):\n"
-                    "            system_prompt = _hermes_hub_project_system_prompt(body)\n",
-                    "chat completions hermes hub system gate",
+                    "            system_prompt = _hermes_hub_project_system_prompt(body)\n"
                 )
+                if hub_gate_new_style not in text:
+                    text, _ = _replace_once(
+                        text,
+                        "        system_prompt, conversation_messages, messages_err = _parse_chat_messages(messages)\n",
+                        "        system_prompt, conversation_messages, messages_err = _parse_chat_messages(messages)\n"
+                        + hub_gate_new_style,
+                        "chat completions hermes hub system gate",
+                    )
+                    changes.append("chat completions hermes hub system gate")
             else:
                 text, _ = _replace_regex_once(
                     text,
