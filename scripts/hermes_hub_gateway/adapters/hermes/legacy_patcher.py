@@ -8915,17 +8915,17 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
 
     if "allow_client_system_prompt = not _is_hermes_hub_request(request, body)" not in text:
         if openai_routes_text is not None:
-            text, _ = _replace_once(
+            # Upstream ha migrato List/Dict -> list/dict: l'anchor aggancia
+            # solo il prefisso stabile e lascia intatta la riga annotata.
+            text, _ = _replace_regex_once(
                 text,
-                '        # System messages -> ephemeral system prompt layered ON TOP of core, flattened to text\n'
-                '        # (Anthropic rejects images there, OpenAI text models ignore them).\n'
-                '        system_prompt = None\n'
-                '        conversation_messages: List[Dict[str, str]] = []',
+                r'(        # System messages -> ephemeral system prompt layered ON TOP of core, flattened to text\n'
+                r'        # \(Anthropic rejects images there, OpenAI text models ignore them\)\.\n'
+                r'        system_prompt = None\n)',
                 '        # System messages -> ephemeral system prompt layered ON TOP of core, flattened to text\n'
                 '        # (Anthropic rejects images there, OpenAI text models ignore them).\n'
                 '        system_prompt = _hermes_hub_project_system_prompt(body) if _is_hermes_hub_request(request, body) else None\n'
-                '        allow_client_system_prompt = not _is_hermes_hub_request(request, body)\n'
-                '        conversation_messages: List[Dict[str, str]] = []',
+                '        allow_client_system_prompt = not _is_hermes_hub_request(request, body)\n',
                 "chat completions hermes hub system gate",
             )
             text, _ = _replace_once(
