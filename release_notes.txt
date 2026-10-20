@@ -1,7 +1,9 @@
-Hermes Hub 0.6.282 (patcher gateway tollerante al nuovo agent upstream)
+Hermes Hub 0.6.283 (gruppi mai persi, GPU veritiera, laya multi-intent)
 
-- Gateway: il patcher accetta anche il layout agent piu' nuovo (tabella capabilities feature-flagged con `entry[0]/entry[1]`, parsing chat estratto in `_parse_chat_messages` con gate al call site, dict features standalone, append change-label solo nei rami che rimpiazzano davvero). Il deploy 0.6.281 restava bloccato con "Patch anchor not found".
-- Gruppi bot sincronizzati (da 0.6.280): endpoint GET/POST/DELETE /v1/hub/bot-groups ora deployabili su tutti gli alberi agent supportati; Android li usa come fonte di verita' con cache offline e pending push/delete.
-- Test: suite completa verde + nuovo contratto test_upstream_variant_tolerance.py; sonda --check e apply idempotenti contro l'albero agent candidato del server.
+- Gruppi bot: al primo sync col gateway i gruppi creati sul telefono vengono caricati sul server invece di essere cancellati; i rifiuti definitivi escono dalle code di sincronizzazione. Se la 0.6.282 aveva wipato i gruppi, ricrearli una volta sola basta: da ora restano sincronizzati.
+- Manager GPU: la VRAM e' attribuita al processo che la usa davvero (LLM vs Comfy) e il manager legge i modelli caricati in Comfy anche con load manuale: niente piu' "LLM su GPU" quando c'e' il video. Nuovi campi /status (llm_model, llm_vram_mb, media_vram_mb, media_loaded_models), mostrati nelle app.
+- laya: capisce piu' comandi in un messaggio ("carica llm e metti in auto e dimmi lo stato"), "passa a comfy" attiva davvero Comfy (MEDIA; DIRECT solo se detto esplicitamente) e conferma solo quando il backend risponde.
+- Server: fix runtime gateway nuovo agent (ruamel/pyyaml + stack ML nel python pinnato) gia' applicati; file manager/laya staged, attivazione con restart su OK utente.
+- Test: suite completa verde + nuovi contratti test_gpu_truth.py e casi multi-intent laya.
 
-Asset: HermesHub-0.6.282-android.apk (Android, versionCode 286), NemoclawChat.Windows_0.6.282.0_x64.msix (x64) e HermesHub-0.6.282-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.283-android.apk (Android, versionCode 287), NemoclawChat.Windows_0.6.283.0_x64.msix (x64) e HermesHub-0.6.283-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

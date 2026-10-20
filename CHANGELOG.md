@@ -2,6 +2,14 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.283 - 2026-10-20
+
+- Gruppi bot: al primo sync i gruppi solo-locali vengono migrati sul gateway invece di essere cancellati; i rifiuti definitivi (4xx) escono dai pending senza riprovare all'infinito.
+- Manager GPU: verita' per-processo (VRAM attribuita a tabby/exllama vs Comfy, nome modello LLM servito, file modello media dagli fd dei processi Comfy anche con load manuale); `llm_loaded` non scatta piu' sul video. Nuovi campi /status: `llm_model`, `llm_vram_mb`, `media_vram_mb`, `media_loaded_models`. Nota deploy: file staged sul server, attivazione (restart manager+laya) su OK utente.
+- laya: multi-intent in un messaggio ("carica llm e metti in auto"), "passa a comfy" va in MEDIA (DIRECT solo se esplicito), attesa backend con conferma ("Comfy attivo" vs "non risponde ancora").
+- Client: sottotitoli GPU veritieri (Android TopBar + Comfy, Windows Home/ComfyPage).
+- Test: suite completa verde + nuovi contratti test_gpu_truth.py.
+
 ## 0.6.282 - 2026-10-20
 
 - Gateway: patcher tollerante anche all'albero agent piu' nuovo (tabella capability feature-flagged, `_parse_chat_messages` estratto, features standalone): deploy e sonda --check verdi e idempotenti sul candidato origin/main del server. Include i fix 0.6.281 (firme PEP 604, annotation non quotate, `list/dict` minuscoli).
