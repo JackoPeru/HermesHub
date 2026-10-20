@@ -51,6 +51,19 @@ private const val GROUPS_PREFS = "hermes_bot_groups"
 private const val GROUPS_JSON_KEY = "items"
 private const val BOT_GROUPS_PENDING_PUSH_KEY = "pending_push"
 private const val BOT_GROUPS_PENDING_DELETE_KEY = "pending_delete"
+private const val BOT_GROUPS_MIGRATED_KEY = "migrated_v1"
+
+private fun botGroupsMigrated(context: Context): Boolean =
+    context.applicationContext.getSharedPreferences(GROUPS_PREFS, Context.MODE_PRIVATE)
+        .getBoolean(BOT_GROUPS_MIGRATED_KEY, false)
+
+private fun markBotGroupsMigrated(context: Context) {
+    context.applicationContext.getSharedPreferences(GROUPS_PREFS, Context.MODE_PRIVATE)
+        .edit { putBoolean(BOT_GROUPS_MIGRATED_KEY, true) }
+}
+
+/** 4xx definitivi (validazione/rifiuto) escono dai pending; 0/5xx restano. */
+private fun keepPendingPush(status: Int): Boolean = status == 0 || status >= 500
 
 internal fun loadHermesBotConnections(context: Context, settings: AppSettings): HermesBotConnectionRegistry {
     val warnings = mutableListOf<String>()
@@ -366,6 +379,8 @@ private suspend fun hermesBotGroupsPut(context: Context, settings: AppSettings, 
  * quando raggiungibile, la cache locale fa da fallback offline. I pending
  * push/delete catturati offline vengono riverificati al primo load online
  * prima di sovrascrivere la cache, così nessun'azione utente si perde.
+ * Al primo load online i gruppi solo-locali (creati prima del sync) vengono
+ * migrati sul server invece di essere cancellati; poi vale il server.
  */
 internal suspend fun loadHermesBotGroupsSynced(context: Context, settings: AppSettings): List<HermesBotGroup> {
     val local = loadHermesBotGroups(context)
@@ -388,13 +403,34 @@ internal suspend fun loadHermesBotGroupsSynced(context: Context, settings: AppSe
         for (name in pendingPush) {
             val group = local.firstOrNull { it.name.equals(name, true) } ?: continue
             val (putStatus, _) = hermesBotGroupsPut(context, settings, group)
-            if (putStatus == 0) remaining += name
+            if (keepPendingPush(putStatus)) remaining += name
         }
         savePendingGroupNames(context, BOT_GROUPS_PENDING_PUSH_KEY, remaining)
     }
 
     val (refreshStatus, refreshBody) = hermesBotGroupsGet(context, settings)
     val items = if (refreshStatus in 200..299) refreshBody else body
+    val serverNames = parseHermesBotGroupsServerPayload(items).map { it.name.lowercase() }.toSet()
+    if (!botGroupsMigrated(context)) {
+        // Prima sincronizzazione: i gruppi locali assenti sul server vengono
+        // caricati (migrazione), non cancellati. I rifiuti definitivi (4xx)
+        // escono dai pending per non riprovare all'infinito.
+        for (group in local) {
+            if (serverNames.contains(group.name.lowercase())) continue
+            if (loadPendingGroupNames(context, BOT_GROUPS_PENDING_PUSH_KEY)
+                    .any { it.equals(group.name, true) }) continue
+            val (putStatus, _) = hermesBotGroupsPut(context, settings, group)
+            if (keepPendingPush(putStatus)) {
+                addPendingGroupName(context, BOT_GROUPS_PENDING_PUSH_KEY, group.name)
+            }
+        }
+        markBotGroupsMigrated(context)
+        val (finalStatus, finalBody) = hermesBotGroupsGet(context, settings)
+        val finalItems = if (finalStatus in 200..299) finalBody else items
+        val parsed = parseHermesBotGroupsServerPayload(finalItems)
+        saveHermesBotGroupsCache(context, parsed)
+        return parsed
+    }
     val parsed = parseHermesBotGroupsServerPayload(items)
     saveHermesBotGroupsCache(context, parsed)
     return parsed

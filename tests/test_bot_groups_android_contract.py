@@ -36,10 +36,17 @@ class BotGroupsAndroidContractTests(unittest.TestCase):
     def test_offline_pending_repairs_never_lose_user_actions(self):
         self.assertIn('BOT_GROUPS_PENDING_PUSH_KEY = "pending_push"', self.connections)
         self.assertIn('BOT_GROUPS_PENDING_DELETE_KEY = "pending_delete"', self.connections)
+        self.assertIn('BOT_GROUPS_MIGRATED_KEY = "migrated_v1"', self.connections)
         # Push differito al primo load online, prima di sovrascrivere la cache.
         runtime = self.connections.split("internal suspend fun loadHermesBotGroupsSynced", 1)[1]
         self.assertIn("hermesBotGroupsDelete(context, settings, name)", runtime)
         self.assertIn("hermesBotGroupsPut(context, settings, group)", runtime)
+        # Prima sincronizzazione: i gruppi solo-locali vengono migrati sul
+        # server invece di essere cancellati; poi vale il server.
+        self.assertIn("if (!botGroupsMigrated(context))", runtime)
+        self.assertIn("markBotGroupsMigrated(context)", runtime)
+        # I rifiuti definitivi (4xx) escono dai pending, 0/5xx restano.
+        self.assertIn("keepPendingPush(putStatus)", runtime)
         # Upsert online aggiorna la cache speculare; offline solo locale + pending.
         upsert = self.connections.split("internal suspend fun upsertHermesBotGroupSynced", 1)[1]
         self.assertIn("addPendingGroupName(context, BOT_GROUPS_PENDING_PUSH_KEY, normalized.name)", upsert)
