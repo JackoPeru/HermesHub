@@ -8959,29 +8959,42 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
 
     if "allow_client_system_prompt = not _is_hermes_hub_request(request, body)" not in text:
         if openai_routes_text is not None:
-            # Upstream ha migrato List/Dict -> list/dict: l'anchor aggancia
-            # solo il prefisso stabile e lascia intatta la riga annotata.
-            text, _ = _replace_regex_once(
-                text,
-                r'(        # System messages -> ephemeral system prompt layered ON TOP of core, flattened to text\n'
-                r'        # \(Anthropic rejects images there, OpenAI text models ignore them\)\.\n'
-                r'        system_prompt = None\n)',
-                '        # System messages -> ephemeral system prompt layered ON TOP of core, flattened to text\n'
-                '        # (Anthropic rejects images there, OpenAI text models ignore them).\n'
-                '        system_prompt = _hermes_hub_project_system_prompt(body) if _is_hermes_hub_request(request, body) else None\n'
-                '        allow_client_system_prompt = not _is_hermes_hub_request(request, body)\n',
-                "chat completions hermes hub system gate",
-            )
-            text, _ = _replace_once(
-                text,
-                '            if role == "system":\n'
-                '                content = _normalize_chat_content(raw_content)\n',
-                '            if role == "system":\n'
-                '                if not allow_client_system_prompt:\n'
-                '                    continue\n'
-                '                content = _normalize_chat_content(raw_content)\n',
-                "chat completions ignore hermes hub system prompts",
-            )
+            if "system_prompt, conversation_messages, messages_err = _parse_chat_messages(messages)" in text:
+                # Newest upstream: parsing estratto in _parse_chat_messages
+                # (senza scope request/body). Il gate vive al call site e
+                # sostituisce interamente il system prompt client con quello
+                # di progetto; i system message client non raggiungono mai
+                # conversation_messages, quindi nessun secondo replace serve.
+                text, _ = _replace_once(
+                    text,
+                    "        system_prompt, conversation_messages, messages_err = _parse_chat_messages(messages)\n",
+                    "        system_prompt, conversation_messages, messages_err = _parse_chat_messages(messages)\n"
+                    "        if _is_hermes_hub_request(request, body):\n"
+                    "            system_prompt = _hermes_hub_project_system_prompt(body)\n",
+                    "chat completions hermes hub system gate",
+                )
+            else:
+                text, _ = _replace_regex_once(
+                    text,
+                    r'(        # System messages -> ephemeral system prompt layered ON TOP of core, flattened to text\n'
+                    r'        # \(Anthropic rejects images there, OpenAI text models ignore them\)\.\n'
+                    r'        system_prompt = None\n)',
+                    '        # System messages -> ephemeral system prompt layered ON TOP of core, flattened to text\n'
+                    '        # (Anthropic rejects images there, OpenAI text models ignore them).\n'
+                    '        system_prompt = _hermes_hub_project_system_prompt(body) if _is_hermes_hub_request(request, body) else None\n'
+                    '        allow_client_system_prompt = not _is_hermes_hub_request(request, body)\n',
+                    "chat completions hermes hub system gate",
+                )
+                text, _ = _replace_once(
+                    text,
+                    '            if role == "system":\n'
+                    '                content = _normalize_chat_content(raw_content)\n',
+                    '            if role == "system":\n'
+                    '                if not allow_client_system_prompt:\n'
+                    '                    continue\n'
+                    '                content = _normalize_chat_content(raw_content)\n',
+                    "chat completions ignore hermes hub system prompts",
+                )
         else:
             text, _ = _replace_once(
                 text,
