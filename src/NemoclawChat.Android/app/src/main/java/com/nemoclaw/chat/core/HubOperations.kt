@@ -2519,6 +2519,10 @@ internal fun readVisualBlock(obj: JSONObject): VisualBlock {
         layout = obj.optString("layout"),
         images = readVisualImages(obj.optJSONArray("images") ?: JSONArray()),
         variant = obj.optString("variant"),
+        options = readVisualOptions(obj.optJSONArray("options") ?: JSONArray()),
+        fields = readVisualFields(obj.optJSONArray("fields") ?: JSONArray()),
+        multi = obj.optBoolean("multi", false),
+        submitLabel = obj.optString("submit_label"),
         rawJson = obj.optString("raw_json", obj.toString())
     )
 }
@@ -2570,6 +2574,47 @@ internal fun readVisualImages(array: JSONArray): List<VisualGalleryImage> = buil
     }
 }
 
+internal fun readVisualOptions(array: JSONArray): List<VisualChoiceOption> = buildList {
+    for (i in 0 until minOf(array.length(), 10)) {
+        val obj = array.optJSONObject(i) ?: continue
+        add(VisualChoiceOption(obj.optString("id"), obj.optString("label"), obj.optString("detail")))
+    }
+}
+
+internal val VISUAL_FORM_FIELD_KINDS = setOf("text", "multiline", "number", "date", "bool", "select")
+
+internal fun readVisualFields(array: JSONArray): List<VisualFormField> = buildList {
+    for (i in 0 until minOf(array.length(), 12)) {
+        val obj = array.optJSONObject(i) ?: continue
+        val opts = obj.optJSONArray("options")?.let { arr ->
+            buildList {
+                for (j in 0 until minOf(arr.length(), 10)) {
+                    arr.optString(j).takeIf { it.isNotBlank() }?.let { add(it) }
+                }
+            }
+        }.orEmpty()
+        add(
+            VisualFormField(
+                key = obj.optString("key"),
+                label = obj.optString("label"),
+                kind = obj.optString("kind", "text"),
+                required = obj.optBoolean("required", false),
+                options = opts,
+                placeholder = obj.optString("placeholder")
+            )
+        )
+    }
+}
+
+internal fun isValidVisualFormField(field: VisualFormField): Boolean {
+    if (field.key.isBlank() || field.label.isBlank() || field.label.length > 80) return false
+    if (field.kind !in VISUAL_FORM_FIELD_KINDS) return false
+    if (field.kind == "select") {
+        return field.options.isNotEmpty() && field.options.size <= 10 && field.options.all { it.isNotBlank() }
+    }
+    return true
+}
+
 internal fun readIntArray(array: JSONArray?): List<Int> = buildList {
     if (array == null) return@buildList
     for (i in 0 until minOf(array.length(), 80)) {
@@ -2593,6 +2638,11 @@ internal fun VisualBlock.isValidVisualBlock(): Boolean {
         "progress" -> progressValue?.let { it in 0.0..1.0 } == true &&
             (status.isBlank() || status in setOf("pending", "active", "complete", "blocked", "failed"))
         "approval" -> status in setOf("pending", "approved", "rejected") && action.isNotBlank()
+        "choice" -> status in setOf("pending", "answered") &&
+            options.isNotEmpty() && options.size <= 10 &&
+            options.all { it.id.isNotBlank() && it.label.isNotBlank() && it.label.length <= 120 }
+        "form" -> status in setOf("pending", "submitted") &&
+            fields.isNotEmpty() && fields.size <= 12 && fields.all { isValidVisualFormField(it) }
         "device" -> deviceName.isNotBlank() &&
             deviceStatus in setOf("connected", "connecting", "disconnected", "unknown") &&
             (batteryPercent == null || batteryPercent in 0.0..100.0)

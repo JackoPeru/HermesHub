@@ -1366,7 +1366,7 @@ internal fun ChatScreen(
                     state.messages,
                     key = { message -> message.id }
                 ) { message ->
-                    MessageBubble(message, settings)
+                    MessageBubble(message, settings, onSendText = { quickPrompt = it })
                 }
                 state.streamingState?.let { streaming ->
                     item(key = "streaming") {

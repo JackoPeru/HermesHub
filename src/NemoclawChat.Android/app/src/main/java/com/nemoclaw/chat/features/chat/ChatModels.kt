@@ -337,6 +337,10 @@ data class VisualBlock(
     val layout: String = "",
     val images: List<VisualGalleryImage> = emptyList(),
     val variant: String = "",
+    val options: List<VisualChoiceOption> = emptyList(),
+    val fields: List<VisualFormField> = emptyList(),
+    val multi: Boolean = false,
+    val submitLabel: String = "",
     val rawJson: String = ""
 )
 
@@ -366,6 +370,23 @@ data class VisualGalleryImage(
     val mediaUrl: String,
     val alt: String,
     val caption: String = ""
+)
+
+@androidx.compose.runtime.Immutable
+data class VisualChoiceOption(
+    val id: String,
+    val label: String,
+    val detail: String = ""
+)
+
+@androidx.compose.runtime.Immutable
+data class VisualFormField(
+    val key: String,
+    val label: String,
+    val kind: String = "text",
+    val required: Boolean = false,
+    val options: List<String> = emptyList(),
+    val placeholder: String = ""
 )
 
 data class AgentTask(

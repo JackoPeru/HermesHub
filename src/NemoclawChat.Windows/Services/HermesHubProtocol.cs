@@ -308,6 +308,8 @@ public static class HermesHubProtocol
                 mode = settings.VisualBlocksMode,
                 image_gallery = "supported via /v1/media proxy URLs only",
                 media_file = "supported for image/video/audio/document via safe proxy URLs; include media_kind, mime_type, filename, size_bytes, duration_ms, thumbnail_url when known",
+                choice = "quiz a risposta multipla: {id, type: choice, title: domanda, text?: aiuto, options: [{id, label, detail?}] (1..10, id e label non vuoti), multi?: bool (default false), status: pending}. L'app mostra opzioni toccabili; il tocco invia la risposta come messaggio utente '[risposta quiz \"<id>\"] <label>' (multi: label separate da '; '). Leggi le risposte in quel formato, non chiedere di riscriverle a mano.",
+                form = "modulo inserimento dati: {id, type: form, title, text?: aiuto, fields: [{key, label, kind: text|multiline|number|date|bool|select, required?: bool, options?: [...] (solo select, 1..10), placeholder?}] (1..12), submit_label?, status: pending}. L'app valida i required e invia '[dati modulo \"<id>\"]' seguito da righe 'label: valore'. Leggi i dati da quel formato.",
                 screenshot_contract = "For browser screenshots: capture real image, copy to HERMES_HUB_UPLOAD_PATH (~/.hermes/hub_uploads by default), then emit media_file image with media_url /v1/media/<filename>. Never return a local path or URL as chat text."
             }
         };

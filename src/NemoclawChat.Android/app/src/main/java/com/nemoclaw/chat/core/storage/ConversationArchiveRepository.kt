@@ -449,6 +449,10 @@ private fun writeVisualBlocks(blocks: List<VisualBlock>): JSONArray {
             "image_gallery" -> obj.put("layout", block.layout).put("images", JSONArray(block.images.map { image -> JSONObject().put("media_url", image.mediaUrl).put("alt", image.alt).put("caption", image.caption) }))
             "media_file" -> obj.put("media_url", block.mediaUrl).put("media_kind", block.mediaKind).put("mime_type", block.mimeType).put("filename", block.filename).put("size_bytes", block.sizeBytes ?: JSONObject.NULL).put("duration_ms", block.durationMs ?: JSONObject.NULL).put("thumbnail_url", block.thumbnailUrl).put("local_data_url", block.localDataUrl).put("alt", block.alt)
             "callout" -> obj.put("variant", block.variant).put("text", block.text)
+            "choice" -> obj.put("text", block.text).put("status", block.status).put("multi", block.multi)
+                .put("options", JSONArray(block.options.map { option -> JSONObject().put("id", option.id).put("label", option.label).put("detail", option.detail) }))
+            "form" -> obj.put("text", block.text).put("status", block.status).put("submit_label", block.submitLabel)
+                .put("fields", JSONArray(block.fields.map { field -> JSONObject().put("key", field.key).put("label", field.label).put("kind", field.kind).put("required", field.required).put("placeholder", field.placeholder).put("options", JSONArray(field.options)) }))
             "unknown_block" -> obj.put("raw_json", block.rawJson)
         }
         array.put(obj)

@@ -288,7 +288,7 @@ import kotlin.math.roundToInt
 import kotlin.random.Random
 
 @Composable
-internal fun MessageBubble(message: ChatMessage, settings: AppSettings) {
+internal fun MessageBubble(message: ChatMessage, settings: AppSettings, onSendText: ((String) -> Unit)? = null) {
     // Anti-ripetizione a display: se il testo contiene lo stesso blocco 2x/4x
     // (server o merge concorrenti), mostra una copia sola. Solo assistente.
     val displayText = remember(message.text, message.fromUser, message.isAction) {
@@ -313,7 +313,7 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings) {
                 if (message.visualBlocks.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         message.visualBlocks.filter { it.isValidVisualBlock() }.forEach { block ->
-                            VisualBlockView(block)
+                            VisualBlockView(block, onSendText)
                         }
                     }
                 }
@@ -357,7 +357,7 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             message.visualBlocks.filter { it.isValidVisualBlock() }.forEach { block ->
-                                VisualBlockView(block)
+                                VisualBlockView(block, onSendText)
                             }
                         }
                     }

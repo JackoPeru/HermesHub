@@ -146,6 +146,7 @@ import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -155,6 +156,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -172,6 +174,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -294,7 +297,7 @@ import kotlin.math.roundToInt
 import kotlin.random.Random
 
 @Composable
-internal fun VisualBlockView(block: VisualBlock) {
+internal fun VisualBlockView(block: VisualBlock, onSendText: ((String) -> Unit)? = null) {
     // Immagini inviate dall'utente: solo miniatura, niente card con nome file.
     if (isUserLocalImage(block)) {
         MediaFileBlock(block)
@@ -321,6 +324,8 @@ internal fun VisualBlockView(block: VisualBlock) {
                 "metric" -> MetricBlock(block)
                 "progress" -> ProgressBlock(block)
                 "approval" -> ApprovalBlock(block)
+                "choice" -> ChoiceBlock(block, onSendText)
+                "form" -> FormBlock(block, onSendText)
                 "device" -> DeviceBlock(block)
                 "unknown_block" -> CodeBlock("json", block.rawJson.ifBlank { "{}" }, "hermes-unknown-block.json")
             }
@@ -364,6 +369,160 @@ internal fun ApprovalBlock(block: VisualBlock) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("${block.status}: ${block.action}", color = Color.White, fontWeight = FontWeight.SemiBold)
         if (block.text.isNotBlank()) Text(block.text, color = AppColors.Muted, fontSize = 13.sp)
+    }
+}
+
+@Composable
+internal fun ChoiceBlock(block: VisualBlock, onSendText: ((String) -> Unit)?) {
+    var answered by remember(block.id) { mutableStateOf(block.status.equals("answered", ignoreCase = true)) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (block.text.isNotBlank()) Text(block.text, color = AppColors.Muted, fontSize = 13.sp)
+        if (answered) {
+            Text("Risposto ✓", color = AppColors.Muted, fontSize = 12.sp)
+            return@Column
+        }
+        if (onSendText == null) {
+            block.options.forEach { option ->
+                Text("• ${option.label}", color = Color.White, fontSize = 14.sp)
+            }
+            return@Column
+        }
+        if (!block.multi) {
+            block.options.forEach { option ->
+                val label = if (option.detail.isBlank()) option.label else "${option.label} — ${option.detail}"
+                Button(
+                    onClick = {
+                        answered = true
+                        onSendText("[risposta quiz \"${block.id}\"] ${option.label}")
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(label)
+                }
+            }
+        } else {
+            var checked by remember(block.id) { mutableStateOf(setOf<String>()) }
+            block.options.forEach { option ->
+                val label = if (option.detail.isBlank()) option.label else "${option.label} — ${option.detail}"
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = option.label in checked,
+                        onCheckedChange = { on ->
+                            checked = if (on) checked + option.label else checked - option.label
+                        }
+                    )
+                    Text(label, color = Color.White, fontSize = 14.sp)
+                }
+            }
+            Button(
+                onClick = {
+                    if (checked.isEmpty()) return@Button
+                    answered = true
+                    onSendText("[risposta quiz \"${block.id}\"] ${checked.sorted().joinToString("; ")}")
+                },
+                enabled = checked.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Invia risposte")
+            }
+        }
+    }
+}
+
+@Composable
+internal fun FormBlock(block: VisualBlock, onSendText: ((String) -> Unit)?) {
+    var answered by remember(block.id) { mutableStateOf(block.status.equals("submitted", ignoreCase = true)) }
+    val texts = remember(block.id) { mutableStateMapOf<String, String>() }
+    val checks = remember(block.id) { mutableStateMapOf<String, Boolean>() }
+    val picks = remember(block.id) { mutableStateMapOf<String, String>() }
+    var error by remember(block.id) { mutableStateOf("") }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (block.text.isNotBlank()) Text(block.text, color = AppColors.Muted, fontSize = 13.sp)
+        if (answered) {
+            Text("Inviato ✓", color = AppColors.Muted, fontSize = 12.sp)
+            return@Column
+        }
+        if (onSendText == null) {
+            block.fields.forEach { field ->
+                Text("${field.label}${if (field.required) " *" else ""}", color = Color.White, fontSize = 13.sp)
+            }
+            return@Column
+        }
+        block.fields.forEach { field ->
+            Text(
+                "${field.label}${if (field.required) " *" else ""}",
+                color = Color.White,
+                fontSize = 12.sp
+            )
+            when (field.kind.lowercase()) {
+                "bool" -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = checks[field.key] == true,
+                            onCheckedChange = { checks[field.key] = it }
+                        )
+                        if (field.placeholder.isNotBlank()) Text(field.placeholder, color = Color.White, fontSize = 14.sp)
+                    }
+                }
+                "select" -> {
+                    Column {
+                        field.options.forEach { choice ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(
+                                    selected = picks[field.key] == choice,
+                                    onClick = { picks[field.key] = choice }
+                                )
+                                Text(choice, color = Color.White, fontSize = 14.sp)
+                            }
+                        }
+                    }
+                }
+                else -> {
+                    TextField(
+                        value = texts[field.key].orEmpty(),
+                        onValueChange = { texts[field.key] = it },
+                        placeholder = { if (field.placeholder.isNotBlank()) Text(field.placeholder) },
+                        singleLine = field.kind.lowercase() != "multiline",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+        if (error.isNotBlank()) Text(error, color = Color.Red, fontSize = 12.sp)
+        Button(
+            onClick = {
+                val missing = block.fields.filter { field ->
+                    when (field.kind.lowercase()) {
+                        "bool", "date" -> false
+                        "select" -> field.required && picks[field.key].isNullOrBlank()
+                        "number" -> {
+                            val raw = texts[field.key].orEmpty().trim()
+                            (field.required && raw.isBlank()) ||
+                                (raw.isNotBlank() && raw.toDoubleOrNull() == null)
+                        }
+                        else -> field.required && texts[field.key].orEmpty().isBlank()
+                    }
+                }.map { it.label }
+                if (missing.isNotEmpty()) {
+                    error = "Compila: ${missing.joinToString(", ")}"
+                    return@Button
+                }
+                error = ""
+                answered = true
+                val lines = block.fields.map { field ->
+                    val value = when (field.kind.lowercase()) {
+                        "bool" -> if (checks[field.key] == true) "sì" else "no"
+                        "select" -> picks[field.key].orEmpty()
+                        else -> texts[field.key].orEmpty().trim()
+                    }
+                    "${field.label}: $value"
+                }
+                onSendText("[dati modulo \"${block.id}\"]\n${lines.joinToString("\n")}")
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(block.submitLabel.ifBlank { "Invia" })
+        }
     }
 }
 

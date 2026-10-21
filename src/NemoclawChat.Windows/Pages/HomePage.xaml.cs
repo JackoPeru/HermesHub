@@ -81,6 +81,10 @@ public sealed partial class HomePage : Page
     private string? _activeGatewayRunId;
     private readonly List<ChatInputAttachment> _pendingAttachments = [];
 
+    // Blocchi quiz/form gia' risposti in sessione: niente doppi invii dallo
+    // stesso modulo (la cronologia ri-renderizza i controlli abilitati).
+    private readonly HashSet<string> _answeredBlockIds = new(StringComparer.Ordinal);
+
     private Popup? _slashPopup;
     private ListView? _slashList;
     private readonly List<SlashCommand> _slashCommands;
@@ -3257,6 +3261,8 @@ public sealed partial class HomePage : Page
             "metric" => RenderMetric(block),
             "progress" => RenderProgress(block),
             "approval" => RenderApproval(block),
+            "choice" => RenderChoice(block),
+            "form" => RenderForm(block),
             "device" => RenderDevice(block),
             "unknown_block" => RenderCode("json", block.RawJson ?? "{}", "hermes-unknown-block.json"),
             _ => new TextBlock { Text = block.Caption ?? "Blocco visuale non supportato.", Foreground = (Brush)Application.Current.Resources["MutedTextBrush"] }
@@ -3355,6 +3361,183 @@ public sealed partial class HomePage : Page
             panel.Children.Add(new TextBlock { Text = block.Text, Foreground = (Brush)Application.Current.Resources["MutedTextBrush"], TextWrapping = TextWrapping.WrapWholeWords });
         }
         return panel;
+    }
+
+    private StackPanel RenderChoice(VisualBlockRecord block)
+    {
+        var panel = new StackPanel { Spacing = 6 };
+        if (!string.IsNullOrWhiteSpace(block.Text))
+        {
+            panel.Children.Add(new TextBlock { Text = block.Text, Foreground = (Brush)Application.Current.Resources["MutedTextBrush"], TextWrapping = TextWrapping.WrapWholeWords });
+        }
+        var answered = _answeredBlockIds.Contains(block.Id) ||
+                       string.Equals(block.Status, "answered", StringComparison.OrdinalIgnoreCase);
+        var controls = new List<Control>();
+        if (answered)
+        {
+            panel.Children.Add(new TextBlock { Text = "Risposto ✓", Foreground = (Brush)Application.Current.Resources["MutedTextBrush"], FontSize = 12 });
+            return panel;
+        }
+        if (block.Multi)
+        {
+            var boxes = new List<CheckBox>();
+            foreach (var option in block.Options)
+            {
+                var label = string.IsNullOrWhiteSpace(option.Detail) ? option.Label : $"{option.Label} — {option.Detail}";
+                var box = new CheckBox { Content = label, Tag = option.Label };
+                boxes.Add(box);
+                controls.Add(box);
+                panel.Children.Add(box);
+            }
+            var send = new Button { Content = "Invia risposte" };
+            send.Click += async (_, _) =>
+            {
+                var labels = boxes.Where(box => box.IsChecked == true)
+                    .Select(box => box.Tag as string ?? string.Empty)
+                    .Where(label => label.Length > 0)
+                    .ToList();
+                if (labels.Count == 0)
+                {
+                    return;
+                }
+                SetControlsEnabled(controls, false);
+                send.IsEnabled = false;
+                await SendBlockReplyAsync(block.Id, $"[risposta quiz \"{block.Id}\"] {string.Join("; ", labels)}");
+            };
+            panel.Children.Add(send);
+        }
+        else
+        {
+            foreach (var option in block.Options)
+            {
+                var button = new Button
+                {
+                    Content = string.IsNullOrWhiteSpace(option.Detail) ? option.Label : $"{option.Label} — {option.Detail}",
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Left
+                };
+                button.Click += async (_, _) =>
+                {
+                    SetControlsEnabled(controls, false);
+                    await SendBlockReplyAsync(block.Id, $"[risposta quiz \"{block.Id}\"] {option.Label}");
+                };
+                controls.Add(button);
+                panel.Children.Add(button);
+            }
+        }
+        return panel;
+    }
+
+    private StackPanel RenderForm(VisualBlockRecord block)
+    {
+        var panel = new StackPanel { Spacing = 8 };
+        if (!string.IsNullOrWhiteSpace(block.Text))
+        {
+            panel.Children.Add(new TextBlock { Text = block.Text, Foreground = (Brush)Application.Current.Resources["MutedTextBrush"], TextWrapping = TextWrapping.WrapWholeWords });
+        }
+        if (_answeredBlockIds.Contains(block.Id) ||
+            string.Equals(block.Status, "submitted", StringComparison.OrdinalIgnoreCase))
+        {
+            panel.Children.Add(new TextBlock { Text = "Inviato ✓", Foreground = (Brush)Application.Current.Resources["MutedTextBrush"], FontSize = 12 });
+            return panel;
+        }
+        var readers = new List<Func<(string Label, string Value, bool Missing)>>();
+        var controls = new List<Control>();
+        var errorText = new TextBlock { Foreground = new SolidColorBrush(Colors.Red), FontSize = 12, Visibility = Visibility.Collapsed };
+        foreach (var field in block.Fields)
+        {
+            panel.Children.Add(new TextBlock { Text = field.Label + (field.Required ? " *" : string.Empty), FontSize = 12, Foreground = new SolidColorBrush(Colors.White) });
+            var kind = (field.Kind ?? "text").ToLowerInvariant();
+            if (kind == "bool")
+            {
+                var box = new CheckBox { Content = string.IsNullOrWhiteSpace(field.Placeholder) ? field.Label : field.Placeholder, IsChecked = false };
+                controls.Add(box);
+                panel.Children.Add(box);
+                readers.Add(() => (field.Label, box.IsChecked == true ? "sì" : "no", false));
+            }
+            else if (kind == "select")
+            {
+                var combo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = field.Placeholder ?? "Scegli…" };
+                foreach (var choice in field.Options.Where(o => !string.IsNullOrWhiteSpace(o)))
+                {
+                    combo.Items.Add(choice);
+                }
+                controls.Add(combo);
+                panel.Children.Add(combo);
+                readers.Add(() =>
+                {
+                    var value = (combo.SelectedItem as string) ?? string.Empty;
+                    return (field.Label, value, field.Required && string.IsNullOrWhiteSpace(value));
+                });
+            }
+            else if (kind == "date")
+            {
+                var picker = new DatePicker();
+                controls.Add(picker);
+                panel.Children.Add(picker);
+                readers.Add(() => (field.Label, picker.Date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), false));
+            }
+            else
+            {
+                var input = new TextBox
+                {
+                    PlaceholderText = field.Placeholder ?? string.Empty,
+                    AcceptsReturn = kind == "multiline",
+                    TextWrapping = kind == "multiline" ? TextWrapping.Wrap : TextWrapping.NoWrap
+                };
+                controls.Add(input);
+                panel.Children.Add(input);
+                readers.Add(() =>
+                {
+                    var value = (input.Text ?? string.Empty).Trim();
+                    if (kind == "number" && value.Length > 0 && !double.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out _)
+                        && !double.TryParse(value, out _))
+                    {
+                        return (field.Label, value, true);
+                    }
+                    return (field.Label, value, field.Required && value.Length == 0);
+                });
+            }
+        }
+        var submit = new Button { Content = string.IsNullOrWhiteSpace(block.SubmitLabel) ? "Invia" : block.SubmitLabel };
+        submit.Click += async (_, _) =>
+        {
+            var answers = readers.Select(read => read()).ToList();
+            var missing = answers.Where(answer => answer.Missing).Select(answer => answer.Label).ToList();
+            if (missing.Count > 0)
+            {
+                errorText.Text = "Compila: " + string.Join(", ", missing);
+                errorText.Visibility = Visibility.Visible;
+                return;
+            }
+            errorText.Visibility = Visibility.Collapsed;
+            SetControlsEnabled(controls, false);
+            submit.IsEnabled = false;
+            var lines = answers.Select(answer => $"{answer.Label}: {answer.Value}");
+            await SendBlockReplyAsync(block.Id, $"[dati modulo \"{block.Id}\"]\n{string.Join("\n", lines)}");
+        };
+        panel.Children.Add(errorText);
+        panel.Children.Add(submit);
+        return panel;
+    }
+
+    private static void SetControlsEnabled(IEnumerable<Control> controls, bool enabled)
+    {
+        foreach (var control in controls)
+        {
+            control.IsEnabled = enabled;
+        }
+    }
+
+    private async Task SendBlockReplyAsync(string blockId, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+        _answeredBlockIds.Add(blockId);
+        PromptBox.Text = text;
+        await SendCurrentPromptAsync();
     }
 
     private static StackPanel RenderDevice(VisualBlockRecord block)

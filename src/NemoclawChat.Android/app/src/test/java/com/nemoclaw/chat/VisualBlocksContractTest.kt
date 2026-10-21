@@ -35,6 +35,31 @@ class VisualBlocksContractTest {
     }
 
     @Test
+    fun `choice and form blocks parse and validate`() {
+        val blocks = extractVisualBlocks(
+            """
+            {
+              "visual_blocks_version":1,
+              "visual_blocks":[
+                {"id":"q1","type":"choice","title":"Formato?","status":"pending","options":[{"id":"pdf","label":"PDF"},{"id":"md","label":"Markdown","detail":"leggero"}]},
+                {"id":"f1","type":"form","title":"Dati","status":"pending","submit_label":"Invia","fields":[{"key":"nome","label":"Nome","kind":"text","required":true},{"key":"formato","label":"Formato","kind":"select","options":["PDF","Markdown"]}]},
+                {"id":"bad1","type":"choice","title":"Vuoto","status":"pending","options":[]},
+                {"id":"bad2","type":"form","title":"Rotto","status":"pending","fields":[{"key":"x","label":"X","kind":"teletrasporto"}]}
+              ]
+            }
+            """.trimIndent()
+        )
+
+        assertEquals(listOf("choice", "form", "unknown_block", "unknown_block"), blocks.map { it.type })
+        assertEquals(2, blocks[0].options.size)
+        assertEquals("Markdown", blocks[0].options[1].label)
+        assertEquals("leggero", blocks[0].options[1].detail)
+        assertEquals(2, blocks[1].fields.size)
+        assertEquals("select", blocks[1].fields[1].kind)
+        assertEquals(listOf("PDF", "Markdown"), blocks[1].fields[1].options)
+    }
+
+    @Test
     fun `agent document kind upgrades to image on png evidence`() {
         val blocks = extractVisualBlocks(
             """

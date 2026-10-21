@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.288 - 2026-10-21
+
+- Chat Windows e Android: blocchi interattivi quiz (semplice/multiplo) e form (testo, numero, data, bool, select) con invio risposta in chat e validazione required.
+- Protocollo agente: schemi choice/form e formato delle risposte dell'utente.
+- Test: test_interactive_blocks (6/6), VisualBlocksContractTest esteso.
+
 ## 0.6.287 - 2026-10-20
 
 - Windows, pagina Comfy: sezione NODI DEL JOB con il grafo del workflow dell'agente (nodi, link, completati verdi dal live di Comfy, dettaglio al tocco).

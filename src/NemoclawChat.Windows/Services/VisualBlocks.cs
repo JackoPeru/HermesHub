@@ -13,7 +13,13 @@ public static class VisualBlocksContract
     public const int MaxTableRows = 100;
     public const int MaxChartSeries = 8;
     public const int MaxChartPointsPerSeries = 200;
+    public const int MaxChoiceOptions = 10;
+    public const int MaxFormFields = 12;
+    public const int MaxChoiceLabelChars = 120;
+    public const int MaxFormLabelChars = 80;
+    public const int MaxSelectOptions = 10;
     public static readonly string[] VisualModes = ["auto", "always", "never"];
+    public static readonly string[] FormFieldKinds = ["text", "multiline", "number", "date", "bool", "select"];
 }
 
 public sealed record VisualBlockRecord
@@ -115,6 +121,18 @@ public sealed record VisualBlockRecord
     [JsonPropertyName("media_url")]
     public string? MediaUrl { get; init; }
 
+    [JsonPropertyName("options")]
+    public List<VisualChoiceOption> Options { get; init; } = [];
+
+    [JsonPropertyName("fields")]
+    public List<VisualFormField> Fields { get; init; } = [];
+
+    [JsonPropertyName("multi")]
+    public bool Multi { get; init; }
+
+    [JsonPropertyName("submit_label")]
+    public string? SubmitLabel { get; init; }
+
     [JsonPropertyName("download_url")]
     public string? DownloadUrl { get; init; }
 
@@ -204,6 +222,39 @@ public sealed record VisualGalleryImage
     public string? Caption { get; init; }
 }
 
+public sealed record VisualChoiceOption
+{
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = string.Empty;
+
+    [JsonPropertyName("label")]
+    public string Label { get; init; } = string.Empty;
+
+    [JsonPropertyName("detail")]
+    public string? Detail { get; init; }
+}
+
+public sealed record VisualFormField
+{
+    [JsonPropertyName("key")]
+    public string Key { get; init; } = string.Empty;
+
+    [JsonPropertyName("label")]
+    public string Label { get; init; } = string.Empty;
+
+    [JsonPropertyName("kind")]
+    public string Kind { get; init; } = "text";
+
+    [JsonPropertyName("required")]
+    public bool Required { get; init; }
+
+    [JsonPropertyName("options")]
+    public List<string> Options { get; init; } = [];
+
+    [JsonPropertyName("placeholder")]
+    public string? Placeholder { get; init; }
+}
+
 public static class VisualBlockParser
 {
     private static readonly Regex InlineMediaRegex = new("""MEDIA\s*:\s*\[([^\]]{1,500})]\(([^)\s]{1,1200})\)|!\[([^\]]{1,500})]\(([^)\s]{1,1200})\)""", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
@@ -236,6 +287,8 @@ public static class VisualBlockParser
         "metric",
         "progress",
         "approval",
+        "choice",
+        "form",
         "device",
         "unknown_block"
     };
@@ -554,13 +607,42 @@ public static class VisualBlockParser
                           (string.IsNullOrWhiteSpace(block.Status) ||
                            block.Status is "pending" or "active" or "complete" or "blocked" or "failed"),
             "approval" => block.Status is "pending" or "approved" or "rejected" &&
-                          !string.IsNullOrWhiteSpace(block.Action),
+                           !string.IsNullOrWhiteSpace(block.Action),
+            "choice" => block.Status is "pending" or "answered" &&
+                        block.Options.Count is > 0 and <= VisualBlocksContract.MaxChoiceOptions &&
+                        block.Options.All(option =>
+                            !string.IsNullOrWhiteSpace(option.Id) &&
+                            !string.IsNullOrWhiteSpace(option.Label) &&
+                            option.Label.Length <= VisualBlocksContract.MaxChoiceLabelChars),
+            "form" => block.Status is "pending" or "submitted" &&
+                      block.Fields.Count is > 0 and <= VisualBlocksContract.MaxFormFields &&
+                      block.Fields.All(IsValidFormField),
             "device" => !string.IsNullOrWhiteSpace(block.DeviceName) &&
                         block.DeviceStatus is "connected" or "connecting" or "disconnected" or "unknown" &&
                         (!block.BatteryPercent.HasValue || block.BatteryPercent is >= 0 and <= 100),
             "unknown_block" => !string.IsNullOrWhiteSpace(block.RawJson),
             _ => false
         };
+    }
+
+    private static bool IsValidFormField(VisualFormField field)
+    {
+        if (string.IsNullOrWhiteSpace(field.Key) ||
+            string.IsNullOrWhiteSpace(field.Label) ||
+            field.Label.Length > VisualBlocksContract.MaxFormLabelChars)
+        {
+            return false;
+        }
+        if (!VisualBlocksContract.FormFieldKinds.Contains(field.Kind))
+        {
+            return false;
+        }
+        if (string.Equals(field.Kind, "select", StringComparison.OrdinalIgnoreCase))
+        {
+            return field.Options.Count is > 0 and <= VisualBlocksContract.MaxSelectOptions &&
+                   field.Options.All(option => !string.IsNullOrWhiteSpace(option));
+        }
+        return true;
     }
 
     public static string JsonValueToText(JsonElement value)
@@ -805,6 +887,32 @@ public static class VisualBlockFixtures
                 Status = "pending",
                 Action = "Approvare la sincronizzazione",
                 Text = "L'operazione richiede conferma esplicita."
+            },
+            new VisualBlockRecord
+            {
+                Id = "fixture-choice",
+                Type = "choice",
+                Title = "Quale formato preferisci?",
+                Text = "Tocca una risposta: parte come tuo messaggio.",
+                Status = "pending",
+                Options =
+                [
+                    new VisualChoiceOption { Id = "pdf", Label = "PDF" },
+                    new VisualChoiceOption { Id = "md", Label = "Markdown", Detail = "leggero e modificabile" }
+                ]
+            },
+            new VisualBlockRecord
+            {
+                Id = "fixture-form",
+                Type = "form",
+                Title = "Dati consegna",
+                Status = "pending",
+                SubmitLabel = "Invia dati",
+                Fields =
+                [
+                    new VisualFormField { Key = "nome", Label = "Nome", Kind = "text", Required = true },
+                    new VisualFormField { Key = "formato", Label = "Formato", Kind = "select", Options = ["PDF", "Markdown"] }
+                ]
             },
             new VisualBlockRecord
             {
