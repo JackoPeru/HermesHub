@@ -974,14 +974,14 @@ internal fun ChatScreen(
     // Single-flight resume: LaunchedEffect + PollWhileStarted chiamano
     // recheckActiveWork in concorrenza, il secondo giro fa skip (niente doppie GET).
     val recheckMutex = remember { Mutex() }
-    suspend fun resumeResponseBinding(binding: ActiveWorkBinding) {
-        val cid = state.activeConversationId ?: return
-        val respId = binding.responseId?.takeIf { it.isNotBlank() } ?: return
+    suspend fun resumeResponseBinding(binding: ActiveWorkBinding): DetachedResumeOutcome {
+        val cid = state.activeConversationId ?: return DetachedResumeOutcome.SKIPPED
+        val respId = binding.responseId?.takeIf { it.isNotBlank() } ?: return DetachedResumeOutcome.SKIPPED
         val streaming = state.streamingState
-        if (streaming != null && !streaming.isDone) return
+        if (streaming != null && !streaming.isDone) return DetachedResumeOutcome.SKIPPED
         if (isResponseResumeExpired(binding.startedAtMs, System.currentTimeMillis())) {
             withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
-            return
+            return DetachedResumeOutcome.EXPIRED_GONE
         }
         val url = responseStatusUrl(
             botSettings,
@@ -989,19 +989,22 @@ internal fun ChatScreen(
             resolveWorkMultiplex(binding.profile, binding.multiplex, botMultiplexEnabled),
             respId
         )
+        // Check veloce (niente retry/backoff): il banner deve rispondere in
+        // secondi, non in un minuto. Singolo tentativo, ~12s max.
         val (code, body) = withContext(Dispatchers.IO) {
-            runCatching { httpGetResponse(url, botApiKey) }.getOrElse { 0 to "" }
+            runCatching { httpGetResponseQuick(url, botApiKey) }.getOrElse { 0 to "" }
         }
         // 401/403 permanenti: chiave o profilo errati. 404 solo a profilo noto:
         // a profilo ignoto l'URL puo' essere sbagliato, tieni e riprova.
         if (code == 401 || code == 403 || (code == 404 && shouldClearBindingOn404(resolveWorkProfile(binding.profile, botProfile)))) {
             withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
-            return
+            return if (code == 404) DetachedResumeOutcome.NOT_FOUND_GONE else DetachedResumeOutcome.AUTH_GONE
         }
-        if (code == 404) return
-        if (code !in 200..299) return
-        val storedStatus = runCatching { JSONObject(body).optString("status") }.getOrNull() ?: return
-        if (storedStatus != "completed" && storedStatus != "failed") return
+        if (code == 404) return DetachedResumeOutcome.SKIPPED
+        if (code == 0) return DetachedResumeOutcome.NET_ERROR
+        if (code !in 200..299) return DetachedResumeOutcome.NET_ERROR
+        val storedStatus = runCatching { JSONObject(body).optString("status") }.getOrNull() ?: return DetachedResumeOutcome.SKIPPED
+        if (storedStatus != "completed" && storedStatus != "failed") return DetachedResumeOutcome.STILL_RUNNING
         var fullText = ""
         var fullThinking = ""
         if (storedStatus == "completed") {
@@ -1045,9 +1048,10 @@ internal fun ChatScreen(
                 )
             }
         }
+        return DetachedResumeOutcome.RECOVERED
     }
 
-    suspend fun recheckActiveWork() {
+    suspend fun recheckActiveWork(onResumeOutcome: ((DetachedResumeOutcome) -> Unit)? = null) {
         // Single-flight: se un altro giro e' dentro, skip senza accodare.
         if (!recheckMutex.tryLock()) return
         try {
@@ -1056,7 +1060,7 @@ internal fun ChatScreen(
             ?: return
         if (binding.runId.isBlank() && !binding.responseId.isNullOrBlank()) {
             // Turno Responses senza run: resume risposta via GET (kill/rientro).
-            resumeResponseBinding(binding)
+            onResumeOutcome?.invoke(resumeResponseBinding(binding))
             return
         }
         if (binding.runId.isBlank()) {
@@ -1074,9 +1078,13 @@ internal fun ChatScreen(
             // Profilo ignoto = URL forse sbagliato: tieni e riprova al prossimo tick.
             if (!shouldClearBindingOn404(effProfile)) return
             withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
+            onResumeOutcome?.invoke(DetachedResumeOutcome.NOT_FOUND_GONE)
             return
         }
-        if (code !in 200..299 || info == null) return
+        if (code !in 200..299 || info == null) {
+            onResumeOutcome?.invoke(DetachedResumeOutcome.NET_ERROR)
+            return
+        }
         val approval = parseRunApprovalPayload(info.raw, binding.runId)
         when (backgroundWorkStateFromRun(info, approval != null)) {
             BackgroundWorkState.ACTIVE -> {
@@ -1136,11 +1144,13 @@ internal fun ChatScreen(
                 withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
                 HermesWorkService.stop(context, binding.runId)
                 if (state.backgroundWork?.runId == binding.runId) state.backgroundWork = null
+                onResumeOutcome?.invoke(DetachedResumeOutcome.RECOVERED)
             }
             BackgroundWorkState.DONE_FAILED, BackgroundWorkState.DONE_CANCELLED -> {
                 withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
                 HermesWorkService.stop(context, binding.runId)
                 if (state.backgroundWork?.runId == binding.runId) state.backgroundWork = null
+                onResumeOutcome?.invoke(DetachedResumeOutcome.WORK_FAILED_GONE)
             }
             BackgroundWorkState.GONE, BackgroundWorkState.UNKNOWN -> {
                 if (state.backgroundWork?.runId != binding.runId) {
@@ -1156,14 +1166,30 @@ internal fun ChatScreen(
             recheckMutex.unlock()
         }
     }
+    var detachedFollowUp by remember { mutableStateOf(false) }
+    // Feedback recupero turno staccato: niente piu' silenzio. Sottotitolo nel
+    // banner per gli stati vivi, nota una-tantum per i terminali senza
+    // recupero. Reset a ogni conversazione.
+    var detachedChecking by remember(state.activeConversationId) { mutableStateOf(false) }
+    var detachedSubtitle by remember(state.activeConversationId) {
+        mutableStateOf("Turno staccato: ricontrollo da solo, oppure tocca Ricontrolla.")
+    }
+    var detachedNote by remember(state.activeConversationId) { mutableStateOf<String?>(null) }
+    fun applyResumeOutcome(outcome: DetachedResumeOutcome) {
+        detachedResumeSubtitle(outcome)?.let { detachedSubtitle = it }
+        detachedResumeNote(outcome)?.let { detachedNote = it }
+        if (outcome == DetachedResumeOutcome.RECOVERED) {
+            detachedSubtitle = "Turno staccato: ricontrollo da solo, oppure tocca Ricontrolla."
+            detachedNote = null
+        }
+    }
     LaunchedEffect(state.activeConversationId) {
-        recheckActiveWork()
+        recheckActiveWork(::applyResumeOutcome)
     }
     // Ripresa: ricontrolla il binding mentre la chat e aperta (rientro da
     // background, poll STARTED-only). Solo se esiste un binding: una lettura
     // prefs, niente rete altrimenti. Lo stato alimenta il banner "segue
     // lavoro staccato" (turno vivo sul server dopo kill/rete morta).
-    var detachedFollowUp by remember { mutableStateOf(false) }
     PollWhileStarted(state.activeConversationId, baseIntervalMs = 15_000L) {
         val cid = state.activeConversationId
         if (cid.isNullOrBlank()) {
@@ -1173,7 +1199,7 @@ internal fun ChatScreen(
         val hasBinding = withContext(Dispatchers.IO) { loadActiveWorkBinding(context, cid) } != null
         detachedFollowUp = hasBinding
         if (!hasBinding) return@PollWhileStarted true
-        recheckActiveWork()
+        recheckActiveWork(::applyResumeOutcome)
         detachedFollowUp = withContext(Dispatchers.IO) { loadActiveWorkBinding(context, cid) } != null
         true
     }
@@ -1346,13 +1372,31 @@ internal fun ChatScreen(
         // morta): il server continua, la chat ricontrolla. Mai silenzio.
         if (detachedFollowUp && backgroundWork == null && !state.sending && state.streamingState == null) {
             DetachedFollowBanner(
-                onRecheck = { scope.launch { recheckActiveWork() } },
+                subtitle = detachedSubtitle,
+                checking = detachedChecking,
+                onRecheck = {
+                    scope.launch {
+                        detachedChecking = true
+                        detachedSubtitle = "Ricontrollo in corso…"
+                        try {
+                            recheckActiveWork(::applyResumeOutcome)
+                        } finally {
+                            detachedChecking = false
+                        }
+                    }
+                },
                 onDismiss = {
                     scope.launch(Dispatchers.IO) {
                         state.activeConversationId?.let { clearActiveWorkBinding(context, it) }
                     }
                     detachedFollowUp = false
                 }
+            )
+        }
+        detachedNote?.let { note ->
+            DetachedResumeNote(
+                text = note,
+                onDismiss = { detachedNote = null }
             )
         }
         Box(modifier = Modifier.weight(1f)) {
@@ -2977,6 +3021,8 @@ internal fun BackgroundWorkBanner(
  */
 @Composable
 internal fun DetachedFollowBanner(
+    subtitle: String,
+    checking: Boolean,
     onRecheck: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -3007,21 +3053,64 @@ internal fun DetachedFollowBanner(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    "Turno staccato: ricontrollo la risposta…",
+                    subtitle,
                     color = AppColors.Muted,
                     fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 3,
+                    overflow = TextOverflow.Clip
                 )
             }
             TextButton(
                 onClick = onRecheck,
+                enabled = !checking,
                 colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
             ) {
-                Text("Ricontrolla", color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (checking) "Attendi…" else "Ricontrolla",
+                    color = if (checking) AppColors.Muted else AppColors.Accent,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
             IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.Rounded.Close, contentDescription = "Ignora", tint = AppColors.Muted)
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(4.dp))
+}
+
+@Composable
+internal fun DetachedResumeNote(
+    text: String,
+    onDismiss: () -> Unit
+) {
+    Surface(
+        color = AppColors.Elevated,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, AppColors.Border),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(
+                Icons.Rounded.CloudSync,
+                contentDescription = null,
+                tint = AppColors.Muted,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text,
+                color = AppColors.Muted,
+                fontSize = 12.sp,
+                maxLines = 3,
+                overflow = TextOverflow.Clip,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = AppColors.Muted)
             }
         }
     }

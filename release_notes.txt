@@ -1,8 +1,7 @@
-Hermes Hub 0.6.288 (quiz e moduli nella chat)
+Hermes Hub 0.6.289 (recupero turno staccato veloce e leggibile)
 
-- Chat Windows e Android: l'agente puo' creare domande a risposta multipla (singola o multipla) e moduli di inserimento dati (testo, numero, data, si/no, tendina). Tocchi una risposta e parte come tuo messaggio; il modulo valida i campi obbligatori.
-- Contratto Visual Blocks v1 invariato (solo tipi aggiunti): quiz/form viaggiano con la cronologia e restano visibili alla riapertura.
-- L'agente e' istruito dal protocollo a usare i nuovi blocchi e a leggere le risposte.
-- Test: test_interactive_blocks (6/6) + VisualBlocksContractTest esteso; build Windows e Android senza errori.
+- Android, banner turno staccato: sottotitolo su 3 righe senza troncamenti, stati vivi ("Ricontrollo in corso…", "Ancora in corso sul server", "Rete non raggiungibile") e note una-tantum quando non c'e' niente da recuperare (chiave errata, turno sparito, troppo vecchio).
+- Recupero in secondi invece che fino a un minuto: check HTTP singolo veloce, niente retry/backoff sul tap.
+- Test: DetachedResumeTest (3/3) + test_detached_resume (5/5); build Android senza errori.
 
-Asset: HermesHub-0.6.288-android.apk (Android, versionCode 292), NemoclawChat.Windows_0.6.288.0_x64.msix (x64) e HermesHub-0.6.288-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.289-android.apk (Android, versionCode 293), NemoclawChat.Windows_0.6.289.0_x64.msix (x64) e HermesHub-0.6.289-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

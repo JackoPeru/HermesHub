@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.289 - 2026-10-21
+
+- Android, turno staccato: banner leggibile (3 righe, niente ellipsis), stati di recupero espliciti e note quando non c'e' niente da recuperare.
+- Recupero veloce: check HTTP singolo (~12s max) invece di retry lunghi.
+- Test: DetachedResumeTest (3/3), test_detached_resume (5/5).
+
 ## 0.6.288 - 2026-10-21
 
 - Chat Windows e Android: blocchi interattivi quiz (semplice/multiplo) e form (testo, numero, data, bool, select) con invio risposta in chat e validazione required.

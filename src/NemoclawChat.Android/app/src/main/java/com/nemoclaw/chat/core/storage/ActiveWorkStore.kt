@@ -326,3 +326,31 @@ internal fun resolveAutoApproveMode(botProfile: String?, botModes: Map<String, S
     if (key.isEmpty()) return cleanGlobal
     return botModes[key] ?: botModes.entries.firstOrNull { it.key.equals(key, ignoreCase = true) }?.value ?: cleanGlobal
 }
+
+/** Esito del recupero turno staccato: guida sottotitolo banner e note. Puro. */
+internal enum class DetachedResumeOutcome {
+    SKIPPED,
+    RECOVERED,
+    STILL_RUNNING,
+    NET_ERROR,
+    AUTH_GONE,
+    NOT_FOUND_GONE,
+    EXPIRED_GONE,
+    WORK_FAILED_GONE,
+}
+
+/** Sottotitolo banner per esiti non terminali (null = nessun cambio). Puro. */
+internal fun detachedResumeSubtitle(outcome: DetachedResumeOutcome): String? = when (outcome) {
+    DetachedResumeOutcome.STILL_RUNNING -> "Ancora in corso sul server — ricontrollo da solo."
+    DetachedResumeOutcome.NET_ERROR -> "Rete non raggiungibile — tocca Ricontrolla."
+    else -> null
+}
+
+/** Nota una-tantum per esiti terminali senza recupero (null = niente nota). Puro. */
+internal fun detachedResumeNote(outcome: DetachedResumeOutcome): String? = when (outcome) {
+    DetachedResumeOutcome.AUTH_GONE -> "Recupero impossibile: chiave o profilo non validi."
+    DetachedResumeOutcome.NOT_FOUND_GONE -> "Niente da recuperare: turno non più sul server."
+    DetachedResumeOutcome.EXPIRED_GONE -> "Turno troppo vecchio: niente da recuperare."
+    DetachedResumeOutcome.WORK_FAILED_GONE -> "Lavoro finito sul server senza risultato da mostrare."
+    else -> null
+}
