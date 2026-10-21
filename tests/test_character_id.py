@@ -367,8 +367,21 @@ class TestImaging(unittest.TestCase):
 
     def test_no_backend_no_crash(self):
         photo = make_photo(self.root / "n.jpg")
-        self.assertEqual(available_backends(), [])
-        self.assertEqual(detect_faces(photo), [])
+        # Simula assenza backend bloccando gli import (l'env di sviluppo puo'
+        # avere cv2: il test deve valere ovunque, non solo sul server).
+        blocked = ("insightface", "onnxruntime", "cv2")
+        saved = {}
+        for name in blocked:
+            if name in sys.modules:
+                saved[name] = sys.modules.pop(name)
+            sys.modules[name] = None
+        try:
+            self.assertEqual(available_backends(), [])
+            self.assertEqual(detect_faces(photo), [])
+        finally:
+            for name in blocked:
+                sys.modules.pop(name, None)
+            sys.modules.update(saved)
 
 
 class TestDataset(unittest.TestCase):

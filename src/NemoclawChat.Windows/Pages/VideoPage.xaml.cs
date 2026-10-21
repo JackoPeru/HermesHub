@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using NemoclawChat_Windows.Services;
+using System.Diagnostics;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Media.Core;
 using Windows.Storage;
@@ -20,6 +21,7 @@ public sealed partial class VideoPage : Page
         InitializeComponent();
         VideoPlayer.MediaPlayer.MediaFailed += (_, args) =>
         {
+            Trace.WriteLine($"[VideoPage] MediaFailed url={_currentPlaybackUrl} error={args.Error} message={args.ErrorMessage}");
             DispatcherQueue.TryEnqueue(() =>
             {
                 if (TryUseCompatPlayback($"Player video: {args.ErrorMessage}"))
@@ -31,6 +33,7 @@ public sealed partial class VideoPage : Page
         };
         FullScreenVideoPlayer.MediaPlayer.MediaFailed += (_, args) =>
         {
+            Trace.WriteLine($"[VideoPage] Fullscreen MediaFailed url={_currentPlaybackUrl} error={args.Error} message={args.ErrorMessage}");
             DispatcherQueue.TryEnqueue(() =>
             {
                 if (TryUseCompatPlayback($"Player fullscreen: {args.ErrorMessage}"))
@@ -81,6 +84,7 @@ public sealed partial class VideoPage : Page
         var folder = VideoLibraryService.EnsureLibraryPath(settings);
         var (loaded, loadStatus) = await VideoLibraryService.LoadAsync(settings);
         var videos = loaded.ToList();
+        Trace.WriteLine($"[VideoPage] Feed: {videos.Count} video. Stato: {loadStatus}");
         folder = VideoLibraryService.GetLibraryPath(settings);
 
         LibraryPathText.Text = string.IsNullOrWhiteSpace(folder)

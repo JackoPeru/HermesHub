@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.290 - 2026-10-21
+
+- Gateway, proxy media: supporto HEAD (header senza body, mai transcode) per i player nativi (Windows MediaPlayerElement).
+- Windows, Video: errori player e stato feed nel log diagnostico.
+- Test: test_media_head (3/3).
+
 ## 0.6.289 - 2026-10-21
 
 - Android, turno staccato: banner leggibile (3 righe, niente ellipsis), stati di recupero espliciti e note quando non c'e' niente da recuperare.

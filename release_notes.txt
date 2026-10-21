@@ -1,7 +1,7 @@
-Hermes Hub 0.6.289 (recupero turno staccato veloce e leggibile)
+Hermes Hub 0.6.290 (video che partono sul PC)
 
-- Android, banner turno staccato: sottotitolo su 3 righe senza troncamenti, stati vivi ("Ricontrollo in corso…", "Ancora in corso sul server", "Rete non raggiungibile") e note una-tantum quando non c'e' niente da recuperare (chiave errata, turno sparito, troppo vecchio).
-- Recupero in secondi invece che fino a un minuto: check HTTP singolo veloce, niente retry/backoff sul tap.
-- Test: DetachedResumeTest (3/3) + test_detached_resume (5/5); build Android senza errori.
+- Gateway: il proxy media risponde anche a HEAD (solo header, mai transcodifica). I player nativi come quello Windows sondano con HEAD prima di aprire lo stream: prima prendevano 405 e non partivano.
+- Windows, sezione Video: errori del player e stato del feed scritti nel log (cosi' ogni fallimento e' diagnosticabile).
+- Test: test_media_head (3/3); build Windows senza errori.
 
-Asset: HermesHub-0.6.289-android.apk (Android, versionCode 293), NemoclawChat.Windows_0.6.289.0_x64.msix (x64) e HermesHub-0.6.289-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.290-android.apk (Android, versionCode 294), NemoclawChat.Windows_0.6.290.0_x64.msix (x64) e HermesHub-0.6.290-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

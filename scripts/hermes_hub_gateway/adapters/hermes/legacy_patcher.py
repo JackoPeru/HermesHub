@@ -2001,6 +2001,21 @@ def _hermes_hub_transcribe_file(path, beam_size=None):
             )
             if path is None:
                 return web.json_response({"error": "Media not found"}, status=404)
+            if getattr(request, "method", "GET") == "HEAD":
+                # Sonde player (es. MediaFoundation/WinUI): solo header, mai
+                # transcodifica (un HEAD su ?format=mp4 non deve accodare un
+                # job ffmpeg da 900s solo per conoscere la lunghezza).
+                import mimetypes as _head_mimetypes
+                import os as _head_os
+                if request.query.get("format", "").lower() == "mp4" or request.query.get("transcode", "").lower() in {"1", "true", "mp4"}:
+                    return web.Response(status=200, headers={"Content-Type": "video/mp4", "Accept-Ranges": "bytes", "Cache-Control": "private, no-store"})
+                head_mime = _head_mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+                head_headers = {"Content-Type": head_mime, "Accept-Ranges": "bytes", "Cache-Control": "private, no-store"}
+                try:
+                    head_headers["Content-Length"] = str(_head_os.path.getsize(path))
+                except OSError:
+                    pass
+                return web.Response(status=200, headers=head_headers)
             if request.query.get("format", "").lower() == "mp4" or request.query.get("transcode", "").lower() in {"1", "true", "mp4"}:
                 transcode_timeout = _hermes_hub_env_int("HERMES_HUB_TRANSCODE_TIMEOUT", 900, 30, 7200) + 10
                 path = await asyncio.wait_for(
@@ -4575,7 +4590,7 @@ def _patch_modern_capability_endpoints(text: str) -> tuple[str, bool]:
     ("video_library", ("GET", "/v1/video/library")),
     ("image_library", ("GET", "/v1/image/library")),
     ("news_library", ("GET", "/v1/news/library")),
-    ("media_proxy", ("GET", "/v1/media/{media_id}")),
+    ("media_proxy", ("GET/HEAD", "/v1/media/{media_id}")),
     ("hub_memory", ("GET/PATCH", "/v1/hub/memory")),
     ("hub_state", ("GET/POST", "/v1/hub/state")),
     ("hub_conversations", ("GET/PUT/POST/DELETE", "/v1/hub/conversations")),
@@ -4938,6 +4953,7 @@ def _patch_dynamic_http_routes(text: str) -> tuple[str, bool]:
             ("GET", "/v1/news/library", self._handle_news_library),
             ("POST", "/v1/media/upload", self._handle_hub_media_upload),
             ("GET", "/v1/media/{media_id:.*}", self._handle_hub_media),
+            ("HEAD", "/v1/media/{media_id:.*}", self._handle_hub_media),
             ("GET", "/v1/hub/memory", self._handle_hub_memory),
             ("PATCH", "/v1/hub/memory", self._handle_patch_hub_memory),
             ("GET", "/v1/hub/state", self._handle_get_hub_state),
