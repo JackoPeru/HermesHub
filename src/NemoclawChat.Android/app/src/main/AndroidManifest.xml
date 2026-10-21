@@ -60,6 +60,11 @@
         <meta-data android:name="com.meta.wearable.mwdat.DAM_ENABLED" android:value="false" />
         <meta-data android:name="com.meta.wearable.mwdat.ANALYTICS_OPT_OUT" android:value="true" />
         <service android:name=".VoiceCallService" android:exported="false" android:foregroundServiceType="microphone" />
+        <service android:name=".HermesPushService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
         <service android:name=".HermesWorkService" android:exported="false" android:foregroundServiceType="dataSync" />
         <service
             android:name=".jarvis.JarvisSessionService"

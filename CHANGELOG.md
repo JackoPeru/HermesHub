@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.291 - 2026-10-21
+
+- Sicurezza: chiavi dispositivo P-256 + firma con biometrico sulle azioni server, anti-replay sul gateway, revoca per-telefono.
+- Push FCM a fine job (manager->gateway->telefono), solo segnale; service account operatore opzionale.
+- Test: test_device_signature (10), test_device_push (7).
+
 ## 0.6.290 - 2026-10-21
 
 - Gateway, proxy media: supporto HEAD (header senza body, mai transcode) per i player nativi (Windows MediaPlayerElement).

@@ -13,6 +13,7 @@ import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.fragment.app.FragmentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -30,7 +31,9 @@ import com.nemoclaw.chat.ui.theme.ChatClawTheme
 // private object AppDefaults { }
 // obj.optJSONArray("RawEvents")
 
-class MainActivity : ComponentActivity() {
+// ComponentActivity resta importata per gli helper che la richiedono;
+// l'activity entra da FragmentActivity per BiometricPrompt (firma azioni).
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         if (BuildConfig.DEBUG) {
             StrictMode.setThreadPolicy(

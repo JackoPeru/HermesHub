@@ -229,6 +229,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.content.edit
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.graphics.scale
 import androidx.core.net.toUri
@@ -288,6 +289,11 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import org.json.JSONArray
 import org.json.JSONObject
+import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.GoogleApiAvailability
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -327,6 +333,56 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
     var logFilter by rememberSaveable { mutableStateOf("") }
     var pendingControlAction by remember { mutableStateOf<Pair<String, String>?>(null) }
     var pendingMaintenanceAction by remember { mutableStateOf<String?>(null) }
+    var deviceIdState by remember { mutableStateOf(loadDeviceId(context)) }
+    var deviceStatus by remember { mutableStateOf("Telefono non registrato: le azioni server usano solo la chiave.") }
+    var deviceBusy by remember { mutableStateOf(false) }
+    var pushStatus by remember { mutableStateOf("Notifiche non attive.") }
+    var pushBusy by remember { mutableStateOf(false) }
+    val pushPermissionLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+        onResult = {}
+    )
+
+    suspend fun postServerControlSigned(
+        url: String,
+        payload: JSONObject,
+        actionLabel: String,
+        onDone: (String) -> Unit
+    ) {
+        val devId = deviceIdState
+        if (devId == null) {
+            val result = runCatching {
+                postJson(url, payload, loadGatewaySecret(context), allowCompatAuth = false).second
+            }.getOrElse { it.message ?: "Errore" }
+            onDone(result)
+            return
+        }
+        val activity = findFragmentActivity(context)
+        if (activity == null) {
+            onDone("Activity non disponibile per la conferma biometrica.")
+            return
+        }
+        val gate = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        authenticateDeviceOwner(
+            activity,
+            "Conferma $actionLabel",
+            "Firma con impronta o PIN per eseguire.",
+            onSuccess = { gate.complete(true) },
+            onError = { gate.completeExceptionally(IllegalStateException(it)) }
+        )
+        try {
+            gate.await()
+        } catch (denied: Exception) {
+            onDone(denied.message ?: "Autenticazione annullata.")
+            return
+        }
+        val result = runCatching {
+            postDeviceSignedJson(url, payload, devId, loadGatewaySecret(context)).let { (code, body) ->
+                if (code in 200..299) body.ifBlank { "Eseguito (firmato)." } else "Server HTTP $code: ${body.take(200)}"
+            }
+        }.getOrElse { it.message ?: "Errore" }
+        onDone(result)
+    }
     val maintenanceLabels = mapOf(
         "update" to "Aggiorna",
         "rollback" to "Ripristina versione",
@@ -527,8 +583,192 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                 }
             }
         }
+        item {
+        Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("TELEFONO SICURO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(
+                    if (deviceIdState == null) deviceStatus
+                    else "Registrato: ${deviceIdState!!.take(12)}… · $deviceStatus",
+                    color = AppColors.Muted,
+                    fontSize = 13.sp
+                )
+                Text(
+                    "La chiave firma ogni azione server dopo impronta o PIN. Senza firma il server rifiuta (appena un telefono e' registrato).",
+                    color = AppColors.Faint,
+                    fontSize = 12.sp
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                deviceBusy = true
+                                deviceStatus = "Genero chiave…"
+                                try {
+                                    val id = withContext(Dispatchers.IO) {
+                                        ensureDeviceKeyPair()
+                                        newDeviceId()
+                                    }
+                                    val pem = withContext(Dispatchers.IO) { devicePublicKeyPem() }
+                                    val label = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".take(80)
+                                    val (code, body) = postJson(
+                                        resolveHermesUrl(settings, "/v1/hub/devices/register"),
+                                        JSONObject().put("device_id", id).put("public_key", pem).put("label", label),
+                                        loadGatewaySecret(context),
+                                        allowCompatAuth = false
+                                    )
+                                    if (code in 200..299) {
+                                        saveDeviceId(context, id)
+                                        deviceIdState = id
+                                        val fingerprint = runCatching {
+                                            JSONObject(body).optString("fingerprint")
+                                        }.getOrDefault("")
+                                        deviceStatus = if (fingerprint.isNotBlank()) "impronta $fingerprint." else "registrato."
+                                    } else {
+                                        deviceStatus = "Registrazione fallita: HTTP $code."
+                                    }
+                                } catch (denied: Exception) {
+                                    deviceStatus = denied.message ?: "Errore registrazione."
+                                } finally {
+                                    deviceBusy = false
+                                }
+                            }
+                        },
+                        enabled = !deviceBusy && deviceIdState == null
+                    ) { Text("Registra telefono") }
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                deviceBusy = true
+                                try {
+                                    val id = deviceIdState
+                                    if (id != null) {
+                                        postJson(
+                                            resolveHermesUrl(settings, "/v1/hub/devices/$id"),
+                                            JSONObject(),
+                                            loadGatewaySecret(context),
+                                            method = "DELETE",
+                                            allowCompatAuth = false
+                                        )
+                                        clearDeviceId(context)
+                                        deviceIdState = null
+                                    }
+                                    deviceStatus = "Telefono non registrato: le azioni server usano solo la chiave."
+                                } catch (denied: Exception) {
+                                    deviceStatus = denied.message ?: "Errore revoca."
+                                } finally {
+                                    deviceBusy = false
+                                }
+                            }
+                        },
+                        enabled = !deviceBusy && deviceIdState != null,
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Error, contentColor = Color.White)
+                    ) { Text("Revoca") }
+                }
+            }
+        }
     }
-
+    item {
+        Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("NOTIFICHE PUSH", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(pushStatus, color = AppColors.Muted, fontSize = 13.sp)
+                Text(
+                    "Avvisa a telefono spento quando un job finisce. Il server manda solo il segnale, mai i contenuti.",
+                    color = AppColors.Faint,
+                    fontSize = 12.sp
+                )
+                Button(
+                    onClick = {
+                        scope.launch {
+                            pushBusy = true
+                            pushStatus = "Controllo…"
+                            try {
+                                if (GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context) != ConnectionResult.SUCCESS) {
+                                    pushStatus = "Push non disponibile: niente Play Services."
+                                    return@launch
+                                }
+                                if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                                    ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    pushPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                                val devId = deviceIdState
+                                if (devId == null) {
+                                    pushStatus = "Registra prima il telefono qui sopra."
+                                    return@launch
+                                }
+                                val configBody = runCatching {
+                                    httpGet(resolveHermesUrl(settings, "/v1/hub/push-config"), loadGatewaySecret(context))
+                                }.getOrElse {
+                                    pushStatus = "Config non letta: ${it.message}"
+                                    return@launch
+                                }
+                                val config = runCatching { JSONObject(configBody) }.getOrElse {
+                                    pushStatus = "Config illeggibile."
+                                    return@launch
+                                }
+                                if (!config.optBoolean("configured", false)) {
+                                    pushStatus = "Server senza FCM: mancano service account e client JSON."
+                                    return@launch
+                                }
+                                val client = config.optJSONObject("client")
+                                if (client == null) {
+                                    pushStatus = "Config incompleta."
+                                    return@launch
+                                }
+                                // Default FirebaseApp (niente google-services.json:
+                                // init manuale dai dati del server). Default perche'
+                                // getInstance(app) nominale e' package-private.
+                                val app = withContext(Dispatchers.IO) {
+                                    FirebaseApp.getApps(context).firstOrNull()
+                                        ?: FirebaseApp.initializeApp(
+                                            context,
+                                            FirebaseOptions.Builder()
+                                                .setApiKey(client.optString("api_key"))
+                                                .setApplicationId(client.optString("app_id"))
+                                                .setProjectId(client.optString("project_id"))
+                                                .setGcmSenderId(client.optString("sender_id"))
+                                                .build()
+                                        )
+                                }
+                                if (app == null) {
+                                    pushStatus = "Init Firebase fallita."
+                                    return@launch
+                                }
+                                val token = withContext(Dispatchers.IO) {
+                                    try {
+                                        com.google.android.gms.tasks.Tasks.await(FirebaseMessaging.getInstance().token)
+                                    } catch (failed: Exception) {
+                                        null
+                                    }
+                                }
+                                if (token.isNullOrBlank()) {
+                                    pushStatus = "Token FCM non ottenuto: riprova."
+                                    return@launch
+                                }
+                                savePendingFcmToken(context, token)
+                                val (code, _) = postJson(
+                                    resolveHermesUrl(settings, "/v1/hub/devices/$devId/token"),
+                                    JSONObject().put("fcm_token", token),
+                                    loadGatewaySecret(context),
+                                    allowCompatAuth = false
+                                )
+                                pushStatus = if (code in 200..299) "Notifiche attive su questo telefono."
+                                else "Server HTTP $code: token non salvato."
+                            } catch (failed: Exception) {
+                                pushStatus = failed.message ?: "Errore attivazione."
+                            } finally {
+                                pushBusy = false
+                            }
+                        }
+                    },
+                    enabled = !pushBusy
+                ) { Text("Attiva notifiche") }
+            }
+        }
+    }
+    }
     pendingControlAction?.let { (service, action) ->
         AlertDialog(
             onDismissRequest = { pendingControlAction = null },
@@ -537,7 +777,16 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             text = { Text("Eseguire $action su $service? Le sessioni attive possono interrompersi.", color = AppColors.Muted) },
             confirmButton = {
                 Button(
-                    onClick = { pendingControlAction = null; scope.launch { controlOutput = runCatching { postJson(resolveHermesUrl(settings, "/v1/hub/server/action"), JSONObject().put("service", service).put("action", action), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } },
+                    onClick = {
+                        pendingControlAction = null
+                        scope.launch {
+                            postServerControlSigned(
+                                resolveHermesUrl(settings, "/v1/hub/server/action"),
+                                JSONObject().put("service", service).put("action", action),
+                                action
+                            ) { controlOutput = it }
+                        }
+                    },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (action == "restart") AppColors.Error else AppColors.Accent,
                         contentColor = if (action == "restart") Color.White else Color(0xFF171009)
@@ -557,7 +806,16 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             text = { Text("Eseguire \"${maintenanceLabels[operation] ?: operation}\" sul server? Update, rollback e restore possono interrompere il servizio.", color = AppColors.Muted) },
             confirmButton = {
                 Button(
-                    onClick = { pendingMaintenanceAction = null; scope.launch { controlOutput = runCatching { postJson(resolveHermesUrl(settings, "/v1/hub/server/maintenance"), JSONObject().put("operation", operation), loadGatewaySecret(context), allowCompatAuth = false).second }.getOrElse { it.message ?: "Errore" } } },
+                    onClick = {
+                        pendingMaintenanceAction = null
+                        scope.launch {
+                            postServerControlSigned(
+                                resolveHermesUrl(settings, "/v1/hub/server/maintenance"),
+                                JSONObject().put("operation", operation),
+                                operation
+                            ) { controlOutput = it }
+                        }
+                    },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (operation == "update" || operation == "rollback" || operation == "restore") AppColors.Error else AppColors.Accent,
                         contentColor = if (operation == "update" || operation == "rollback" || operation == "restore") Color.White else Color(0xFF171009)

@@ -323,7 +323,7 @@ ALLOWED_NODE_CLASSES = frozenset({
     "VAEDecodeAudio", "CreateVideo",
     "KSamplerSelect", "BasicScheduler", "SamplerCustomAdvanced",
     "BasicGuider", "RandomNoise",
-    "MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo",
+    "MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo", "MiniMaxH3BandAVLatent",
     "H3MultiStream",
     "MiniMaxH3SigmaShift", "Ref2VAVSAGatePatch",
 })
@@ -1556,6 +1556,49 @@ def update_job(jid: str, **fields) -> None:
     with _db_lock:
         db.execute(f"UPDATE jobs SET {sets} WHERE id=?", (*fields.values(), jid))
         db.commit()
+    # Transizioni terminali (fuori dal lock: get_job lo riacquisisce):
+    # avviso best-effort al gateway per il ventaglio push. Mai fatale.
+    try:
+        if fields.get("status") in ("done", "failed"):
+            key = (jid, fields["status"])
+            if key not in _JOB_NOTIFY_SENT:
+                _JOB_NOTIFY_SENT.add(key)
+                if len(_JOB_NOTIFY_SENT) > 5000:
+                    _JOB_NOTIFY_SENT.clear()
+                notify_gateway_job(get_job(jid), str(fields["status"]), str(fields.get("error") or ""))
+    except Exception:  # noqa: BLE001 - notifica opzionale, mai blocca il job
+        pass
+
+
+_JOB_NOTIFY_SENT: set = set()
+
+
+def notify_gateway_job(job: dict | None, status: str, detail: str = "") -> None:
+    """Avvisa il gateway a fine job (push FCM ai device). Best-effort."""
+    try:
+        if not isinstance(job, dict) or not job.get("job_id"):
+            return
+        base = (os.environ.get("HERMES_HUB_GATEWAY_URL") or "http://127.0.0.1:8642").rstrip("/")
+        key = str((CONFIG.get("api_key") or "")).strip()
+        if not key:
+            return
+        payload = {
+            "job_id": job["job_id"],
+            "status": status,
+            "kind": job.get("kind", ""),
+            "preset": job.get("preset", ""),
+            "detail": detail[:200],
+        }
+        req = urllib.request.Request(
+            base + "/v1/hub/jobs/notify",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp.read(4096)
+    except Exception:  # noqa: BLE001 - gateway giu' o rotta assente: il job resta valido
+        pass
 
 
 def queued_jobs() -> list[dict]:

@@ -10868,7 +10868,697 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
     changes.extend(correlation_changes)
     text, shadow_changes = _patch_shadow_sessions_v1(text)
     changes.extend(shadow_changes)
+    text, device_changes = _patch_device_security_v1(text)
+    changes.extend(device_changes)
     return text, openai_routes_text, changes
+
+
+def _patch_device_security_v1(text: str) -> tuple[str, list[str]]:
+    """Chiavi dispositivo (firma P-256) + replay protection + push FCM job.
+
+    - Registro in hub_devices.json (0600): id -> {public_key PEM, label,
+      created, revoked, fcm_token}; nonce visti con scadenza (anti-replay,
+      anche dopo restart).
+    - Verifica via openssl CLI (niente dipendenze extra nel runtime gestito).
+    - Enforcement firma su server action/maintenance quando ci sono chiavi
+      attive (bootstrap: registro vuoto = solo Bearer legacy).
+    - POST /v1/hub/jobs/notify (manager, Bearer) -> ventaglio FCM ai device
+      con token (service account operatore, opzionale).
+    """
+    changes: list[str] = []
+
+    # Layout vecchi senza i sottosistemi necessari: skip silenzioso (il
+    # gateway resta patchato come prima, senza device security). Solo il
+    # gate sugli handler esistenti e' rumoroso: se c'e' da proteggere e il
+    # pattern non matcha, meglio fallire che restare aperti.
+    helpers_anchor = None
+    for candidate in ("def _hermes_hub_storage_path", "def _multimodal_validation_error"):
+        if candidate in text:
+            helpers_anchor = candidate
+            break
+    handlers_anchor = None
+    for candidate in (
+        '    async def _handle_models(self, request: "web.Request") -> "web.Response":',
+        "    async def _handle_models(self, request: web.Request) -> web.Response:",
+    ):
+        if candidate in text:
+            handlers_anchor = candidate
+            break
+    routes_anchor = None
+    for candidate in (
+        '            ("HEAD", "/v1/media/{media_id:.*}", self._handle_hub_media),\n',
+        '            ("GET", "/v1/media/{media_id:.*}", self._handle_hub_media),\n',
+        '            ("GET", "/v1/video/library", self._handle_video_library),\n',
+    ):
+        if candidate in text:
+            routes_anchor = candidate
+            break
+    if helpers_anchor is None or handlers_anchor is None or routes_anchor is None:
+        return text, changes
+
+    if "def _hermes_hub_device_store_path" not in text:
+        helpers = r'''def _hermes_hub_device_store_path() -> "Path":
+    return _hermes_hub_storage_path("HERMES_HUB_DEVICES_FILE", "hub_devices.json")
+
+
+def _hermes_hub_device_load() -> Dict[str, Any]:
+    data = _hermes_hub_read_json(_hermes_hub_device_store_path(), {"devices": {}, "nonces": {}})
+    devices = data.get("devices")
+    if not isinstance(devices, dict):
+        devices = {}
+    nonces = data.get("nonces")
+    if not isinstance(nonces, dict):
+        nonces = {}
+    return {"devices": devices, "nonces": nonces}
+
+
+def _hermes_hub_device_save(store: Dict[str, Any]) -> None:
+    path = _hermes_hub_device_store_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    devices = store.get("devices")
+    nonces = store.get("nonces")
+    _hermes_hub_write_json(path, {
+        "devices": devices if isinstance(devices, dict) else {},
+        "nonces": nonces if isinstance(nonces, dict) else {},
+    })
+    try:
+        os.chmod(path, 0o600)
+    except Exception:
+        pass
+
+
+def _hermes_hub_device_fingerprint(public_key_pem: str) -> str:
+    import base64 as _b64
+    import hashlib as _hl
+    body = "".join(
+        line.strip() for line in public_key_pem.strip().splitlines() if "-----" not in line
+    )
+    try:
+        raw = _b64.b64decode(body)
+    except Exception:
+        raw = public_key_pem.encode()
+    return _hl.sha256(raw).hexdigest()[:16]
+
+
+def _hermes_hub_device_check_pem(public_key_pem: str) -> bool:
+    import base64 as _b64
+    lines = [line.strip() for line in public_key_pem.strip().splitlines() if line.strip()]
+    if len(lines) < 3:
+        return False
+    if lines[0] != "-----BEGIN PUBLIC KEY-----" or lines[-1] != "-----END PUBLIC KEY-----":
+        return False
+    try:
+        raw = _b64.b64decode("".join(lines[1:-1]), validate=True)
+    except Exception:
+        return False
+    return 64 <= len(raw) <= 512
+
+
+def _hermes_hub_device_canonical(method: str, path_qs: str, timestamp: str, nonce: str, body_sha256: str) -> bytes:
+    return "\n".join([method.upper(), path_qs, timestamp, nonce, body_sha256]).encode()
+
+
+async def _hermes_hub_device_verify_signature(request: "web.Request", raw_body: bytes) -> "tuple[bool, str]":
+    """Verifica firma dispositivo. Ritorna (ok, key_id | motivo)."""
+    import base64 as _b64
+    import hashlib as _hl
+    import re as _re
+    import subprocess as _sp
+    import tempfile as _tf
+    import time as _time
+    headers = request.headers
+    key_id = (headers.get("X-Hermes-Key-Id") or "").strip()
+    timestamp = (headers.get("X-Hermes-Timestamp") or "").strip()
+    nonce = (headers.get("X-Hermes-Nonce") or "").strip()
+    signature_b64 = (headers.get("X-Hermes-Signature") or "").strip()
+    if not _re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{7,63}", key_id):
+        return False, "unknown device"
+    if not _re.fullmatch(r"[A-Za-z0-9_-]{16,128}", nonce):
+        return False, "bad nonce"
+    try:
+        ts = int(timestamp)
+    except (TypeError, ValueError):
+        return False, "bad timestamp"
+    now = int(_time.time())
+    try:
+        window = int(os.environ.get("HERMES_HUB_DEVICE_SIG_WINDOW", "300"))
+    except (TypeError, ValueError):
+        window = 300
+    window = min(max(window, 60), 3600)
+    if abs(now - ts) > window:
+        return False, "stale timestamp"
+    store = _hermes_hub_device_load()
+    devices = store["devices"]
+    entry = devices.get(key_id)
+    if not isinstance(entry, dict) or entry.get("revoked"):
+        return False, "unknown device"
+    pem = str(entry.get("public_key") or "")
+    if not _hermes_hub_device_check_pem(pem):
+        return False, "unknown device"
+    nonces = store["nonces"]
+    pruned = {n: exp for n, exp in nonces.items() if isinstance(exp, (int, float)) and exp > now}
+    if nonce in pruned:
+        return False, "replay"
+    path_qs = str(getattr(request, "path_qs", None) or request.path or "")
+    if len(path_qs) > 2048:
+        return False, "bad path"
+    body_sha = _hl.sha256(raw_body or b"").hexdigest()
+    canonical = _hermes_hub_device_canonical(getattr(request, "method", "POST") or "POST", path_qs, str(ts), nonce, body_sha)
+    try:
+        signature = _b64.b64decode(signature_b64, validate=True)
+    except Exception:
+        return False, "bad signature encoding"
+    if not (8 <= len(signature) <= 256):
+        return False, "bad signature"
+    pem_file = sig_file = data_file = None
+    try:
+        tmpdir = str(_hermes_hub_device_store_path().parent)
+        pem_fd, pem_file = _tf.mkstemp(prefix="devkey-", dir=tmpdir)
+        os.chmod(pem_file, 0o600)
+        with os.fdopen(pem_fd, "w", encoding="utf-8") as handle:
+            handle.write(pem if pem.endswith("\n") else pem + "\n")
+        sig_fd, sig_file = _tf.mkstemp(prefix="devsig-", dir=tmpdir)
+        os.chmod(sig_file, 0o600)
+        with os.fdopen(sig_fd, "wb") as handle:
+            handle.write(signature)
+        data_fd, data_file = _tf.mkstemp(prefix="devdata-", dir=tmpdir)
+        os.chmod(data_file, 0o600)
+        with os.fdopen(data_fd, "wb") as handle:
+            handle.write(canonical)
+        proc = await asyncio.to_thread(
+            _sp.run,
+            ["openssl", "dgst", "-sha256", "-verify", pem_file, "-signature", sig_file, data_file],
+            capture_output=True,
+            timeout=15,
+        )
+        ok = proc.returncode == 0 and b"Verified OK" in (proc.stdout or b"")
+    except Exception:
+        return False, "verifier error"
+    finally:
+        for temp in (pem_file, sig_file, data_file):
+            try:
+                if temp:
+                    os.unlink(temp)
+            except Exception:
+                pass
+    if not ok:
+        return False, "bad signature"
+    pruned[nonce] = now + window
+    if len(pruned) > 5000:
+        for old in sorted(pruned, key=lambda n: pruned[n])[: len(pruned) - 5000]:
+            pruned.pop(old, None)
+    store["nonces"] = pruned
+    try:
+        _hermes_hub_device_save(store)
+    except Exception:
+        pass
+    return True, key_id
+
+
+async def _hermes_hub_require_device_signature(request: "web.Request") -> "Optional[web.Response]":
+    """Gate firma per le rotte pericolose. None = prosegui."""
+    mode = os.environ.get("HERMES_HUB_DEVICE_SIGNATURE", "enforce").strip().lower()
+    if mode in {"off", "0", "false", "no"}:
+        return None
+    store = _hermes_hub_device_load()
+    devices = store["devices"] if isinstance(store.get("devices"), dict) else {}
+    active = [key for key, entry in devices.items() if isinstance(entry, dict) and not entry.get("revoked")]
+    if not active:
+        # Bootstrap: nessuna chiave registrata = solo Bearer legacy.
+        return None
+    try:
+        raw_body = await request.read()
+    except Exception:
+        raw_body = b""
+    ok, detail = await _hermes_hub_device_verify_signature(request, raw_body)
+    if ok:
+        try:
+            _hermes_hub_audit_event({
+                "event": "device.signed",
+                "summary": f"signed control by device {detail}",
+                "tool": "device",
+                "risk": "high",
+                "status": "ok",
+            })
+        except Exception:
+            pass
+        return None
+    return web.json_response({"error": "device signature required", "detail": detail}, status=403)
+
+
+def _hermes_hub_fcm_client_config() -> "Optional[Dict[str, str]]":
+    import json as _json
+    raw_path = (os.environ.get("HERMES_HUB_FCM_CLIENT_JSON", "") or "").strip()
+    if not raw_path:
+        return None
+    try:
+        with open(raw_path, "r", encoding="utf-8") as handle:
+            data = _json.load(handle)
+        if not isinstance(data, dict):
+            return None
+        cfg = {key: str(data.get(key) or "").strip() for key in ("api_key", "app_id", "project_id", "sender_id")}
+        if not all(cfg.values()):
+            return None
+        return cfg
+    except Exception:
+        return None
+
+
+def _hermes_hub_fcm_access_token() -> "Optional[str]":
+    import base64 as _b64
+    import json as _json
+    import subprocess as _sp
+    import tempfile as _tf
+    import time as _time
+    import urllib.request as _urlreq
+    cache = globals().setdefault("_hermes_hub_fcm_token_cache", {})
+    now = int(_time.time())
+    if cache.get("token") and int(cache.get("expiry", 0)) - 120 > now:
+        return str(cache["token"])
+    sa_path = (os.environ.get("HERMES_HUB_FCM_SERVICE_ACCOUNT", "") or "").strip()
+    if not sa_path:
+        return None
+    try:
+        with open(sa_path, "r", encoding="utf-8") as handle:
+            sa = _json.load(handle)
+        if not isinstance(sa, dict):
+            return None
+        client_email = str(sa.get("client_email") or "").strip()
+        private_key = str(sa.get("private_key") or "")
+        if not client_email or "-----BEGIN PRIVATE KEY-----" not in private_key:
+            return None
+
+        def _b64url(raw: bytes) -> str:
+            return _b64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+        header = _b64url(_json.dumps({"alg": "RS256", "typ": "JWT"}, separators=(",", ":")).encode())
+        claims = _b64url(_json.dumps({
+            "iss": client_email,
+            "scope": "https://www.googleapis.com/auth/firebase.messaging",
+            "aud": "https://oauth2.googleapis.com/token",
+            "iat": now,
+            "exp": now + 3600,
+        }, separators=(",", ":")).encode())
+        signing_input = f"{header}.{claims}".encode()
+        key_file = None
+        try:
+            key_fd, key_file = _tf.mkstemp(prefix="fcmsa-")
+            os.chmod(key_file, 0o600)
+            with os.fdopen(key_fd, "w", encoding="utf-8") as handle:
+                handle.write(private_key if private_key.endswith("\n") else private_key + "\n")
+            proc = _sp.run(
+                ["openssl", "dgst", "-sha256", "-sign", key_file],
+                input=signing_input,
+                capture_output=True,
+                timeout=15,
+            )
+            if proc.returncode != 0 or not proc.stdout:
+                return None
+            assertion = f"{header}.{claims}.{_b64url(proc.stdout)}"
+        finally:
+            try:
+                if key_file:
+                    os.unlink(key_file)
+            except Exception:
+                pass
+        token_req = _urlreq.Request(
+            "https://oauth2.googleapis.com/token",
+            data=f"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={assertion}".encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        with _urlreq.urlopen(token_req, timeout=15) as resp:
+            token_body = _json.load(resp)
+        access_token = str(token_body.get("access_token") or "").strip()
+        if not access_token:
+            return None
+        cache["token"] = access_token
+        cache["expiry"] = now + int(token_body.get("expires_in", 3600) or 3600)
+        return access_token
+    except Exception:
+        try:
+            logger.exception("Hermes Hub FCM token failed")
+        except Exception:
+            pass
+        return None
+
+
+async def _hermes_hub_fcm_send(fcm_token: str, title: str, body: str, data: Dict[str, str]) -> str:
+    """Invia una notifica FCM. Ritorna 'sent' | 'gone' | 'error'."""
+    import json as _json
+    import urllib.request as _urlreq
+    cfg = _hermes_hub_fcm_client_config()
+    if cfg is None or not fcm_token:
+        return "error"
+    access_token = await asyncio.to_thread(_hermes_hub_fcm_access_token)
+    if not access_token:
+        return "error"
+    payload = {
+        "message": {
+            "token": fcm_token,
+            "notification": {"title": title[:120], "body": body[:400]},
+            "data": {str(k)[:64]: str(v)[:512] for k, v in (data or {}).items()},
+            "android": {"priority": "high"},
+        }
+    }
+    try:
+        req = _urlreq.Request(
+            f"https://fcm.googleapis.com/v1/projects/{cfg['project_id']}/messages:send",
+            data=_json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {access_token}"},
+            method="POST",
+        )
+
+        def _post() -> "tuple[int, str]":
+            try:
+                with _urlreq.urlopen(req, timeout=15) as resp:
+                    return resp.status, resp.read().decode("utf-8", "replace")
+            except _urlreq.HTTPError as http_error:
+                try:
+                    return http_error.code, http_error.read().decode("utf-8", "replace")
+                except Exception:
+                    return http_error.code, ""
+            return 0, ""
+
+        status, text = await asyncio.to_thread(_post)
+        if status == 200:
+            return "sent"
+        if status in (400, 404) and any(code in text for code in ("NOT_FOUND", "UNREGISTERED", "INVALID_ARGUMENT")):
+            return "gone"
+        return "error"
+    except Exception:
+        return "error"
+
+
+async def _hermes_hub_fanout_job_notify(job: Dict[str, Any]) -> Dict[str, int]:
+    store = _hermes_hub_device_load()
+    devices = store["devices"] if isinstance(store.get("devices"), dict) else {}
+    targets = [
+        (key_id, str(entry.get("fcm_token") or "").strip())
+        for key_id, entry in devices.items()
+        if isinstance(entry, dict) and not entry.get("revoked") and str(entry.get("fcm_token") or "").strip()
+    ]
+    if not targets:
+        return {"notified": 0, "devices": 0}
+    status = str(job.get("status") or "")
+    label = str(job.get("preset") or job.get("kind") or "job")[:80]
+    detail = str(job.get("detail") or job.get("error") or "")[:120]
+    if status == "done":
+        push_body = f"{label}: completato"
+    elif status == "failed":
+        push_body = f"{label}: fallito" + (f" ({detail})" if detail else "")
+    else:
+        push_body = f"{label}: {status}"
+    data = {"job_id": str(job.get("job_id") or "")[:64], "status": status[:32]}
+    sent = 0
+    pruned = False
+    for key_id, token in targets:
+        outcome = await _hermes_hub_fcm_send(token, "HermesHub", push_body, data)
+        if outcome == "sent":
+            sent += 1
+        elif outcome == "gone":
+            entry = devices.get(key_id)
+            if isinstance(entry, dict):
+                entry.pop("fcm_token", None)
+                pruned = True
+    if pruned:
+        try:
+            _hermes_hub_device_save(store)
+        except Exception:
+            pass
+    return {"notified": sent, "devices": len(targets)}
+
+
+'''
+        anchor = helpers_anchor
+        text = text.replace(anchor, helpers + anchor, 1)
+        changes.append("device security helpers")
+
+    if "async def _handle_hub_devices" not in text:
+        handlers = r'''    async def _handle_hub_devices(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        store = _hermes_hub_device_load()
+        devices = store.get("devices") if isinstance(store.get("devices"), dict) else {}
+        items = []
+        for key_id in sorted(devices):
+            entry = devices[key_id]
+            if not isinstance(entry, dict):
+                continue
+            items.append({
+                "device_id": key_id,
+                "label": str(entry.get("label") or "")[:80],
+                "created": entry.get("created", 0),
+                "revoked": bool(entry.get("revoked")),
+                "fingerprint": _hermes_hub_device_fingerprint(str(entry.get("public_key") or "")),
+                "has_token": bool(str(entry.get("fcm_token") or "")),
+            })
+        return web.json_response({"devices": items})
+
+    async def _handle_hub_device_register(self, request: "web.Request") -> "web.Response":
+        import re as _re
+        import subprocess as _sp
+        import tempfile as _tf
+        import time as _time
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            body = await request.json()
+        except Exception as exc:
+            return web.json_response({"error": "Invalid JSON body", "detail": str(exc)}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "JSON body must be an object"}, status=400)
+        body_dict = body
+        device_id = str(body_dict.get("device_id") or "").strip()
+        public_key = str(body_dict.get("public_key") or "")
+        label = str(body_dict.get("label") or "")[:80]
+        if not _re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{7,63}", device_id):
+            return web.json_response({"error": "bad device_id"}, status=400)
+        if not _hermes_hub_device_check_pem(public_key):
+            return web.json_response({"error": "bad public_key (EC P-256 SPKI PEM)"}, status=400)
+        pem_file = None
+        try:
+            pem_fd, pem_file = _tf.mkstemp(prefix="devreg-")
+            os.chmod(pem_file, 0o600)
+            with os.fdopen(pem_fd, "w", encoding="utf-8") as handle:
+                handle.write(public_key if public_key.endswith("\n") else public_key + "\n")
+            proc = await asyncio.to_thread(
+                _sp.run,
+                ["openssl", "pkey", "-pubin", "-in", pem_file, "-text", "-noout"],
+                capture_output=True,
+                timeout=15,
+            )
+            if proc.returncode != 0 or b"NIST CURVE: P-256" not in (proc.stdout or b""):
+                return web.json_response({"error": "key is not EC P-256"}, status=400)
+        except Exception:
+            return web.json_response({"error": "key check failed"}, status=400)
+        finally:
+            try:
+                if pem_file:
+                    os.unlink(pem_file)
+            except Exception:
+                pass
+        store = _hermes_hub_device_load()
+        devices = store["devices"]
+        if device_id in devices and isinstance(devices[device_id], dict) and not devices[device_id].get("revoked"):
+            return web.json_response({"error": "device already registered"}, status=409)
+        devices[device_id] = {
+            "public_key": public_key,
+            "label": label,
+            "created": int(_time.time()),
+            "revoked": False,
+            "fcm_token": "",
+        }
+        store["devices"] = devices
+        try:
+            _hermes_hub_device_save(store)
+        except Exception as exc:
+            return web.json_response({"error": f"store failed: {exc}"}, status=500)
+        try:
+            _hermes_hub_audit_event({
+                "event": "device.register",
+                "summary": f"device {device_id} registered ({label})",
+                "tool": "device",
+                "risk": "high",
+                "status": "ok",
+            })
+        except Exception:
+            pass
+        return web.json_response({"device_id": device_id, "fingerprint": _hermes_hub_device_fingerprint(public_key)})
+
+    async def _handle_hub_device_token(self, request: "web.Request") -> "web.Response":
+        import re as _re
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        device_id = str(request.match_info.get("device_id", "") or "").strip()
+        try:
+            body = await request.json()
+        except Exception as exc:
+            return web.json_response({"error": "Invalid JSON body", "detail": str(exc)}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "JSON body must be an object"}, status=400)
+        body_dict = body
+        token = str(body_dict.get("fcm_token") or "").strip()
+        if not _re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{7,63}", device_id):
+            return web.json_response({"error": "bad device_id"}, status=400)
+        if not _re.fullmatch(r"[A-Za-z0-9_:\-]{32,4096}", token):
+            return web.json_response({"error": "bad fcm_token"}, status=400)
+        store = _hermes_hub_device_load()
+        devices = store["devices"]
+        entry = devices.get(device_id)
+        if not isinstance(entry, dict) or entry.get("revoked"):
+            return web.json_response({"error": "unknown device"}, status=404)
+        entry["fcm_token"] = token
+        try:
+            _hermes_hub_device_save(store)
+        except Exception as exc:
+            return web.json_response({"error": f"store failed: {exc}"}, status=500)
+        return web.json_response({"device_id": device_id, "push": True})
+
+    async def _handle_hub_device_revoke(self, request: "web.Request") -> "web.Response":
+        import re as _re
+        import time as _time
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        device_id = str(request.match_info.get("device_id", "") or "").strip()
+        if not _re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{7,63}", device_id):
+            return web.json_response({"error": "bad device_id"}, status=400)
+        store = _hermes_hub_device_load()
+        devices = store["devices"]
+        entry = devices.get(device_id)
+        if not isinstance(entry, dict):
+            return web.json_response({"error": "unknown device"}, status=404)
+        label = str(entry.get("label") or "")
+        devices[device_id] = {"label": label, "created": entry.get("created", 0), "revoked": True,
+                              "revoked_at": int(_time.time()), "fcm_token": "",
+                              "fingerprint": _hermes_hub_device_fingerprint(str(entry.get("public_key") or ""))}
+        try:
+            _hermes_hub_device_save(store)
+        except Exception as exc:
+            return web.json_response({"error": f"store failed: {exc}"}, status=500)
+        try:
+            _hermes_hub_audit_event({
+                "event": "device.revoke",
+                "summary": f"device {device_id} revoked",
+                "tool": "device",
+                "risk": "high",
+                "status": "ok",
+            })
+        except Exception:
+            pass
+        return web.json_response({"device_id": device_id, "revoked": True})
+
+    async def _handle_hub_push_config(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        cfg = _hermes_hub_fcm_client_config()
+        if cfg is None:
+            return web.json_response({"configured": False, "client": None})
+        return web.json_response({"configured": True, "client": cfg})
+
+    async def _handle_hub_job_notify(self, request: "web.Request") -> "web.Response":
+        import re as _re
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            body = await request.json()
+        except Exception as exc:
+            return web.json_response({"error": "Invalid JSON body", "detail": str(exc)}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "JSON body must be an object"}, status=400)
+        body_dict = body
+        job_id = str(body_dict.get("job_id") or "")[:64]
+        status = str(body_dict.get("status") or "")[:32]
+        if not _re.fullmatch(r"[A-Za-z0-9_-]{1,64}", job_id):
+            return web.json_response({"error": "bad job_id"}, status=400)
+        if status not in ("done", "failed"):
+            return web.json_response({"notified": 0, "devices": 0, "skipped": True})
+        job = {
+            "job_id": job_id,
+            "status": status,
+            "kind": str(body_dict.get("kind") or "")[:40],
+            "preset": str(body_dict.get("preset") or "")[:80],
+            "detail": str(body_dict.get("detail") or body_dict.get("error") or "")[:200],
+        }
+        result = await _hermes_hub_fanout_job_notify(job)
+        return web.json_response(result)
+
+    async def _handle_models(self, request: "web.Request") -> "web.Response":'''
+        anchor = handlers_anchor
+        text = text.replace(anchor, handlers, 1)
+        changes.append("device security handlers")
+
+    # Regione propria DOPO il blocco route dinamiche (che viene rigenerato
+    # a ogni passata: righe estranee dentro sparirebbero e la seconda
+    # passata non sarebbe mai pulita). Sostituzione integrale idempotente.
+    device_routes = '''        # HERMES_HUB_DEVICE_ROUTES_BEGIN
+        routes.extend([
+            ("GET", "/v1/hub/devices", self._handle_hub_devices),
+            ("POST", "/v1/hub/devices/register", self._handle_hub_device_register),
+            ("POST", "/v1/hub/devices/{device_id}/token", self._handle_hub_device_token),
+            ("DELETE", "/v1/hub/devices/{device_id}", self._handle_hub_device_revoke),
+            ("GET", "/v1/hub/push-config", self._handle_hub_push_config),
+            ("POST", "/v1/hub/jobs/notify", self._handle_hub_job_notify),
+        ])
+        # HERMES_HUB_DEVICE_ROUTES_END'''
+    routes_anchor = "        # HERMES_HUB_DYNAMIC_ROUTES_END"
+    if "# HERMES_HUB_DEVICE_ROUTES_BEGIN" not in text:
+        if routes_anchor not in text:
+            return text, changes
+        text = text.replace(routes_anchor, routes_anchor + "\n" + device_routes, 1)
+        changes.append("device security routes")
+    else:
+        start = text.index("# HERMES_HUB_DEVICE_ROUTES_BEGIN")
+        end = text.index("# HERMES_HUB_DEVICE_ROUTES_END", start) + len("# HERMES_HUB_DEVICE_ROUTES_END")
+        if text[start:end] != device_routes[8:]:
+            text = text[:start] + device_routes[8:] + text[end:]
+            changes.append("device security routes")
+
+    if '("device_keys", ("GET/POST/DELETE", "/v1/hub/devices"))' not in text:
+        # Tabella capability solo informativa e non presente in tutti i
+        # layout: se manca si salta senza fallire (rotte/handler/gate sopra
+        # restano obbligatori e rumorosi).
+        cap_anchor = '    ("media_proxy", ("GET/HEAD", "/v1/media/{media_id}")),\n'
+        if cap_anchor in text:
+            capabilities = cap_anchor + '''    ("device_keys", ("GET/POST/DELETE", "/v1/hub/devices")),
+    ("push_config", ("GET", "/v1/hub/push-config")),
+    ("job_notify", ("POST", "/v1/hub/jobs/notify")),
+'''
+            text = text.replace(cap_anchor, capabilities, 1)
+            changes.append("device security capabilities")
+
+    # Idempotenza: le due gate si inseriscono dopo il preambolo auth, che
+    # resta identico (matcherebbe di nuovo). Una sola guardia globale basta:
+    # o entrano entrambe o _replace_regex_once fallisce rumoroso.
+    # Layout senza server handler: niente da proteggere, skip.
+    if "_hermes_hub_require_device_signature(request)" not in text and \
+            "async def _handle_hub_server_action" in text and \
+            "async def _handle_hub_server_maintenance" in text:
+        for handler_name in ("_handle_hub_server_action", "_handle_hub_server_maintenance"):
+            pattern = (
+                r"(    async def " + handler_name + r"\(self, request: (?:\"web\.Request\"|web\.Request)\) -> (?:\"web\.Response\"|web\.Response):\n"
+                r"        auth_error = self\._check_auth\(request\)\n"
+                r"        if auth_error is not None:\n"
+                r"            return auth_error\n)"
+            )
+            replacement = (
+                r"\1        device_error = await _hermes_hub_require_device_signature(request)\n"
+                r"        if device_error is not None:\n"
+                r"            return device_error\n"
+            )
+            text, changed = _replace_regex_once(text, pattern, replacement, f"device signature gate {handler_name}")
+            if changed:
+                changes.append(f"device signature gate {handler_name}")
+    return text, changes
 
 
 def _patch_shadow_sessions_v1(text: str) -> tuple[str, list[str]]:

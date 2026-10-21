@@ -58,8 +58,8 @@ android {
         applicationId = "com.nemoclaw.chat"
         minSdk = if (enableMetaDat) 29 else 26
         targetSdk = 36
-        versionCode = 294
-        versionName = "0.6.290"
+        versionCode = 295
+        versionName = "0.6.291"
         resConfigs("en", "it")
         buildConfigField("boolean", "META_DAT_ENABLED", enableMetaDat.toString())
         // Nessuna chiave API nel BuildConfig: la release APK non contiene
@@ -143,6 +143,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.navigation:navigation-compose:2.9.8")
     implementation("androidx.work:work-runtime-ktx:2.11.0")
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
+    implementation("com.google.firebase:firebase-messaging:23.4.1")
     implementation("androidx.health.connect:connect-client:1.1.0")
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     implementation("androidx.media3:media3-ui:1.10.1")

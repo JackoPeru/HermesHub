@@ -228,3 +228,41 @@ internal fun executeJsonRequest(
         response.code to response.body.byteStream().readUtf8Bounded(limit)
     }
 }
+
+/**
+ * POST firmato con chiave dispositivo (P-256): singolo tentativo, niente
+ * retry/candidati (ogni retry riuserebbe lo stesso nonce = replay rifiutato;
+ * URL diversi invaliderebbero la firma sul path). Per le rotte pericolose.
+ */
+internal suspend fun postDeviceSignedJson(
+    url: String,
+    payload: JSONObject,
+    deviceId: String,
+    apiKey: String? = null,
+    requestContext: HermesRequestContext = HermesHubProtocol.newCorrelationContext()
+): Pair<Int, String> = withContext(Dispatchers.IO) {
+    val body = payload.toString().toByteArray(Charsets.UTF_8)
+    val parsed = java.net.URI(url)
+    val pathAndQuery = (parsed.rawPath ?: "/") +
+        (parsed.rawQuery?.takeIf { it.isNotBlank() }?.let { "?$it" }.orEmpty())
+    val signed = signDeviceRequest("POST", pathAndQuery, body)
+    val builder = Request.Builder()
+        .url(url)
+        .header("Accept", "application/json")
+        .header("User-Agent", "HermesHub-Android")
+        .header("X-Hermes-Key-Id", deviceId)
+        .header("X-Hermes-Timestamp", signed.timestampSec)
+        .header("X-Hermes-Nonce", signed.nonce)
+        .header("X-Hermes-Signature", signed.signatureB64)
+    HermesHubProtocol.addCorrelationHeaders(builder, requestContext)
+    apiKey?.takeIf { it.isNotBlank() }?.let { builder.header("Authorization", "Bearer $it") }
+    val request = builder.post(body.toRequestBody("application/json; charset=utf-8".toMediaType())).build()
+    return@withContext try {
+        apiHttpClient.newCall(request).execute().use { response ->
+            response.code to response.body.byteStream().readUtf8Bounded(MAX_JSON_RESPONSE_BYTES)
+        }
+    } catch (ex: Exception) {
+        if (ex is kotlinx.coroutines.CancellationException) throw ex
+        0 to (ex.message ?: ex.javaClass.simpleName)
+    }
+}

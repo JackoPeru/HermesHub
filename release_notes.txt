@@ -1,7 +1,11 @@
-Hermes Hub 0.6.290 (video che partono sul PC)
+Hermes Hub 0.6.291 (firme dispositivo + push fine-job)
 
-- Gateway: il proxy media risponde anche a HEAD (solo header, mai transcodifica). I player nativi come quello Windows sondano con HEAD prima di aprire lo stream: prima prendevano 405 e non partivano.
-- Windows, sezione Video: errori del player e stato del feed scritti nel log (cosi' ogni fallimento e' diagnosticabile).
-- Test: test_media_head (3/3); build Windows senza errori.
+- Sicurezza: il telefono genera una chiave P-256 nel Keystore e firma ogni azione server (control/maintenance) dopo impronta o PIN. Il gateway verifica con openssl, rifiuta replay e timestamp vecchi, revoca per-telefono. Senza firma, a registro pieno, solo Bearer non basta piu'.
+- Notifiche push: a job completato/fallito il manager avvisa il gateway, che manda FCM ai telefoni registrati (solo segnale, mai contenuti). Service account operatore opzionale; senza, tutto resta come prima.
+- Registrazione dalla schermata Server (Android): TELEFONO SICURO + NOTIFICHE PUSH.
+- Windows invariato (non chiama quelle rotte).
+- Test: test_device_signature (10), test_device_push (7); build Android/Windows senza errori.
 
-Asset: HermesHub-0.6.290-android.apk (Android, versionCode 294), NemoclawChat.Windows_0.6.290.0_x64.msix (x64) e HermesHub-0.6.290-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.291-android.apk (Android, versionCode 295), NemoclawChat.Windows_0.6.291.0_x64.msix (x64) e HermesHub-0.6.291-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+
+Operatore: per le push, mettere il JSON service account in HERMES_HUB_FCM_SERVICE_ACCOUNT e il client JSON (api_key/app_id/project_id/sender_id) in HERMES_HUB_FCM_CLIENT_JSON nel service del gateway; kill-switch firme: HERMES_HUB_DEVICE_SIGNATURE=off.
