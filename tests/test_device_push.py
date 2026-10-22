@@ -86,6 +86,20 @@ class DeviceSigningTests(unittest.TestCase):
     def test_android_unit_test_covers_canonical(self) -> None:
         self.assertIn("canonical payload joins five lines", text(AND_TEST))
 
+    def test_r8_keeps_security_classes(self) -> None:
+        # 0.6.291: R8 full mode aveva rimosso BiometricPrompt dalla release.
+        proguard = (
+            REPO / "src/NemoclawChat.Android/app/proguard-rules.pro"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            "androidx.biometric.**",
+            "androidx.fragment.app.FragmentActivity",
+            "com.google.android.gms.tasks.**",
+            "com.nemoclaw.chat.HermesPushService",
+            "com.nemoclaw.chat.core.security.DeviceKeysKt",
+        ):
+            self.assertIn(marker, proguard)
+
 
 class JobPushTests(unittest.TestCase):
     def test_gateway_fcm_fanout(self) -> None:
