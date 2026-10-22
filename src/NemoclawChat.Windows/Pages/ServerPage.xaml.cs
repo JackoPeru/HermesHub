@@ -56,6 +56,57 @@ public sealed partial class ServerPage : Page
             "POST /api/jobs -> crea cron Hermes";
     }
 
+    private string? _lastPhoneCommandId;
+
+    private async void PhoneSend_Click(object sender, RoutedEventArgs e)
+    {
+        var kind = (PhoneKindBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "tap";
+        JsonDocument payload;
+        try
+        {
+            payload = JsonDocument.Parse(
+                string.IsNullOrWhiteSpace(PhoneParamsBox.Text) ? "{}" : PhoneParamsBox.Text);
+        }
+        catch (JsonException)
+        {
+            PhoneOutputBox.Text = "Payload JSON non valido.";
+            return;
+        }
+
+        PhoneOutputBox.Text = $"Accodo {kind}…";
+        var body = JsonSerializer.Serialize(new
+        {
+            kind,
+            payload = JsonSerializer.Deserialize<Dictionary<string, object>>(payload.RootElement.GetRawText()),
+        });
+        var response = await GatewayService.SendHermesRequestAsync(
+            _settings, HttpMethod.Post, "/v1/hub/phone/commands", body);
+        PhoneOutputBox.Text = response;
+        try
+        {
+            using var doc = JsonDocument.Parse(response);
+            if (doc.RootElement.TryGetProperty("id", out var id))
+            {
+                _lastPhoneCommandId = id.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+        }
+    }
+
+    private async void PhoneResult_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_lastPhoneCommandId))
+        {
+            PhoneOutputBox.Text = "Accoda prima un comando.";
+            return;
+        }
+
+        PhoneOutputBox.Text = await GatewayService.SendHermesRequestAsync(
+            _settings, HttpMethod.Get, $"/v1/hub/phone/commands/{Uri.EscapeDataString(_lastPhoneCommandId)}");
+    }
+
     private async void RunDiagnostics_Click(object sender, RoutedEventArgs e)
     {
         DiagnosticsPanel.Children.Clear();

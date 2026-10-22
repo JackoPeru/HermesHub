@@ -257,6 +257,14 @@ import com.nemoclaw.chat.createVideoPlayerView
 import com.nemoclaw.chat.FullscreenVideoOrientationEffect
 import com.nemoclaw.chat.findActivity
 import com.nemoclaw.chat.core.WorkLimits
+import com.nemoclaw.chat.features.git.GitHubPr
+import com.nemoclaw.chat.features.git.diffLineKind
+import com.nemoclaw.chat.features.git.fetchPrDiff
+import com.nemoclaw.chat.features.git.listOpenPrs
+import com.nemoclaw.chat.features.git.mergePr
+import com.nemoclaw.chat.features.git.parseGitHubRepo
+import com.nemoclaw.chat.loadGithubToken
+import com.nemoclaw.chat.saveGithubToken
 import com.nemoclaw.chat.features.bots.isLinkedArchiveId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -3335,6 +3343,64 @@ internal fun ProjectsScreen(
     var title by rememberSaveable { mutableStateOf(selected?.title.orEmpty()) }
     var instructions by rememberSaveable { mutableStateOf(selected?.projectInstructions.orEmpty()) }
     var status by remember { mutableStateOf("Pronto.") }
+    val prScope = rememberCoroutineScope()
+    var ghToken by remember { mutableStateOf(loadGithubToken(context).orEmpty()) }
+    var prList by remember { mutableStateOf(emptyList<GitHubPr>()) }
+    var prMsg by remember { mutableStateOf("") }
+    var prOpen by remember { mutableStateOf<Int?>(null) }
+    var prDiff by remember { mutableStateOf("") }
+    var prMergeArm by remember { mutableStateOf<Int?>(null) }
+    var prBusy by remember { mutableStateOf(false) }
+    fun prRepo() = parseGitHubRepo(selected?.repositoryUrl.orEmpty())
+    fun loadPrs() {
+        val repo = prRepo()
+        if (repo == null) {
+            prMsg = "Repository non GitHub."
+            return
+        }
+        if (ghToken.isBlank()) {
+            prMsg = "Token GitHub mancante qui sotto."
+            return
+        }
+        prBusy = true
+        prScope.launch {
+            try {
+                prList = listOpenPrs(repo.first, repo.second, ghToken)
+                prMsg = if (prList.isEmpty()) "Nessuna PR aperta." else "${prList.size} PR aperte."
+            } catch (failed: Exception) {
+                prMsg = failed.message ?: "Errore rete."
+            } finally {
+                prBusy = false
+            }
+        }
+    }
+    fun openPrDiff(number: Int) {
+        val repo = prRepo() ?: return
+        prOpen = number
+        prDiff = ""
+        prMergeArm = null
+        prScope.launch {
+            try {
+                prDiff = fetchPrDiff(repo.first, repo.second, number, ghToken)
+                if (prDiff.isBlank()) prMsg = "Diff vuoto o illeggibile."
+            } catch (failed: Exception) {
+                prMsg = failed.message ?: "Errore rete."
+            }
+        }
+    }
+    fun mergePr(number: Int) {
+        val repo = prRepo() ?: return
+        prScope.launch {
+            try {
+                val done = mergePr(repo.first, repo.second, number, ghToken)
+                prMsg = if (done) "PR #$number unita." else "Merge rifiutato."
+                prMergeArm = null
+                if (done) loadPrs()
+            } catch (failed: Exception) {
+                prMsg = failed.message ?: "Errore rete."
+            }
+        }
+    }
 
     fun edit(project: LocalConversation?) {
         selectedId = project?.id.orEmpty()
@@ -3456,6 +3522,83 @@ internal fun ProjectsScreen(
                     }
                 }
                 Text(status, color = AppColors.Muted, fontSize = 12.sp)
+            }
+        }
+        item {
+            val repo = prRepo()
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("PULL REQUEST", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                if (repo == null) {
+                    Text("Repository non GitHub: niente PR da qui.", color = AppColors.Muted, fontSize = 12.sp)
+                } else {
+                    Text("${repo.first}/${repo.second}", color = Color.White, fontSize = 14.sp)
+                    SettingsField("Token GitHub", ghToken, {
+                        ghToken = it
+                        saveGithubToken(context, it)
+                    })
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = { loadPrs() },
+                            enabled = !prBusy
+                        ) { Text("Leggi PR") }
+                    }
+                    if (prMsg.isNotBlank()) {
+                        Text(prMsg, color = AppColors.Muted, fontSize = 12.sp)
+                    }
+                    prList.forEach { pr ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { openPrDiff(pr.number) }
+                                .padding(vertical = 6.dp)
+                        ) {
+                            Text(
+                                "#${pr.number} ${pr.title}",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                "${pr.state} · ${pr.author} · ${pr.createdAt}",
+                                color = AppColors.Muted,
+                                fontSize = 11.sp
+                            )
+                        }
+                        if (prOpen == pr.number) {
+                            if (prDiff.isBlank()) {
+                                Text("Carico diff…", color = AppColors.Muted, fontSize = 12.sp)
+                            } else {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 320.dp)
+                                        .verticalScroll(rememberScrollState())
+                                        .background(AppColors.Panel, RoundedCornerShape(10.dp))
+                                        .padding(10.dp)
+                                ) {
+                                    prDiff.lines().take(400).forEach { line ->
+                                        val color = when (diffLineKind(line)) {
+                                            '+' -> AppColors.Success
+                                            '-' -> AppColors.Error
+                                            else -> Color.White
+                                        }
+                                        Text(line.take(160), color = color, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                                    }
+                                }
+                                if (pr.state == "open") {
+                                    if (prMergeArm == pr.number) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            Button(onClick = { mergePr(pr.number) }) { Text("Conferma merge") }
+                                            TextButton(onClick = { prMergeArm = null }) { Text("Annulla", color = AppColors.Accent) }
+                                        }
+                                    } else {
+                                        TextButton(onClick = { prMergeArm = pr.number }) { Text("Unisci PR", color = AppColors.Accent) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

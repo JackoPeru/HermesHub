@@ -475,6 +475,9 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             }
         }
         item {
+            PulseCard(context = context, settings = settings)
+        }
+        item {
             GpuComputeCard(context = context, settings = settings)
         }
         item {
@@ -3714,6 +3717,115 @@ internal fun gpuBridgeBase(gatewayUrl: String): String {
         noPath.replace(Regex(":[0-9]+$"), ":8645")
     } else {
         "$noPath:8645"
+    }
+}
+
+internal data class PulseDay(val done: Int, val failed: Int)
+
+/** Secchi giornalieri 7 giorni (oggi ultimo) da (createdAtSec, status). Puro. */
+internal fun bucketPulseDays(created: List<Pair<Long, String>>, nowMs: Long): List<PulseDay> {
+    val days = Array(7) { PulseDay(0, 0) }
+    val dayMs = 86_400_000L
+    val todayStart = (nowMs / dayMs) * dayMs
+    for ((atSec, status) in created) {
+        val atMs = atSec * 1000L
+        if (atMs <= 0) continue
+        val diff = (todayStart - (atMs / dayMs) * dayMs) / dayMs
+        if (diff < 0 || diff > 6) continue
+        val slot = (6 - diff.toInt()).coerceIn(0, 6)
+        val prev = days[slot]
+        days[slot] = if (status == "done") prev.copy(done = prev.done + 1)
+        else prev.copy(failed = prev.failed + 1)
+    }
+    return days.toList()
+}
+
+@Composable
+internal fun PulseCard(context: Context, settings: AppSettings) {
+    val scope = rememberCoroutineScope()
+    val base = remember(settings.gatewayUrl) { gpuManagerBase(settings.gatewayUrl) }
+    var days by remember(base) { mutableStateOf(emptyList<PulseDay>()) }
+    var line by remember(base) { mutableStateOf("Carico giornata…") }
+    var busy by remember(base) { mutableStateOf(false) }
+
+    fun refresh() {
+        scope.launch {
+            busy = true
+            try {
+                val key = loadGpuAppSecret(context)
+                val (code, body) = httpGetResponse("$base/jobs?limit=300", key)
+                if (code !in 200..299) {
+                    line = "Job non leggibili (HTTP $code)."
+                    return@launch
+                }
+                val arr = runCatching { JSONObject(body).optJSONArray("jobs") }.getOrNull()
+                val created = buildList {
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            val o = arr.optJSONObject(i) ?: continue
+                            add(o.optDouble("created_at", 0.0).toLong() to o.optString("status"))
+                        }
+                    }
+                }
+                val buckets = bucketPulseDays(created, System.currentTimeMillis())
+                days = buckets
+                val today = buckets.last()
+                line = "Oggi: ${today.done} completati · ${today.failed} falliti."
+            } catch (failed: Exception) {
+                line = failed.message ?: "Errore rete."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    LaunchedEffect(base) { refresh() }
+    Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "PULSE · 7 GIORNI",
+                    color = AppColors.Accent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { refresh() }, enabled = !busy) { Text("Aggiorna", color = AppColors.Accent) }
+            }
+            Text(line, color = Color.White, fontSize = 13.sp)
+            if (days.size == 7) {
+                val max = (days.maxOf { it.done + it.failed }).coerceAtLeast(1)
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(64.dp)
+                ) {
+                    val slot = size.width / 7f
+                    val barW = (slot * 0.55f).coerceAtLeast(4f)
+                    days.forEachIndexed { index, day ->
+                        val total = day.done + day.failed
+                        if (total <= 0) return@forEachIndexed
+                        val h = size.height * (total.toFloat() / max)
+                        val x = index * slot + (slot - barW) / 2f
+                        val doneH = h * (day.done.toFloat() / total)
+                        drawRoundRect(
+                            color = AppColors.Success,
+                            topLeft = androidx.compose.ui.geometry.Offset(x, size.height - doneH),
+                            size = androidx.compose.ui.geometry.Size(barW, doneH)
+                        )
+                        val failH = h - doneH
+                        if (failH > 1f) {
+                            drawRoundRect(
+                                color = AppColors.Error,
+                                topLeft = androidx.compose.ui.geometry.Offset(x, size.height - h),
+                                size = androidx.compose.ui.geometry.Size(barW, failH)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

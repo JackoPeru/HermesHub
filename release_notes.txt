@@ -1,12 +1,10 @@
-Hermes Hub 0.6.293 (l'agente non tocca piu' il manager)
+Hermes Hub 0.6.294 (activity, phone_use, fleet, git, pulse, wake)
 
-- Manager: piano controllo (modi, force, reboot, supervisor) solo chiave laya; app con chiave separata (letture + coda job + display + characters + submit). Vecchia chiave condivisa revocata, niente piu' chiavi condivise.
-- Chiavi manager/laya in file root-only (systemd credential): niente piu' api_key nello yaml leggibile. Sudo invariato per scelta utente: un abuso deliberato via sudo resta possibile e loggato, ma l'accesso casuale/autonomo e' chiuso.
-- laya: ingresso app per NL, agenti solo submit preset via /laya/jobs (+stato), nuovo intento "riavvia il manager".
-- App: campo "Chiave app GPU/manager" in Impostazioni (entrambe); modi e riavvio via laya; lista telefoni registrati con revoca.
-- Agente istruito: manager off-limits, preset via laya, modi via laya NL.
+- Activity Tracker: turni gruppo strutturati (stato per membro, risposte espandibili, fallimenti) + storico ultimi 20.
+- Controllo remoto Android: coda comandi phone_use sul gateway (tap/swipe/text/key/open_app/list_apps/dump_tree), AccessibilityService armato con kill switch, pannello Windows, istruzioni agente.
+- Fleet: scheda FLOTTA in Bot (bot, gruppi, turni, GPU).
+- Git da telefono: PR aperte, diff colorato, merge con conferma, token in Keystore.
+- Pulse: grafico 7 giorni completati/falliti. Wake word: sensibilita + statistiche ascolto.
 - Test: suite verde; build entrambe senza errori.
 
-Asset: HermesHub-0.6.293-android.apk (Android, versionCode 297), NemoclawChat.Windows_0.6.293.0_x64.msix (x64) e HermesHub-0.6.293-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
-
-Setup una-tantum: incollare la chiave app nelle due app (verra' fornita); riavvio servizi a coda vuota.
+Asset: HermesHub-0.6.294-android.apk (Android, versionCode 298), NemoclawChat.Windows_0.6.294.0_x64.msix (x64) e HermesHub-0.6.294-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

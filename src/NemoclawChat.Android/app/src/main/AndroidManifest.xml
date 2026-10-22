@@ -17,6 +17,10 @@
 
     <queries>
         <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
             <action android:name="android.intent.action.OPEN_DOCUMENT" />
             <data android:mimeType="*/*" />
         </intent>
@@ -60,6 +64,17 @@
         <meta-data android:name="com.meta.wearable.mwdat.DAM_ENABLED" android:value="false" />
         <meta-data android:name="com.meta.wearable.mwdat.ANALYTICS_OPT_OUT" android:value="true" />
         <service android:name=".VoiceCallService" android:exported="false" android:foregroundServiceType="microphone" />
+        <service
+            android:name=".features.phone.HermesPhoneService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/phone_control_config" />
+        </service>
         <service android:name=".HermesPushService" android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />

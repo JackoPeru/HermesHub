@@ -10870,7 +10870,229 @@ def _hermes_hub_transcode_mp4(source: "Path") -> "Path":
     changes.extend(shadow_changes)
     text, device_changes = _patch_device_security_v1(text)
     changes.extend(device_changes)
+    text, phone_changes = _patch_phone_control_v1(text)
+    changes.extend(phone_changes)
     return text, openai_routes_text, changes
+
+
+def _patch_phone_control_v1(text: str) -> tuple[str, list[str]]:
+    """Coda comandi telefono (phone_use): l'agente accoda, il telefono armato esegue.
+
+    Disegno sicurezza: la coda e' raggiungibile con Bearer (anche agente, per
+    progetto: e' cosi' che guida il telefono). La sicurezza sta
+    sull'ESECUZIONE: telefono armato esplicitamente, kill switch, comandi con
+    scadenza, audit, tipi allowlist. Mai screenshot: solo albero UI testuale.
+    """
+    changes: list[str] = []
+
+    if "def _hermes_hub_phone_store_path" not in text:
+        helpers = r"""
+def _hermes_hub_phone_store_path() -> "Path":
+    return _hermes_hub_storage_path("HERMES_HUB_PHONE_FILE", "hub_phone.json")
+
+
+def _hermes_hub_phone_load() -> Dict[str, Any]:
+    import time as _time
+    data = _hermes_hub_read_json(_hermes_hub_phone_store_path(), {"commands": []})
+    items = data.get("commands")
+    if not isinstance(items, list):
+        items = []
+    now = _time.time()
+    live = [c for c in items if isinstance(c, dict) and float(c.get("expires_at", 0) or 0) > now]
+    return {"commands": live[-50:]}
+
+
+def _hermes_hub_phone_save(commands: list) -> None:
+    _hermes_hub_write_json(_hermes_hub_phone_store_path(), {"commands": commands[-50:]})
+
+
+def _hermes_hub_phone_kinds() -> Dict[str, str]:
+    return {
+        "tap": "tocco singolo",
+        "swipe": "trascinamento",
+        "text": "inserimento testo nel campo attivo",
+        "key": "tasto sistema (back/home/recents)",
+        "open_app": "apri app per package",
+        "list_apps": "elenca app avviabili",
+        "dump_tree": "albero UI testuale",
+    }
+
+
+def _hermes_hub_phone_validate(kind: str, payload: dict) -> "Optional[str]":
+    kinds = _hermes_hub_phone_kinds()
+    if kind not in kinds:
+        return "kind non consentito (ammessi: " + ", ".join(sorted(kinds)) + ")"
+    if not isinstance(payload, dict):
+        return "payload deve essere un oggetto"
+
+    def num(value: object, lo: float, hi: float) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and lo <= float(value) <= hi
+
+    if kind in ("tap",):
+        if not num(payload.get("x"), 0, 4096) or not num(payload.get("y"), 0, 4096):
+            return "tap vuole x,y 0..4096"
+    elif kind == "swipe":
+        for key in ("x1", "y1", "x2", "y2"):
+            if not num(payload.get(key), 0, 4096):
+                return "swipe vuole " + key + " 0..4096"
+        if not num(payload.get("ms", 300), 50, 5000):
+            return "swipe vuole ms 50..5000"
+    elif kind == "text":
+        value = payload.get("text", "")
+        if not isinstance(value, str) or not value.strip() or len(value) > 500:
+            return "text vuole 1..500 caratteri"
+    elif kind == "key":
+        if str(payload.get("name", "")).lower() not in ("back", "home", "recents"):
+            return "key vuole back|home|recents"
+    elif kind == "open_app":
+        import re as _re
+        package = str(payload.get("package", "")).strip()
+        if len(package) > 200 or not _re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+", package):
+            return "package non valido"
+    elif kind in ("list_apps", "dump_tree"):
+        if payload:
+            return "nessun parametro per questo kind"
+    return None
+"""
+        storage_anchor = "def _hermes_hub_storage_path"
+        if storage_anchor not in text:
+            storage_anchor = "def _multimodal_validation_error"
+        if storage_anchor not in text:
+            return text, changes
+        text = text.replace(storage_anchor, helpers + storage_anchor, 1)
+        changes.append("phone control helpers")
+
+    if "async def _handle_hub_phone_commands" not in text:
+        handlers = r"""
+    async def _handle_hub_phone_commands(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        try:
+            body = await request.json()
+        except Exception as exc:
+            return web.json_response({"error": "Invalid JSON body", "detail": str(exc)}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "JSON body must be an object"}, status=400)
+        kind = str(body.get("kind") or "").strip().lower()
+        payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
+        problem = _hermes_hub_phone_validate(kind, payload)
+        if problem is not None:
+            return web.json_response({"error": problem}, status=400)
+        import time as _time
+        import uuid as _uuid
+        store = _hermes_hub_phone_load()
+        command = {
+            "id": _uuid.uuid4().hex[:12],
+            "kind": kind,
+            "payload": payload,
+            "status": "pending",
+            "created_at": _time.time(),
+            "expires_at": _time.time() + 600,
+        }
+        commands = store["commands"] + [command]
+        try:
+            _hermes_hub_phone_save(commands)
+        except Exception as exc:
+            return web.json_response({"error": "store failed: " + str(exc)}, status=500)
+        try:
+            _hermes_hub_audit_event({
+                "event": "phone.command",
+                "summary": "phone " + kind + " accodato",
+                "tool": "phone",
+                "risk": "high",
+                "status": "ok",
+            })
+        except Exception:
+            pass
+        return web.json_response({"id": command["id"], "status": "queued"})
+
+    async def _handle_hub_phone_poll(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        store = _hermes_hub_phone_load()
+        pending = [c for c in store["commands"] if c.get("status") == "pending"]
+        return web.json_response({"commands": pending})
+
+    async def _handle_hub_phone_one(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        command_id = str(request.match_info.get("command_id", "") or "").strip()
+        store = _hermes_hub_phone_load()
+        for command in store["commands"]:
+            if command.get("id") == command_id:
+                return web.json_response(command)
+        return web.json_response({"error": "unknown command"}, status=404)
+
+    async def _handle_hub_phone_result(self, request: "web.Request") -> "web.Response":
+        auth_error = self._check_auth(request)
+        if auth_error is not None:
+            return auth_error
+        command_id = str(request.match_info.get("command_id", "") or "").strip()
+        try:
+            body = await request.json()
+        except Exception as exc:
+            return web.json_response({"error": "Invalid JSON body", "detail": str(exc)}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "JSON body must be an object"}, status=400)
+        store = _hermes_hub_phone_load()
+        for command in store["commands"]:
+            if command.get("id") == command_id and command.get("status") == "pending":
+                command["status"] = "done" if body.get("ok") else "failed"
+                command["result"] = str(body.get("result") or "")[:2000]
+                import time as _time
+                command["finished_at"] = _time.time()
+                try:
+                    _hermes_hub_phone_save(store["commands"])
+                except Exception as exc:
+                    return web.json_response({"error": "store failed: " + str(exc)}, status=500)
+                try:
+                    _hermes_hub_audit_event({
+                        "event": "phone.result",
+                        "summary": "phone " + str(command.get("kind")) + " " + command["status"],
+                        "tool": "phone",
+                        "risk": "medium" if command["status"] == "done" else "high",
+                        "status": "ok",
+                    })
+                except Exception:
+                    pass
+                return web.json_response({"id": command_id, "status": command["status"]})
+        return web.json_response({"error": "unknown or settled command"}, status=404)
+
+    async def _handle_models(self, request: "web.Request") -> "web.Response":
+"""
+        models_anchor = '    async def _handle_models(self, request: "web.Request") -> "web.Response":'
+        if models_anchor not in text:
+            return text, changes
+        text = text.replace(models_anchor, handlers, 1)
+        changes.append("phone control handlers")
+
+    routes_block = r"""
+        # HERMES_HUB_PHONE_ROUTES_BEGIN
+        routes.extend([
+            ("POST", "/v1/hub/phone/commands", self._handle_hub_phone_commands),
+            ("GET", "/v1/hub/phone/commands", self._handle_hub_phone_poll),
+            ("GET", "/v1/hub/phone/commands/{command_id}", self._handle_hub_phone_one),
+            ("POST", "/v1/hub/phone/commands/{command_id}/result", self._handle_hub_phone_result),
+        ])
+        # HERMES_HUB_PHONE_ROUTES_END
+"""
+    want_routes = routes_block.strip()
+    if "# HERMES_HUB_PHONE_ROUTES_BEGIN" not in text:
+        dyn_end = "        # HERMES_HUB_DYNAMIC_ROUTES_END"
+        if dyn_end not in text:
+            return text, changes
+        text = text.replace(dyn_end, dyn_end + "\n" + want_routes, 1)
+        changes.append("phone control routes")
+    else:
+        start = text.index("# HERMES_HUB_PHONE_ROUTES_BEGIN")
+        end = text.index("# HERMES_HUB_PHONE_ROUTES_END", start) + len("# HERMES_HUB_PHONE_ROUTES_END")
+        if text[start:end].strip() != want_routes:
+            text = text[:start] + want_routes + text[end:]
+            changes.append("phone control routes")
+    return text, changes
 
 
 def _patch_device_security_v1(text: str) -> tuple[str, list[str]]:

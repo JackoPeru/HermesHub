@@ -126,6 +126,15 @@
                     </StackPanel>
                     <TextBox x:Name="LogFilterBox" Header="Filtro log live" TextChanged="LogFilterBox_TextChanged" />
                     <TextBox x:Name="ControlOutputBox" Header="Servizi · coda · run · GPU · log" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="340" FontFamily="Consolas" />
+                    <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="TELEFONO REMOTO" />
+                    <TextBlock Style="{StaticResource CaptionStyle}" Text="Accoda comandi phone_use (tap, swipe, text, key, open_app, list_apps, dump_tree). Il telefono li esegue solo se armato." TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ComboBox x:Name="PhoneKindBox" Width="150" SelectedIndex="0"><ComboBoxItem Content="tap" /><ComboBoxItem Content="swipe" /><ComboBoxItem Content="text" /><ComboBoxItem Content="key" /><ComboBoxItem Content="open_app" /><ComboBoxItem Content="list_apps" /><ComboBoxItem Content="dump_tree" /></ComboBox>
+                        <Button Style="{StaticResource PrimaryButtonStyle}" Click="PhoneSend_Click" Content="Accoda" />
+                        <Button Style="{StaticResource TextButtonStyle}" Click="PhoneResult_Click" Content="Leggi risultato" />
+                    </StackPanel>
+                    <TextBox x:Name="PhoneParamsBox" Header="Payload JSON (es. {&quot;x&quot;:500,&quot;y&quot;:800})" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="60" FontFamily="Consolas" />
+                    <TextBox x:Name="PhoneOutputBox" Header="Coda telefono · id e risultati" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="120" FontFamily="Consolas" />
                     <TextBlock x:Name="CompatibilityWarningText" Foreground="#FFFFB86B" TextWrapping="Wrap" />
                 </StackPanel>
             </StackPanel>

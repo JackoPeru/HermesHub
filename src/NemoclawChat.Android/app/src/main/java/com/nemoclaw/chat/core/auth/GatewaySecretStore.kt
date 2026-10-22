@@ -159,6 +159,74 @@ internal fun saveGpuAppSecret(context: Context, secret: String?): Boolean {
     return saved
 }
 
+private const val GITHUB_TOKEN_PREF_KEY = "githubTokenCiphertext"
+private const val GITHUB_TOKEN_ALIAS = "HermesHubGitHubToken"
+private const val GITHUB_TOKEN_AAD = "HermesHub.GitHubToken.v1"
+private val githubTokenKeyLock = Any()
+
+/** Token GitHub (PR/diff/merge da telefono). Keystore come le altre chiavi. */
+internal fun loadGithubToken(context: Context): String? {
+    val stored = migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
+        .getString(GITHUB_TOKEN_PREF_KEY, null)
+        ?: return null
+    return runCatching {
+        val parts = stored.split(':', limit = 2)
+        if (parts.size != 2) return@runCatching null
+        val iv = Base64.decode(parts[0], Base64.NO_WRAP)
+        val encrypted = Base64.decode(parts[1], Base64.NO_WRAP)
+        val cipher = Cipher.getInstance(GATEWAY_SECRET_TRANSFORMATION)
+        cipher.init(Cipher.DECRYPT_MODE, getOrCreateGithubTokenKey(), GCMParameterSpec(128, iv))
+        cipher.updateAAD(GITHUB_TOKEN_AAD.toByteArray(Charsets.UTF_8))
+        String(cipher.doFinal(encrypted), Charsets.UTF_8).trim().takeIf { it.isNotBlank() }
+    }.getOrNull()
+}
+
+internal fun saveGithubToken(context: Context, secret: String?): Boolean {
+    val normalized = secret?.trim().takeUnless { it.isNullOrEmpty() }
+    if (normalized == null) {
+        var removed = false
+        migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
+            .edit(commit = true) {
+                remove(GITHUB_TOKEN_PREF_KEY)
+                removed = true
+            }
+        return removed
+    }
+    val encoded = runCatching {
+        val cipher = Cipher.getInstance(GATEWAY_SECRET_TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateGithubTokenKey())
+        cipher.updateAAD(GITHUB_TOKEN_AAD.toByteArray(Charsets.UTF_8))
+        val encrypted = cipher.doFinal(normalized.toByteArray(Charsets.UTF_8))
+        "${Base64.encodeToString(cipher.iv, Base64.NO_WRAP)}:${Base64.encodeToString(encrypted, Base64.NO_WRAP)}"
+    }.getOrNull() ?: return false
+    var saved = false
+    migratePrefs(context, CURRENT_SETTINGS_PREFS, LEGACY_SETTINGS_PREFS)
+        .edit(commit = true) {
+            putString(GITHUB_TOKEN_PREF_KEY, encoded)
+            saved = true
+        }
+    return saved
+}
+
+private fun getOrCreateGithubTokenKey(): SecretKey = synchronized(githubTokenKeyLock) {
+    val keyStore = KeyStore.getInstance(GATEWAY_SECRET_KEYSTORE).apply { load(null) }
+    val existing = keyStore.getEntry(GITHUB_TOKEN_ALIAS, null) as? KeyStore.SecretKeyEntry
+    if (existing != null) {
+        return@synchronized existing.secretKey
+    }
+    val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, GATEWAY_SECRET_KEYSTORE)
+    val spec = KeyGenParameterSpec.Builder(
+        GITHUB_TOKEN_ALIAS,
+        KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+    )
+        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+        .setKeySize(256)
+        .build()
+    generator.init(spec)
+    generator.generateKey()
+}
+
 private fun getOrCreateGpuAppSecretKey(): SecretKey = synchronized(gpuAppSecretKeyLock) {
     val keyStore = KeyStore.getInstance(GATEWAY_SECRET_KEYSTORE).apply { load(null) }
     val existing = keyStore.getEntry(GPU_APP_SECRET_ALIAS, null) as? KeyStore.SecretKeyEntry

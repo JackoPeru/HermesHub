@@ -184,6 +184,7 @@ internal data class VoiceProfile(
     val speed: Float = 1.08f,
     val wakeWord: Boolean = false,
     val wakePhrase: String = DefaultWakePhrase,
+    val wakeSensitivity: Float = 1.0f,
     val pushToTalk: Boolean = false,
     val showTranscript: Boolean = false,
     val bluetooth: Boolean = false,
@@ -207,6 +208,7 @@ internal fun loadVoiceProfile(context: Context, projectId: String): VoiceProfile
         speed = preferences.getFloat("speed:$keySuffix", 1.08f).coerceIn(0.75f, 1.35f),
         wakeWord = preferences.getBoolean("wake:$keySuffix", false),
         wakePhrase = safeWakePhrase,
+        wakeSensitivity = preferences.getFloat("wakeSensitivity:$keySuffix", 1.0f).coerceIn(0.5f, 2.0f),
         pushToTalk = preferences.getBoolean("ptt:$keySuffix", false),
         showTranscript = preferences.getBoolean("transcript:$keySuffix", false),
         bluetooth = preferences.getBoolean("bluetooth:$keySuffix", false),
@@ -224,6 +226,7 @@ internal fun saveVoiceProfile(context: Context, projectId: String, profile: Voic
         putFloat("speed:$keySuffix", profile.speed.coerceIn(0.75f, 1.35f))
         putBoolean("wake:$keySuffix", profile.wakeWord)
         putString("wakePhrase:$keySuffix", safeWakePhrase)
+        putFloat("wakeSensitivity:$keySuffix", profile.wakeSensitivity.coerceIn(0.5f, 2.0f))
         putBoolean("ptt:$keySuffix", profile.pushToTalk)
         putBoolean("transcript:$keySuffix", profile.showTranscript)
         putBoolean("bluetooth:$keySuffix", profile.bluetooth)
@@ -678,21 +681,67 @@ internal suspend fun runVoiceCallLoop(
     }
 }
 
+/**
+ * Soglia VAD dal rumore di fondo e sensibilita' utente (0.5 permissiva ..
+ * 2.0 selettiva). Pura, testabile: confronta precisione/consumi.
+ */
+internal fun wakeVoiceThreshold(noiseFloor: Double, sensitivity: Float): Double {
+    val gain = sensitivity.toDouble().coerceIn(0.5, 2.0)
+    return (noiseFloor * 2.5 * gain + 6.0).coerceIn(18.0, 1_800.0)
+}
+
+internal fun wakeStatsKey(today: String): String = "wake:$today"
+
+internal fun recordWakeListen(context: Context, seconds: Long) {
+    if (seconds <= 0) return
+    val prefs = context.applicationContext.getSharedPreferences("voice_wake_stats", Context.MODE_PRIVATE)
+    val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ITALIAN)
+        .format(java.util.Date())
+    prefs.edit {
+        putLong(wakeStatsKey(today) + ":seconds", prefs.getLong(wakeStatsKey(today) + ":seconds", 0L) + seconds)
+    }
+}
+
+internal fun recordWakeActivation(context: Context) {
+    val prefs = context.applicationContext.getSharedPreferences("voice_wake_stats", Context.MODE_PRIVATE)
+    val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ITALIAN)
+        .format(java.util.Date())
+    prefs.edit {
+        putLong(wakeStatsKey(today) + ":hits", prefs.getLong(wakeStatsKey(today) + ":hits", 0L) + 1)
+    }
+}
+
+internal fun wakeStatsLine(stats: Pair<Long, Long>): String {
+    val minutes = stats.first / 60
+    return "Ascolto oggi: ${minutes} min · attivazioni: ${stats.second}."
+}
+
+internal fun loadWakeStatsToday(context: Context): Pair<Long, Long> {
+    val prefs = context.applicationContext.getSharedPreferences("voice_wake_stats", Context.MODE_PRIVATE)
+    val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ITALIAN)
+        .format(java.util.Date())
+    return prefs.getLong(wakeStatsKey(today) + ":seconds", 0L) to
+        prefs.getLong(wakeStatsKey(today) + ":hits", 0L)
+}
+
 internal suspend fun awaitWakePhrase(
     context: Context,
     settings: AppSettings,
     apiKey: String?,
-    wakePhrase: String
+    wakePhrase: String,
+    sensitivity: Float = 1.0f
 ) {
     while (coroutineContext.isActive) {
         try {
-            val file = captureVoiceUtterance(context) ?: continue
+            val file = captureVoiceUtterance(context, sensitivity) ?: continue
+            recordWakeListen(context, file.length() / (16000L * 2L))
             val transcript = try {
                 transcribeVoiceFile(settings, apiKey, file).trim()
             } finally {
                 file.delete()
             }
             if (stripWakePhrase(transcript, wakePhrase) != null) {
+                recordWakeActivation(context)
                 return
             }
         } catch (ex: CancellationException) {
@@ -703,7 +752,7 @@ internal suspend fun awaitWakePhrase(
     }
 }
 
-internal suspend fun captureVoiceUtterance(context: Context): File? = withContext(Dispatchers.IO) {
+internal suspend fun captureVoiceUtterance(context: Context, sensitivity: Float = 1.0f): File? = withContext(Dispatchers.IO) {
     if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
         throw SecurityException("Permesso microfono non disponibile.")
     }
@@ -747,7 +796,7 @@ internal suspend fun captureVoiceUtterance(context: Context): File? = withContex
             val peak = pcmPeak(chunk)
             observedFrames++
             maxObservedRms = max(maxObservedRms, rms)
-            val threshold = (noiseFloor * 2.5 + 6.0).coerceIn(18.0, 1_800.0)
+            val threshold = wakeVoiceThreshold(noiseFloor, sensitivity)
             val peakThreshold = (noiseFloor * 10.0 + 80.0).coerceIn(100.0, 12_000.0)
             val voiced = rms >= threshold || peak >= peakThreshold
             val now = System.currentTimeMillis()

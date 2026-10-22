@@ -1,6 +1,7 @@
 package com.nemoclaw.chat.features.bots
 
 import android.content.Context
+import androidx.core.content.edit
 import com.nemoclaw.chat.AppSettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -28,6 +29,78 @@ internal data class HermesBotGroupTurnResult(
     val memberResults: List<HermesBotGroupMemberResult>,
     val failures: List<String>
 )
+
+/** Riepilogo persistito di un turno gruppo (monitoraggio, max 20). */
+internal data class GroupTurnSummary(
+    val group: String,
+    val outcome: String,
+    val rounds: Int,
+    val replies: Int,
+    val failures: Int,
+    val atMs: Long
+)
+
+internal const val GROUP_TURN_HISTORY_CAP = 20
+private const val GROUP_TURN_HISTORY_PREFS = "hermes_group_turns"
+private const val GROUP_TURN_HISTORY_KEY = "turns"
+
+internal fun summarizeGroupTurn(
+    result: HermesBotGroupTurnResult,
+    atMs: Long = System.currentTimeMillis()
+): GroupTurnSummary = GroupTurnSummary(
+    group = result.groupName,
+    outcome = result.outcome,
+    rounds = result.rounds,
+    replies = result.memberResults.count { !it.silent },
+    failures = result.failures.size,
+    atMs = atMs
+)
+
+internal fun pruneGroupTurnHistory(items: List<GroupTurnSummary>): List<GroupTurnSummary> =
+    items.sortedByDescending { it.atMs }.take(GROUP_TURN_HISTORY_CAP)
+
+internal fun loadGroupTurnHistory(context: Context): List<GroupTurnSummary> {
+    val raw = context.applicationContext
+        .getSharedPreferences(GROUP_TURN_HISTORY_PREFS, Context.MODE_PRIVATE)
+        .getString(GROUP_TURN_HISTORY_KEY, null) ?: return emptyList()
+    return runCatching {
+        val arr = JSONArray(raw)
+        buildList {
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                add(
+                    GroupTurnSummary(
+                        group = o.optString("group"),
+                        outcome = o.optString("outcome"),
+                        rounds = o.optInt("rounds"),
+                        replies = o.optInt("replies"),
+                        failures = o.optInt("failures"),
+                        atMs = o.optLong("atMs")
+                    )
+                )
+            }
+        }.let { pruneGroupTurnHistory(it) }
+    }.getOrDefault(emptyList())
+}
+
+internal fun recordGroupTurn(context: Context, summary: GroupTurnSummary) {
+    val updated = pruneGroupTurnHistory(listOf(summary) + loadGroupTurnHistory(context))
+    val arr = JSONArray()
+    updated.forEach { item ->
+        arr.put(
+            JSONObject()
+                .put("group", item.group)
+                .put("outcome", item.outcome)
+                .put("rounds", item.rounds)
+                .put("replies", item.replies)
+                .put("failures", item.failures)
+                .put("atMs", item.atMs)
+        )
+    }
+    context.applicationContext
+        .getSharedPreferences(GROUP_TURN_HISTORY_PREFS, Context.MODE_PRIVATE)
+        .edit { putString(GROUP_TURN_HISTORY_KEY, arr.toString()) }
+}
 
 private const val MAX_GROUP_ROUNDS = 3
 private const val MAX_GROUP_MESSAGES = 10

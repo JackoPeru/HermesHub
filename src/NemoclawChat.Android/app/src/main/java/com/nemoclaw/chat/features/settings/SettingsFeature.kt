@@ -242,7 +242,14 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
+import com.nemoclaw.chat.features.phone.isPhoneArmed
+import com.nemoclaw.chat.features.phone.setPhoneArmed
+import com.nemoclaw.chat.features.phone.isPhoneAccessibilityEnabled
+import com.nemoclaw.chat.features.phone.openPhoneAccessibilitySettings
+import com.nemoclaw.chat.features.phone.loadPhoneLog
 import com.nemoclaw.chat.resolveHermesUrl
+import com.nemoclaw.chat.loadWakeStatsToday
+import com.nemoclaw.chat.wakeStatsLine
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -347,6 +354,7 @@ internal fun SettingsScreen(
     var voiceSpeed by remember(settings.activeProjectId, voiceProfile) { mutableFloatStateOf(voiceProfile.speed) }
     var voiceWakeWord by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.wakeWord) }
     var voiceWakePhrase by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.wakePhrase) }
+    var voiceWakeSensitivity by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.wakeSensitivity) }
     var voicePushToTalk by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.pushToTalk) }
     var voiceTranscript by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.showTranscript) }
     var voiceBluetooth by remember(settings.activeProjectId, voiceProfile) { mutableStateOf(voiceProfile.bluetooth) }
@@ -794,6 +802,33 @@ internal fun SettingsScreen(
                             }
                         }
                         SettingsField("Wake word personalizzata", voiceWakePhrase, { voiceWakePhrase = it })
+                        Text("SENSIBILITÀ ASCOLTO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf("Permissiva" to 0.6f, "Normale" to 1.0f, "Selettiva" to 1.6f).forEach { (label, value) ->
+                                Button(
+                                    onClick = { voiceWakeSensitivity = value },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (voiceWakeSensitivity == value) AppColors.Accent else AppColors.Composer,
+                                        contentColor = if (voiceWakeSensitivity == value) Color(0xFF171009) else Color.White
+                                    )
+                                ) {
+                                    Text(label, color = if (voiceWakeSensitivity == value) Color(0xFF171009) else Color.White)
+                                }
+                            }
+                        }
+                        Text(
+                            "Permissiva sente di più (più falsi), selettiva solo voci chiare. Sotto: ascolto e attivazioni di oggi.",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            wakeStatsLine(loadWakeStatsToday(context)),
+                            color = AppColors.Muted,
+                            fontSize = 12.sp
+                        )
                         MetricSwitch("Abilita wake word", voiceWakeWord) { enabled ->
                             if (enabled && androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                                 wakePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -1051,6 +1086,53 @@ internal fun SettingsScreen(
                 } // Column Automazione
             } // item Automazione
             item {
+                SettingsSectionHeader(title = "Controllo telefono", subtitle = "L'agente opera il telefono solo se armato.")
+            }
+            item {
+                val phoneArmedState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(isPhoneArmed(context)) }
+                val phoneAccessState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(isPhoneAccessibilityEnabled(context)) }
+                val phoneLogState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(loadPhoneLog(context)) }
+                fun refreshPhone() {
+                    phoneArmedState.value = isPhoneArmed(context)
+                    phoneAccessState.value = isPhoneAccessibilityEnabled(context)
+                    phoneLogState.value = loadPhoneLog(context)
+                }
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Arma controllo remoto", color = Color.White, modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = phoneArmedState.value,
+                            onCheckedChange = {
+                                setPhoneArmed(context, it)
+                                refreshPhone()
+                            }
+                        )
+                    }
+                    Text(
+                        "Arma = il telefono esegue i comandi in coda. Kill switch: disarma qui o dalla notifica STOP.",
+                        color = AppColors.Muted,
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        "Accesso accessibilità: " + if (phoneAccessState.value) "concesso." else "mancante: apri le impostazioni e attivalo.",
+                        color = if (phoneAccessState.value) AppColors.Success else AppColors.Error,
+                        fontSize = 12.sp
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(onClick = {
+                            openPhoneAccessibilitySettings(context)
+                        }) { Text("Accessibilità") }
+                        TextButton(onClick = { refreshPhone() }) { Text("Aggiorna", color = AppColors.Accent) }
+                    }
+                    if (phoneLogState.value.isNotEmpty()) {
+                        Text("Ultimi comandi", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        phoneLogState.value.take(10).forEach { line ->
+                            Text(line, color = AppColors.Muted, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+            item {
                 SettingsSectionHeader(title = "Privacy e dati", subtitle = "Screenshot, backup e ripristino.")
             }
             item {
@@ -1172,6 +1254,7 @@ internal fun SettingsScreen(
                                     speed = voiceSpeed,
                                     wakeWord = voiceWakeWord,
                                     wakePhrase = normalizeWakePhrase(voiceWakePhrase),
+                                    wakeSensitivity = voiceWakeSensitivity,
                                     pushToTalk = voicePushToTalk,
                                     showTranscript = voiceTranscript,
                                     bluetooth = voiceBluetooth,

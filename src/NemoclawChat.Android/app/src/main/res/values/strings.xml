@@ -7,4 +7,5 @@
     <string name="widget_chat">Chat</string>
     <string name="widget_voice">Voce</string>
     <string name="widget_scan">Scan</string>
+    <string name="phone_control_desc">Permette a Hermes Hub (solo se armato da te) di toccare schermo, scrivere e aprire app per tuo conto. Kill switch sempre visibile.</string>
 </resources>

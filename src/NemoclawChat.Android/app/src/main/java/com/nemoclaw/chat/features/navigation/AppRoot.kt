@@ -681,6 +681,7 @@ internal fun ChatApp() {
         selectedTab,
         wakeVoiceProfile?.wakeWord,
         wakeVoiceProfile?.wakePhrase,
+        wakeVoiceProfile?.wakeSensitivity,
         settings.gatewayUrl,
         voiceProfileRevision
     ) {
@@ -693,7 +694,7 @@ internal fun ChatApp() {
         var detected = false
         startVoiceForegroundService(context, mode = "wake")
         try {
-            awaitWakePhrase(context, settings, initialGatewaySecret.value, wake.wakePhrase)
+            awaitWakePhrase(context, settings, initialGatewaySecret.value, wake.wakePhrase, wake.wakeSensitivity)
             detected = true
             val activity = context as? Activity
             if (activity != null) {

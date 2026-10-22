@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.294 - 2026-10-22
+
+- Activity gruppi strutturata + storico; phone_use (gateway+Android+Windows); fleet; PR/diff/merge; pulse 7 giorni; wake sensitivity+stats.
+- Test: nuovi unit/marker per ogni voce.
+
 ## 0.6.293 - 2026-10-22
 
 - Manager: ruoli laya (controllo) / app (letture+coda), chiavi root-only, vecchia chiave revocata.
