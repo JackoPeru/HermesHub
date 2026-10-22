@@ -341,6 +341,10 @@ data class VisualBlock(
     val fields: List<VisualFormField> = emptyList(),
     val multi: Boolean = false,
     val submitLabel: String = "",
+    val genuiVersion: Int = 0,
+    val genuiFallback: String = "",
+    val genuiSpec: String = "",
+    val genuiStateSeed: String = "",
     val rawJson: String = ""
 )
 

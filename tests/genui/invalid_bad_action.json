@@ -1,0 +1,1 @@
+{"visual_blocks_version": 1, "visual_blocks": [{"type": "genui", "genui_version": 1, "id": "evil-action", "fallback_text": "x", "state": {}, "spec": {"kind": "column", "id": "root", "children": [{"kind": "button", "id": "b", "label": "Vai", "action": {"kind": "agent"}}, {"kind": "button", "id": "b2", "label": "Vai2", "action": {"kind": "teleport", "action_id": "x"}}]}}]}

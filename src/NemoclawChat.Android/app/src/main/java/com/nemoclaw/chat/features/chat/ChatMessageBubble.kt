@@ -313,7 +313,7 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings, onSendTe
                 if (message.visualBlocks.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         message.visualBlocks.filter { it.isValidVisualBlock() }.forEach { block ->
-                            VisualBlockView(block, onSendText)
+                            VisualBlockView(block, onSendText, settings.visualBlocksMode != "never")
                         }
                     }
                 }
@@ -357,7 +357,7 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings, onSendTe
                         Spacer(modifier = Modifier.height(10.dp))
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             message.visualBlocks.filter { it.isValidVisualBlock() }.forEach { block ->
-                                VisualBlockView(block, onSendText)
+                                VisualBlockView(block, onSendText, settings.visualBlocksMode != "never")
                             }
                         }
                     }

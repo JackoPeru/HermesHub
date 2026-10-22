@@ -453,6 +453,11 @@ private fun writeVisualBlocks(blocks: List<VisualBlock>): JSONArray {
                 .put("options", JSONArray(block.options.map { option -> JSONObject().put("id", option.id).put("label", option.label).put("detail", option.detail) }))
             "form" -> obj.put("text", block.text).put("status", block.status).put("submit_label", block.submitLabel)
                 .put("fields", JSONArray(block.fields.map { field -> JSONObject().put("key", field.key).put("label", field.label).put("kind", field.kind).put("required", field.required).put("placeholder", field.placeholder).put("options", JSONArray(field.options)) }))
+            "genui" -> obj.put("genui_version", block.genuiVersion).put("fallback_text", block.genuiFallback)
+                .put("spec", runCatching { JSONObject(block.genuiSpec) }.getOrDefault(JSONObject()))
+                .put("state", runCatching {
+                    JSONObject(GenUiStateStore.snapshotJson(genUiSnapshotKey(block.id, block.genuiSpec)))
+                }.getOrDefault(JSONObject(block.genuiStateSeed.ifBlank { "{}" })))
             "unknown_block" -> obj.put("raw_json", block.rawJson)
         }
         array.put(obj)

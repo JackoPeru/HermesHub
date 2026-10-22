@@ -297,7 +297,7 @@ import kotlin.math.roundToInt
 import kotlin.random.Random
 
 @Composable
-internal fun VisualBlockView(block: VisualBlock, onSendText: ((String) -> Unit)? = null) {
+internal fun VisualBlockView(block: VisualBlock, onSendText: ((String) -> Unit)? = null, genUiEnabled: Boolean = true) {
     // Immagini inviate dall'utente: solo miniatura, niente card con nome file.
     if (isUserLocalImage(block)) {
         MediaFileBlock(block)
@@ -326,6 +326,8 @@ internal fun VisualBlockView(block: VisualBlock, onSendText: ((String) -> Unit)?
                 "approval" -> ApprovalBlock(block)
                 "choice" -> ChoiceBlock(block, onSendText)
                 "form" -> FormBlock(block, onSendText)
+                "genui" -> if (genUiEnabled) GenUiBlock(block, onSendText)
+                else Text(block.genuiFallback.ifBlank { "Interfaccia non disponibile." }, color = Color.White, fontSize = 14.sp)
                 "device" -> DeviceBlock(block)
                 "unknown_block" -> CodeBlock("json", block.rawJson.ifBlank { "{}" }, "hermes-unknown-block.json")
             }

@@ -747,14 +747,26 @@ public static class ChatArchiveStore
         return changed;
     }
 
-    private static VisualBlockRecord CloneVisualBlock(VisualBlockRecord block) => block with
+    private static VisualBlockRecord CloneVisualBlock(VisualBlockRecord block)
     {
-        HighlightLines = block.HighlightLines.ToList(),
-        Columns = block.Columns.ToList(),
-        Rows = block.Rows.Select(row => new Dictionary<string, JsonElement>(row, StringComparer.Ordinal)).ToList(),
-        Series = block.Series.Select(series => series with { Points = series.Points.ToList() }).ToList(),
-        Images = block.Images.ToList()
-    };
+        var clone = block with
+        {
+            HighlightLines = block.HighlightLines.ToList(),
+            Columns = block.Columns.ToList(),
+            Rows = block.Rows.Select(row => new Dictionary<string, JsonElement>(row, StringComparer.Ordinal)).ToList(),
+            Series = block.Series.Select(series => series with { Points = series.Points.ToList() }).ToList(),
+            Images = block.Images.ToList()
+        };
+        // GenUI: lo snapshot di stato (interazioni locali) viene fuso in
+        // archivio, cosi' sopravvive a refresh e riavvio.
+        if (string.Equals(block.Type, "genui", StringComparison.OrdinalIgnoreCase) &&
+            block.Spec is { ValueKind: System.Text.Json.JsonValueKind.Object } &&
+            GenUiStateStore.SnapshotElement(block.Id, block.Spec.Value.GetRawText()) is { } snapshot)
+        {
+            clone = clone with { State = snapshot };
+        }
+        return clone;
+    }
 
     private static string RevisionKey(ConversationRecord item) => JsonSerializer.Serialize(new
     {

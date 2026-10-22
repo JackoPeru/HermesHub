@@ -602,6 +602,12 @@ internal fun dedupeVisualBlocks(current: List<VisualBlock>, incoming: List<Visua
         if (existing == null) {
             indexByKey[key] = out.size
             out += block
+        } else if (block.type.equals("genui", ignoreCase = true) &&
+            out[existing].type.equals("genui", ignoreCase = true) &&
+            block.id == out[existing].id
+        ) {
+            // Stessa UI rigenerata dall'agente: l'ultima versione vince.
+            out[existing] = block
         } else if (specificity(block) > specificity(out[existing])) {
             out[existing] = block
         }
@@ -3125,6 +3131,7 @@ private fun visualBlocksMetadataJson(
                 .put("mode", settings.visualBlocksMode)
                 .put("image_gallery", "supported via /v1/media proxy URLs only")
                 .put("media_file", "supported for image/video/audio/document via safe proxy URLs; include media_kind, mime_type, filename, size_bytes, duration_ms, thumbnail_url when known")
+                .put("genui", "supported: interactive declarative UI v1 (type genui with id, genui_version 1, fallback_text, state, spec tree). See GenUI instructions in system prompt.")
         )
 }
 

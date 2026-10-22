@@ -1,6 +1,9 @@
-Hermes Hub 0.6.296 (updater resiliente a /status lenta)
+Hermes Hub 0.6.297 (Generative UI v1)
 
-- Updater Linux: timeout /status manager 8s -> 90s (probe llm_serving fino a 45s sotto carico) + fallback su /jobs veloce quando /status non risponde: se la coda e' inattiva procede (il gateway e' stateless sui job), altrimenti defer.
-- Senza fix: defer permanente "manager unreachable" a GPU calde.
+- L'agente puo' generare interfacce interattive dentro la chat (blocco genui in visual_blocks): tutorial, simulazioni parametriche, dashboard, form avanzate, diagrammi a nodi.
+- 29 tipi di nodi, stato locale per istanza (slider/filtri/step senza model call), formule sicure (slider -> grafico in tempo reale), condizioni visible/enabled, azioni agent con eventi [genui ...] e aggiornamento stessa-id.
+- Validazione strict identica su Android/Windows (150 nodi, profondita' 8, URL solo proxy/https, niente codice); fallback testuale sempre; interruttore Blocchi visuali never.
+- Istruzioni agente integrate in entrambe le app; nessun cambio gateway.
+- Test: contract 9/9, Kotlin 11/11, Windows harness differenziale, suite repo verde.
 
-Asset: HermesHub-0.6.296-android.apk (Android, versionCode 300), NemoclawChat.Windows_0.6.296.0_x64.msix (x64) e HermesHub-0.6.296-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.297-android.apk (Android, versionCode 301), NemoclawChat.Windows_0.6.297.0_x64.msix (x64) e HermesHub-0.6.297-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

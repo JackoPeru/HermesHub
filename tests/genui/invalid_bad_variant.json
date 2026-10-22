@@ -1,0 +1,1 @@
+{"visual_blocks_version": 1, "visual_blocks": [{"type": "genui", "genui_version": 1, "id": "bad-variant", "fallback_text": "x", "state": {}, "spec": {"kind": "alert", "id": "a", "variant": "hyper", "text": "x"}}]}

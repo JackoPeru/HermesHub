@@ -373,6 +373,7 @@ internal fun visualBlocksMetadata(settings: AppSettings, conversationId: String?
                 .put("mode", settings.visualBlocksMode)
                 .put("image_gallery", "supported via /v1/media proxy URLs only")
                 .put("media_file", "supported for image/video/audio/document via safe proxy URLs; include media_kind, mime_type, filename, size_bytes, duration_ms, thumbnail_url when known")
+                .put("genui", "supported: interactive declarative UI v1 (type genui with id, genui_version 1, fallback_text, state, spec tree). See GenUI instructions in system prompt.")
                 .put("screenshot_contract", "For browser screenshots: capture real image, copy to HERMES_HUB_UPLOAD_PATH (~/.hermes/hub_uploads by default), then emit media_file image with media_url /v1/media/<filename>. Never return a local path or URL as chat text.")
         )
 }
@@ -2523,6 +2524,10 @@ internal fun readVisualBlock(obj: JSONObject): VisualBlock {
         fields = readVisualFields(obj.optJSONArray("fields") ?: JSONArray()),
         multi = obj.optBoolean("multi", false),
         submitLabel = obj.optString("submit_label"),
+        genuiVersion = obj.optInt("genui_version", 0),
+        genuiFallback = obj.optString("fallback_text"),
+        genuiSpec = obj.optJSONObject("spec")?.toString().orEmpty(),
+        genuiStateSeed = obj.optJSONObject("state")?.toString().orEmpty(),
         rawJson = obj.optString("raw_json", obj.toString())
     )
 }
@@ -2646,6 +2651,9 @@ internal fun VisualBlock.isValidVisualBlock(): Boolean {
         "device" -> deviceName.isNotBlank() &&
             deviceStatus in setOf("connected", "connecting", "disconnected", "unknown") &&
             (batteryPercent == null || batteryPercent in 0.0..100.0)
+        "genui" -> GenUiValidator.validateBlock(
+            id, genuiVersion, genuiFallback, genuiStateSeed, genuiSpec
+        ) != null
         "unknown_block" -> rawJson.isNotBlank()
         else -> false
     }

@@ -3263,6 +3263,7 @@ public sealed partial class HomePage : Page
             "approval" => RenderApproval(block),
             "choice" => RenderChoice(block),
             "form" => RenderForm(block),
+            "genui" => RenderGenUi(block),
             "device" => RenderDevice(block),
             "unknown_block" => RenderCode("json", block.RawJson ?? "{}", "hermes-unknown-block.json"),
             _ => new TextBlock { Text = block.Caption ?? "Blocco visuale non supportato.", Foreground = (Brush)Application.Current.Resources["MutedTextBrush"] }
