@@ -1,7 +1,6 @@
-Hermes Hub 0.6.295 (updater post-lockdown)
+Hermes Hub 0.6.296 (updater resiliente a /status lenta)
 
-- Updater Linux: busy check manager con chiave app root-only via sudo (la chiave gateway e' revocata dal lockdown 0.6.293); fallback gateway solo per server pre-lockdown.
-- Senza questo fix nessun update gateway futuro poteva installarsi (defer permanente 401).
-- Verifiche live: gateway 0.6.294 attivo, rotte phone 200, coda phone POST→pending→done OK.
+- Updater Linux: timeout /status manager 8s -> 90s (probe llm_serving fino a 45s sotto carico) + fallback su /jobs veloce quando /status non risponde: se la coda e' inattiva procede (il gateway e' stateless sui job), altrimenti defer.
+- Senza fix: defer permanente "manager unreachable" a GPU calde.
 
-Asset: HermesHub-0.6.295-android.apk (Android, versionCode 299), NemoclawChat.Windows_0.6.295.0_x64.msix (x64) e HermesHub-0.6.295-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.296-android.apk (Android, versionCode 300), NemoclawChat.Windows_0.6.296.0_x64.msix (x64) e HermesHub-0.6.296-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

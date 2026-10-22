@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.296 - 2026-10-22
+
+- Updater Linux: /status manager con timeout 90s + fallback /jobs (idle→procedi, busy/down→defer).
+- Test: marker fallback in test_release_consistency.
+
 ## 0.6.295 - 2026-10-22
 
 - Updater Linux: busy check manager con chiave app root-only via sudo (gateway revocata dal lockdown); senza fix, defer 401 permanente.

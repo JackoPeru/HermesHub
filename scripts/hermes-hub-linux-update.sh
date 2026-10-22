@@ -23,6 +23,10 @@ GATEWAY_HEALTH_URL="${GATEWAY_BASE_URL%/}/health/detailed"
 API_SERVER_KEY_FILE="${API_SERVER_KEY_FILE:-$HOME/.hermes/api_server.key}"
 HERMES_ENV_FILE="${HERMES_ENV_FILE:-$HOME/.hermes/.env}"
 MANAGER_URL="${HERMES_HUB_MANAGER_URL:-http://127.0.0.1:8643}"
+# /status impiega decine di secondi quando i backend sono sotto carico
+# (probe llm_serving fino a 45s): timeout generoso, poi fallback su /jobs.
+MANAGER_STATUS_MAX_TIME="${HERMES_HUB_UPDATE_MANAGER_MAX_TIME:-90}"
+MANAGER_JOBS_MAX_TIME="${HERMES_HUB_UPDATE_MANAGER_JOBS_MAX_TIME:-15}"
 COMFY_URL="${HERMES_HUB_COMFY_URL:-http://127.0.0.1:8188}"
 BUSY_LEASE_FILE="${HERMES_HUB_BUSY_LEASE:-$HOME/.hermes/hub_busy.lock}"
 
@@ -412,6 +416,65 @@ PY
   return 0
 }
 
+manager_jobs_fallback_reason() {
+  # /status lento o giu': seconda sorgente veloce. Solo trasporto: se
+  # /jobs risponde e non c'e' nulla di attivo, il gateway (stateless sui
+  # job: vivono in manager+comfy) puo' aggiornarsi; altrimenti defer.
+  local key="$1" curl_cfg body_file status verdict
+  curl_cfg="$(mktemp "$TMP_DIR/manager-jobs-auth.XXXXXX")" || { printf 'manager unreachable'; return 0; }
+  body_file="$(mktemp "$TMP_DIR/manager-jobs.XXXXXX")" || {
+    rm -f "$curl_cfg"
+    printf 'manager unreachable'
+    return 0
+  }
+  if ! write_curl_auth_config "$key" "$curl_cfg"; then
+    rm -f "$curl_cfg" "$body_file"
+    printf 'manager unreachable'
+    return 0
+  fi
+  status="$(curl --silent --connect-timeout 3 --max-time "$MANAGER_JOBS_MAX_TIME" \
+    -K "$curl_cfg" --output "$body_file" --write-out '%{http_code}' \
+    "$MANAGER_URL/jobs?limit=50" 2>/dev/null || true)"
+  rm -f "$curl_cfg"
+  if [ "$status" != "200" ]; then
+    rm -f "$body_file"
+    printf 'manager unreachable'
+    return 0
+  fi
+  verdict="$(python3 - "$body_file" <<'PY' 2>/dev/null || true
+import json
+import sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as jobs_file:
+        data = json.load(jobs_file)
+except Exception:
+    print("manager jobs unreadable")
+    raise SystemExit(0)
+jobs = data.get("jobs")
+if not isinstance(jobs, list):
+    print("manager jobs unreadable")
+    raise SystemExit(0)
+active = sum(
+    1 for job in jobs
+    if isinstance(job, dict) and job.get("status") in ("queued", "running")
+)
+if active > 0:
+    print("manager has %d active job(s) (status probe slow)" % active)
+else:
+    print("__MANAGER_JOBS_IDLE__")
+PY
+  )"
+  rm -f "$body_file"
+  if [ "$verdict" = "__MANAGER_JOBS_IDLE__" ]; then
+    echo "manager /status lento, /jobs inattiva: procedo (solo gateway, i job vivono in manager+comfy)" >&2
+    return 0
+  elif [ -z "$verdict" ]; then
+    printf 'manager status unreadable'
+  else
+    printf '%s' "$verdict"
+  fi
+}
+
 manager_busy_reason() {
   local key="$1"
   if [ -z "$key" ]; then
@@ -435,7 +498,7 @@ manager_busy_reason() {
     printf 'manager API key configuration invalid'
     return 0
   fi
-  status="$(curl --silent --connect-timeout 3 --max-time 8 \
+  status="$(curl --silent --connect-timeout 3 --max-time "$MANAGER_STATUS_MAX_TIME" \
     -K "$curl_cfg" --output "$body_file" --write-out '%{http_code}' \
     "$MANAGER_URL/status" 2>/dev/null || true)"
   rm -f "$curl_cfg"
@@ -447,7 +510,7 @@ manager_busy_reason() {
       ;;
     000|'')
       rm -f "$body_file"
-      printf 'manager unreachable'
+      manager_jobs_fallback_reason "$key"
       return 0
       ;;
     200) ;;

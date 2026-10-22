@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.295"
-EXPECTED_ANDROID_VERSION_CODE = 299
+EXPECTED_VERSION = "0.6.296"
+EXPECTED_ANDROID_VERSION_CODE = 300
 
 
 def read(relative_path: str) -> str:
@@ -567,6 +567,9 @@ class ReleaseConsistencyTests(unittest.TestCase):
         # il busy check usa la chiave app root-only via sudo.
         self.assertIn("/etc/hermes/keys/app.key", updater)
         self.assertIn("sudo -n cat", updater)
+        # Status lenta sotto carico: timeout lungo + fallback su /jobs.
+        self.assertIn("manager_jobs_fallback_reason", updater)
+        self.assertIn("MANAGER_STATUS_MAX_TIME", updater)
 
     def test_android_fresh_install_has_preconfigured_connection(self) -> None:
         app_settings = read(
