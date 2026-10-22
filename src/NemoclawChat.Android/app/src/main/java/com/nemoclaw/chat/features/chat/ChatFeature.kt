@@ -181,6 +181,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
@@ -1175,6 +1177,13 @@ internal fun ChatScreen(
         mutableStateOf("Turno staccato: ricontrollo da solo, oppure tocca Ricontrolla.")
     }
     var detachedNote by remember(state.activeConversationId) { mutableStateOf<String?>(null) }
+    // Follow live del turno sul gateway: mentre gira, la chat mostra
+    // l'output che cresce (SSE per i run, poll per le Responses). Si ferma
+    // da solo al terminale (resume normale), all'invio o al cambio chat.
+    var liveFollowStopped by remember(state.activeConversationId) { mutableStateOf(false) }
+    var liveFollowGen by remember(state.activeConversationId) { mutableStateOf(0) }
+    val liveFollowFlow = remember(state.activeConversationId) { MutableStateFlow<StreamingState?>(null) }
+    val liveFollow by liveFollowFlow.collectAsState()
     fun applyResumeOutcome(outcome: DetachedResumeOutcome) {
         detachedResumeSubtitle(outcome)?.let { detachedSubtitle = it }
         detachedResumeNote(outcome)?.let { detachedNote = it }
@@ -1185,6 +1194,88 @@ internal fun ChatScreen(
     }
     LaunchedEffect(state.activeConversationId) {
         recheckActiveWork(::applyResumeOutcome)
+    }
+    // Avvio follow live: binding vivo + niente turno locale in corso.
+    // Chiave su (cid, liveFollowGen): "Ferma" lo cancella e non riparte.
+    suspend fun runLiveFollow(binding: ActiveWorkBinding, followFlow: MutableStateFlow<StreamingState?>) {
+        // Segue il turno vivo sul gateway e riversa l'output che cresce nel
+        // flow (bolla streaming sintetica). Run = SSE nativo, Responses =
+        // poll veloce. Approvals escluse: le gestisce il recheck dedicato.
+        val cid = state.activeConversationId ?: return
+        val effProfile = resolveWorkProfile(binding.profile, botProfile)
+        val effMultiplex = resolveWorkMultiplex(binding.profile, binding.multiplex, botMultiplexEnabled)
+        fun baseState(): StreamingState = StreamingState(
+            status = "Seguo il turno live dal gateway…",
+            activityLog = listOf("Seguo il turno live dal gateway…"),
+            source = "Hermes",
+            activeRunId = binding.runId.takeIf { it.isNotBlank() },
+            responseId = binding.responseId
+        )
+        if (binding.runId.isNotBlank()) {
+            val client = HermesRunClient(botSettings, botApiKey, effProfile, effMultiplex)
+            try {
+                client.events(binding.runId).collect { (name, data) ->
+                    if (state.activeConversationId != cid || state.sending || state.streamingState != null) {
+                        throw kotlinx.coroutines.CancellationException("follow interrotto")
+                    }
+                    val fresh = runCatching { parseSseData(name, data) }.getOrDefault(emptyList())
+                        .filterNot { it is ChatStreamEvent.ApprovalRequest || it is ChatStreamEvent.ApprovalResolved }
+                    if (fresh.isEmpty()) return@collect
+                    var next = followFlow.value ?: baseState()
+                    fresh.forEach { next = next.applyEvent(it) }
+                    if (next.text.isNotBlank() || next.thinking.isNotBlank()) followFlow.value = next
+                }
+            } catch (cancel: kotlinx.coroutines.CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+            }
+            if (state.activeConversationId == cid) {
+                recheckActiveWork(::applyResumeOutcome)
+            }
+            return
+        }
+        val respId = binding.responseId?.takeIf { it.isNotBlank() } ?: return
+        val url = responseStatusUrl(botSettings, effProfile, effMultiplex, respId)
+        while (true) {
+            if (state.activeConversationId != cid || state.sending || state.streamingState != null) return
+            val (code, body) = runCatching { httpGetResponseQuick(url, botApiKey) }.getOrElse { 0 to "" }
+            if (code !in 200..299) {
+                kotlinx.coroutines.delay(3000)
+                continue
+            }
+            val storedStatus = runCatching { JSONObject(body).optString("status") }.getOrNull().orEmpty()
+            if (storedStatus == "completed" || storedStatus == "failed") {
+                applyResumeOutcome(resumeResponseBinding(binding))
+                followFlow.value = null
+                return
+            }
+            val events = runCatching { parseFullBody(body) }.getOrDefault(emptyList())
+                .filterNot { it is ChatStreamEvent.ApprovalRequest || it is ChatStreamEvent.ApprovalResolved }
+            if (events.isNotEmpty()) {
+                val prev = followFlow.value
+                val text = foldLiveFollowText(prev?.text.orEmpty(), events)
+                val thinking = foldLiveFollowThinking(prev?.thinking.orEmpty(), events)
+                if (text.isNotBlank() || thinking.isNotBlank()) {
+                    followFlow.value = (prev ?: baseState()).copy(
+                        text = text,
+                        thinking = thinking,
+                        hasThinking = thinking.isNotBlank()
+                    )
+                }
+            }
+            kotlinx.coroutines.delay(3000)
+        }
+    }
+
+    LaunchedEffect(state.activeConversationId, liveFollowGen) {
+        liveFollowFlow.value = null
+        if (liveFollowStopped) return@LaunchedEffect
+        val cid = state.activeConversationId ?: return@LaunchedEffect
+        val binding = withContext(Dispatchers.IO) { loadActiveWorkBinding(context, cid) }
+            ?: return@LaunchedEffect
+        if (binding.runId.isBlank() && binding.responseId.isNullOrBlank()) return@LaunchedEffect
+        if (state.sending || state.streamingState != null) return@LaunchedEffect
+        runLiveFollow(binding, liveFollowFlow)
     }
     // Ripresa: ricontrolla il binding mentre la chat e aperta (rientro da
     // background, poll STARTED-only). Solo se esiste un binding: una lettura
@@ -1236,6 +1327,24 @@ internal fun ChatScreen(
         val totalItems = state.messages.size + 1
         if (totalItems > 0) {
             listState.scrollToItem(totalItems - 1)
+        }
+    }
+    // Stessa regola per il follow live: segue in fondo solo se eri gia' li'.
+    LaunchedEffect(liveFollow?.text?.length) {
+        if (liveFollow == null) {
+            return@LaunchedEffect
+        }
+        val info = listState.layoutInfo
+        val total = info.totalItemsCount
+        val wasAtBottom = if (total <= 1) {
+            true
+        } else {
+            val last = info.visibleItemsInfo.lastOrNull() ?: return@LaunchedEffect
+            !((total - 1 - last.index) >= 1 ||
+                (last.index == total - 1 && last.offset + last.size > info.viewportEndOffset + 150))
+        }
+        if (wasAtBottom && total > 0) {
+            listState.scrollToItem(total - 1)
         }
     }
     val contextUsage = remember(
@@ -1370,7 +1479,18 @@ internal fun ChatScreen(
         }
         // Turno staccato senza run banner (Responses senza runId, kill/rete
         // morta): il server continua, la chat ricontrolla. Mai silenzio.
-        if (detachedFollowUp && backgroundWork == null && !state.sending && state.streamingState == null) {
+        // Mentre il follow live e' attivo, il banner mostra avanzamento e stop.
+        val followingLive = liveFollow != null && !state.sending && state.streamingState == null
+        if (followingLive) {
+            LiveFollowBanner(
+                chars = liveFollow?.text?.length ?: 0,
+                onStop = {
+                    liveFollowStopped = true
+                    liveFollowGen++
+                    liveFollowFlow.value = null
+                }
+            )
+        } else if (detachedFollowUp && backgroundWork == null && !state.sending && state.streamingState == null) {
             DetachedFollowBanner(
                 subtitle = detachedSubtitle,
                 checking = detachedChecking,
@@ -1425,6 +1545,16 @@ internal fun ChatScreen(
                                         .onFailure { Toast.makeText(context, "TTS Kokoro non disponibile: ${it.message}", Toast.LENGTH_SHORT).show() }
                                 }
                             }
+                        )
+                    }
+                }
+                liveFollow?.let { follow ->
+                    item(key = "live-follow") {
+                        StreamingBubbleView(
+                            follow,
+                            settings.showToolCalls,
+                            settings.showMessageMetrics,
+                            settings.metricFilter()
                         )
                     }
                 }
@@ -3015,10 +3145,79 @@ internal fun BackgroundWorkBanner(
 }
 
 /**
- * Turno staccato (kill/rete morta, server continua per
- * continue_on_disconnect): la chat segue il recupero in vista invece di
- * lasciare il turno morto in silenzio. Ricontrolla ora o ignora.
+ * Accumulo output del follow live (Responses via poll): gli snapshot
+ * sostituiscono, i delta si fondono sul testo precedente. Puro, testabile.
  */
+internal fun foldLiveFollowText(previous: String, events: List<ChatStreamEvent>): String {
+    val snaps = events.filterIsInstance<ChatStreamEvent.TextSnapshot>()
+    if (snaps.isNotEmpty()) return snaps.last().text
+    var acc = previous
+    events.filterIsInstance<ChatStreamEvent.TextDelta>().forEach { acc = mergeTextDelta(acc, it.delta) }
+    return acc
+}
+
+internal fun foldLiveFollowThinking(previous: String, events: List<ChatStreamEvent>): String {
+    val snaps = events.filterIsInstance<ChatStreamEvent.ThinkingSnapshot>()
+    if (snaps.isNotEmpty()) return snaps.last().text
+    var acc = previous
+    events.filterIsInstance<ChatStreamEvent.ThinkingDelta>().forEach { acc = mergeTextDelta(acc, it.delta) }
+    return acc
+}
+
+/**
+ * Banner turni staccati (kill/rete morta, server continua per
+ * continue_on_disconnect): follow live mentre gira, recupero guidato poi.
+ */
+@Composable
+internal fun LiveFollowBanner(
+    chars: Int,
+    onStop: () -> Unit
+) {
+    Surface(
+        color = AppColors.Elevated,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, AppColors.Border),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(
+                Icons.Rounded.CloudSync,
+                contentDescription = null,
+                tint = AppColors.Success,
+                modifier = Modifier.size(20.dp)
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "Seguo il turno live",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    "$chars caratteri · si aggiorna da solo",
+                    color = AppColors.Muted,
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Clip
+                )
+            }
+            TextButton(
+                onClick = onStop,
+                colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+            ) {
+                Text("Ferma", color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(4.dp))
+}
+
 @Composable
 internal fun DetachedFollowBanner(
     subtitle: String,

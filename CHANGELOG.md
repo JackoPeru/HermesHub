@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.292 - 2026-10-22
+
+- Android, chat: follow live del turno sul gateway al rientro (SSE run / poll Responses), banner con stop, resume al terminale.
+- Test: LiveFollowTest (5/5), test_live_follow (3/3).
+
 ## 0.6.291 - 2026-10-21
 
 - Sicurezza: chiavi dispositivo P-256 + firma con biometrico sulle azioni server, anti-replay sul gateway, revoca per-telefono.
