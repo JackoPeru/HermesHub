@@ -7,6 +7,10 @@ After=network-online.target
 Type=simple
 User=matteo
 Group=matteo
+# Chiavi controllo/app via credential root-only (l'agente non le legge):
+# manager.key = controllo pieno (laya), app.key = ruolo app.
+LoadCredential=manager.key:/etc/hermes/keys/manager.key
+LoadCredential=app.key:/etc/hermes/keys/app.key
 WorkingDirectory=/opt/hermes/gpu-manager
 ExecStart=/opt/hermes/gpu-manager/venv/bin/python /opt/hermes/gpu-manager/manager.py
 Restart=on-failure
