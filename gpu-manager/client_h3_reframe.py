@@ -46,7 +46,7 @@ def main():
     duration_limit = min(secs, 15)  # ref2va trained range ~124-362 frames; ref video max 15s
     body = {
         "preset": "journey_video_reframe916",
-        "parameters": {
+        "params": {
             "prompt": PROMPT,
             "input_video": "/opt/hermes/runtimes/comfyui/app/input/h3_reframe_test.mp4",
             "width": 768,

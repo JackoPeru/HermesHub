@@ -916,8 +916,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(413, {"ok": False, "error": "body troppo grande"})
             return
         payload = self._read_json()
-        result = submit_preset_job(self.cfg, payload.get("preset", ""),
-                                   payload.get("params", {}))
+        params = payload.get("params", None)
+        if params is None:
+            # Alias tollerato: gli agenti scrivono naturalmente "parameters".
+            params = payload.get("parameters", {})
+        result = submit_preset_job(self.cfg, payload.get("preset", ""), params)
         self._send(200 if result.get("ok") else result.get("status", 400), result)
 
 

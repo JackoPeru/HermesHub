@@ -89,6 +89,15 @@ class layaRolesTests(unittest.TestCase):
         self.assertNotIn("gpu-manager.yaml", src)
         self.assertNotIn("127.0.0.1:8643", src)
 
+    def test_laya_submit_accepts_params_alias(self) -> None:
+        # Il client storico manda "parameters": il bridge accetta l'alias,
+        # mai params droppati in silenzio.
+        bridge = text(LAYA)
+        self.assertIn('payload.get("params"', bridge)
+        self.assertIn('payload.get("parameters"', bridge)
+        client = text(REFRAME_SCRIPT)
+        self.assertIn('"params": {', client)
+
 
 class AppKeysTests(unittest.TestCase):
     def test_android_gpu_app_key(self) -> None:
