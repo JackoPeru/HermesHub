@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.295 - 2026-10-22
+
+- Updater Linux: busy check manager con chiave app root-only via sudo (gateway revocata dal lockdown); senza fix, defer 401 permanente.
+- Test: marker updater in test_release_consistency.
+
 ## 0.6.294 - 2026-10-22
 
 - Activity gruppi strutturata + storico; phone_use (gateway+Android+Windows); fleet; PR/diff/merge; pulse 7 giorni; wake sensitivity+stats.

@@ -328,6 +328,16 @@ resolve_manager_key() {
     fi
   fi
 
+  # Lockdown manager (0.6.293+): la chiave gateway e' revocata sul manager.
+  # Prima la chiave app root-only via sudo (sola lettura, busy check),
+  # poi eventuale gateway key (server pre-lockdown).
+  for key_path in "${HERMES_HUB_MANAGER_KEY_FILE:-}" /etc/hermes/keys/app.key; do
+    [ -n "$key_path" ] || continue
+    key="$(sudo -n cat -- "$key_path" 2>/dev/null | tr -d '[:space:]')" || continue
+    is_safe_bearer_key "$key" || continue
+    printf '%s' "$key"
+    return 0
+  done
   if [ -n "$gateway_key" ]; then
     is_safe_bearer_key "$gateway_key" || return 2
     printf '%s' "$gateway_key"

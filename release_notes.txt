@@ -1,10 +1,7 @@
-Hermes Hub 0.6.294 (activity, phone_use, fleet, git, pulse, wake)
+Hermes Hub 0.6.295 (updater post-lockdown)
 
-- Activity Tracker: turni gruppo strutturati (stato per membro, risposte espandibili, fallimenti) + storico ultimi 20.
-- Controllo remoto Android: coda comandi phone_use sul gateway (tap/swipe/text/key/open_app/list_apps/dump_tree), AccessibilityService armato con kill switch, pannello Windows, istruzioni agente.
-- Fleet: scheda FLOTTA in Bot (bot, gruppi, turni, GPU).
-- Git da telefono: PR aperte, diff colorato, merge con conferma, token in Keystore.
-- Pulse: grafico 7 giorni completati/falliti. Wake word: sensibilita + statistiche ascolto.
-- Test: suite verde; build entrambe senza errori.
+- Updater Linux: busy check manager con chiave app root-only via sudo (la chiave gateway e' revocata dal lockdown 0.6.293); fallback gateway solo per server pre-lockdown.
+- Senza questo fix nessun update gateway futuro poteva installarsi (defer permanente 401).
+- Verifiche live: gateway 0.6.294 attivo, rotte phone 200, coda phone POST→pending→done OK.
 
-Asset: HermesHub-0.6.294-android.apk (Android, versionCode 298), NemoclawChat.Windows_0.6.294.0_x64.msix (x64) e HermesHub-0.6.294-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.295-android.apk (Android, versionCode 299), NemoclawChat.Windows_0.6.295.0_x64.msix (x64) e HermesHub-0.6.295-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

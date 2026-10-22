@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.294"
-EXPECTED_ANDROID_VERSION_CODE = 298
+EXPECTED_VERSION = "0.6.295"
+EXPECTED_ANDROID_VERSION_CODE = 299
 
 
 def read(relative_path: str) -> str:
@@ -563,6 +563,10 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn("FAILED_RELEASE_FILE", updater)
         self.assertIn("record_failed_release", updater)
         self.assertIn("Quarantined failed release", updater)
+        # Lockdown 0.6.293+: la chiave gateway e' revocata sul manager;
+        # il busy check usa la chiave app root-only via sudo.
+        self.assertIn("/etc/hermes/keys/app.key", updater)
+        self.assertIn("sudo -n cat", updater)
 
     def test_android_fresh_install_has_preconfigured_connection(self) -> None:
         app_settings = read(
