@@ -62,6 +62,12 @@ DEFAULT_CONFIG = {
     # Chiavi accettate in ingresso (Bearer). Se vuote si usa la chiave manager.
     "api_key": "",
     "trusted_keys": [],
+    # Chiave app (letture NL + submit job): l'agente non la conosce mai.
+    # Via credential file app.key, env HERMES_GPU_APP_KEY o yaml.
+    "app_key": "",
+    # Chiavi agente/gateway (solo submit job via /laya/jobs, mai NL/modi).
+    # Allowlist non segreta: l'agente conosce gia' queste chiavi.
+    "agent_keys": [],
 }
 
 # Risposta a scelta per laya: intento -> modo del manager.
@@ -110,6 +116,10 @@ _MODE_KEYWORDS = (
 )
 _STATUS_KEYWORDS = ("stato", "status", "come sta", "che succede", "situazione",
                     "riassunto", "come va")
+
+# Riavvio manager (solo NL app, mai agente-diagnostica): verbo + target.
+_REBOOT_VERBS = ("riavvia", "restart", "reboot", "ravvia")
+_REBOOT_TARGETS = ("manager", "gestore")
 
 log = logging.getLogger(APP_NAME)
 
@@ -174,7 +184,27 @@ def load_config(env: dict | None = None) -> dict:
             pass
     if env.get("HERMES_GPU_MANAGER_KEY") and not cfg.get("manager_key"):
         cfg["manager_key"] = env["HERMES_GPU_MANAGER_KEY"]
+    cred_manager = _credential_file("manager.key")
+    if cred_manager and not cfg.get("manager_key"):
+        cfg["manager_key"] = cred_manager
+    cred_app = _credential_file("app.key")
+    if cred_app and not cfg.get("app_key"):
+        cfg["app_key"] = cred_app
+    elif env.get("HERMES_GPU_APP_KEY") and not cfg.get("app_key"):
+        cfg["app_key"] = env["HERMES_GPU_APP_KEY"]
     return cfg
+
+
+def _credential_file(name: str) -> str:
+    """Chiave da file root-only via systemd LoadCredential (come il manager)."""
+    base = os.environ.get("CREDENTIALS_DIRECTORY", "")
+    if not base:
+        return ""
+    try:
+        with open(os.path.join(base, name), "r", encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
 
 
 def _manager_config_keys() -> list:
@@ -212,12 +242,44 @@ def accept_keys(cfg: dict) -> list:
     return keys or manager_keys(cfg)
 
 
+def app_keys(cfg: dict) -> list:
+    """Chiave app (utenti): NL completo + submit job. Mai all'agente."""
+    keys = [cfg.get("app_key") or ""]
+    return [k for k in keys if isinstance(k, str) and k]
+
+
+def agent_keys(cfg: dict) -> list:
+    """Chiavi agente/gateway (solo submit via /laya/jobs): allowlist, non segrete."""
+    extra = cfg.get("agent_keys") or []
+    if isinstance(extra, str):
+        extra = [extra]
+    if not isinstance(extra, list):
+        return []
+    return [k for k in extra if isinstance(k, str) and k]
+
+
+def caller_role(cfg: dict, auth: str) -> str:
+    """Ruolo del chiamante: 'app' | 'agent' | ''. Mai entrambi."""
+    import hmac as _hmac
+    for key in app_keys(cfg):
+        if _hmac.compare_digest(auth, f"Bearer {key}"):
+            return "app"
+    for key in agent_keys(cfg):
+        if _hmac.compare_digest(auth, f"Bearer {key}"):
+            return "agent"
+    return ""
+
+
 def classify_text(text: str) -> dict:
     """Fallback deterministico testo -> {"intent","mode"}. Mai solleva."""
     try:
         if not isinstance(text, str):
             return {"intent": "unknown", "mode": None}
         low = text.lower()
+        if any(verb in low for verb in _REBOOT_VERBS) and any(
+            target in low for target in _REBOOT_TARGETS
+        ):
+            return {"intent": "reboot", "mode": None}
         for mode, keywords in _MODE_KEYWORDS:
             for keyword in keywords:
                 if keyword in low:
@@ -559,6 +621,15 @@ def _handle_single(cfg: dict, text: str, *, execute: bool = True, http=http_json
         return {"ok": ok, "reply": reply, "intent": "status", "mode": None,
                 "backend": backend, "manager_reachable": ok}
 
+    if intent == "reboot":
+        if not execute:
+            return {"ok": True, "intent": "reboot", "mode": None, "backend": backend,
+                    "reply": "Ok, riavvierei il manager.", "executed": False}
+        restarted = restart_manager(cfg, http, runner, sleeper, clock)
+        reply = "Manager riavviato, torna tra poco." if restarted else "Riavvio manager fallito."
+        return {"ok": restarted, "reply": reply, "intent": "reboot", "mode": None,
+                "backend": backend, "manager_reachable": restarted, "executed": True}
+
     if intent != "mode" or mode is None:
         return {"ok": False, "intent": "unknown", "mode": None, "backend": backend,
                 "reply": compose_reply("", {"stage": "bad_mode"})}
@@ -581,6 +652,48 @@ def _handle_single(cfg: dict, text: str, *, execute: bool = True, http=http_json
         "executed": True,
         "manager": outcome,
     }
+
+
+# Preset sottomettibili via /laya/jobs (stessi del manager; raw workflow mai).
+LAYA_SUBMIT_PRESETS = {
+    "create_image": "image",
+    "edit_image": "image",
+    "journey_video_preview": "video",
+    "journey_video_quality": "video",
+    "journey_video_first_last": "video",
+    "journey_video_reference": "video",
+    "journey_video_reference_fast": "video",
+    "journey_video_reframe916": "video",
+}
+
+LAYA_SUBMIT_MAX_PARAMS_BYTES = 32 * 1024
+LAYA_SUBMIT_MAX_PROMPT_CHARS = 4000
+
+
+def submit_preset_job(cfg: dict, preset: str, params: dict | None, http=http_json) -> dict:
+    """Sottomette un preset al manager. Solo preset allowlist, mai workflow raw."""
+    name = str(preset or "").strip()
+    kind = LAYA_SUBMIT_PRESETS.get(name)
+    if not kind:
+        return {"ok": False, "error": f"preset non consentito: {name or '?'}", "status": 400}
+    clean = dict(params) if isinstance(params, dict) else {}
+    try:
+        if len(json.dumps(clean, ensure_ascii=False)) > LAYA_SUBMIT_MAX_PARAMS_BYTES:
+            return {"ok": False, "error": "params troppo grandi", "status": 413}
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "error": "params illeggibili", "status": 400}
+    prompt = clean.get("prompt")
+    if isinstance(prompt, str) and len(prompt) > LAYA_SUBMIT_MAX_PROMPT_CHARS:
+        return {"ok": False, "error": "prompt troppo lungo", "status": 413}
+    url = str(cfg.get("manager_url", "")).rstrip("/") + f"/jobs/{kind}"
+    code, data = http("POST", url, {"preset": name, "params": clean}, _auth_headers(cfg), 30)
+    if code in (200, 202) and isinstance(data, dict) and data.get("job_id"):
+        return {"ok": True, "job_id": data["job_id"], "status": data.get("status", "queued"),
+                "preset": name, "code": code}
+    detail = ""
+    if isinstance(data, dict):
+        detail = str(data.get("error") or data.get("detail") or "")[:200]
+    return {"ok": False, "error": detail or "submit fallito", "status": code}
 
 
 def handle_command(cfg: dict, text: str, *, execute: bool = True, http=http_json,
@@ -619,9 +732,11 @@ def handle_command(cfg: dict, text: str, *, execute: bool = True, http=http_json
                 previews.append(f"forzerei {found['mode']}")
             elif found["intent"] == "status":
                 previews.append("mostrerei lo stato")
+            elif found["intent"] == "reboot":
+                previews.append("riavvierei il manager")
             else:
                 previews.append(f"non ho capito {seg!r}")
-        ok = all(f["intent"] in ("mode", "status") for f in classified)
+        ok = all(f["intent"] in ("mode", "status", "reboot") for f in classified)
         actions = [dict(segment=seg, intent=f["intent"], mode=f["mode"],
                         backend=f["backend"], executed=False)
                    for seg, f in zip(segments, classified)]
@@ -639,6 +754,15 @@ def handle_command(cfg: dict, text: str, *, execute: bool = True, http=http_json
                 "backend": found["backend"],
                 "ok": ok,
                 "reply": summarize_status(status) if ok else "Il manager non risponde.",
+                "executed": True,
+            })
+        elif found["intent"] == "reboot":
+            restarted = restart_manager(cfg, http, runner, sleeper, clock)
+            actions.append({
+                "segment": seg, "intent": "reboot", "mode": None,
+                "backend": found["backend"],
+                "ok": restarted,
+                "reply": "Manager riavviato, torna tra poco." if restarted else "Riavvio manager fallito.",
                 "executed": True,
             })
         elif found["intent"] == "mode" and found["mode"]:
@@ -664,8 +788,10 @@ def handle_command(cfg: dict, text: str, *, execute: bool = True, http=http_json
             })
     mode_actions = [a for a in actions if a["intent"] == "mode"]
     status_actions = [a for a in actions if a["intent"] == "status"]
-    ok = all(a["ok"] for a in mode_actions) and all(a["ok"] for a in status_actions)
-    if not mode_actions and not status_actions:
+    reboot_actions = [a for a in actions if a["intent"] == "reboot"]
+    ok = all(a["ok"] for a in mode_actions) and all(a["ok"] for a in status_actions) \
+        and all(a["ok"] for a in reboot_actions)
+    if not mode_actions and not status_actions and not reboot_actions:
         ok = False
     reply = " ".join(a["reply"] for a in actions)
     return {"ok": ok, "reply": reply, "intent": "multi",
@@ -718,16 +844,21 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path.split("?")[0] == "/":
             self._send(200, {"service": APP_NAME, "chat": "POST /laya"})
             return
+        if self.path.split("?")[0] == "/laya/jobs":
+            return self._get_job()
         self._send(404, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802 - nome stdlib
-        if self.path.split("?")[0] != "/laya":
+        path = self.path.split("?")[0]
+        if path == "/laya/jobs":
+            return self._post_jobs()
+        if path != "/laya":
             self._send(404, {"ok": False, "error": "not found"})
             return
-        if not accept_keys(self.cfg):
+        if not app_keys(self.cfg):
             self._send(500, {"ok": False, "error": "bridge api_key non configurata"})
             return
-        if not self._authorized():
+        if caller_role(self.cfg, self.headers.get("authorization", "")) != "app":
             self._send(401, {"ok": False, "error": "invalid bridge api key"})
             return
         payload = self._read_json()
@@ -739,6 +870,55 @@ class _Handler(BaseHTTPRequestHandler):
             log.warning("handle_command fallito: %r", exc)
             result = {"ok": False, "reply": "Errore interno.", "intent": "unknown"}
         self._send(200, result)
+
+    def _get_job(self) -> None:
+        """Stato job (solo lettura) per app e agente. Mai workflow interi."""
+        import re as _re
+        import urllib.parse as _urlparse
+        role = caller_role(self.cfg, self.headers.get("authorization", ""))
+        if role not in ("app", "agent"):
+            if not app_keys(self.cfg) and not agent_keys(self.cfg):
+                self._send(500, {"ok": False, "error": "bridge api_key non configurata"})
+            else:
+                self._send(401, {"ok": False, "error": "invalid bridge api key"})
+            return
+        query = _urlparse.urlparse(self.path).query
+        params = _urlparse.parse_qs(query)
+        job_id = (params.get("job_id") or [""])[0].strip()
+        if not _re.fullmatch(r"[A-Za-z0-9_-]{1,64}", job_id):
+            self._send(400, {"ok": False, "error": "bad job_id"})
+            return
+        url = str(self.cfg.get("manager_url", "")).rstrip("/") + "/jobs/" + job_id
+        code, data = http_json("GET", url, None, _auth_headers(self.cfg), 15)
+        if code != 200 or not isinstance(data, dict):
+            self._send(502, {"ok": False, "error": "manager non raggiungibile", "status": code})
+            return
+        safe = {k: data.get(k) for k in (
+            "job_id", "status", "progress", "phase", "preset", "kind",
+            "error", "created_at", "updated_at", "result_paths")}
+        safe["result_paths"] = safe.get("result_paths") if isinstance(safe.get("result_paths"), list) else []
+        self._send(200, {"ok": True, **{k: v for k, v in safe.items() if v is not None}})
+
+    def _post_jobs(self) -> None:
+        """Submit preset per app e agente. Mai workflow raw, mai NL/modi."""
+        role = caller_role(self.cfg, self.headers.get("authorization", ""))
+        if role not in ("app", "agent"):
+            if not app_keys(self.cfg) and not agent_keys(self.cfg):
+                self._send(500, {"ok": False, "error": "bridge api_key non configurata"})
+            else:
+                self._send(401, {"ok": False, "error": "invalid bridge api key"})
+            return
+        try:
+            length = int(self.headers.get("content-length") or 0)
+        except (TypeError, ValueError):
+            length = 0
+        if length > LAYA_SUBMIT_MAX_PARAMS_BYTES + 1024:
+            self._send(413, {"ok": False, "error": "body troppo grande"})
+            return
+        payload = self._read_json()
+        result = submit_preset_job(self.cfg, payload.get("preset", ""),
+                                   payload.get("params", {}))
+        self._send(200 if result.get("ok") else result.get("status", 400), result)
 
 
 def serve(cfg: dict | None = None) -> None:

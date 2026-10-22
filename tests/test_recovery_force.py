@@ -214,8 +214,8 @@ class TestManagerWiring(unittest.TestCase):
         assert node is not None
         seg = ast.get_source_segment(self.src, node)
         assert seg is not None
-        # `Depends(require_key)` vive nella firma: resta l'unico gate.
-        self.assertIn("require_key", seg)
+        # `Depends(require_laya)` vive nella firma: solo controllo laya.
+        self.assertIn("require_laya", seg)
         # Il bridge gira in locale: MAI il gate utente-locale, mai il gate manuale.
         self.assertNotIn("_require_user_control", seg)
         self.assertNotIn("_require_manual_allowed", seg)

@@ -336,6 +336,8 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
     var deviceIdState by remember { mutableStateOf(loadDeviceId(context)) }
     var deviceStatus by remember { mutableStateOf("Telefono non registrato: le azioni server usano solo la chiave.") }
     var deviceBusy by remember { mutableStateOf(false) }
+    var registeredDevices by remember { mutableStateOf<List<RegisteredDevice>>(emptyList()) }
+    var devicesMsg by remember { mutableStateOf("") }
     var pushStatus by remember { mutableStateOf("Notifiche non attive.") }
     var pushBusy by remember { mutableStateOf(false) }
     val pushPermissionLauncher = rememberLauncherForActivityResult(
@@ -382,6 +384,49 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             }
         }.getOrElse { it.message ?: "Errore" }
         onDone(result)
+    }
+
+    fun refreshDevices() {
+        scope.launch {
+            devicesMsg = "Leggo…"
+            try {
+                val body = httpGet(resolveHermesUrl(settings, "/v1/hub/devices"), loadGatewaySecret(context))
+                val arr = JSONObject(body).optJSONArray("devices") ?: JSONArray()
+                registeredDevices = (0 until arr.length()).mapNotNull { i ->
+                    val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                    RegisteredDevice(
+                        o.optString("device_id"),
+                        o.optString("label"),
+                        o.optBoolean("revoked"),
+                        o.optBoolean("has_token")
+                    )
+                }.filter { it.id.isNotBlank() }
+                devicesMsg = if (registeredDevices.isEmpty()) "Nessun telefono registrato."
+                else "${registeredDevices.size} registrati (un telefono che non riconosci: revocalo)."
+            } catch (failed: Exception) {
+                devicesMsg = failed.message ?: "Errore lettura."
+            }
+        }
+    }
+
+    fun revokeDevice(id: String) {
+        scope.launch {
+            devicesMsg = runCatching {
+                val (code, _) = postJson(
+                    resolveHermesUrl(settings, "/v1/hub/devices/$id"),
+                    JSONObject(), loadGatewaySecret(context), method = "DELETE", allowCompatAuth = false
+                )
+                if (code !in 200..299) "Revoca HTTP $code" else ""
+            }.getOrElse { it.message ?: "Errore revoca." }
+            if (devicesMsg.isBlank()) {
+                if (deviceIdState == id) {
+                    clearDeviceId(context)
+                    deviceIdState = null
+                    deviceStatus = "Telefono non registrato: le azioni server usano solo la chiave."
+                }
+                refreshDevices()
+            }
+        }
     }
     val maintenanceLabels = mapOf(
         "update" to "Aggiorna",
@@ -665,6 +710,49 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                         colors = ButtonDefaults.buttonColors(containerColor = AppColors.Error, contentColor = Color.White)
                     ) { Text("Revoca") }
                 }
+                HorizontalDivider(color = AppColors.Border)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        "Telefoni registrati",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { refreshDevices() }) { Text("Vedi", color = AppColors.Accent) }
+                }
+                if (devicesMsg.isNotBlank()) {
+                    Text(devicesMsg, color = AppColors.Muted, fontSize = 12.sp)
+                }
+                registeredDevices.forEach { device ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                (device.label.ifBlank { device.id }) + if (device.revoked) " (revocato)" else "",
+                                color = if (device.revoked) AppColors.Muted else Color.White,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                device.id + if (device.hasToken) " · push" else "",
+                                color = AppColors.Faint,
+                                fontSize = 11.sp
+                            )
+                        }
+                        if (!device.revoked) {
+                            TextButton(onClick = { revokeDevice(device.id) }) {
+                                Text("Revoca", color = AppColors.Error)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -827,6 +915,13 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
         )
     }
 }
+
+internal data class RegisteredDevice(
+    val id: String,
+    val label: String,
+    val revoked: Boolean,
+    val hasToken: Boolean
+)
 
 @Composable
 internal fun ServerMetric(title: String, value: String, detail: String, valueColor: Color = Color.White) {
@@ -3058,36 +3153,13 @@ internal fun ProfileScreen(
     var rebootStatus by remember { mutableStateOf("") }
 
     fun doReboot() {
+        // Riavvio manager via laya (il POST diretto /system/reboot e'
+        // controllo laya: la chiave app non basta piu'). Host reboot solo via ssh.
         scope.launch {
             rebootBusy = true
             rebootStatus = try {
-                val key = loadGatewaySecret(context)
-                val (code, body) = postJson("$managerBase/system/reboot", JSONObject(), key, allowCompatAuth = false)
-                if (code == 200) {
-                    "Comando di riavvio inviato. Il server tornerà online tra circa un minuto."
-                } else if (code == 409) {
-                    // Manager aggiornato: vuole il ticket single-use (secondo
-                    // POST = conferma, gia data nel dialogo). Manager vecchio:
-                    // 409 senza ticket = messaggio onesto, niente retry.
-                    val ticket = extractRebootTicket(body)
-                    if (ticket.isNullOrBlank()) {
-                        "Riavvio rifiutato (HTTP 409): risposta manager non valida."
-                    } else {
-                        val (code2, _) = postJson(
-                            "$managerBase/system/reboot",
-                            JSONObject().put("ticket", ticket),
-                            key,
-                            allowCompatAuth = false
-                        )
-                        if (code2 == 200) {
-                            "Comando di riavvio inviato. Il server tornerà online tra circa un minuto."
-                        } else {
-                            "Riavvio rifiutato (HTTP $code2). Ticket scaduto: riprova."
-                        }
-                    }
-                } else {
-                    "Riavvio rifiutato (HTTP $code). Verifica che hermes-gpu-manager sia aggiornato."
-                }
+                val bridge = gpuBridgeBase(settings.gatewayUrl)
+                postLayaCommand(bridge, "riavvia il manager", loadGpuAppSecret(context))
             } catch (ex: Exception) {
                 "Errore invio riavvio: ${ex.message ?: ex.javaClass.simpleName}"
             }
@@ -3391,8 +3463,8 @@ internal fun ProfileScreen(
         AlertDialog(
             onDismissRequest = { showRebootConfirm = false },
             containerColor = AppColors.Surface,
-            title = { Text("Riavviare il server?", color = Color.White) },
-            text = { Text("Il server Hermes si riavvierà completamente (come sudo reboot now). Chat, modelli e code media si interromperanno e torneranno online da soli.", color = AppColors.Muted) },
+            title = { Text("Riavviare il manager?", color = Color.White) },
+            text = { Text("laya riavvia hermes-gpu-manager (non l'intero server: per quello serve ssh). Code e modelli si interrompono e tornano da soli.", color = AppColors.Muted) },
             confirmButton = {
                 Button(
                     onClick = { showRebootConfirm = false; doReboot() },
@@ -3622,14 +3694,6 @@ internal fun WellbeingBarChart(
         }
 }
 
-/**
- * Ticket single-use da risposta 409 di /system/reboot (manager aggiornato):
- * 32+ hex, mai loggato in chiaro dal chiamante. Puro e testabile.
- */
-internal fun extractRebootTicket(body: String): String? =
-    runCatching { JSONObject(body).optString("ticket").trim() }.getOrNull()
-        ?.takeIf { it.matches(Regex("[0-9a-fA-F]{32,}")) }
-
 internal fun gpuManagerBase(gatewayUrl: String): String {    val trimmed = gatewayUrl.trim().trimEnd('/')
     val noPath = trimmed.substringBefore("/v1").substringBefore("/api")
     return if (Regex(":[0-9]+$").containsMatchIn(noPath)) {
@@ -3670,7 +3734,7 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
         busy = true
         try {
             error = runCatching {
-                val key = loadGatewaySecret(context)
+                val key = loadGpuAppSecret(context)
                 val (statusCode, statusBody) = httpGetResponse("$base/status", key)
                 if (statusCode !in 200..299) {
                     throw IllegalStateException(managerStatusErrorMessage(statusCode, statusBody))
@@ -3700,14 +3764,8 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
         scope.launch {
             layaBusy = true
             layaReply = runCatching {
-                val key = loadGatewaySecret(context)
-                val (code, respBody) = postJson("$bridge/laya", JSONObject().put("text", text), key, allowCompatAuth = false)
-                if (code !in 200..299) {
-                    "Bridge HTTP $code"
-                } else {
-                    JSONObject(respBody).optString("reply").ifBlank { "Nessuna risposta." }
-                }
-            }.getOrElse { "Bridge non raggiungibile ($bridge)." }
+                postLayaCommand(bridge, text, loadGpuAppSecret(context))
+            }.getOrElse { it.message ?: "Errore" }
             layaBusy = false
             refresh()
         }
@@ -3737,7 +3795,14 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                     Button(
                         onClick = {
                             scope.launch {
-                                runCatching { postJson("$base/mode/${mode.lowercase()}", JSONObject(), loadGatewaySecret(context), allowCompatAuth = false) }
+                                val layaText = when (mode) {
+                                    "LLM" -> "metti LLM ready"
+                                    "MEDIA" -> "attiva comfy"
+                                    else -> "metti in auto"
+                                }
+                                layaReply = runCatching {
+                                    postLayaCommand(bridge, layaText, loadGpuAppSecret(context))
+                                }.getOrElse { it.message ?: "Errore" }
                                 refresh()
                             }
                         },
@@ -3751,6 +3816,9 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                 }
             }
             Text("Stato: $state", color = Color.White, fontWeight = FontWeight.SemiBold)
+            if (layaReply.isNotBlank()) {
+                Text(layaReply, color = AppColors.Muted, fontSize = 12.sp)
+            }
             Text(
                 "Qwen: ${if (status.optBoolean("llm_loaded", false)) "Online" else if (status.optBoolean("llm_online", false)) "Avvio..." else "Offline"} · " +
                     "ComfyUI: ${if (status.optBoolean("media_online", false)) "Online" else "Offline"}",

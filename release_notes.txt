@@ -1,7 +1,12 @@
-Hermes Hub 0.6.292 (segui il turno live)
+Hermes Hub 0.6.293 (l'agente non tocca piu' il manager)
 
-- Android, chat: rientrando con un turno vivo sul gateway, la chat mostra l'output che cresce in tempo quasi-reale (SSE nativo per i run, poll ogni 3s per le Responses) con banner "Seguo il turno live" e pulsante Ferma. Al terminale scatta il resume normale. Niente piu' cecita' mentre l'agente lavora.
-- Le approvazioni restano sul canale dedicato (recheck): il follow non le intercetta.
-- Test: LiveFollowTest (5/5) + test_live_follow (3/3); build Android senza errori.
+- Manager: piano controllo (modi, force, reboot, supervisor) solo chiave laya; app con chiave separata (letture + coda job + display + characters + submit). Vecchia chiave condivisa revocata, niente piu' chiavi condivise.
+- Chiavi manager/laya in file root-only (systemd credential): niente piu' api_key nello yaml leggibile. Sudo invariato per scelta utente: un abuso deliberato via sudo resta possibile e loggato, ma l'accesso casuale/autonomo e' chiuso.
+- laya: ingresso app per NL, agenti solo submit preset via /laya/jobs (+stato), nuovo intento "riavvia il manager".
+- App: campo "Chiave app GPU/manager" in Impostazioni (entrambe); modi e riavvio via laya; lista telefoni registrati con revoca.
+- Agente istruito: manager off-limits, preset via laya, modi via laya NL.
+- Test: suite verde; build entrambe senza errori.
 
-Asset: HermesHub-0.6.292-android.apk (Android, versionCode 296), NemoclawChat.Windows_0.6.292.0_x64.msix (x64) e HermesHub-0.6.292-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.293-android.apk (Android, versionCode 297), NemoclawChat.Windows_0.6.293.0_x64.msix (x64) e HermesHub-0.6.293-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+
+Setup una-tantum: incollare la chiave app nelle due app (verra' fornita); riavvio servizi a coda vuota.

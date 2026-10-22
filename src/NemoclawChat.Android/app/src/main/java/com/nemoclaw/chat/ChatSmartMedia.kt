@@ -70,8 +70,8 @@ internal suspend fun trySmartMediaSend(
 ): SmartAccepted? {
     if (attachments.isEmpty()) return null
     if (!settings.smartFastPath) return null
-    // Chiave assente -> niente chiamate anonime al manager.
-    val managerKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() } ?: return null
+    // Chiave app, mai gateway: il manager non accetta piu' la chiave hub.
+    val managerKey = loadGpuAppSecret(context)?.takeIf { it.isNotBlank() } ?: return null
     val managerBase = gpuManagerBase(settings.gatewayUrl)
     // Fase 0: verdetto senza file. Se non e media (o caso disattivato), il
     // flusso normale carica una volta sola dentro streamChatRequest.

@@ -403,10 +403,11 @@ internal fun TopBar(
         scope.launch {
             llmBusy = true
             llmError = runCatching {
-                val (code, body) = postJson("$managerBase/mode/${if (wanted) "llm" else "media"}", JSONObject(), managerApiKey, allowCompatAuth = false)
-                if (code !in 200..299) {
-                    throw IllegalStateException(managerModeErrorMessage(code, body))
-                }
+                postLayaCommand(
+                    gpuBridgeBase(settings.gatewayUrl),
+                    if (wanted) "metti LLM ready" else "attiva comfy",
+                    managerApiKey
+                )
                 delay(3_000)
                 readManagerStatus()
             }.exceptionOrNull()?.message ?: ""
@@ -418,11 +419,11 @@ internal fun TopBar(
         scope.launch {
             llmBusy = true
             llmError = runCatching {
-                val mode = if (wanted) "direct" else "auto"
-                val (code, body) = postJson("$managerBase/mode/$mode", JSONObject(), managerApiKey, allowCompatAuth = false)
-                if (code !in 200..299) {
-                    throw IllegalStateException(managerModeErrorMessage(code, body))
-                }
+                postLayaCommand(
+                    gpuBridgeBase(settings.gatewayUrl),
+                    if (wanted) "passa a comfy diretto" else "metti in auto",
+                    managerApiKey
+                )
                 delay(3_000)
                 readManagerStatus()
             }.exceptionOrNull()?.message ?: ""
@@ -434,11 +435,8 @@ internal fun TopBar(
         scope.launch {
             llmBusy = true
             llmError = runCatching {
-                val mode = if (wanted) "auto" else if (llmLoaded == true) "llm" else "media"
-                val (code, body) = postJson("$managerBase/mode/$mode", JSONObject(), managerApiKey, allowCompatAuth = false)
-                if (code !in 200..299) {
-                    throw IllegalStateException(managerModeErrorMessage(code, body))
-                }
+                val text = if (wanted) "metti in auto" else if (llmLoaded == true) "metti LLM ready" else "attiva comfy"
+                postLayaCommand(gpuBridgeBase(settings.gatewayUrl), text, managerApiKey)
                 delay(3_000)
                 readManagerStatus()
             }.exceptionOrNull()?.message ?: ""
@@ -453,7 +451,7 @@ internal fun TopBar(
             layaBusy = true
             layaReply = runCatching {
                 val bridge = gpuBridgeBase(settings.gatewayUrl)
-                val key = loadGatewaySecret(layaContext)
+                val key = loadGpuAppSecret(layaContext)
                 val (code, respBody) = postJson("$bridge/laya", JSONObject().put("text", text), key, allowCompatAuth = false)
                 if (code !in 200..299) {
                     "Bridge HTTP $code"

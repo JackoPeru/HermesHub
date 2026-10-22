@@ -65,7 +65,7 @@ import com.nemoclaw.chat.decodeScreenFrame
 import com.nemoclaw.chat.fetchScreenFrameBytes
 import com.nemoclaw.chat.getScreenStatus
 import com.nemoclaw.chat.gpuManagerBase
-import com.nemoclaw.chat.loadGatewaySecret
+import com.nemoclaw.chat.loadGpuAppSecret
 import com.nemoclaw.chat.postScreenRelease
 import com.nemoclaw.chat.postScreenTakeover
 import com.nemoclaw.chat.postScreenTicket
@@ -121,7 +121,7 @@ internal fun ScreenViewer(
     val webViewRef = remember { arrayOfNulls<android.webkit.WebView>(1) }
     LaunchedEffect(loadNonce) {
         if (loadNonce == 0) return@LaunchedEffect
-        val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
+        val key = withContext(Dispatchers.IO) { loadGpuAppSecret(appContext) }
         val base = gpuManagerBase(settings.gatewayUrl)
         val minted = withContext(Dispatchers.IO) { postScreenTicket(settings, key) }
         if (minted == null) {
@@ -235,9 +235,9 @@ internal fun ScreenPreviewImage(
     LaunchedEffect(settings.gatewayUrl, width) {
         lastSignature = null
     }
-    val previewApiKeyHash = remember(settings.gatewayUrl) { (loadGatewaySecret(appContext) ?: "").hashCode() }
+    val previewApiKeyHash = remember(settings.gatewayUrl) { (loadGpuAppSecret(appContext) ?: "").hashCode() }
     PollWhileStarted(settings.gatewayUrl, width, previewApiKeyHash, baseIntervalMs = refreshMs) {
-        val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
+        val key = withContext(Dispatchers.IO) { loadGpuAppSecret(appContext) }
         val bytes = withContext(Dispatchers.IO) { fetchScreenFrameBytes(settings, key, width) }
         // Skip re-decode se i byte sono identici ai precedenti (hash+lunghezza).
         val signature = BitmapImageLoader.frameSignature(bytes)
@@ -286,11 +286,11 @@ internal fun ScreenScreen(
     var reloadNonce by remember { mutableStateOf(0) }
 
     suspend fun refreshStatus(): ScreenStatusInfo? {
-        val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
+        val key = withContext(Dispatchers.IO) { loadGpuAppSecret(appContext) }
         return withContext(Dispatchers.IO) { getScreenStatus(settings, key) }
     }
 
-    val screenApiKeyHash = remember(settings.gatewayUrl) { (loadGatewaySecret(appContext) ?: "").hashCode() }
+    val screenApiKeyHash = remember(settings.gatewayUrl) { (loadGpuAppSecret(appContext) ?: "").hashCode() }
     PollWhileStarted(settings.gatewayUrl, reloadNonce, screenApiKeyHash, baseIntervalMs = 5_000L) {
         val next = runCatching { refreshStatus() }.getOrNull()
         if (next != null) {
@@ -307,7 +307,7 @@ internal fun ScreenScreen(
         scope.launch {
             busy = true
             try {
-                val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
+                val key = withContext(Dispatchers.IO) { loadGpuAppSecret(appContext) }
                 val ok = withContext(Dispatchers.IO) { postScreenTakeover(settings, key, viewerId.ifBlank { null }) }
                 if (ok) {
                     holding = true
@@ -325,7 +325,7 @@ internal fun ScreenScreen(
         scope.launch {
             busy = true
             try {
-                val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
+                val key = withContext(Dispatchers.IO) { loadGpuAppSecret(appContext) }
                 withContext(Dispatchers.IO) { postScreenRelease(settings, key, viewerId.ifBlank { null }) }
                 holding = false
                 reloadNonce++
@@ -346,7 +346,7 @@ internal fun ScreenScreen(
             if (holding && !changing) {
                 runCatching {
                     kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                        val key = loadGatewaySecret(appContext)
+                        val key = loadGpuAppSecret(appContext)
                         postScreenRelease(settings, key, viewerId.ifBlank { null })
                     }
                 }

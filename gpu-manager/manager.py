@@ -57,6 +57,9 @@ DEFAULT_CONFIG = {
     "host": "0.0.0.0",
     "port": 8643,
     "api_key": "",
+    # Chiave app (letture + coda job + display + characters): l'agente non la
+    # conosce mai. Laya usa api_key (controllo pieno). Mai chiavi condivise.
+    "app_key": "",
     # False = /mode/media e /mode/direct rifiutati con 409 (i video vanno in
     # coda in AUTO, il manuale non serve). /mode/llm e /mode/auto restano liberi.
     "allow_manual_modes": False,
@@ -189,7 +192,35 @@ def load_config() -> dict:
                 pass
     if os.environ.get("HERMES_GPU_MANAGER_KEY"):
         cfg["api_key"] = os.environ["HERMES_GPU_MANAGER_KEY"]
+    cred_manager = _credential_file("manager.key")
+    if cred_manager:
+        cfg["api_key"] = cred_manager
+    cred_app = _credential_file("app.key")
+    if cred_app:
+        cfg["app_key"] = cred_app
+    elif os.environ.get("HERMES_GPU_APP_KEY"):
+        cfg["app_key"] = os.environ["HERMES_GPU_APP_KEY"]
     return cfg
+
+
+def _credential_file(name: str) -> str:
+    """Chiave da file root-only via systemd LoadCredential.
+
+    Il manager gira come servizio di sistema: i file in $CREDENTIALS_DIRECTORY
+    non sono leggibili dagli altri utenti (l'agente gira come utente diverso
+    dai servizi o comunque senza accesso ai credential store). Ordine:
+    credential file -> env (test/dev) -> configurato altrove.
+    """
+    base = os.environ.get("CREDENTIALS_DIRECTORY", "")
+    if not base:
+        return ""
+    try:
+        candidate = os.path.join(base, name)
+        with open(candidate, "r", encoding="utf-8") as handle:
+            value = handle.read().strip()
+        return value
+    except OSError:
+        return ""
 
 
 def _deep_merge(base: dict, override: dict) -> None:
@@ -3245,25 +3276,53 @@ except Exception as exc:
 
 
 def _manager_keys() -> list:
-    """Chiavi accettate: api_key primaria + trusted_keys secondarie
-    (es. master key hub, stessa trust-zone sullo stesso host)."""
+    """Chiavi controllo pieno (laya/operatore): MAI chiavi condivise.
+
+    La vecchia master key hub condivisa con gateway/app e' rimossa: chi la
+    conosceva (incluso l'agente via yaml leggibile) non controlla piu' nulla.
+    """
     keys = [CONFIG.get("api_key") or ""]
-    extra = CONFIG.get("trusted_keys") or []
-    if isinstance(extra, str):
-        extra = [extra]
-    if isinstance(extra, list):
-        keys.extend(k for k in extra if isinstance(k, str) and k)
     return [k for k in keys if isinstance(k, str) and k]
 
 
-def require_key(request: Request) -> None:
+def _app_keys() -> list:
+    """Chiavi ruolo app: letture + coda job + display + characters + laya NL.
+
+    Accetta anche le chiavi controllo (superset): laya puo' tutto.
+    """
+    keys = [CONFIG.get("app_key") or ""]
+    keys.extend(_manager_keys())
+    seen: list = []
+    for key in keys:
+        if isinstance(key, str) and key and key not in seen:
+            seen.append(key)
+    return seen
+
+
+def _bearer_matches(request: Request, keys: list) -> bool:
+    auth = request.headers.get("authorization", "")
+    return any(hmac.compare_digest(auth, f"Bearer {key}") for key in keys)
+
+
+def require_laya(request: Request) -> None:
+    """Solo controllo pieno (laya/operatore): modi, force, reboot, supervisor."""
     expected = _manager_keys()
     if not expected:
         # Fail-closed: senza chiave configurata NESSUNA rotta protetta
         # risponde (prima: passava tutto, anche /system/reboot).
         raise HTTPException(500, "manager api_key non configurata")
-    auth = request.headers.get("authorization", "")
-    if not any(hmac.compare_digest(auth, f"Bearer {key}") for key in expected):
+    if not _bearer_matches(request, expected):
+        raise HTTPException(401, "invalid manager api key")
+
+
+def require_key(request: Request) -> None:
+    """Ruolo app (o controllo): letture, submit, coda, display, characters."""
+    expected = _app_keys()
+    if not expected:
+        # Fail-closed: senza chiave configurata NESSUNA rotta protetta
+        # risponde (prima: passava tutto, anche /system/reboot).
+        raise HTTPException(500, "manager api_key non configurata")
+    if not _bearer_matches(request, expected):
         raise HTTPException(401, "invalid manager api key")
 
 
@@ -3429,14 +3488,14 @@ def _require_manual_allowed(mode: str) -> None:
 
 
 @app.post("/mode/llm")
-async def mode_llm(request: Request, _: None = Depends(require_key)) -> dict:
+async def mode_llm(request: Request, _: None = Depends(require_laya)) -> dict:
     _require_user_control(request)
     _log_mode_request(request, "LLM")
     return _set_desired("LLM")
 
 
 @app.post("/mode/media")
-async def mode_media(request: Request, _: None = Depends(require_key)) -> dict:
+async def mode_media(request: Request, _: None = Depends(require_laya)) -> dict:
     _require_user_control(request)
     _log_mode_request(request, "MEDIA")
     _require_manual_allowed("MEDIA")
@@ -3444,14 +3503,14 @@ async def mode_media(request: Request, _: None = Depends(require_key)) -> dict:
 
 
 @app.post("/mode/auto")
-async def mode_auto(request: Request, _: None = Depends(require_key)) -> dict:
+async def mode_auto(request: Request, _: None = Depends(require_laya)) -> dict:
     _require_user_control(request)
     _log_mode_request(request, "AUTO")
     return _set_desired("AUTO")
 
 
 @app.post("/mode/direct")
-async def mode_direct(request: Request, _: None = Depends(require_key)) -> dict:
+async def mode_direct(request: Request, _: None = Depends(require_laya)) -> dict:
     _require_user_control(request)
     _log_mode_request(request, "DIRECT")
     _require_manual_allowed("DIRECT")
@@ -3524,7 +3583,7 @@ class ForceRequest(BaseModel):
 
 
 @app.post("/force")
-async def force_mode(req: ForceRequest, _: None = Depends(require_key)) -> dict:
+async def force_mode(req: ForceRequest, _: None = Depends(require_laya)) -> dict:
     """Forza il modo richiesto ORA, scavalcando i blocchi. Mai pin persistente.
 
     Flusso: normalizza la mode -> se lo stato e' transitorio e il lock e'
@@ -3607,7 +3666,7 @@ def _reboot_consume_ticket(ticket: str, now: float | None = None) -> bool:
         return False
 
 @app.post("/system/reboot", response_model=None)
-async def system_reboot(request: Request, _: None = Depends(require_key)) -> dict:
+async def system_reboot(request: Request, _: None = Depends(require_laya)) -> dict:
     """Reboot con ticket single-use: senza ticket valido risponde 409 con
     ticket fresco (120s); con ticket valido esegue. Fire-and-forget."""
     _require_user_control(request)
@@ -3824,7 +3883,7 @@ class AskRequest(BaseModel):
 
 
 @app.post("/supervisor/ask")
-async def supervisor_ask(req: AskRequest, _: None = Depends(require_key)) -> dict:
+async def supervisor_ask(req: AskRequest, _: None = Depends(require_laya)) -> dict:
     """Canale NL del supervisore (Fase 4): spiega e PROPONE, mai 500.
 
     Flusso: snapshot -> `recovery.answer` (testo deterministico grounded) ->

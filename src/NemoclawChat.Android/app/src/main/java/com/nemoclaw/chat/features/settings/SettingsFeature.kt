@@ -313,6 +313,7 @@ internal fun SettingsScreen(
     var imageLibraryPath by remember(settings.imageLibraryPath) { mutableStateOf(settings.imageLibraryPath) }
     var extraImagePaths by remember(settings.extraImageLibraryPaths) { mutableStateOf(settings.extraImageLibraryPaths.joinToString("\n")) }
     var apiKey by remember(gatewaySecret) { mutableStateOf(gatewaySecret.orEmpty()) }
+    var gpuAppKey by remember { mutableStateOf(loadGpuAppSecret(context).orEmpty()) }
     var fontScale by remember(settings.fontScale) { mutableFloatStateOf(settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)) }
     var showToolCalls by remember(settings.showToolCalls) { mutableStateOf(settings.showToolCalls) }
     var backgroundWork by remember(settings.backgroundWork) { mutableStateOf(settings.backgroundWork) }
@@ -681,6 +682,12 @@ internal fun SettingsScreen(
                             fontSize = 12.sp
                         )
                         SettingsPasswordField("API key Hermes", apiKey, { apiKey = it })
+                        SettingsPasswordField("Chiave app GPU/manager", gpuAppKey, { gpuAppKey = it })
+                        Text(
+                            "Seconda chiave (solo letture + coda job + laya). L'agente non la conosce: senza, Comfy/GPU e laya non rispondono.",
+                            color = AppColors.Muted,
+                            fontSize = 12.sp
+                        )
                         SettingsField("Cartella video Hermes (dal server)", videoLibraryPath, { }, readOnly = true)
                         SettingsField("Cartella news Hermes", newsLibraryPath, { newsLibraryPath = it })
                         SettingsField("Cartella immagini Hermes (dal server)", imageLibraryPath, { }, readOnly = true)
@@ -1173,6 +1180,7 @@ internal fun SettingsScreen(
                                 scope.launch {
                                     val saved = withContext(Dispatchers.IO) {
                                         val secretSaved = saveGatewaySecret(context, candidateSecret)
+                                        val gpuSaved = saveGpuAppSecret(context, gpuAppKey)
                                         if (secretSaved) {
                                             saveVoiceProfile(
                                                 context,
@@ -1180,10 +1188,10 @@ internal fun SettingsScreen(
                                                 candidateVoiceProfile
                                             )
                                         }
-                                        secretSaved
+                                        secretSaved && gpuSaved
                                     }
                                     if (!saved) {
-                                        status = "API key non salvata: Android Keystore non disponibile. Credenziale non scritta in chiaro."
+                                        status = "Chiavi non salvate: Android Keystore non disponibile. Credenziali non scritte in chiaro."
                                     } else {
                                         onGatewaySecretChanged()
                                         onSave(candidate)

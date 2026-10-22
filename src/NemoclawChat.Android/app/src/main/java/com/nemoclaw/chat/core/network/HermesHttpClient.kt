@@ -230,6 +230,22 @@ internal fun executeJsonRequest(
 }
 
 /**
+ * POST NL a laya con chiave app. Ritorna la reply su ok==true, altrimenti
+ * solleva con messaggio leggibile (stesso stile degli altri comandi).
+ */
+internal suspend fun postLayaCommand(bridgeBase: String, text: String, appKey: String?): String {
+    val key = appKey?.takeIf { it.isNotBlank() }
+        ?: throw IllegalStateException("Chiave app mancante: inseriscila in Impostazioni.")
+    val (code, body) = postJson("$bridgeBase/laya", JSONObject().put("text", text), key, allowCompatAuth = false)
+    if (code !in 200..299) throw IllegalStateException("laya HTTP $code")
+    val root = runCatching { JSONObject(body) }.getOrElse { throw IllegalStateException("Risposta laya illeggibile.") }
+    if (!root.optBoolean("ok", false)) {
+        throw IllegalStateException(root.optString("reply").ifBlank { "laya: comando rifiutato" })
+    }
+    return root.optString("reply").ifBlank { "Eseguito." }
+}
+
+/**
  * POST firmato con chiave dispositivo (P-256): singolo tentativo, niente
  * retry/candidati (ogni retry riuserebbe lo stesso nonce = replay rifiutato;
  * URL diversi invaliderebbero la firma sul path). Per le rotte pericolose.

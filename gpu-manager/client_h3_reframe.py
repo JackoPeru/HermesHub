@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Hermes GPU manager job client (H3 Ref2VA reframe test).
 Usage: python3 _h3_reframe_submit.py [seconds]
-"""
-import json, sys, time, urllib.request
-import yaml
 
-KEY = yaml.safe_load(open('/etc/hermes/gpu-manager.yaml'))['api_key']
-BASE = 'http://127.0.0.1:8643'
+Pipeline sanzionata post-lockdown: l'agente NON parla col manager (niente
+chiave, niente yaml). Sottomette il preset a laya (/laya/jobs, ruolo agent)
+e segue lo stato sempre via laya. Chiave agent = HERMES_GATEWAY_API_KEY.
+"""
+import json, os, sys, time, urllib.request
+
+KEY = os.environ.get("HERMES_GATEWAY_API_KEY", "")
+BASE = os.environ.get("HERMES_LAYA_URL", "http://127.0.0.1:8645")
+if not KEY:
+    print("HERMES_GATEWAY_API_KEY mancante: lo script gira come agente.", file=sys.stderr)
+    sys.exit(2)
 
 def get(p):
     r = urllib.request.Request(BASE + p, headers={'Authorization': 'Bearer ' + KEY})
@@ -50,7 +56,7 @@ def main():
             "seed": 42,
         },
     }
-    out = post('/jobs/video', body)
+    out = post('/laya/jobs', body)
     print(json.dumps(out))
     jid = out.get('job_id')
     if not jid:
@@ -60,7 +66,7 @@ def main():
     last = None
     while time.time() - t0 < 2400:
         time.sleep(20)  # generous polling interval, sleep as a real wait
-        s = get(f'/jobs/{jid}')
+        s = get(f'/laya/jobs?job_id={jid}')
         status = s.get('status')
         progress = s.get('progress')
         line = f"t+{int(time.time()-t0)}s status={status} progress={progress} err={s.get('error','')[:200]}"
@@ -69,7 +75,7 @@ def main():
             last = line
         if status in ('done', 'failed', 'canceled'):
             break
-    s = get(f'/jobs/{jid}')
+    s = get(f'/laya/jobs?job_id={jid}')
     print("FINAL:", json.dumps({k: s.get(k) for k in ('status', 'progress', 'error', 'result_paths', 'duration_s')}, ensure_ascii=False, indent=1))
 
 if __name__ == '__main__':

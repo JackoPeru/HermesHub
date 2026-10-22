@@ -156,7 +156,8 @@ def load_manager_keys_fn():
 
 
 class TestManagerKeys(unittest.TestCase):
-    """Chiavi accettate: primaria + trusted_keys, mai vuote."""
+    """Chiavi controllo: solo primaria. Niente trusted condivise (l'agente
+    le leggeva dallo yaml): chiavi app separate con ruolo ridotto."""
 
     def keys_for(self, config: dict) -> list:
         ns = load_manager_keys_fn()
@@ -166,16 +167,11 @@ class TestManagerKeys(unittest.TestCase):
     def test_primary_only(self):
         self.assertEqual(self.keys_for({"api_key": "abc"}), ["abc"])
 
-    def test_primary_plus_trusted_list(self):
+    def test_trusted_keys_are_ignored(self):
+        # La vecchia master key hub condivisa non apre piu' nulla.
         self.assertEqual(
             self.keys_for({"api_key": "abc", "trusted_keys": ["hub1", "hub2"]}),
-            ["abc", "hub1", "hub2"],
-        )
-
-    def test_trusted_single_string(self):
-        self.assertEqual(
-            self.keys_for({"api_key": "abc", "trusted_keys": "hub1"}),
-            ["abc", "hub1"],
+            ["abc"],
         )
 
     def test_empty_means_no_keys(self):
@@ -186,9 +182,77 @@ class TestManagerKeys(unittest.TestCase):
     def test_require_key_is_fail_closed(self):
         src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
         self.assertIn("raise HTTPException(500", src)
+        self.assertIn("def require_laya", src)
         bridge = (REPO / "gpu-manager" / "display_bridge.py").read_text(encoding="utf-8")
         self.assertIn("raise HTTPException(500", bridge)
-        self.assertIn("trusted_keys", bridge)
+        self.assertNotIn("trusted_keys", bridge)
+
+
+def load_roles_namespace() -> dict:
+    """Carica _manager_keys/_app_keys/require_* via AST con stub HTTP."""
+    src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    wanted = [
+        n for n in tree.body
+        if isinstance(n, ast.FunctionDef) and n.name in {
+            "_manager_keys", "_app_keys", "_bearer_matches",
+            "require_laya", "require_key",
+        }
+    ]
+    assert len(wanted) == 5, "funzioni ruolo non trovate in manager.py"
+
+    class FakeHTTPException(Exception):
+        def __init__(self, status_code: int, detail: str = ""):
+            super().__init__(detail)
+            self.status_code = status_code
+
+    class FakeRequest:
+        def __init__(self, auth: str):
+            self.headers = {"authorization": auth}
+
+    mod = ast.Module(body=wanted, type_ignores=[])
+    ns: dict = {
+        "CONFIG": {},
+        "Request": FakeRequest,
+        "HTTPException": FakeHTTPException,
+    }
+    exec(compile(mod, "manager_roles", "exec"), ns)  # noqa: S102 - test locale
+    return ns
+
+
+class TestManagerRoles(unittest.TestCase):
+    """Controllo=laya, app=letture+coda. L'agente non ha nessuna chiave."""
+
+    def roles(self, config: dict) -> dict:
+        ns = load_roles_namespace()
+        ns["CONFIG"] = config
+        return ns
+
+    def call(self, ns: dict, fn: str, auth: str) -> int:
+        try:
+            ns[fn](ns["Request"](auth))
+            return 200
+        except Exception as exc:  # noqa: BLE001 - FakeHTTPException
+            return getattr(exc, "status_code", -1)
+
+    def test_control_requires_laya_key(self) -> None:
+        ns = self.roles({"api_key": "laya1", "app_key": "app1"})
+        self.assertEqual(200, self.call(ns, "require_laya", "Bearer laya1"))
+        self.assertEqual(401, self.call(ns, "require_laya", "Bearer app1"))
+        self.assertEqual(401, self.call(ns, "require_laya", "Bearer vecchia-master"))
+        self.assertEqual(401, self.call(ns, "require_laya", ""))
+
+    def test_app_role_accepts_both(self) -> None:
+        ns = self.roles({"api_key": "laya1", "app_key": "app1"})
+        self.assertEqual(200, self.call(ns, "require_key", "Bearer app1"))
+        self.assertEqual(200, self.call(ns, "require_key", "Bearer laya1"))
+        self.assertEqual(401, self.call(ns, "require_key", "Bearer vecchia-master"))
+        self.assertEqual(401, self.call(ns, "require_key", ""))
+
+    def test_empty_config_is_fail_closed(self) -> None:
+        ns = self.roles({})
+        self.assertEqual(500, self.call(ns, "require_laya", "Bearer x"))
+        self.assertEqual(500, self.call(ns, "require_key", "Bearer x"))
 
 
 def load_manual_allowed_fn():

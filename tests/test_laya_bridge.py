@@ -246,6 +246,83 @@ class TestHandleCommand(unittest.TestCase):
         self.assertTrue(any("hermes-tabby.service" in c for c in calls))
 
 
+class TestCallerRoles(unittest.TestCase):
+    """Ruoli ingresso: app (NL completo) vs agent (solo submit)."""
+
+    def cfg(self, **over):
+        base = dict(lb.DEFAULT_CONFIG)
+        base.update(over)
+        return base
+
+    def test_app_role_wins_over_agent(self):
+        cfg = self.cfg(app_key="app1", agent_keys=["ag1"])
+        self.assertEqual(lb.caller_role(cfg, "Bearer app1"), "app")
+        self.assertEqual(lb.caller_role(cfg, "Bearer ag1"), "agent")
+        self.assertEqual(lb.caller_role(cfg, "Bearer no"), "")
+        self.assertEqual(lb.caller_role(cfg, ""), "")
+
+    def test_no_keys_no_role(self):
+        self.assertEqual(lb.caller_role(self.cfg(), ""), "")
+
+
+class TestRebootIntent(unittest.TestCase):
+    def test_riavvia_manager_rules(self):
+        out = lb.handle_command(
+            dict(lb.DEFAULT_CONFIG), "riavvia il manager",
+            http=make_http(), runner=_noop_runner, sleeper=_noop_sleep)
+        self.assertEqual("reboot", out["intent"])
+
+    def test_reboot_executes_restart(self):
+        calls = []
+        http = make_http()
+        out = lb.handle_command(
+            dict(lb.DEFAULT_CONFIG), "riavvia il manager", http=http,
+            runner=lambda cmd, timeout=60: (calls.append(cmd), (0, ""))[1],
+            sleeper=_noop_sleep)
+        self.assertTrue(out["ok"])
+        self.assertTrue(any("restart" in c and "hermes-gpu-manager.service" in c for c in calls))
+
+    def test_reboot_preview_no_execute(self):
+        out = lb.handle_command(
+            dict(lb.DEFAULT_CONFIG), "riavvia il manager", execute=False,
+            http=make_http(), runner=_noop_runner, sleeper=_noop_sleep)
+        self.assertTrue(out["ok"])
+        self.assertEqual("reboot", out["intent"])
+        self.assertFalse(out.get("executed", True))
+
+
+class TestSubmitPreset(unittest.TestCase):
+    def test_allowlist_blocks_unknown_and_raw(self):
+        http = make_http()
+        bad = lb.submit_preset_job(dict(lb.DEFAULT_CONFIG), "rm_rf", {}, http=http)
+        self.assertFalse(bad["ok"])
+        self.assertEqual(400, bad["status"])
+        self.assertFalse(any("/jobs/" in c["url"] for c in http.calls))
+
+    def test_forwards_preset_to_manager(self):
+        calls = []
+        logged = {}
+
+        def http(method, url, payload=None, headers=None, timeout=15):
+            calls.append({"method": method, "url": url, "payload": payload})
+            return 202, {"job_id": "abc123", "status": "queued", "preset": "journey_video_reframe916"}
+
+        out = lb.submit_preset_job(
+            dict(lb.DEFAULT_CONFIG), "journey_video_reframe916",
+            {"prompt": "ciao"}, http=http)
+        self.assertTrue(out["ok"])
+        self.assertEqual("abc123", out["job_id"])
+        self.assertTrue(calls[0]["url"].endswith("/jobs/video"))
+        self.assertNotIn("workflow", calls[0]["payload"])
+
+    def test_prompt_cap(self):
+        out = lb.submit_preset_job(
+            dict(lb.DEFAULT_CONFIG), "create_image",
+            {"prompt": "x" * 5000}, http=make_http())
+        self.assertFalse(out["ok"])
+        self.assertEqual(413, out["status"])
+
+
 class TestSplitCommands(unittest.TestCase):
     def test_split_congiunzioni_e_punteggiatura(self):
         self.assertEqual(["carica l'llm", "metti in auto"],

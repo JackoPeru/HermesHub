@@ -9,6 +9,7 @@ public static class GatewayCredentialStore
     private const string LegacyResource = "ChatClaw.OpenClawGateway";
     private const string UserName = "hermes";
     private const string LegacyUserName = "operator";
+    private const string GpuAppResource = "HermesHub.GpuAppKey";
     private static readonly Regex ConnectionIdRegex = new("^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     // PasswordVault e' wrapper COM thread-safe: cachiamo singleton invece di allocare per call.
@@ -22,6 +23,8 @@ public static class GatewayCredentialStore
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(30);
     private static string? _cachedSecret;   // null = non caricato; "" = nessun segreto
     private static DateTime _cachedAtUtc = DateTime.MinValue;
+    private static string? _cachedGpuAppSecret;
+    private static DateTime _cachedGpuAppAtUtc = DateTime.MinValue;
 
     public static bool HasSecret()
     {
@@ -70,6 +73,70 @@ public static class GatewayCredentialStore
         {
             _cachedSecret = null;
             _cachedAtUtc = DateTime.MinValue;
+        }
+    }
+
+    /// <summary>
+    /// Chiave app GPU/manager+laya (ruolo ridotto: letture + coda + laya NL).
+    /// Mai la chiave manager/laya completa. Cache TTL come il secret gateway.
+    /// </summary>
+    public static string LoadGpuAppSecret()
+    {
+        lock (CacheLock)
+        {
+            if (_cachedGpuAppSecret is not null && DateTime.UtcNow - _cachedGpuAppAtUtc < CacheTtl)
+            {
+                return _cachedGpuAppSecret;
+            }
+        }
+
+        var loaded = TryLoadSecret(GpuAppResource, UserName, out var secret) ? secret : string.Empty;
+        lock (CacheLock)
+        {
+            _cachedGpuAppSecret = loaded;
+            _cachedGpuAppAtUtc = DateTime.UtcNow;
+        }
+        return loaded;
+    }
+
+    public static void InvalidateCachedGpuAppSecret()
+    {
+        lock (CacheLock)
+        {
+            _cachedGpuAppSecret = null;
+            _cachedGpuAppAtUtc = DateTime.MinValue;
+        }
+    }
+
+    public static bool SaveGpuAppSecret(string secret)
+    {
+        lock (MutationLock)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(secret))
+                {
+                    RemoveSecret(GpuAppResource, UserName);
+                    InvalidateCachedGpuAppSecret();
+                    return true;
+                }
+
+                var normalized = secret.Trim();
+                SharedVault.Value.Add(new PasswordCredential(GpuAppResource, UserName, normalized));
+                if (!TryLoadSecret(GpuAppResource, UserName, out var saved) || !string.Equals(saved, normalized, StringComparison.Ordinal))
+                {
+                    RemoveSecret(GpuAppResource, UserName);
+                    throw new InvalidOperationException("Verifica chiave app non riuscita.");
+                }
+
+                InvalidateCachedGpuAppSecret();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.WriteLine($"[GatewayCredentialStore] SaveGpuAppSecret: {ex.GetType().Name}: {ex.Message}");
+                return false;
+            }
         }
     }
 

@@ -356,12 +356,10 @@ if _FASTAPI:
     router = APIRouter()
 
     def _bridge_keys() -> list:
-        keys = [str(_manager_config().get("api_key") or "")]
-        extra = _manager_config().get("trusted_keys") or []
-        if isinstance(extra, str):
-            extra = [extra]
-        if isinstance(extra, list):
-            keys.extend(str(k or "") for k in extra)
+        # Ruolo app + controllo. Niente chiavi condivise extra (stesso burn
+        # del manager: la vecchia master key hub non apre piu' nulla).
+        keys = [str(_manager_config().get("app_key") or "")]
+        keys.append(str(_manager_config().get("api_key") or ""))
         return [k for k in keys if k]
 
     def _require_key(request: Request) -> None:

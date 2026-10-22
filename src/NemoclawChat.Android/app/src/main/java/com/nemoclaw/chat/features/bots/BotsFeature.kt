@@ -98,7 +98,7 @@ import com.nemoclaw.chat.decodeScreenFrame
 import com.nemoclaw.chat.fetchScreenFrameBytes
 import com.nemoclaw.chat.getScreenStatus
 import com.nemoclaw.chat.loadBotAutoApproveMap
-import com.nemoclaw.chat.loadGatewaySecret
+import com.nemoclaw.chat.loadGpuAppSecret
 import com.nemoclaw.chat.saveBotAutoApprove
 import com.nemoclaw.chat.core.WorkLimits
 import kotlinx.coroutines.delay
@@ -852,7 +852,7 @@ internal fun BotsScreen(
     // polla da se): invocazione condizionale, non early-return.
     if (!showSectionScreen) {
     PollWhileStarted(settings.gatewayUrl, baseIntervalMs = 8_000L) {
-        val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
+        val key = withContext(Dispatchers.IO) { loadGpuAppSecret(appContext) }
         val next = runCatching { withContext(Dispatchers.IO) { getScreenStatus(settings, key) } }.getOrNull()
         screenStatus = next
         // "Apri schermo quando il bot lo usa": fronte di un bot che prende
@@ -879,7 +879,7 @@ internal fun BotsScreen(
             lastScreenSignature = null
             return@PollWhileStarted true
         }
-        val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
+        val key = withContext(Dispatchers.IO) { loadGpuAppSecret(appContext) }
         val bytes = withContext(Dispatchers.IO) { fetchScreenFrameBytes(settings, key, 480) }
         // Skip re-decode se i byte sono identici ai precedenti (hash/lunghezza).
         val signature = BitmapImageLoader.frameSignature(bytes)

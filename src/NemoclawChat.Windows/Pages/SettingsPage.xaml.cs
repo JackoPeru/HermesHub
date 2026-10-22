@@ -31,6 +31,7 @@ public sealed partial class SettingsPage : Page
         var settings = AppSettingsStore.Load();
         GatewayUrlBox.Text = settings.GatewayUrl;
         ApiKeyBox.Password = GatewayCredentialStore.LoadSecret();
+        GpuAppKeyBox.Password = GatewayCredentialStore.LoadGpuAppSecret();
         GatewayWsUrlBox.Text = settings.GatewayWsUrl;
         AdminBridgeUrlBox.Text = settings.AdminBridgeUrl;
         ProviderBox.Text = settings.Provider;
@@ -82,10 +83,11 @@ public sealed partial class SettingsPage : Page
         AppSettingsStore.Save(settings);
         VoicePreferencesStore.Save(settings.ActiveProjectId, ReadVoicePreferences());
         var credentialSaved = GatewayCredentialStore.SaveSecret(ApiKeyBox.Password);
+        var gpuAppSaved = GatewayCredentialStore.SaveGpuAppSecret(GpuAppKeyBox.Password);
 
-        StatusText.Text = credentialSaved
+        StatusText.Text = credentialSaved && gpuAppSaved
             ? "Impostazioni salvate. Hermes usa API key Bearer salvata."
-            : "Impostazioni salvate, ma la API key precedente e' rimasta attiva: PasswordVault non disponibile.";
+            : "Impostazioni salvate, ma una chiave precedente e' rimasta attiva: PasswordVault non disponibile.";
     }
 
     private async void TestGatewayWs_Click(object sender, RoutedEventArgs e)

@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.292"
-EXPECTED_ANDROID_VERSION_CODE = 296
+EXPECTED_VERSION = "0.6.293"
+EXPECTED_ANDROID_VERSION_CODE = 297
 
 
 def read(relative_path: str) -> str:
@@ -82,14 +82,15 @@ class ReleaseConsistencyTests(unittest.TestCase):
             self.assertIn(path, sources)
 
     def test_android_reboot_uses_ticket(self) -> None:
-        # Manager aggiornato chiede ticket single-use (409); l'app lo
-        # gestisce restando compatibile col manager precedente (200 diretto).
+        # Riavvio manager via laya (il POST diretto /system/reboot e'
+        # controllo laya): niente ticket in app, niente reboot host da app.
         sources = read_android_sources()
         for marker in (
-            "extractRebootTicket(",
-            'put("ticket", ticket)',
+            "riavvia il manager",
+            "postLayaCommand",
         ):
             self.assertIn(marker, sources)
+        self.assertNotIn('"$managerBase/system/reboot"', sources)
 
     def test_android_detached_turns_stay_resumable(self) -> None:
         # Kill/rete morta: niente stop server implicito, reattach prima
@@ -474,7 +475,8 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn("if (!saved) {", save_block)
         self.assertIn("onSave(candidate)", save_block)
         self.assertLess(save_block.index("if (!saved) {"), save_block.index("onSave(candidate)"))
-        self.assertIn("Credenziale non scritta in chiaro", main)
+        self.assertIn("Chiavi non salvate: Android Keystore non disponibile. Credenziali non scritte in chiaro.", main)
+        self.assertIn("saveGpuAppSecret", main)
         self.assertNotIn("}.getOrDefault(normalized)", main)
 
     def test_android_network_badge_requires_real_gateway_probe(self) -> None:

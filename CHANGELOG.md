@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.293 - 2026-10-22
+
+- Manager: ruoli laya (controllo) / app (letture+coda), chiavi root-only, vecchia chiave revocata.
+- laya: ruoli ingresso, submit preset per agenti, intento reboot manager.
+- App: chiave app dedicata, modi/reboot via laya, lista device con revoca.
+- Agente: manager off-limits via protocollo.
+
 ## 0.6.292 - 2026-10-22
 
 - Android, chat: follow live del turno sul gateway al rientro (SSE run / poll Responses), banner con stop, resume al terminale.

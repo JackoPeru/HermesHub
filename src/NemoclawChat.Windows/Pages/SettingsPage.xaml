@@ -29,6 +29,7 @@
                 <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="CONNESSIONE HERMES" />
                 <TextBox x:Name="GatewayUrlBox" Header="Hermes API URL" PlaceholderText="http://nome-magicdns:8642/v1" />
                 <PasswordBox x:Name="ApiKeyBox" Header="API key Hermes" PlaceholderText="Inserisci la chiave del tuo server" />
+                <PasswordBox x:Name="GpuAppKeyBox" Header="Chiave app GPU/manager" PlaceholderText="Seconda chiave: letture + coda job + laya" />
                 <TextBox x:Name="ActiveProjectNameBox" Header="Progetto attivo (gestisci dalla pagina Progetti)" IsReadOnly="True" />
                 <TextBox x:Name="VideoLibraryPathBox" Header="Cartella video Hermes (sync server)" IsReadOnly="True" PlaceholderText="In attesa di sync da Hermes /health/detailed" />
                 <TextBox x:Name="NewsLibraryPathBox" Header="Cartella news Hermes" PlaceholderText="~/news" />

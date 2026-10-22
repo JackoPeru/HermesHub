@@ -929,7 +929,7 @@ internal fun ChatScreen(
     // chat con LLM scarico, anche mentre l'utente lavorava in Comfy manuale:
     // il toggle manuale in TopBar resta l'unico modo di cambiare modo.
     // Il manager in AUTO ricarica l'LLM da solo quando serve.
-    val managerKey = remember { loadGatewaySecret(context) }
+    val managerKey = remember { loadGpuAppSecret(context) }
     // Allegati pending persistenti: rientrando in app (o nella conversazione)
     // la foto allegata al prompt e' ancora li'.
     var restoredPendingFor by remember { mutableStateOf<String?>(null) }
@@ -2135,7 +2135,7 @@ internal fun ChatScreen(
                         }
 
                         try {
-                            val smartKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() }
+                            val smartKey = loadGpuAppSecret(context)?.takeIf { it.isNotBlank() }
                             if (smartJob != null && smartKey == null) {
                                 // Chiave sparita a meta strada: torna al flusso normale
                                 // (lo snapshot attachments e intatto, niente hang).
@@ -2255,7 +2255,7 @@ internal fun ChatScreen(
                                 )
                                 val sJob = smartJob
                                 if (sJob != null) {
-                                    val sKey = loadGatewaySecret(context)?.takeIf { it.isNotBlank() }
+                                        val sKey = loadGpuAppSecret(context)?.takeIf { it.isNotBlank() }
                                     if (sKey != null) {
                                         cancelSmartJob(
                                             gpuManagerBase(settings.gatewayUrl), sKey, sJob.jobId

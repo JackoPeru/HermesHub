@@ -55,7 +55,7 @@ import com.nemoclaw.chat.isWifiTransport
 import com.nemoclaw.chat.gatewayProbeHttpClient
 import com.nemoclaw.chat.gpuManagerBase
 import com.nemoclaw.chat.httpGetResponseQuick
-import com.nemoclaw.chat.loadGatewaySecret
+import com.nemoclaw.chat.loadGpuAppSecret
 import com.nemoclaw.chat.managerStatusErrorMessage
 import com.nemoclaw.chat.readUtf8Bounded
 import kotlinx.coroutines.Dispatchers
@@ -272,7 +272,7 @@ internal fun ComfyScreen(
         refreshing = true
         scope.launch {
             try {
-                val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
+                val key = withContext(Dispatchers.IO) { loadGpuAppSecret(appContext) }
                 val root = fastestGatewayRoot(settings, isWifiTransport(appContext))
                 status = loadComfyStatus(root.ifBlank { settings.gatewayUrl }, key)
             } finally {
@@ -282,7 +282,7 @@ internal fun ComfyScreen(
     }
 
     PollWhileStarted(settings.gatewayUrl, settings.localGatewayUrl, refreshNonce, baseIntervalMs = 5_000L) {
-        val key = withContext(Dispatchers.IO) { loadGatewaySecret(appContext) }
+        val key = withContext(Dispatchers.IO) { loadGpuAppSecret(appContext) }
         val root = fastestGatewayRoot(settings, isWifiTransport(appContext))
         status = loadComfyStatus(root.ifBlank { settings.gatewayUrl }, key)
         true

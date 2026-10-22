@@ -2321,7 +2321,7 @@ public static class GatewayService
     /// <summary>
     /// Base GPU-manager: deriva dal gateway con port-swap verso :8643
     /// (stesso contratto di gpuManagerBase del client Android). Chiave =
-    /// stesso secret gateway (hubkey = mgrkey), mai hardcoded.
+    /// chiave app GPU (ruolo ridotto), MAI il secret gateway.
     /// </summary>
     public static string ManagerBase(AppSettings settings) => SwapServicePort(settings, 8643);
 
@@ -2359,7 +2359,7 @@ public static class GatewayService
     }
 
     /// <summary>
-    /// GET/POST JSON verso il gpu-manager con Bearer del secret gateway.
+    /// GET/POST JSON verso il gpu-manager con Bearer della chiave app GPU.
     /// Ritorna (0, messaggio) su errore transport, mai throw (tranne cancel).
     /// </summary>
     public static async Task<(int StatusCode, string Body)> SendManagerRequestAsync(
@@ -2373,7 +2373,7 @@ public static class GatewayService
         using var request = new HttpRequestMessage(method, url);
         request.Headers.TryAddWithoutValidation("Accept", "application/json");
         request.Headers.TryAddWithoutValidation("User-Agent", "HermesHub-Windows");
-        var secret = GatewayCredentialStore.LoadSecret();
+        var secret = GatewayCredentialStore.LoadGpuAppSecret();
         if (!string.IsNullOrWhiteSpace(secret))
         {
             request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {secret.Trim()}");
@@ -2399,7 +2399,7 @@ public static class GatewayService
     }
 
     /// <summary>
-    /// POST/GET JSON verso il bridge laya (:8645) con Bearer del secret gateway.
+    /// POST/GET JSON verso il bridge laya (:8645) con Bearer della chiave app GPU.
     /// Ritorna (0, messaggio) su errore transport, mai throw (tranne cancel).
     /// </summary>
     public static async Task<(int StatusCode, string Body)> SendBridgeRequestAsync(
@@ -2413,7 +2413,7 @@ public static class GatewayService
         using var request = new HttpRequestMessage(method, url);
         request.Headers.TryAddWithoutValidation("Accept", "application/json");
         request.Headers.TryAddWithoutValidation("User-Agent", "HermesHub-Windows");
-        var secret = GatewayCredentialStore.LoadSecret();
+        var secret = GatewayCredentialStore.LoadGpuAppSecret();
         if (!string.IsNullOrWhiteSpace(secret))
         {
             request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {secret.Trim()}");

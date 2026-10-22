@@ -6,7 +6,7 @@ import com.nemoclaw.chat.AppSettings
 import com.nemoclaw.chat.apiHttpClient
 import com.nemoclaw.chat.gpuManagerBase
 import com.nemoclaw.chat.httpGetResponse
-import com.nemoclaw.chat.loadGatewaySecret
+import com.nemoclaw.chat.loadGpuAppSecret
 import com.nemoclaw.chat.postJson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -307,4 +307,4 @@ internal suspend fun generateCharacterVideo(
     }.getOrElse { null to "Generazione fallita" }
 }
 
-internal fun managerKeyOf(context: Context): String? = loadGatewaySecret(context)
+internal fun managerKeyOf(context: Context): String? = loadGpuAppSecret(context)
