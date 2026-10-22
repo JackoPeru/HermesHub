@@ -1759,12 +1759,14 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
     var viewerId by remember { mutableStateOf<String?>(null) }
     var isDownloading by remember { mutableStateOf(false) }
     val apiKey = remember { loadGatewaySecret(context) }
+    // Browse manager (:8643/browse, ruolo app dal lockdown): mai la chiave gateway.
+    val managerKey = remember { loadGpuAppSecret(context) }
     // Scroll issato: sopravvive ad apertura/chiusura viewer.
     val listState = rememberLazyListState()
 
     LaunchedEffect(settings.gatewayUrl, currentPath, refreshKey) {
         status = "Sfoglio cartella immagini..."
-        val result = loadImageBrowse(settings, apiKey, currentPath)
+        val result = loadImageBrowse(settings, managerKey, currentPath)
         parentPath = result.parent
         folders = result.folders
         items = result.items

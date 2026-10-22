@@ -1,9 +1,7 @@
-Hermes Hub 0.6.297 (Generative UI v1)
+Hermes Hub 0.6.298 (fix browse immagini)
 
-- L'agente puo' generare interfacce interattive dentro la chat (blocco genui in visual_blocks): tutorial, simulazioni parametriche, dashboard, form avanzate, diagrammi a nodi.
-- 29 tipi di nodi, stato locale per istanza (slider/filtri/step senza model call), formule sicure (slider -> grafico in tempo reale), condizioni visible/enabled, azioni agent con eventi [genui ...] e aggiornamento stessa-id.
-- Validazione strict identica su Android/Windows (150 nodi, profondita' 8, URL solo proxy/https, niente codice); fallback testuale sempre; interruttore Blocchi visuali never.
-- Istruzioni agente integrate in entrambe le app; nessun cambio gateway.
-- Test: contract 9/9, Kotlin 11/11, Windows harness differenziale, suite repo verde.
+- Android: Sfoglia immagini (:8643/browse, ruolo app) usava ancora la chiave gateway -> 401. Ora usa la chiave app GPU; miniature/download restano con chiave gateway (corretto).
+- Verificati tutti gli altri accessi manager: gia' su chiave app.
+- Test: tripwire anti-regressione in test_manager_lockdown.
 
-Asset: HermesHub-0.6.297-android.apk (Android, versionCode 301), NemoclawChat.Windows_0.6.297.0_x64.msix (x64) e HermesHub-0.6.297-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.298-android.apk (Android, versionCode 302), NemoclawChat.Windows_0.6.298.0_x64.msix (x64) e HermesHub-0.6.298-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

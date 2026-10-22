@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.298 - 2026-10-22
+
+- Android: browse immagini con chiave app (fix 401); tripwire anti-regressione.
+
 ## 0.6.297 - 2026-10-22
 
 - Generative UI v1: blocco genui (29 nodi, stato locale, formule, condizioni, azioni agent, update stessa-id) su Android+Windows; validazione strict; fallback; gate never; istruzioni agente.

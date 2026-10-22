@@ -123,6 +123,13 @@ class AppKeysTests(unittest.TestCase):
         self.assertIn("LoadGpuAppSecret()", gateway)
         self.assertNotIn("hubkey = mgrkey", gateway)
 
+    def test_android_image_browse_uses_app_key(self) -> None:
+        # Regressione: il browse immagini (:8643/browse, ruolo app) riceveva
+        # la chiave gateway -> 401. Solo la chiave app sul manager.
+        server = (REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/server/ServerFeature.kt").read_text(encoding="utf-8")
+        self.assertIn("loadImageBrowse(settings, managerKey", server)
+        self.assertIn("loadGpuAppSecret(context)", server)
+
     def test_protocol_forbids_manager_to_agent(self) -> None:
         protocol = text(WIN_PROTOCOL)
         self.assertIn("GPU manager off-limits", protocol)
