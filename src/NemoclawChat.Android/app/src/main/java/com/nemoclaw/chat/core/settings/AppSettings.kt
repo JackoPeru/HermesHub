@@ -310,7 +310,7 @@ internal object AppDefaults {
     const val activeProjectName = ""
     const val fontScale = 1.0f
     const val showToolCalls = true
-    const val showMessageMetrics = false
+    const val showMessageMetrics = true
     const val metricTtft = true
     const val metricTokensPerSecond = true
     const val metricOutputTokens = true

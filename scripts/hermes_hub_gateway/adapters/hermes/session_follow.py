@@ -30,6 +30,9 @@ MAX_THINKING_CHARS = 2000
 MAX_HUB_MESSAGES = 500
 MIN_RUN_INTERVAL_S = 45.0
 THROTTLE_NAME = ".session_follow_throttle"
+CURSOR_NAME = ".session_follow_cursors.json"
+CURSOR_OVERLAP = 25
+READ_LIMIT = 400
 
 
 def hermes_home() -> str:
@@ -91,8 +94,10 @@ def read_session_status(db_path: str, session_id: str) -> dict:
     return {"ended": row["ended_at"] is not None, "end_reason": row["end_reason"] or ""}
 
 
-def read_session_rows(db_path: str, session_id: str, limit: int = 100) -> list[dict]:
-    """Ultime righe della sessione (id crescenti). Solo lettura, mai raise."""
+def read_session_rows(
+    db_path: str, session_id: str, limit: int = 100, since_id: int = 0
+) -> list[dict]:
+    """Righe della sessione (id crescenti), da since_id escluso. Solo lettura."""
     db = _connect_ro(db_path)
     if db is None:
         return []
@@ -100,8 +105,8 @@ def read_session_rows(db_path: str, session_id: str, limit: int = 100) -> list[d
         rows = db.execute(
             "SELECT id, role, content, tool_call_id, tool_calls, tool_name,"
             " timestamp, finish_reason, reasoning_content, display_kind"
-            " FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?",
-            (session_id, max(1, min(int(limit), 200))),
+            " FROM messages WHERE session_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
+            (session_id, int(since_id), max(1, min(int(limit), 1000))),
         ).fetchall()
     except Exception:
         return []
@@ -111,7 +116,7 @@ def read_session_rows(db_path: str, session_id: str, limit: int = 100) -> list[d
         except Exception:
             pass
     out = []
-    for row in reversed(rows):
+    for row in rows:
         try:
             out.append(
                 {
@@ -160,32 +165,33 @@ def _stamp_throttle(hub_db_path: str) -> None:
         pass
 
 
-def _scan_mapped_conversations(hub_db_path: str) -> list[tuple[str, int, str]]:
+def _scan_mapped_conversations(hub_db_path: str) -> list[tuple[str, int, str]] | None:
     """(entity_id, updated_at, hermesSessionId) senza caricare i payload.
 
-    Ritorna [] in caso di errore (il chiamante non fa nulla).
+    None in caso di errore DB (il chiamante non tocca nulla).
     """
     try:
         db = sqlite3.connect("file:" + hub_db_path + "?mode=ro", uri=True, timeout=10)
     except Exception:
-        return []
+        return None
     try:
         try:
             rows = db.execute(
                 "SELECT entity_id, updated_at,"
-                " json_extract(payload_json, '$.hermesSessionId')"
+                " json_extract(payload_json, '$.hermesSessionId'),"
+                " json_extract(payload_json, '$.followState.active')"
                 " FROM hub_entities WHERE entity_type = 'conversation' AND deleted = 0"
                 " ORDER BY updated_at DESC LIMIT 1000"
             ).fetchall()
         except Exception:
-            return []
+            return None
     finally:
         try:
             db.close()
         except Exception:
             pass
     out = []
-    for entity_id, updated_at, session_id in rows:
+    for entity_id, updated_at, session_id, was_active in rows:
         session_id = str(session_id or "").strip()
         if not session_id:
             continue
@@ -193,7 +199,7 @@ def _scan_mapped_conversations(hub_db_path: str) -> list[tuple[str, int, str]]:
             updated = int(updated_at or 0)
         except Exception:
             updated = 0
-        out.append((str(entity_id), updated, session_id))
+        out.append((str(entity_id), updated, session_id, bool(was_active)))
     return out
 
 
@@ -335,23 +341,60 @@ def merge_hub_messages(current: list, follow: list) -> list:
     return merged
 
 
-def sync_conversation_follow(store, conversation: dict, home: str | None = None) -> bool:
-    """Sincronizza UNA conversazione Hub. Ritorna True se ha scritto."""
+def _cursor_path(hub_db_path: str) -> str:
+    parent = os.path.dirname(hub_db_path) or "."
+    return os.path.join(parent, CURSOR_NAME)
+
+
+def _read_cursors(hub_db_path: str) -> dict:
+    try:
+        with open(_cursor_path(hub_db_path), encoding="utf-8") as handle:
+            data = json.loads(handle.read())
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_cursors(hub_db_path: str, cursors: dict) -> None:
+    try:
+        with open(_cursor_path(hub_db_path), "w", encoding="utf-8") as handle:
+            json.dump({str(k): int(v) for k, v in cursors.items()}, handle)
+    except Exception:
+        pass
+
+
+def sync_conversation_follow(store, conversation: dict, home: str | None = None,
+                             cursors: dict | None = None) -> bool:
+    """Sincronizza UNA conversazione Hub. Ritorna True se ha scritto.
+
+    Cursore monotono con overlap (recupera clobber recenti); il merge per id
+    resta l'unica fonte di verita contro i duplicati. ``cursors`` mutato.
+    """
+    entity_id = str(conversation.get("id") or "").strip()
     session_id = str(conversation.get("hermesSessionId") or "").strip()
     if not session_id:
         return False
     db_path = profile_db_path(str(conversation.get("botIdentityKey") or ""), home)
     if not db_path:
         return False
+    cursor = 0
+    if isinstance(cursors, dict):
+        try:
+            cursor = max(0, int(cursors.get(entity_id, 0) or 0))
+        except Exception:
+            cursor = 0
     status = read_session_status(db_path, session_id)
-    rows = read_session_rows(db_path, session_id, limit=100)
-    if not rows:
-        return False
+    rows = read_session_rows(db_path, session_id, limit=READ_LIMIT,
+                             since_id=max(0, cursor - CURSOR_OVERLAP))
     current = conversation.get("messages")
     current = list(current) if isinstance(current, list) else []
     follow = build_follow_messages(rows)
     merged = merge_hub_messages(current, follow)
-    if len(merged) == len(current):
+    active = (not status.get("ended", True)) and bool(rows)
+    prev_follow = conversation.get("followState")
+    prev_active = bool(isinstance(prev_follow, dict) and prev_follow.get("active"))
+    messages_changed = len(merged) != len(current)
+    if not messages_changed and active == prev_active:
         return False
     last_ts = 0
     for message in merged:
@@ -367,10 +410,16 @@ def sync_conversation_follow(store, conversation: dict, home: str | None = None)
     conversation["messages"] = merged
     conversation["updatedAt"] = max(last_ts, existing_updated + 1)
     conversation["followState"] = {
-        "active": not status.get("ended", False),
-        "lastMsgId": max(r["id"] for r in rows),
+        "active": active,
+        "lastMsgId": max([r["id"] for r in rows] + [0]),
         "checkedAt": last_ts,
     }
+    if isinstance(cursors, dict) and rows:
+        try:
+            cursors[entity_id] = max(int(cursors.get(entity_id, 0) or 0),
+                                    max(r["id"] for r in rows))
+        except Exception:
+            pass
     return True
 
 
@@ -396,12 +445,27 @@ def _maybe_sync_follow_ups(hub_db_path: str | None = None, home: str | None = No
         return 0
     _stamp_throttle(hub_db)
     mapped = _scan_mapped_conversations(hub_db)
-    if not mapped:
+    if mapped is None:
         return 0
     store = SQLiteHubStateStore(hub_db)
     applied = 0
+    cursors = _read_cursors(hub_db)
     try:
-        for entity_id, _, _ in mapped[:MAX_CONVOS_PER_RUN]:
+        mapped_ids = {entity_id for entity_id, _, _, _ in mapped}
+        # Prune cursori orfani (conversazioni cancellate/scollegate).
+        for stale in [k for k in cursors if k not in mapped_ids]:
+            del cursors[stale]
+        # Finestra: top recenti + eventuali active fuori finestra (flip a
+        # inactive garantito anche per sessioni vecchie ancora marcate).
+        window = list(mapped[:MAX_CONVOS_PER_RUN])
+        seen = {entity_id for entity_id, _, _, _ in window}
+        for entry in mapped[MAX_CONVOS_PER_RUN:]:
+            if len(window) >= MAX_CONVOS_PER_RUN + 15:
+                break
+            if entry[0] not in seen and entry[3]:
+                window.append(entry)
+                seen.add(entry[0])
+        for entity_id, _, _, _ in window:
             try:
                 record = store.get("conversation", entity_id)
             except Exception:
@@ -415,7 +479,7 @@ def _maybe_sync_follow_ups(hub_db_path: str | None = None, home: str | None = No
             if not str(payload.get("hermesSessionId") or "").strip():
                 continue
             try:
-                changed = sync_conversation_follow(store, payload, home)
+                changed = sync_conversation_follow(store, payload, home, cursors)
             except Exception:
                 continue
             if not changed:
@@ -434,6 +498,12 @@ def _maybe_sync_follow_ups(hub_db_path: str | None = None, home: str | None = No
             except Exception:
                 continue
     finally:
+        try:
+            # Sempre: il file e' pochi byte, il cursore avanzato evita
+            # riletture; il prune evita crescita infinita.
+            _write_cursors(hub_db, cursors)
+        except Exception:
+            pass
         try:
             store.close()
         except Exception:

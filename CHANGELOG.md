@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.300 - 2026-10-23
+
+- Chat Android: feed attivita minimale stile timeline (Ragionamento + righe tool singole Eseguito/Letto/Esplorato/Modificato/Cercato, espandibili); prefill `Prefill · xk/max tok · tk/s · %` anche quando stimato (~); invio mostra solo "Invio richiesta" con shimmer; metriche messaggio di nuovo attive di default.
+- Gateway session_follow: cursore monotono + overlap (niente piu buchi su backlog >100), prune cursori orfani, flip inactive garantito anche fuori top-25; Android merge con mutex single-flight + dismiss banner persistente.
+- Test: WorkFeedFormatTest (7), ChatStreamProtocolTest (47), session_follow (11), suite verdi.
+
 ## 0.6.299 - 2026-10-23
 
 - Follow turni detached: sync gateway sessioni->Hub + merge live Android con banner; chiude la dead zone legacy.

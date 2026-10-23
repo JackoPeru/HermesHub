@@ -146,10 +146,22 @@ class ChatStreamProtocolTest {
     }
 
     @Test
-    fun estimatedPromptProgressIsNeverShown() {
+    fun estimatedPromptProgressIsShownMarked() {
         val events = parseSseData(
             "hermes.processing.progress",
             """{"type":"hermes.processing.progress","estimated":true,"percent":50}"""
+        )
+        val progress = events.filterIsInstance<ChatStreamEvent.PromptProgress>()
+        assertEquals(1, progress.size)
+        assertTrue(progress.single().estimated)
+        assertEquals(50, progress.single().percent)
+    }
+
+    @Test
+    fun estimatedProgressWithoutAnyDataIsDropped() {
+        val events = parseSseData(
+            "hermes.processing.progress",
+            """{"type":"hermes.processing.progress","estimated":true}"""
         )
         assertTrue(events.none { it is ChatStreamEvent.PromptProgress })
     }
@@ -373,14 +385,20 @@ class ChatStreamProtocolTest {
     }
 
     @Test
-    fun estimatedProgressNeverAppearsInActivityTimelineAndCompletionKeepsIt() {
+    fun estimatedProgressAppearsMarkedInTimelineAndCompletionKeepsIt() {
         var state = StreamingState()
+        assertEquals("Invio richiesta", state.status)
         state = state.applyEvent(ChatStreamEvent.PromptProgress(75, estimated = true))
-        assertTrue(state.activityTimeline.isEmpty())
+        assertEquals(1, state.activityTimeline.size)
+        val entry = state.activityTimeline.single()
+        assertEquals(AssistantActivity.Kind.PromptProgress, entry.kind)
+        assertTrue(entry.text.startsWith("~Prefill"))
+        assertTrue(entry.text.contains("75%"))
+        val prefills = state.transcript.filterIsInstance<TranscriptBlock.Prefill>()
+        assertEquals(1, prefills.size)
         state = state.applyEvent(ChatStreamEvent.ThinkingDelta("Evento esplicito."))
         state = state.applyEvent(ChatStreamEvent.Done(ChatStreamStats()))
         assertTrue(state.isDone)
-        assertEquals("Evento esplicito.", state.activityTimeline.single().text)
     }
 
     @Test

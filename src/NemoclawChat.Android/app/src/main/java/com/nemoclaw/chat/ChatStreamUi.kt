@@ -262,7 +262,11 @@ internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolea
         }
 
         if (showToolCalls && state.toolCalls.isNotEmpty()) {
-            ToolGroupExpander(state.toolCalls)
+            state.toolCalls.forEach { tool ->
+                androidx.compose.runtime.key(tool.id) {
+                    WorkToolRow(tool)
+                }
+            }
         }
 
         if (active && state.text.isNotBlank()) {
@@ -284,7 +288,7 @@ private fun preGenerationStatusLabel(status: String, progressPercent: Int?, elap
         normalized.contains("processing prompt") || normalized.contains("prefill prompt") || normalized.contains("elaborazione prompt") -> "Attesa progresso reale dal server"
         normalized.contains("responses") || normalized.contains("protocollo") -> "Preparazione sessione Hermes"
         elapsedSec >= 1.0 -> "Attesa risposta dal modello"
-        else -> status.ifBlank { "Invio prompt a Hermes" }
+        else -> status.ifBlank { "Invio richiesta" }
     }
 }
 
@@ -344,7 +348,11 @@ internal fun AgentTranscript(
                 }
                 is TranscriptBlock.Tools -> {
                     if (block.tools.isNotEmpty()) {
-                        ToolGroupExpander(block.tools)
+                        block.tools.forEach { tool ->
+                            androidx.compose.runtime.key(tool.id) {
+                                WorkToolRow(tool)
+                            }
+                        }
                     }
                 }
                 is TranscriptBlock.Prefill -> {
@@ -442,7 +450,11 @@ internal fun HermesActivityTimeline(timeline: List<AssistantActivity>, active: B
             PrefillPinnedRow(prefill.text, active)
         }
         if (tools.isNotEmpty()) {
-            ToolGroupExpander(tools)
+            tools.forEach { tool ->
+                androidx.compose.runtime.key(tool.id) {
+                    WorkToolRow(tool)
+                }
+            }
         }
         if (reasoningText.isNotBlank()) {
             ReasoningCanvas(reasoningText, active)
@@ -661,53 +673,55 @@ internal fun friendlyActivityStatus(status: String): String {
 }
 
 @Composable
-internal fun ToolGroupExpander(tools: List<ToolCallState>) {
-    // Reset solo quando cambia il SET di tool (nuovo turno), non a ogni update di stato.
-    var expanded by remember(tools.map { it.id }) { mutableStateOf(false) }
-    val pending = tools.count { inferToolOutcome(it) == ToolOutcome.Pending }
-    val failed = tools.count { inferToolOutcome(it) == ToolOutcome.Error }
-    val completed = tools.size - pending - failed
-    // Shimmer solo quando ci sono tool effettivamente pending (derivedStateOf).
-    val showShimmer by remember(pending) { derivedStateOf { pending > 0 } }
-    val status = when {
-        pending > 0 -> "$pending in corso"
-        failed > 0 -> "$failed falliti"
-        else -> "$completed completati"
+internal fun WorkToolRow(tool: ToolCallState) {
+    var expanded by remember(tool.id) { mutableStateOf(false) }
+    val outcome = inferToolOutcome(tool)
+    val statusColor = when (outcome) {
+        ToolOutcome.Success -> Color(0xFF34C759)
+        ToolOutcome.Error -> Color(0xFFFF453A)
+        ToolOutcome.Pending -> AppColors.Accent
     }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    val statusIcon = when (outcome) {
+        ToolOutcome.Success -> Icons.Rounded.CheckCircle
+        ToolOutcome.Error -> Icons.Rounded.Error
+        ToolOutcome.Pending -> Icons.Rounded.AutoAwesome
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 48.dp)
+                .heightIn(min = 40.dp)
                 .clickable { expanded = !expanded },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (showShimmer) {
-                ShimmerText("Tool", enabled = true)
-            } else {
-                Text(text = "Tool", color = AppColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-            }
-            Text(text = "${tools.size}", color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.weight(1f))
-            Text(text = status, color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Icon(statusIcon, contentDescription = null, tint = statusColor, modifier = Modifier.size(16.dp))
+            Text(
+                workToolTitle(tool.name, tool.args),
+                color = Color.White,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Text(outcome.label, color = statusColor, fontSize = 11.sp)
             Icon(
                 imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                contentDescription = if (expanded) "Chiudi tool" else "Mostra tool",
+                contentDescription = if (expanded) "Chiudi dettaglio" else "Mostra dettaglio",
                 tint = AppColors.Muted,
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(15.dp)
             )
         }
         if (expanded) {
-            Column(
-                modifier = Modifier.padding(start = 2.dp, end = 4.dp, bottom = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                tools.forEach { tool ->
-                    androidx.compose.runtime.key(tool.id) {
-                        ToolActivityRow(tool)
-                    }
-                }
+            val argsText = tool.argsPreview.ifBlank {
+                if (tool.args.isBlank()) "-" else prettifyJson(tool.args)
+            }
+            ActivityLine("Argomenti", argsText, monospaced = true)
+            val resultText = tool.resultPreview.ifBlank {
+                tool.result?.takeIf { it.isNotBlank() }?.let { prettifyJson(it) }.orEmpty()
+            }
+            if (resultText.isNotBlank()) {
+                ActivityLine("Risultato", resultText, monospaced = true)
             }
         }
     }
@@ -911,62 +925,6 @@ internal fun ActivityLine(label: String, value: String, monospaced: Boolean = fa
             fontFamily = if (monospaced) FontFamily.Monospace else FontFamily.Default,
             fontSize = 12.sp
         )
-    }
-}
-
-@Composable
-internal fun ToolActivityRow(tool: ToolCallState) {
-    var expanded by remember { mutableStateOf(false) }
-    val outcome = inferToolOutcome(tool)
-    val statusColor = when (outcome) {
-        ToolOutcome.Success -> Color(0xFF34C759)
-        ToolOutcome.Error -> Color(0xFFFF453A)
-        ToolOutcome.Pending -> AppColors.Accent
-    }
-    val statusIcon = when (outcome) {
-        ToolOutcome.Success -> Icons.Rounded.CheckCircle
-        ToolOutcome.Error -> Icons.Rounded.Error
-        ToolOutcome.Pending -> Icons.Rounded.AutoAwesome
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp)
-                .clickable { expanded = !expanded },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(statusIcon, contentDescription = null, tint = statusColor, modifier = Modifier.size(18.dp))
-            Text(
-                humanToolName(tool.name, tool.id, tool.args),
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            Text(outcome.label, color = statusColor, fontSize = 11.sp)
-            Icon(
-                imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                contentDescription = if (expanded) "Chiudi tool" else "Apri tool",
-                tint = AppColors.Muted,
-                modifier = Modifier.size(15.dp)
-            )
-        }
-        if (expanded) {
-            val argsText = tool.argsPreview.ifBlank {
-                if (tool.args.isBlank()) "-" else prettifyJson(tool.args)
-            }
-            ActivityLine("Argomenti", argsText, monospaced = true)
-            val resultText = tool.resultPreview.ifBlank {
-                tool.result?.takeIf { it.isNotBlank() }?.let { prettifyJson(it) }.orEmpty()
-            }
-            if (resultText.isNotBlank()) {
-                ActivityLine("Risultato", resultText, monospaced = true)
-            }
-        }
     }
 }
 

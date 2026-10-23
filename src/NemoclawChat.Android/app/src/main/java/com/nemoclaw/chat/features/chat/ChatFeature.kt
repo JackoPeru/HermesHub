@@ -1207,7 +1207,14 @@ internal fun ChatScreen(
     var serverFollowActive by remember(state.activeConversationId) { mutableStateOf(false) }
     var serverFollowChecking by remember(state.activeConversationId) { mutableStateOf(false) }
     var serverSyncNote by remember(state.activeConversationId) { mutableStateOf<String?>(null) }
+    // Dismiss intenzionale: il tick non riapre il banner (il merge silenzioso continua).
+    var serverFollowDismissed by remember(state.activeConversationId) { mutableStateOf(false) }
+    // Single-flight merge: tick 15s + Ricontrolla manuale corrono insieme;
+    // senza, doppio addAll degli stessi messaggi (duplicati live+archivio).
+    val mergeFollowMutex = remember { Mutex() }
     suspend fun mergeServerFollowUp(): Int {
+        if (!mergeFollowMutex.tryLock()) return 0
+        try {
         val cid = state.activeConversationId ?: return 0
         val streaming = state.streamingState
         if (streaming != null && !streaming.isDone) return 0
@@ -1236,6 +1243,9 @@ internal fun ChatScreen(
             }
         }
         return missing.size
+        } finally {
+            mergeFollowMutex.unlock()
+        }
     }
     LaunchedEffect(state.activeConversationId) {
         recheckActiveWork(::applyResumeOutcome)
@@ -1564,7 +1574,7 @@ internal fun ChatScreen(
                     detachedFollowUp = false
                 }
             )
-        } else if (serverFollowActive && !state.sending && state.streamingState == null) {
+        } else if (serverFollowActive && !serverFollowDismissed && !state.sending && state.streamingState == null) {
             DetachedFollowBanner(
                 subtitle = "Sessione attiva sul server — i nuovi messaggi arrivano da soli.",
                 checking = serverFollowChecking,
@@ -1579,7 +1589,7 @@ internal fun ChatScreen(
                         }
                     }
                 },
-                onDismiss = { serverFollowActive = false }
+                onDismiss = { serverFollowDismissed = true }
             )
         }
         serverSyncNote?.let { note ->

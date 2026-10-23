@@ -65,6 +65,12 @@ class SessionFollowTests(unittest.TestCase):
     def hub_path(self):
         return str(self.tmp / "hub.sqlite3")
 
+    def clear_throttle(self, hub):
+        try:
+            Path(Path(hub).parent / follow.THROTTLE_NAME).unlink()
+        except Exception:
+            pass
+
     def test_profile_resolution(self):
         (self.home / "profiles" / "director").mkdir(parents=True)
         (self.home / "profiles" / "director" / "state.db").write_bytes(b"")
@@ -156,6 +162,8 @@ class SessionFollowTests(unittest.TestCase):
             store.close()
         first = follow.maybe_sync_follow_ups(hub, str(self.home))
         self.assertEqual(1, first)
+        # Idempotenza vera (non throttle): pulisci throttle e riesegui.
+        self.clear_throttle(hub)
         second = follow.maybe_sync_follow_ups(hub, str(self.home))
         self.assertEqual(0, second)
         store = SQLiteHubStateStore(hub)
@@ -202,14 +210,159 @@ class SessionFollowTests(unittest.TestCase):
         self.assertFalse(payload["followState"]["active"])
         self.assertEqual(1, len(payload["messages"]))
 
-    def test_never_raises(self):
-        # DB assenti, conversazioni senza sessione, profili ignoti: sempre 0.
+    def test_never_raises(self):        # DB assenti, conversazioni senza sessione, profili ignoti: sempre 0.
         hub = self.hub_path()
         self.assertEqual(0, follow.maybe_sync_follow_ups(hub, str(self.home)))
         self.assertEqual([], follow.read_session_rows("/nonexistent.db", "x"))
         self.assertEqual({}, follow.read_session_status("/nonexistent.db", "x"))
         self.assertIsNone(follow.profile_db_path("primary::nope", str(self.home)))
-        self.assertFalse(follow.sync_conversation_follow(None, {"hermesSessionId": ""}))
+        self.assertFalse(follow.sync_conversation_follow(None, {"hermesSessionId": ""}, str(self.home), {}))
+
+    def test_unknown_session_never_active(self):
+        from hermes_hub_gateway.infrastructure.sqlite import SQLiteHubStateStore
+
+        make_session_db(
+            self.home / "profiles" / "director" / "state.db", "api_ghost",
+            rows=[{"id": 1, "role": "assistant", "content": "Boo.", "timestamp": 100.0}],
+        )
+        # Sessione cancellata dal DB dopo: status vuoto -> inactive.
+        db_path = str(self.home / "profiles" / "director" / "state.db")
+        db = sqlite3.connect(db_path)
+        db.execute("DELETE FROM sessions WHERE id='api_ghost'")
+        db.commit()
+        db.close()
+        hub = self.hub_path()
+        store = SQLiteHubStateStore(hub)
+        try:
+            store.upsert({
+                "entity_type": "conversation",
+                "entity_id": "conv_g",
+                "payload": {"id": "conv_g", "hermesSessionId": "api_ghost",
+                            "botIdentityKey": "primary::director", "updatedAt": 10, "messages": [],
+                            "followState": {"active": True, "lastMsgId": 1, "checkedAt": 100}},
+                "updated_at": 10,
+                "deleted": False,
+            })
+        finally:
+            store.close()
+        self.assertEqual(1, follow.maybe_sync_follow_ups(hub, str(self.home)))
+        store = SQLiteHubStateStore(hub)
+        try:
+            payload = dict(store.get("conversation", "conv_g").payload)
+        finally:
+            store.close()
+        # Flip a inactive scritto anche senza messaggi nuovi.
+        self.assertFalse(payload["followState"]["active"])
+
+    def test_backlog_paging_converges(self):
+        from hermes_hub_gateway.infrastructure.sqlite import SQLiteHubStateStore
+
+        rows = [{"id": i, "role": "assistant", "content": "msg %d" % i, "timestamp": 100.0 + i}
+                for i in range(1, 131)]
+        make_session_db(
+            self.home / "profiles" / "director" / "state.db", "api_big", rows=rows)
+        hub = self.hub_path()
+        store = SQLiteHubStateStore(hub)
+        try:
+            store.upsert({
+                "entity_type": "conversation",
+                "entity_id": "conv_b",
+                "payload": {"id": "conv_b", "hermesSessionId": "api_big",
+                            "botIdentityKey": "primary::director", "updatedAt": 10, "messages": []},
+                "updated_at": 10,
+                "deleted": False,
+            })
+        finally:
+            store.close()
+        self.assertEqual(1, follow.maybe_sync_follow_ups(hub, str(self.home)))
+        store = SQLiteHubStateStore(hub)
+        try:
+            payload = dict(store.get("conversation", "conv_b").payload)
+        finally:
+            store.close()
+        ids = [m["id"] for m in payload["messages"]]
+        # Tutte le 130 righe (backlog intero, non solo le ultime 100).
+        self.assertEqual(130, len(ids))
+        self.assertIn("srv_1", ids)
+        self.assertIn("srv_130", ids)
+
+    def test_stale_active_outside_window_flips(self):
+        from hermes_hub_gateway.infrastructure.sqlite import SQLiteHubStateStore
+
+        # 30 conversazioni recenti + 1 vecchia marcata active.
+        make_session_db(
+            self.home / "profiles" / "director" / "state.db", "api_old", ended=True,
+            rows=[{"id": 1, "role": "assistant", "content": "vecchio", "timestamp": 100.0}])
+        hub = self.hub_path()
+        store = SQLiteHubStateStore(hub)
+        try:
+            for i in range(30):
+                store.upsert({
+                    "entity_type": "conversation",
+                    "entity_id": "conv_filler_%02d" % i,
+                    "payload": {"id": "conv_filler_%02d" % i, "updatedAt": 1000 + i, "messages": []},
+                    "updated_at": 1000 + i,
+                    "deleted": False,
+                })
+            store.upsert({
+                "entity_type": "conversation",
+                "entity_id": "conv_old",
+                "payload": {"id": "conv_old", "hermesSessionId": "api_old",
+                            "botIdentityKey": "primary::director", "updatedAt": 10,
+                            "messages": [{"id": "srv_1", "text": "vecchio"}],
+                            "followState": {"active": True, "lastMsgId": 1, "checkedAt": 100}},
+                "updated_at": 10,
+                "deleted": False,
+            })
+        finally:
+            store.close()
+        self.clear_throttle(hub)
+        self.assertEqual(1, follow.maybe_sync_follow_ups(hub, str(self.home)))
+        store = SQLiteHubStateStore(hub)
+        try:
+            payload = dict(store.get("conversation", "conv_old").payload)
+        finally:
+            store.close()
+        self.assertFalse(payload["followState"]["active"])
+
+    def test_cursor_advances_and_prunes(self):
+        import sqlite3 as _sqlite3
+
+        from hermes_hub_gateway.infrastructure.sqlite import SQLiteHubStateStore
+
+        make_session_db(
+            self.home / "profiles" / "director" / "state.db", "api_c",
+            rows=[{"id": i, "role": "assistant", "content": "m%d" % i, "timestamp": 100.0 + i}
+                  for i in range(1, 6)])
+        hub = self.hub_path()
+        store = SQLiteHubStateStore(hub)
+        try:
+            store.upsert({
+                "entity_type": "conversation",
+                "entity_id": "conv_c",
+                "payload": {"id": "conv_c", "hermesSessionId": "api_c",
+                            "botIdentityKey": "primary::director", "updatedAt": 10, "messages": []},
+                "updated_at": 10,
+                "deleted": False,
+            })
+        finally:
+            store.close()
+        self.assertEqual(1, follow.maybe_sync_follow_ups(hub, str(self.home)))
+        cursor_file = Path(hub).parent / follow.CURSOR_NAME
+        cursors = json.loads(cursor_file.read_text(encoding="utf-8"))
+        self.assertEqual(5, cursors.get("conv_c"))
+        # Seconda run: niente di nuovo, niente scritture.
+        self.assertEqual(0, follow.maybe_sync_follow_ups(hub, str(self.home)))
+        # Conversazione sparita -> cursore potato.
+        db = _sqlite3.connect(hub)
+        db.execute("DELETE FROM hub_entities WHERE entity_type='conversation' AND entity_id='conv_c'")
+        db.execute("DELETE FROM hub_changes WHERE entity_type='conversation' AND entity_id='conv_c'")
+        db.commit()
+        db.close()
+        self.clear_throttle(hub)
+        follow.maybe_sync_follow_ups(hub, str(self.home))
+        cursors = json.loads(cursor_file.read_text(encoding="utf-8"))
+        self.assertNotIn("conv_c", cursors)
 
 
 if __name__ == "__main__":

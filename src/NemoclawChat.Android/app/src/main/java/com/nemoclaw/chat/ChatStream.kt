@@ -252,6 +252,98 @@ internal fun redactToolRawEvent(name: String, json: String): String {
     return SAFE_RAW_EVENT_JSON
 }
 
+/**
+ * Riga prefill "Prefill · 12k/262k tok · 654 tk/s · 45%".
+ * Stimato (senza totale affidabile) = prefisso ~ e niente %. Puro e testabile.
+ */
+internal fun formatCompactTokens(n: Long): String {
+    if (n < 0) return "…"
+    return when {
+        n >= 1_000_000L -> {
+            val v = n / 1_000_000.0
+            (if (v >= 100) v.roundToInt().toString() else String.format(java.util.Locale.US, "%.1f", v))
+                .replace('.', ',').trimEnd('0').trimEnd(',') + "M"
+        }
+        n >= 1_000L -> {
+            val v = n / 1_000.0
+            (if (v >= 100) v.roundToInt().toString() else String.format(java.util.Locale.US, "%.1f", v))
+                .replace('.', ',').trimEnd('0').trimEnd(',') + "k"
+        }
+        else -> n.toString()
+    }
+}
+
+internal fun formatTps(tps: Double): String {
+    if (!tps.isFinite() || tps <= 0) return ""
+    return if (tps >= 100) tps.roundToInt().toString()
+    else String.format(java.util.Locale.US, "%.1f", tps).replace('.', ',').trimEnd('0').trimEnd(',')
+}
+
+internal fun formatPrefillLine(
+    processed: Int?,
+    total: Int?,
+    maxTokens: Int?,
+    tps: Double?,
+    percent: Int?,
+    estimated: Boolean
+): String {
+    val head = if (estimated) "~Prefill" else "Prefill"
+    val denom = maxTokens?.takeIf { it > 0 } ?: total?.takeIf { it > 0 }
+    val tokPart = when {
+        processed != null && denom != null -> "${formatCompactTokens(processed.toLong())}/${formatCompactTokens(denom.toLong())} tok"
+        processed != null -> "${formatCompactTokens(processed.toLong())} tok"
+        else -> null
+    }
+    val tpsPart = tps?.takeIf { it.isFinite() && it > 0 }?.let { "${formatTps(it)} tk/s" }
+    val pctPart = percent?.takeIf { it in 1..100 }?.let { "$it%" }
+    val parts = listOfNotNull(tokPart, tpsPart, pctPart)
+    return if (parts.isEmpty()) head else "$head · ${parts.joinToString(" · ")}"
+}
+
+/** Primo argomento significativo (comando/path/query) dagli args tool. Puro. */
+internal fun extractFirstToolArg(args: String): String {
+    val trimmed = args.trim()
+    if (trimmed.isEmpty()) return ""
+    val fromJson = runCatching {
+        val obj = org.json.JSONObject(trimmed)
+        listOf("command", "path", "file", "query", "url", "prompt", "text", "q", "pattern", "input")
+            .firstNotNullOfOrNull { key -> obj.optString(key).takeIf { it.isNotBlank() } }
+    }.getOrNull()
+    val raw = fromJson ?: trimmed.lines().firstOrNull { it.isNotBlank() } ?: ""
+    val single = raw.replace(Regex("\\s+"), " ").trim()
+    return if (single.length <= 80) single else single.take(80).trimEnd() + "…"
+}
+
+/**
+ * Titolo riga tool stile feed ("Eseguito: gh repo view…", "Letto: file.txt").
+ * Solo verbi+argomenti reali, mai conteggi inventati. Puro e testabile.
+ */
+internal fun workToolTitle(name: String, args: String): String {
+    val clean = humanToolName(name, "", args).trim()
+    val detail = extractFirstToolArg(args)
+    fun has(vararg words: String): Boolean {
+        val pattern = Regex("\\b(${words.joinToString("|") { Regex.escape(it) }})", RegexOption.IGNORE_CASE)
+        return pattern.containsMatchIn(clean)
+    }
+    val argsHasCommand = runCatching {
+        org.json.JSONObject(args).has("command")
+    }.getOrDefault(false)
+    val verb = when {
+        argsHasCommand || has("terminal", "shell", "bash", "exec", "command", "run", "script", "codice") -> "Eseguito"
+        has("read", "cat", "show", "view", "lettura", "leggi") -> "Letto"
+        has("ls", "dir", "find", "glob", "list", "explor", "tree") -> "Esplorato"
+        has("write", "create", "save", "scriv", "crea") -> "Scritto"
+        has("edit", "patch", "diff", "modif", "apply") -> "Modificato"
+        has("fetch", "curl", "download", "wget", "scaric") -> "Scaricato"
+        has("search", "query", "web", "cerc", "grep", "lookup") -> "Cercato"
+        has("image", "vision", "analy", "screenshot", "photo") -> "Analizzato"
+        has("video", "audio", "elabor") -> "Elaborato"
+        else -> ""
+    }
+    if (verb.isEmpty()) return clean.ifBlank { "Attività" }
+    return if (detail.isNotBlank()) "$verb: $detail" else verb
+}
+
 /** Explicit server activity. Client-generated status never enters this timeline. */
 @androidx.compose.runtime.Immutable
 data class AssistantActivity(
@@ -326,14 +418,14 @@ data class StreamingState(
     val pendingApprovals: List<HermesServerApproval> = emptyList(),
     val pendingSteer: String = "",
     val stats: ChatStreamStats? = null,
-    val status: String = "Invio prompt a Hermes...",
+    val status: String = "Invio richiesta",
     val promptProgressPercent: Int? = null,
     val promptProgressEstimated: Boolean = false,
     val promptProgressProcessedTokens: Int? = null,
     val promptProgressTotalTokens: Int? = null,
     val promptProgressCachedTokens: Int? = null,
     val promptProgressTimeMs: Double? = null,
-    val activityLog: List<String> = listOf("0.0s  Invio prompt a Hermes..."),
+    val activityLog: List<String> = listOf("0.0s  Invio richiesta"),
     val error: String? = null,
     val source: String = "Hermes",
     val usedFallback: Boolean = false,
@@ -640,14 +732,14 @@ private fun StreamingState.appendReasoningSnapshotActivity(snapshot: String): Li
 }
 
 private fun StreamingState.appendPromptProgressActivity(event: ChatStreamEvent.PromptProgress): List<AssistantActivity> {
-    if (event.estimated) return activityTimeline
-    val details = buildList {
-        if (event.processedTokens != null && event.totalTokens != null && event.totalTokens > 0) add("${event.processedTokens}/${event.totalTokens} tok")
-        if (event.cachedTokens != null && event.cachedTokens > 0) add("cache ${event.cachedTokens}")
-        if (event.timeMs != null && event.timeMs >= 0) add("${String.format(java.util.Locale.US, "%.1f", event.timeMs / 1000.0)}s")
-    }
-    val label = friendlyActivityStatus(event.label.ifBlank { "Elaborazione prompt" })
-    val text = "$label ${event.percent.coerceIn(0, 100)}%" + if (details.isEmpty()) "" else " (${details.joinToString(", ")})"
+    val text = formatPrefillLine(
+        processed = event.processedTokens,
+        total = event.totalTokens,
+        maxTokens = stats?.contextLength,
+        tps = stats?.tokensPerSecond,
+        percent = event.percent,
+        estimated = event.estimated
+    )
     val last = activityTimeline.lastOrNull()
     return if (last?.kind == AssistantActivity.Kind.PromptProgress) {
         boundedTimeline(activityTimeline.dropLast(1) + last.copy(text = text))
@@ -730,14 +822,14 @@ private fun StreamingState.appendTranscriptTool(id: String, name: String?, updat
 }
 
 private fun StreamingState.appendTranscriptPrefill(event: ChatStreamEvent.PromptProgress): StreamingState {
-    if (event.estimated) return this
-    val details = buildList {
-        if (event.processedTokens != null && event.totalTokens != null && event.totalTokens > 0) add("${event.processedTokens}/${event.totalTokens} tok")
-        if (event.cachedTokens != null && event.cachedTokens > 0) add("cache ${event.cachedTokens}")
-        if (event.timeMs != null && event.timeMs >= 0) add("${String.format(java.util.Locale.US, "%.1f", event.timeMs / 1000.0)}s")
-    }
-    val label = friendlyActivityStatus(event.label.ifBlank { "Elaborazione prompt" })
-    val text = "$label ${event.percent.coerceIn(0, 100)}%" + if (details.isEmpty()) "" else " (${details.joinToString(", ")})"
+    val text = formatPrefillLine(
+        processed = event.processedTokens,
+        total = event.totalTokens,
+        maxTokens = stats?.contextLength,
+        tps = stats?.tokensPerSecond,
+        percent = event.percent,
+        estimated = event.estimated
+    )
     val blocks = transcript.filterNot { it is TranscriptBlock.Prefill }.toMutableList()
     blocks += TranscriptBlock.Prefill(text)
     return copy(transcript = boundedTranscript(blocks))
@@ -2296,13 +2388,26 @@ private fun parseEventObject(eventName: String?, obj: JSONObject): List<ChatStre
             if (out.any { it is ChatStreamEvent.PromptProgress }) {
                 return out
             }
-            if (obj.optBoolean("estimated", false)) {
+            val estimated = obj.optBoolean("estimated", false)
+            val percent = obj.optProgressPercent()
+            val progress = obj.optJSONObject("prompt_progress")
+            val processed = progress?.optIntOrNull("processed")
+            val total = progress?.optIntOrNull("total")?.takeIf { it > 0 }
+            val cache = progress?.optIntOrNull("cache")
+            val timeMs = progress?.optDoubleOrNull("time_ms")
+            // Anche stimato si mostra (marcato ~): niente prefill se zero dati.
+            if (percent == null && processed == null && total == null) {
                 return out
             }
-            val percent = obj.optProgressPercent()
-            if (percent != null) {
-                out += ChatStreamEvent.PromptProgress(percent, "Elaborazione prompt")
-            }
+            out += ChatStreamEvent.PromptProgress(
+                percent = percent ?: 0,
+                label = "Elaborazione prompt",
+                estimated = estimated,
+                processedTokens = processed,
+                totalTokens = total,
+                cachedTokens = cache,
+                timeMs = timeMs
+            )
             return out
         }
         t.contains("hermes.visual_blocks") || t.contains("visual_blocks") -> {
@@ -2971,17 +3076,24 @@ private fun JSONObject.optProgressPercent(): Int? {
 }
 
 private fun JSONObject.promptProgressEventOrNull(): ChatStreamEvent.PromptProgress? {
-    if (optBoolean("estimated", false)) return null
+    val estimated = optBoolean("estimated", false)
     val progress = optJSONObject("prompt_progress") ?: return null
-    val total = progress.optIntOrNull("total")?.takeIf { it > 0 } ?: return null
-    val processed = progress.optIntOrNull("processed") ?: return null
+    val total = progress.optIntOrNull("total")?.takeIf { it > 0 }
+    val processed = progress.optIntOrNull("processed")
     val cache = progress.optIntOrNull("cache")
     val timeMs = progress.optDoubleOrNull("time_ms")
-    val percent = ((processed.toDouble() / total.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
+    // Stimato senza totale: si mostra comunque (marcato ~), non si scarta.
+    if (!estimated && total == null) return null
+    if (estimated && total == null && processed == null) return null
+    val percent = if (total != null && processed != null) {
+        ((processed.toDouble() / total.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
+    } else {
+        optProgressPercent() ?: 0
+    }
     return ChatStreamEvent.PromptProgress(
         percent = percent,
         label = "Elaborazione prompt",
-        estimated = false,
+        estimated = estimated,
         processedTokens = processed,
         totalTokens = total,
         cachedTokens = cache,

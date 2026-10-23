@@ -1,8 +1,9 @@
-Hermes Hub 0.6.299 (follow turni detached)
+Hermes Hub 0.6.300 (feed attivita + prefill + follow robusto)
 
-- Problema: i turni continuati sul server dopo uscita/kill restavano invisibili (chat ferma, "niente da mostrare"). Causa: nessun follow per turni legacy + Hub mai aggiornato (dead zone).
-- Gateway: nuovo sync session_follow — le conversazioni Hub collegate (hermesSessionId) ricevono i messaggi nuovi dal session DB del profilo (testi + attivita tool, mai output grezzi); trigger sul pull esistente, mai raise, throttle 45s.
-- Android: merge live dei messaggi sincronizzati nel tick 15s (senza binding), banner "sessione attiva sul server", nota di sync, pull+merge sul Ricontrolla; followState parsato.
-- Test: session_follow 7/7, SessionFollowUpTest 4/4, suite verdi.
+- Android: feed attivita minimale in italiano (Ragionamento + una riga per tool: Eseguito/Letto/Esplorato/Scritto/Modificato/Scaricato/Cercato/Analizzato, espandibili con argomenti/risultato); collettore "Attivita Hermes N / Mostra".
+- Prefill ripristinato e arricchito: "Prefill · 12,3k/262k tok · 654 tk/s · 45%"; i progress stimati non vengono piu scartati (marcati ~). Invio mostra solo "Invio richiesta" con shimmer classico.
+- Metriche messaggio (TTFT, t/s, tok, prompt, ctx, max) di nuovo attive di default (la scelta manuale resta).
+- Gateway session_follow: cursore monotono + overlap 25 (niente buchi su backlog lunghi), prune cursori orfani, flip a inactive garantito anche oltre la top-25; Android merge single-flight + dismiss banner persistente.
+- Test: WorkFeedFormatTest 7/7, ChatStreamProtocolTest 47/47, AgentTranscriptTest 11/11, session_follow 11/11, consistency 28/28.
 
-Asset: HermesHub-0.6.299-android.apk (Android, versionCode 303), NemoclawChat.Windows_0.6.299.0_x64.msix (x64) e HermesHub-0.6.299-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.300-android.apk (Android, versionCode 304), NemoclawChat.Windows_0.6.300.0_x64.msix (x64) e HermesHub-0.6.300-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
