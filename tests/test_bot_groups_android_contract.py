@@ -8,19 +8,23 @@ solo-locale.
 """
 
 import pathlib
+import sys
 import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tests"))
+
+from android_sources import read_android_bots_ui  # noqa: E402
+
 BOT_CONNECTIONS = ROOT / "src" / "NemoclawChat.Android" / "app" / "src" / "main" / "java" / "com" / "nemoclaw" / "chat" / "features" / "bots" / "BotConnections.kt"
-BOT_FEATURE = ROOT / "src" / "NemoclawChat.Android" / "app" / "src" / "main" / "java" / "com" / "nemoclaw" / "chat" / "features" / "bots" / "BotsFeature.kt"
 
 
 class BotGroupsAndroidContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.connections = BOT_CONNECTIONS.read_text(encoding="utf-8")
-        cls.feature = BOT_FEATURE.read_text(encoding="utf-8")
+        cls.feature = read_android_bots_ui()
 
     def test_synced_operations_target_primary_gateway(self):
         count = self.connections.count("/v1/hub/bot-groups")

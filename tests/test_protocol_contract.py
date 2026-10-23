@@ -10,6 +10,13 @@ from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "tests"))
+
+from android_sources import (  # noqa: E402
+    read_android_bots_ui,
+    read_android_hub_ops,
+    read_android_stream,
+)
 
 from hermes_hub_gateway.protocol import (  # noqa: E402
     build_error,
@@ -71,19 +78,7 @@ class ProtocolContractTests(unittest.TestCase):
             / "chat"
             / "HermesHubProtocol.kt"
         ).read_text(encoding="utf-8")
-        android_stream = (
-            ROOT
-            / "src"
-            / "NemoclawChat.Android"
-            / "app"
-            / "src"
-            / "main"
-            / "java"
-            / "com"
-            / "nemoclaw"
-            / "chat"
-            / "ChatStream.kt"
-        ).read_text(encoding="utf-8")
+        android_stream = read_android_stream()
 
         for source in (windows_protocol, android_protocol):
             self.assertIn("X-Hermes-Request-Id", source)
@@ -103,20 +98,7 @@ class ProtocolContractTests(unittest.TestCase):
         windows_protocol = (
             ROOT / "src" / "NemoclawChat.Windows" / "Services" / "HermesHubProtocol.cs"
         ).read_text(encoding="utf-8")
-        android_operations = (
-            ROOT
-            / "src"
-            / "NemoclawChat.Android"
-            / "app"
-            / "src"
-            / "main"
-            / "java"
-            / "com"
-            / "nemoclaw"
-            / "chat"
-            / "core"
-            / "HubOperations.kt"
-        ).read_text(encoding="utf-8")
+        android_operations = read_android_hub_ops()
         gateway_module = (
             ROOT / "scripts" / "hermes_hub_gateway" / "bot_profiles.py"
         ).read_text(encoding="utf-8")
@@ -139,21 +121,7 @@ class ProtocolContractTests(unittest.TestCase):
         self.assertIn('BOT_CHAT_TITLE = "Bot Chat"', gateway_module)
         self.assertNotIn("auth.json", gateway_module)
 
-        android_bots = (
-            ROOT
-            / "src"
-            / "NemoclawChat.Android"
-            / "app"
-            / "src"
-            / "main"
-            / "java"
-            / "com"
-            / "nemoclaw"
-            / "chat"
-            / "features"
-            / "bots"
-            / "BotsFeature.kt"
-        ).read_text(encoding="utf-8")
+        android_bots = read_android_bots_ui()
         self.assertIn("createHermesBot", android_bots)
         self.assertIn("updateHermesBot", android_bots)
         self.assertIn("deleteHermesBot", android_bots)
@@ -231,21 +199,7 @@ class ProtocolContractTests(unittest.TestCase):
             / "bots"
             / "BotGroupTurn.kt"
         ).read_text(encoding="utf-8")
-        android_bots = (
-            ROOT
-            / "src"
-            / "NemoclawChat.Android"
-            / "app"
-            / "src"
-            / "main"
-            / "java"
-            / "com"
-            / "nemoclaw"
-            / "chat"
-            / "features"
-            / "bots"
-            / "BotsFeature.kt"
-        ).read_text(encoding="utf-8")
+        android_bots = read_android_bots_ui()
 
         self.assertIn("NormalizeEndpoint(settings.GatewayUrl)", windows_store)
         self.assertIn("!string.IsNullOrWhiteSpace(settings.GatewayUrl)", windows_store)
@@ -318,20 +272,7 @@ class ProtocolContractTests(unittest.TestCase):
             / "automation"
             / "AutomationFeature.kt"
         ).read_text(encoding="utf-8")
-        android_operations = (
-            ROOT
-            / "src"
-            / "NemoclawChat.Android"
-            / "app"
-            / "src"
-            / "main"
-            / "java"
-            / "com"
-            / "nemoclaw"
-            / "chat"
-            / "core"
-            / "HubOperations.kt"
-        ).read_text(encoding="utf-8")
+        android_operations = read_android_hub_ops()
 
         self.assertIn("ProfileScopedApiUri", windows_gateway)
         self.assertIn("NormalizeBotRoutineName", windows_gateway)

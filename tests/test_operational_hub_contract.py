@@ -1,8 +1,12 @@
 import pathlib
+import sys
 import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tests"))
+
+from android_sources import read_android_stream  # noqa: E402
 
 
 class OperationalHubContractTests(unittest.TestCase):
@@ -124,13 +128,12 @@ class OperationalHubContractTests(unittest.TestCase):
         android_ui = self.read(
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStreamUi.kt"
         )
-        android_stream = self.read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStream.kt"
-        )
+        android_stream = read_android_stream()
         gateway = self.read("scripts/patch-hermes-gateway-native.py")
         self.assertIn('new AssistantActivityRecord("reasoning"', windows)
         self.assertIn("CollapseActivityOnce()", windows)
-        self.assertIn("HermesActivityDisclosure(flagBlocks,", android_ui)
+        self.assertIn("AgentTranscript(", android_ui)
+        self.assertIn("maxVisible", android_ui)
         self.assertIn("transcriptBlocksOf(timeline", android_ui)
         self.assertIn("activityTimeline", android_stream)
         self.assertIn("ThinkingSnapshot", android_stream)
@@ -148,9 +151,7 @@ class OperationalHubContractTests(unittest.TestCase):
     def test_prompt_progress_is_server_reported_and_ui_hides_backend_name(self):
         windows_stream = self.read("src/NemoclawChat.Windows/Services/ChatStream.cs")
         windows_ui = self.read("src/NemoclawChat.Windows/Pages/StreamingBubble.cs")
-        android_stream = self.read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStream.kt"
-        )
+        android_stream = read_android_stream()
         android_ui = self.read(
             "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStreamUi.kt"
         )

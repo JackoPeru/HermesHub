@@ -7,10 +7,10 @@ dashboard pulse, wake word locale.)
 import unittest
 from pathlib import Path
 
+from android_sources import read_android_bots_ui, read_android_server_ui
+
 REPO = Path(__file__).resolve().parent.parent
 
-BOTS_UI = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/bots/BotsFeature.kt"
-SERVER_UI = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/server/ServerFeature.kt"
 GIT = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/git/GitHubPrs.kt"
 VOICE = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/VoiceModeScreen.kt"
 SETTINGS = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/settings/SettingsFeature.kt"
@@ -23,7 +23,7 @@ def text(path: Path) -> str:
 
 class FleetTests(unittest.TestCase):
     def test_fleet_card(self) -> None:
-        src = text(BOTS_UI)
+        src = read_android_bots_ui()
         for marker in (
             "FleetCard",
             "fleetSummaryLine",
@@ -55,7 +55,7 @@ class GitPrTests(unittest.TestCase):
 
 class PulseWakeTests(unittest.TestCase):
     def test_pulse(self) -> None:
-        src = text(SERVER_UI)
+        src = read_android_server_ui()
         for marker in (
             "PulseCard",
             "bucketPulseDays",

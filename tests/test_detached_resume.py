@@ -8,9 +8,14 @@ sottotitolo va su piu' righe senza ellipsis.
 import unittest
 from pathlib import Path
 
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from android_sources import read_android_chat_ui  # noqa: E402
+
 REPO = Path(__file__).resolve().parent.parent
 
-CHAT_FEATURE = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/chat/ChatFeature.kt"
 ACTIVE_WORK = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/core/storage/ActiveWorkStore.kt"
 AND_TEST = REPO / "src/NemoclawChat.Android/app/src/test/java/com/nemoclaw/chat/DetachedResumeTest.kt"
 
@@ -35,13 +40,13 @@ class DetachedResumeTests(unittest.TestCase):
             self.assertIn(marker, src)
 
     def test_resume_is_fast_and_reports_outcome(self) -> None:
-        src = text(CHAT_FEATURE)
+        src = read_android_chat_ui()
         self.assertIn("httpGetResponseQuick(url, botApiKey)", src)
         self.assertIn("resumeResponseBinding(binding: ActiveWorkBinding): DetachedResumeOutcome", src)
         self.assertIn("STILL_RUNNING", src)
 
     def test_banner_is_readable_and_stateful(self) -> None:
-        src = text(CHAT_FEATURE)
+        src = read_android_chat_ui()
         self.assertIn("DetachedFollowBanner(", src)
         self.assertIn("subtitle = detachedSubtitle", src)
         self.assertIn("checking = detachedChecking", src)
@@ -54,7 +59,7 @@ class DetachedResumeTests(unittest.TestCase):
 
     def test_legacy_markers_survive(self) -> None:
         # Contratto test_release_consistency: nomi storici invariati.
-        src = text(CHAT_FEATURE)
+        src = read_android_chat_ui()
         self.assertIn("DetachedFollowBanner(", src)
         self.assertIn("detachedFollowUp", src)
 

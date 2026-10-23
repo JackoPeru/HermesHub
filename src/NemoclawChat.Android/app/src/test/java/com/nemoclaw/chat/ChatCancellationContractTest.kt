@@ -18,10 +18,10 @@ import org.junit.Test
  * Sorgenti mappate:
  * - features/chat/ChatFeature.kt:1045-1059 -> `state.activeStreamJob?.cancel()` + POST
  *   `/v1/runs/{id}/stop` quando `activeRunId` e' noto; la cancel locale da sola non basta.
- * - ChatStream.kt:1165 -> `awaitClose { call.cancel() }`: la cancel del flow cancella la call OkHttp.
- * - ChatStream.kt:2067 -> `invokeOnCancellation { call.cancel() }`: la cancel del job cancella
- *   anche le richieste non-SSE (`executeCancellableRequest`).
- * - ChatStream.kt:1032 -> `ensureActive()`: il parser e' cooperativo, nessun evento dopo cancel.
+ * - StreamSseNet.kt (`streamSseAttempt` -> `awaitClose { call.cancel() }`): la cancel del flow cancella la call OkHttp.
+ * - StreamSseNet.kt (`executeCancellableRequest` -> `invokeOnCancellation { call.cancel() }`): la cancel del job cancella
+ *   anche le richieste non-SSE.
+ * - StreamParsing.kt (`parseSseData` -> `ensureActive()`): il parser e' cooperativo, nessun evento dopo cancel.
  * - ChatFeature.kt:912-925 -> `CancellationException -> interrupted = true`; il `finally`
  *   salva una sola snapshot finale "Interrotto", nessun checkpoint/salvataggio tardivo dopo.
  */

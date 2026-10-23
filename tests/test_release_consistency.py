@@ -21,6 +21,17 @@ def read_android_sources() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in sorted(source_root.rglob("*.kt")))
 
 
+def read_android_stream_sources() -> str:
+    # Ex ChatStream.kt, spezzato in Stream*.kt (stessa cartella, stesso package).
+    stream_root = (
+        ROOT / "src" / "NemoclawChat.Android" / "app" / "src" / "main" / "java"
+        / "com" / "nemoclaw" / "chat"
+    )
+    return "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(stream_root.glob("Stream*.kt"))
+    )
+
+
 class ReleaseConsistencyTests(unittest.TestCase):
     def test_gateway_launcher_file_transfer_defaults_are_unlimited(self) -> None:
         launcher = read("scripts/hermes-hub-linux.sh")
@@ -345,9 +356,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn("PlugAndPlayGatewayHosts = [];", windows_gateway)
 
         android_main = read_android_sources()
-        android_stream = read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStream.kt"
-        )
+        android_stream = read_android_stream_sources()
         self.assertIn("plugAndPlayGatewayRoots = emptyList<String>()", android_main)
         self.assertIn("plugAndPlayStreamGatewayRoots = emptyList<String>()", android_stream)
 
@@ -400,9 +409,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertNotIn("exportLocalBackup(context, apiKey)", main)
 
     def test_activity_timeline_uses_redacted_cross_platform_wire_schema(self) -> None:
-        android_stream = read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStream.kt"
-        )
+        android_stream = read_android_stream_sources()
         android_archive = read_android_sources()
         windows_archive = read("src/NemoclawChat.Windows/Services/ChatArchiveStore.cs")
         windows_sync = read("src/NemoclawChat.Windows/Services/GatewayService.cs")
@@ -421,9 +428,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn("RedactRawEvent", windows_archive)
 
     def test_activity_timeline_sync_raw_event_and_checkpoint_recovery_are_fail_closed(self) -> None:
-        android_stream = read(
-            "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStream.kt"
-        )
+        android_stream = read_android_stream_sources()
         android_archive = read_android_sources()
         windows_archive = read("src/NemoclawChat.Windows/Services/ChatArchiveStore.cs")
         windows_sync = read("src/NemoclawChat.Windows/Services/GatewayService.cs")

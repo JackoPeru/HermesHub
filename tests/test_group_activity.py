@@ -3,10 +3,11 @@
 import unittest
 from pathlib import Path
 
+from android_sources import read_android_bots_ui
+
 REPO = Path(__file__).resolve().parent.parent
 
 TURN = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/bots/BotGroupTurn.kt"
-BOTS_UI = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/bots/BotsFeature.kt"
 AND_TEST = REPO / "src/NemoclawChat.Android/app/src/test/java/com/nemoclaw/chat/features/bots/GroupTurnActivityTest.kt"
 
 
@@ -28,7 +29,7 @@ class GroupActivityTests(unittest.TestCase):
             self.assertIn(marker, src)
 
     def test_structured_activity_ui(self) -> None:
-        src = text(BOTS_UI)
+        src = read_android_bots_ui()
         for marker in (
             "GroupTurnActivity",
             "formatGroupTurnTime",

@@ -1,8 +1,12 @@
 import pathlib
+import sys
 import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tests"))
+
+from android_sources import read_android_stream  # noqa: E402
 
 
 class ProjectWorkspaceContractTests(unittest.TestCase):
@@ -39,7 +43,7 @@ class ProjectWorkspaceContractTests(unittest.TestCase):
 
     def test_active_project_context_reaches_native_requests(self):
         windows_protocol = self.read("src/NemoclawChat.Windows/Services/HermesHubProtocol.cs")
-        android_stream = self.read("src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/ChatStream.kt")
+        android_stream = read_android_stream()
         android_main = self.read_android_sources()
         self.assertIn("project_context = project is null ? null", windows_protocol)
         self.assertIn("ProjectContextInstructions(settings)", windows_protocol)

@@ -8,7 +8,7 @@ import org.junit.Test
 /**
  * Contract upload multi-file (test JVM, nessuna dipendenza Android).
  *
- * Sorgente mappata: ChatStream.kt:1272-1277
+ * Sorgente mappata: StreamUpload.kt (`buildPromptWithAttachmentToolRefs`)
  * ```
  * val refs = attachments.map { uploadAttachmentForTool(...) }
  * val uploadedIndexes = refs.indices.filter { refs[it].error.isNullOrBlank() }.toSet()

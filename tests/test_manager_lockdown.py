@@ -11,6 +11,8 @@
 import unittest
 from pathlib import Path
 
+from android_sources import read_android_server_ui
+
 REPO = Path(__file__).resolve().parent.parent
 
 MANAGER = REPO / "gpu-manager/manager.py"
@@ -19,7 +21,6 @@ DISPLAY = REPO / "gpu-manager/display_bridge.py"
 REFRAME_SCRIPT = REPO / "gpu-manager/client_h3_reframe.py"
 AND_SECRET = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/core/auth/GatewaySecretStore.kt"
 AND_TOPBAR = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/chat/ChatTopBar.kt"
-AND_SERVER = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/server/ServerFeature.kt"
 AND_HTTP = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/core/network/HermesHttpClient.kt"
 AND_SETTINGS = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/settings/SettingsFeature.kt"
 WIN_CRED = REPO / "src/NemoclawChat.Windows/Services/GatewayCredentialStore.cs"
@@ -111,7 +112,7 @@ class AppKeysTests(unittest.TestCase):
         topbar = text(AND_TOPBAR)
         self.assertIn("postLayaCommand", topbar)
         self.assertNotIn("/mode/", topbar)
-        server = text(AND_SERVER)
+        server = read_android_server_ui()
         self.assertIn("riavvia il manager", server)
         self.assertIn("RegisteredDevice", server)
         self.assertIn("postLayaCommand", text(AND_HTTP))
@@ -126,7 +127,7 @@ class AppKeysTests(unittest.TestCase):
     def test_android_image_browse_uses_app_key(self) -> None:
         # Regressione: il browse immagini (:8643/browse, ruolo app) riceveva
         # la chiave gateway -> 401. Solo la chiave app sul manager.
-        server = (REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/server/ServerFeature.kt").read_text(encoding="utf-8")
+        server = read_android_server_ui()
         self.assertIn("loadImageBrowse(settings, managerKey", server)
         self.assertIn("loadGpuAppSecret(context)", server)
 

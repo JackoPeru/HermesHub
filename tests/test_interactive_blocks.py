@@ -9,13 +9,14 @@ protocollo insegna all'agente ([risposta quiz ...] / [dati modulo ...]).
 import unittest
 from pathlib import Path
 
+from android_sources import read_android_hub_ops
+
 REPO = Path(__file__).resolve().parent.parent
 
 WIN_VISUAL = REPO / "src/NemoclawChat.Windows/Services/VisualBlocks.cs"
 WIN_HOME = REPO / "src/NemoclawChat.Windows/Pages/HomePage.xaml.cs"
 WIN_PROTOCOL = REPO / "src/NemoclawChat.Windows/Services/HermesHubProtocol.cs"
 AND_MODELS = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/chat/ChatModels.kt"
-AND_OPS = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/core/HubOperations.kt"
 AND_UI = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/chat/ChatMediaBlocks.kt"
 AND_BUBBLE = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/chat/ChatMessageBubble.kt"
 AND_FEATURE = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/chat/ChatFeature.kt"
@@ -60,7 +61,7 @@ class InteractiveBlocksTests(unittest.TestCase):
         models = text(AND_MODELS)
         for marker in ("VisualChoiceOption", "VisualFormField", "val options", "val fields", "val submitLabel"):
             self.assertIn(marker, models)
-        ops = text(AND_OPS)
+        ops = read_android_hub_ops()
         for marker in ("readVisualOptions", "readVisualFields", '"choice" ->', '"form" ->', "isValidVisualFormField"):
             self.assertIn(marker, ops)
         archive = text(AND_ARCHIVE)

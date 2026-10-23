@@ -9,13 +9,14 @@ operatore (opzionale), notifica manager->gateway a fine job.
 import unittest
 from pathlib import Path
 
+from android_sources import read_android_server_ui
+
 REPO = Path(__file__).resolve().parent.parent
 
 PATCHER = REPO / "scripts/hermes_hub_gateway/adapters/hermes/legacy_patcher.py"
 MANAGER = REPO / "gpu-manager/manager.py"
 DEVICE_KEYS = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/core/security/DeviceKeys.kt"
 HTTP_CLIENT = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/core/network/HermesHttpClient.kt"
-SERVER_UI = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/server/ServerFeature.kt"
 PUSH_SERVICE = REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/HermesPushService.kt"
 MANIFEST = REPO / "src/NemoclawChat.Android/app/src/main/AndroidManifest.xml"
 GRADLE = REPO / "src/NemoclawChat.Android/app/build.gradle.kts"
@@ -73,7 +74,7 @@ class DeviceSigningTests(unittest.TestCase):
             self.assertIn(marker, keys)
         client = text(HTTP_CLIENT)
         self.assertIn("postDeviceSignedJson", client)
-        ui = text(SERVER_UI)
+        ui = read_android_server_ui()
         for marker in (
             "postServerControlSigned",
             "postDeviceSignedJson",
@@ -138,7 +139,7 @@ class JobPushTests(unittest.TestCase):
         gradle = text(GRADLE)
         self.assertIn("firebase-messaging", gradle)
         self.assertIn("androidx.biometric:biometric", gradle)
-        ui = text(SERVER_UI)
+        ui = read_android_server_ui()
         self.assertIn("NOTIFICHE PUSH", ui)
         self.assertIn("Attiva notifiche", ui)
 
