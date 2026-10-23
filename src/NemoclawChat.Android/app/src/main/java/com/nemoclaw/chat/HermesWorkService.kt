@@ -48,6 +48,9 @@ internal class HermesWorkService : Service() {
     )
     private val tracked = ConcurrentHashMap<String, Tracked>()
     private val notifiedApprovals = ConcurrentHashMap<String, String>()
+    /** Ultimo stato per run (per la notifica foreground unica) + run mostrato. */
+    private val lastStatus = ConcurrentHashMap<String, String>()
+    private var foregroundRunId: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -99,10 +102,9 @@ internal class HermesWorkService : Service() {
                         intent.getStringExtra(EXTRA_PROFILE)?.takeIf { it.isNotBlank() },
                         intent.getBooleanExtra(EXTRA_MULTIPLEX, false)
                     )
-                    startForegroundInternal(progressNotification(
-                        "Hermes al lavoro",
-                        intent.getStringExtra(EXTRA_GOAL)?.takeIf { it.isNotBlank() } ?: "Avanzamento nel gateway…"
-                    ))
+                    foregroundRunId = runId
+                    lastStatus[runId] = intent.getStringExtra(EXTRA_GOAL)?.takeIf { it.isNotBlank() } ?: "Avanzamento nel gateway…"
+                    refreshForeground()
                     startPoller(runId)
                 }
             }
@@ -269,6 +271,7 @@ internal class HermesWorkService : Service() {
         // così un poller concorrente non può ri-creare stato dopo lo stop.
         pollers.remove(cleanRunId)?.cancel()
         notifiedApprovals.remove(cleanRunId)
+        lastStatus.remove(cleanRunId)
         val metaSnapshot = tracked.remove(cleanRunId)
         if (metaSnapshot != null) {
             runCatching { clearActiveWorkBinding(this@HermesWorkService, metaSnapshot.conversationId) }
@@ -276,12 +279,12 @@ internal class HermesWorkService : Service() {
         cancelNotification(tag(cleanRunId))
         val metaForStop = metaSnapshot
         if (metaForStop == null) {
-            stopIfIdle()
+            refreshForeground()
             return
         }
         val clientSnapshot = clientForMeta(metaForStop)
         if (clientSnapshot == null) {
-            stopIfIdle()
+            refreshForeground()
             return
         }
         // Stop retryabile in background; stopSelf solo dopo conferma o retry esauriti.
@@ -306,7 +309,7 @@ internal class HermesWorkService : Service() {
                 Log.w(TAG, "stop runId=$cleanRunId code=$lastCode retry esauriti, rilascio claim per nuovo stop")
                 releaseStopClaim(cleanRunId)
             }
-            stopIfIdle()
+            refreshForeground()
         }
     }
 
@@ -324,6 +327,7 @@ internal class HermesWorkService : Service() {
     private fun untrack(runId: String, clearBinding: Boolean) {
         pollers.remove(runId)?.cancel()
         notifiedApprovals.remove(runId)
+        lastStatus.remove(runId)
         val metaSnapshot = tracked.remove(runId)
         if (clearBinding) {
             val cidSnapshot = metaSnapshot?.conversationId
@@ -331,8 +335,9 @@ internal class HermesWorkService : Service() {
                 runCatching { clearActiveWorkBinding(this, cidSnapshot) }
             }
         }
+        // Pulizia orfane di versioni precedenti (seconda riga ongoing).
         cancelNotification(tag(runId))
-        stopIfIdle()
+        refreshForeground()
     }
 
     private fun stopIfIdle() {
@@ -358,52 +363,79 @@ internal class HermesWorkService : Service() {
         )
     }
 
-    private fun stopAction(runId: String): NotificationCompat.Action {
+    private fun stopAction(runId: String?): NotificationCompat.Action {
+        val intent = Intent(this, HermesWorkService::class.java).setAction(ACTION_STOP)
+        if (!runId.isNullOrBlank()) intent.putExtra(EXTRA_RUN_ID, runId)
         val pending = PendingIntent.getService(
-            this, runId.hashCode(),
-            Intent(this, HermesWorkService::class.java)
-                .setAction(ACTION_STOP)
-                .putExtra(EXTRA_RUN_ID, runId),
+            this, (runId ?: "all").hashCode(),
+            intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Action.Builder(0, "Interrompi", pending).build()
     }
 
-    private fun progressNotification(title: String, text: String): Notification =
-        NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun progressNotification(title: String, text: String, stopRunId: String? = null): Notification {
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle(title)
             .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentIntent(openAppIntent())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .build()
+        // Pulsante stop solo quando c'e un run agganciato (mai sulla riga iniziale).
+        if (stopRunId != null) builder.addAction(stopAction(stopRunId.ifBlank { null }))
+        return builder.build()
+    }
 
+    /**
+     * UNA SOLA notifica ongoing: quella foreground (stesso id senza tag).
+     * Niente piu seconda riga per-run: gli avanzamenti aggiornano questa.
+     */
     private fun updateProgress(runId: String, text: String) {
-        val metaSnapshot = tracked[runId] ?: return
-        val goalTitle = metaSnapshot.goal.take(80).ifBlank { "Hermes al lavoro" }
-        notifyPerRun(runId, metaSnapshot.conversationId, goalTitle, text, ongoing = true)
+        if (tracked[runId] == null) return
+        lastStatus[runId] = text
+        refreshForeground()
+    }
+
+    private fun refreshForeground() {
+        val ids = tracked.keys.toList()
+        if (ids.isEmpty()) {
+            stopIfIdle()
+            return
+        }
+        val current = foregroundRunId?.takeIf { tracked.containsKey(it) }
+            ?: ids.sorted().first().also { foregroundRunId = it }
+        val meta = tracked[current]
+        val title = foregroundSummary(ids.size, meta?.goal.orEmpty())
+        val text = lastStatus[current]?.takeIf { it.isNotBlank() } ?: "Avanzamento nel gateway…"
+        // Singolo run: stop mirato; multipli: stop totale.
+        val stopId = if (ids.size == 1) current else null
+        runCatching {
+            getSystemService(NotificationManager::class.java)
+                .notify(NOTIFICATION_ID, progressNotification(title, text, stopRunId = stopId))
+        }
     }
 
     private fun notifyFinished(runId: String, conversationId: String?, title: String, text: String) {
         // Una sola volta per runId (il worker fallback controlla lo stesso marker).
         if (wasRunNotified(this, runId)) return
-        notifyPerRun(runId, conversationId, title, text, ongoing = false)
+        notifyTransient(runId, conversationId, title, text)
         markRunNotified(this, runId)
     }
 
     /**
-     * UN SOLO helper per-run: stesso tag `work_<runId>`, stesso id per progress,
-     * finish e approval (deeplink identico). Evita notifiche ongoing orfane.
+     * Notifiche TRANSITORIE (fine lavoro, approvazioni): cancellabili e con
+     * auto-cancel. Mai ongoing: l'unica ongoing e quella foreground, cosi non
+     * esistono piu doppie righe non cancellabili.
      */
-    private fun notifyPerRun(
+    private fun notifyTransient(
         runId: String,
         conversationId: String?,
         title: String,
         text: String,
-        ongoing: Boolean,
         highPriority: Boolean = false
     ) {
         val cidSnapshot = conversationId?.trim().orEmpty()
@@ -414,13 +446,10 @@ internal class HermesWorkService : Service() {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentIntent(openAppIntent(cidSnapshot.ifBlank { null }))
-            .setOngoing(ongoing)
+            .setOngoing(false)
             .setOnlyAlertOnce(true)
-            .setAutoCancel(!ongoing)
+            .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-        if (ongoing) {
-            builder.addAction(stopAction(runId))
-        }
         if (highPriority) {
             builder.setPriority(NotificationCompat.PRIORITY_HIGH)
         }
@@ -480,7 +509,7 @@ internal class HermesWorkService : Service() {
         val detail = detailParts
             .filter { it.isNotBlank() }.joinToString(" — ").take(220)
             .ifBlank { "Decisione richiesta." }
-        notifyPerRun(runId, conversationId, "Hermes chiede approvazione", detail, ongoing = false, highPriority = true)
+        notifyTransient(runId, conversationId, "Hermes chiede approvazione", detail, highPriority = true)
     }
 
     private fun cancelNotification(tag: String) {
@@ -563,6 +592,14 @@ internal class HermesWorkService : Service() {
             }
         }
     }
+}
+
+/**
+ * Titolo della notifica foreground unica. Puro e testabile.
+ */
+internal fun foregroundSummary(runCount: Int, goal: String): String {
+    if (runCount > 1) return "Hermes al lavoro ($runCount)"
+    return goal.take(80).ifBlank { "Hermes al lavoro" }
 }
 
 /**

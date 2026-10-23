@@ -1,8 +1,7 @@
-Hermes Hub 0.6.303 (feed sempre visibile + stallo onesto)
+Hermes Hub 0.6.304 (notifica singola)
 
-- Gruppi "N attività" aperti di default mentre il turno è vivo (niente tap per vedere); compatti a turno chiuso.
-- Dopo 30s senza eventi, riga "Elaborazione lunga · Ns — il server sta ancora lavorando" (sparisce da sola al prossimo evento).
-- Mai più label "tool" generica: fallback "Attività".
-- Test: WorkFeedFormatTest 16/16, suite Android verde, consistency 28/28.
+- Una sola notifica ongoing per i lavori Hermes: gli avanzamenti aggiornano la foreground (con pulsante Interrompi), niente piu seconda riga "Elaborazione nel gateway...".
+- Completamenti e approvazioni restano notifiche transitorie cancellabili.
+- Test: HermesWorkServiceTest 2/2, suite Android verde, consistency 28/28.
 
-Asset: HermesHub-0.6.303-android.apk (Android, versionCode 307), NemoclawChat.Windows_0.6.303.0_x64.msix (x64) e HermesHub-0.6.303-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.304-android.apk (Android, versionCode 308), NemoclawChat.Windows_0.6.304.0_x64.msix (x64) e HermesHub-0.6.304-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
