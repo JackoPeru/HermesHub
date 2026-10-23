@@ -65,6 +65,15 @@ class WorkFeedFormatTest {
     }
 
     @Test
+    fun workToolTitleNeverShowsGenericTool() {
+        assertEquals("Attività", workToolTitle("tool", ""))
+        assertEquals("Attività", workToolTitle("call_abc123", ""))
+        assertEquals("Attività", workToolTitle("", ""))
+        // Con dettaglio reale il generico si qualifica comunque.
+        assertTrue(workToolTitle("tool", """{"command":"ls /tmp"}""").startsWith("Eseguito:"))
+    }
+
+    @Test
     fun toolDurationFormatsLikeDesktop() {
         assertEquals("", formatToolDuration(0))
         assertEquals("", formatToolDuration(-5))

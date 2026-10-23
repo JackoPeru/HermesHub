@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.303 - 2026-10-23
+
+- Chat Android: gruppi tool aperti di default a turno vivo; riga "Elaborazione lunga · Ns" dopo 30s senza eventi; mai piu label "tool" generica.
+- Test: fallback generico in WorkFeedFormatTest, suite verdi.
+
 ## 0.6.302 - 2026-10-23
 
 - Chat Android: feed compatto stile desktop ufficiale (prosa + righe dense Pensiero · Ns / Eseguito · 25s / N attività ∨, pill "↓ N messaggi" oltre 8 blocchi); durate tool reali; turni chiusi con feed inline invece del box "Attività Hermes".

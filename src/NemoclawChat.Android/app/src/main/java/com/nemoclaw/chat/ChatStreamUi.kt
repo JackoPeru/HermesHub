@@ -128,6 +128,12 @@ internal fun StreamingBubbleView(
                         shimmer = true
                     )
                 }
+                if (!state.isDone) {
+                    StallHint(
+                        contentKey = Triple(transcript.size, state.text.length, timeline.size),
+                        active = true
+                    )
+                }
 
                 if (state.text.isNotEmpty() && (state.isDone || transcript.isEmpty())) {
                     val streamText = remember(state.text) { collapseRepeatedBlocks(state.text) }
@@ -336,7 +342,7 @@ internal fun AgentTranscript(
                 }
                 is TranscriptBlock.Tools -> {
                     if (block.tools.isNotEmpty()) {
-                        CompactToolsGroup(block.tools)
+                        CompactToolsGroup(block.tools, active)
                     }
                 }
                 is TranscriptBlock.Prefill -> {
@@ -398,12 +404,13 @@ private fun CompactThoughtRow(text: String, elapsedSec: Double, active: Boolean,
 }
 
 @Composable
-private fun CompactToolsGroup(tools: List<ToolCallState>) {
+private fun CompactToolsGroup(tools: List<ToolCallState>, active: Boolean = false) {
     if (tools.size == 1) {
         androidx.compose.runtime.key(tools[0].id) { CompactToolRow(tools[0]) }
         return
     }
-    var expanded by remember(tools.map { it.id }) { mutableStateOf(false) }
+    // Live: aperto di default (vedere senza tap); a turno chiuso: compatto.
+    var expanded by remember(tools.map { it.id }, active) { mutableStateOf(active) }
     Column {
         Row(
             modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 3.dp),
@@ -433,9 +440,36 @@ private fun CompactToolsGroup(tools: List<ToolCallState>) {
     }
 }
 
+/**
+ * Riga onesta quando lo stream e vivo ma non arrivano eventi: dopo 30s
+ * mostra da quanto il server sta elaborando (contesti lunghi). Sparisce
+ * da sola al prossimo evento o a turno chiuso.
+ */
 @Composable
-private fun CompactMorePill(hidden: Int, onClick: () -> Unit) {
-    Box(
+private fun StallHint(contentKey: Any?, active: Boolean) {
+    if (!active) return
+    var nowNs by remember { mutableLongStateOf(System.nanoTime()) }
+    var lastChangeNs by remember { mutableLongStateOf(System.nanoTime()) }
+    LaunchedEffect(contentKey) { lastChangeNs = System.nanoTime() }
+    LaunchedEffect(active) {
+        while (active) {
+            kotlinx.coroutines.delay(1000L)
+            nowNs = System.nanoTime()
+        }
+    }
+    val idleSec = (nowNs - lastChangeNs) / 1_000_000_000L
+    if (idleSec >= 30) {
+        Text(
+            "Elaborazione lunga · ${idleSec}s — il server sta ancora lavorando",
+            color = AppColors.Faint,
+            fontSize = 12.sp,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun CompactMorePill(hidden: Int, onClick: () -> Unit) {    Box(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -467,7 +501,7 @@ internal fun HermesActivityTimeline(timeline: List<AssistantActivity>, active: B
             PrefillPinnedRow(prefill.text, active)
         }
         if (tools.isNotEmpty()) {
-            CompactToolsGroup(tools)
+            CompactToolsGroup(tools, active)
         }
         if (reasoningText.isNotBlank()) {
             ReasoningCanvas(reasoningText, active)

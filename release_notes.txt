@@ -1,7 +1,8 @@
-Hermes Hub 0.6.302 (feed compatto stile desktop ufficiale)
+Hermes Hub 0.6.303 (feed sempre visibile + stallo onesto)
 
-- Feed denso inline: prosa dell'agente + righe compatte (Pensiero · 14s espandibile, Eseguito: ... · 25s con durate reali, gruppi "N attività" espandibili, prefill slim); niente piu card alte ne box "Attivita Hermes" vuoti.
-- Turni chiusi: feed compatto inline (primi 8 blocchi + pill "↓ N messaggi" come il desktop).
-- Test: WorkFeedFormatTest 15/15 (durate, titoli, gruppi), suite Android verde, consistency 28/28.
+- Gruppi "N attività" aperti di default mentre il turno è vivo (niente tap per vedere); compatti a turno chiuso.
+- Dopo 30s senza eventi, riga "Elaborazione lunga · Ns — il server sta ancora lavorando" (sparisce da sola al prossimo evento).
+- Mai più label "tool" generica: fallback "Attività".
+- Test: WorkFeedFormatTest 16/16, suite Android verde, consistency 28/28.
 
-Asset: HermesHub-0.6.302-android.apk (Android, versionCode 306), NemoclawChat.Windows_0.6.302.0_x64.msix (x64) e HermesHub-0.6.302-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.303-android.apk (Android, versionCode 307), NemoclawChat.Windows_0.6.303.0_x64.msix (x64) e HermesHub-0.6.303-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

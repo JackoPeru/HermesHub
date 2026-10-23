@@ -362,6 +362,10 @@ internal fun workToolTitle(name: String, args: String): String {
         has("video", "audio", "elabor") -> "Elaborato"
         else -> ""
     }
+    // Nomi generici del parser senza dettaglio: mai mostrare "tool".
+    if (detail.isBlank() && (clean.isBlank() || clean.equals("tool", ignoreCase = true) || clean.matches(Regex("^call_[0-9a-fA-F]+$")))) {
+        return "Attività"
+    }
     if (verb.isEmpty()) return clean.ifBlank { "Attività" }
     return if (detail.isNotBlank()) "$verb: $detail" else verb
 }
