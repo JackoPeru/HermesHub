@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.302 - 2026-10-23
+
+- Chat Android: feed compatto stile desktop ufficiale (prosa + righe dense Pensiero · Ns / Eseguito · 25s / N attività ∨, pill "↓ N messaggi" oltre 8 blocchi); durate tool reali; turni chiusi con feed inline invece del box "Attività Hermes".
+- Test: durate e titoli in WorkFeedFormatTest, suite verdi.
+
 ## 0.6.301 - 2026-10-23
 
 - Chat Android: mai piu nomi evento grezzi in UI (message.started -> "Invio richiesta", wrapper vuoti -> invisibili, envelope/raw non toccano lo status); niente piu "Evento Hermes: ..." bloccato per minuti.

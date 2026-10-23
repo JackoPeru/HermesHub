@@ -57,11 +57,49 @@ class WorkFeedFormatTest {
         assertEquals("Modificato: audit4.mjs", workToolTitle("edit", """{"file":"audit4.mjs"}"""))
         assertEquals("Cercato: prefill regression", workToolTitle("search", """{"query":"prefill regression"}"""))
     }
-
     @Test
     fun workToolTitleNeverInventsCountsAndFallsBackToName() {
         assertEquals("Eseguito", workToolTitle("terminal", ""))
         assertEquals("mio-tool-strano", workToolTitle("mio-tool-strano", ""))
         assertTrue(workToolTitle("bash", "find . -name vercel.json").startsWith("Eseguito:"))
+    }
+
+    @Test
+    fun toolDurationFormatsLikeDesktop() {
+        assertEquals("", formatToolDuration(0))
+        assertEquals("", formatToolDuration(-5))
+        assertEquals("608ms", formatToolDuration(608))
+        assertEquals("145ms", formatToolDuration(145))
+        assertEquals("6,2s", formatToolDuration(6200))
+        assertEquals("13s", formatToolDuration(13000))
+        assertEquals("25s", formatToolDuration(25000))
+    }
+
+    @Test
+    fun toolDurationNeedsBothEnds() {
+        assertEquals(0L, toolDurationMs(ToolCallState("a", "bash")))
+        assertEquals("", toolDurationLabel(ToolCallState("a", "bash")))
+        val done = ToolCallState("a", "bash", startedAtMs = 1000L, endedAtMs = 26000L)
+        assertEquals(25000L, toolDurationMs(done))
+        assertEquals("25s", toolDurationLabel(done))
+    }
+
+    @Test
+    fun toolStartAndEndStampDurations() {
+        var state = StreamingState()
+        state = state.applyEvent(ChatStreamEvent.ToolCallStart("t1", "bash"))
+        val running = state.toolCalls.single()
+        assertTrue(running.startedAtMs > 0)
+        assertEquals(0L, running.endedAtMs)
+        state = state.applyEvent(ChatStreamEvent.ToolCallEnd("t1"))
+        val finished = state.toolCalls.single()
+        assertTrue(finished.endedAtMs >= finished.startedAtMs)
+        assertTrue(finished.startedAtMs > 0)
+    }
+
+    @Test
+    fun toolsGroupTitleCounts() {
+        assertEquals("1 attività", toolsGroupTitle(1))
+        assertEquals("4 attività", toolsGroupTitle(4))
     }
 }

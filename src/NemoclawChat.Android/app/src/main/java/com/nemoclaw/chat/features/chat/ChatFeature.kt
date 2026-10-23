@@ -3054,8 +3054,16 @@ internal fun ArchivedActivityDisclosure(
         val filtered = compatible.filter { showToolCalls || it.kind != AssistantActivity.Kind.Tool }
         flagTranscriptBlocks(transcriptBlocksOf(filtered, "", showToolCalls), showToolCalls)
     }
-    // Contenuto congelato: l'hash e una chiave stabile per l'expand/collapse.
-    if (blocks.isNotEmpty()) HermesActivityDisclosure(blocks, blocks.hashCode())
+    // Feed compatto inline come il desktop: oltre 8 blocchi, pill "↓ N messaggi".
+    if (blocks.isNotEmpty()) {
+        AgentTranscript(
+            blocks = blocks,
+            active = false,
+            includeAgentText = false,
+            turnKey = blocks.hashCode(),
+            maxVisible = 8
+        )
+    }
 }
 
 

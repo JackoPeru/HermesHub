@@ -1,7 +1,7 @@
-Hermes Hub 0.6.301 (status premium, niente piu eventi grezzi)
+Hermes Hub 0.6.302 (feed compatto stile desktop ufficiale)
 
-- Problema: dopo l'invio restava bloccato "Evento Hermes: message.started / in attesa" per minuti. Causa: i wrapper senza testo cadevano nel fallback Raw e gli envelope sovrascrivevano lo status a ogni evento.
-- Fix: message.started diventa "Invio richiesta" con shimmer; i wrapper vuoti sono invisibili (KeepAlive); envelope e raw non toccano mai lo status visibile (restano solo nella vista debug espandibile).
-- Test: HermesModernApiTest 31/31 (3 nuovi), suite Android verde, consistency 28/28.
+- Feed denso inline: prosa dell'agente + righe compatte (Pensiero · 14s espandibile, Eseguito: ... · 25s con durate reali, gruppi "N attività" espandibili, prefill slim); niente piu card alte ne box "Attivita Hermes" vuoti.
+- Turni chiusi: feed compatto inline (primi 8 blocchi + pill "↓ N messaggi" come il desktop).
+- Test: WorkFeedFormatTest 15/15 (durate, titoli, gruppi), suite Android verde, consistency 28/28.
 
-Asset: HermesHub-0.6.301-android.apk (Android, versionCode 305), NemoclawChat.Windows_0.6.301.0_x64.msix (x64) e HermesHub-0.6.301-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.302-android.apk (Android, versionCode 306), NemoclawChat.Windows_0.6.302.0_x64.msix (x64) e HermesHub-0.6.302-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

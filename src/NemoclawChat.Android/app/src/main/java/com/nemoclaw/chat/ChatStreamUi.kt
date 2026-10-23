@@ -15,6 +15,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -139,7 +141,13 @@ internal fun StreamingBubbleView(
                         else flagTranscriptBlocks(transcriptBlocksOf(timeline, state.thinking, showToolCalls), showToolCalls)
                     }
                     if (flagBlocks.isNotEmpty()) {
-                        HermesActivityDisclosure(flagBlocks, state.startedAtNs)
+                        AgentTranscript(
+                            blocks = flagBlocks,
+                            active = false,
+                            includeAgentText = false,
+                            turnKey = state.startedAtNs,
+                            maxVisible = 8
+                        )
                     }
                 }
             }
@@ -264,7 +272,7 @@ internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolea
         if (showToolCalls && state.toolCalls.isNotEmpty()) {
             state.toolCalls.forEach { tool ->
                 androidx.compose.runtime.key(tool.id) {
-                    WorkToolRow(tool)
+                    CompactToolRow(tool)
                 }
             }
         }
@@ -292,34 +300,10 @@ private fun preGenerationStatusLabel(status: String, progressPercent: Int?, elap
     }
 }
 
-@Composable
-internal fun HermesActivityDisclosure(blocks: List<TranscriptBlock>, turnKey: Any) {
-    val visibleCount = blocks.size
-    // Chiave stabile di turno (startedAtNs live, hash contenuto per gli
-    // archiviati): l'expand/collapse non si resetta a ogni nuovo blocco.
-    var expanded by rememberSaveable(turnKey) { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { expanded = !expanded },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text("Attività Hermes", color = AppColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-            Text("$visibleCount", color = AppColors.Muted, fontSize = 12.sp)
-            Spacer(Modifier.weight(1f))
-            Text(if (expanded) "Nascondi" else "Mostra", color = AppColors.Muted, fontSize = 12.sp)
-            Icon(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                contentDescription = if (expanded) "Chiudi attivita" else "Mostra attivita",
-                tint = AppColors.Muted, modifier = Modifier.size(16.dp))
-        }
-        if (expanded) AgentTranscript(blocks = blocks, active = false, includeAgentText = false, turnKey = turnKey)
-    }
-}
-
 /**
- * Feed agente in ordine cronologico: testo dell'agente interleavato con
- * pensieri ("Ragionamento · Ns") e raffiche di tool, ognuno espandibile.
- * A fine turno resta solo dentro il flag: qui si mostra il processo.
+ * Feed agente compatto stile desktop ufficiale: prosa interleavata con
+ * righe dense (Pensiero · Ns, Eseguito/Letto/… · durata, N attività ∨).
+ * Oltre maxVisible si mostra la pill "↓ N messaggi" come sul desktop.
  */
 @Composable
 internal fun AgentTranscript(
@@ -327,13 +311,17 @@ internal fun AgentTranscript(
     active: Boolean,
     includeAgentText: Boolean,
     tailText: String = "",
-    turnKey: Any? = null
+    turnKey: Any? = null,
+    maxVisible: Int = Int.MAX_VALUE
 ) {
+    var expandedMore by remember(turnKey) { mutableStateOf(false) }
+    val visible = if (expandedMore || blocks.size <= maxVisible) blocks else blocks.take(maxVisible)
+    val hidden = blocks.size - visible.size
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        blocks.forEachIndexed { index, block ->
+        visible.forEachIndexed { index, block ->
             when (block) {
                 is TranscriptBlock.AgentText -> {
                     if (includeAgentText && block.text.isNotBlank()) {
@@ -343,16 +331,12 @@ internal fun AgentTranscript(
                 }
                 is TranscriptBlock.Thought -> {
                     if (block.text.isNotBlank()) {
-                        ThoughtRow(text = block.text, elapsedSec = block.elapsedSec, active = active, index = index, turnKey = turnKey)
+                        CompactThoughtRow(text = block.text, elapsedSec = block.elapsedSec, active = active, index = index, turnKey = turnKey)
                     }
                 }
                 is TranscriptBlock.Tools -> {
                     if (block.tools.isNotEmpty()) {
-                        block.tools.forEach { tool ->
-                            androidx.compose.runtime.key(tool.id) {
-                                WorkToolRow(tool)
-                            }
-                        }
+                        CompactToolsGroup(block.tools)
                     }
                 }
                 is TranscriptBlock.Prefill -> {
@@ -362,6 +346,9 @@ internal fun AgentTranscript(
                 }
             }
         }
+        if (hidden > 0) {
+            CompactMorePill(hidden) { expandedMore = true }
+        }
         if (includeAgentText && tailText.isNotBlank()) {
             MarkdownText(tailText, color = Color.White, fontSize = 15.sp)
         }
@@ -369,70 +356,100 @@ internal fun AgentTranscript(
 }
 
 @Composable
-private fun ThoughtRow(text: String, elapsedSec: Double, active: Boolean, index: Int = 0, turnKey: Any? = null) {
-    val showShimmer by remember(active) { derivedStateOf { active } }
-    // Chiave stabile di turno + indice: crescere del testo non richiude.
+private fun CompactThoughtRow(text: String, elapsedSec: Double, active: Boolean, index: Int = 0, turnKey: Any? = null) {
     var expanded by if (turnKey != null) {
         rememberSaveable(turnKey, index) { mutableStateOf(false) }
     } else {
         remember(index) { mutableStateOf(false) }
     }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    val title = if (elapsedSec >= 1) {
+        "Pensiero · ${String.format(java.util.Locale.US, "%.0f", elapsedSec)}s"
+    } else {
+        "Pensiero"
+    }
+    Column {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 40.dp)
-                .clickable { expanded = !expanded },
+            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            if (showShimmer) {
-                ShimmerText("Ragionamento", enabled = true)
-                Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = if (elapsedSec >= 1) "${String.format(java.util.Locale.US, "%.0f", elapsedSec)}s · in corso" else "in corso",
-                    color = AppColors.Muted,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            } else {
-                val label = if (elapsedSec >= 1) {
-                    "Ragionamento · ${String.format(java.util.Locale.US, "%.0f", elapsedSec)}s"
-                } else {
-                    "Ragionamento"
-                }
-                Text(label, color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                Text(
-                    text.take(90).replace("\n", " "),
-                    color = AppColors.Faint,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-            }
+            Text(
+                title,
+                color = if (active) AppColors.Accent else AppColors.Faint,
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f)
+            )
             Icon(
                 imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                contentDescription = if (expanded) "Chiudi ragionamento" else "Mostra ragionamento",
-                tint = AppColors.Muted,
-                modifier = Modifier.size(15.dp)
+                contentDescription = if (expanded) "Chiudi pensiero" else "Mostra pensiero",
+                tint = AppColors.Faint,
+                modifier = Modifier.size(13.dp)
             )
         }
         if (expanded) {
-            Surface(
-                color = AppColors.Composer.copy(alpha = 0.62f),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = text.ifBlank { "—" },
-                    color = AppColors.Muted,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    modifier = Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())
-                        .padding(horizontal = 10.dp, vertical = 8.dp)
-                )
+            Text(
+                text = text.ifBlank { "—" },
+                color = AppColors.Muted,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 12.dp, end = 4.dp).heightIn(max = 160.dp).verticalScroll(rememberScrollState())
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactToolsGroup(tools: List<ToolCallState>) {
+    if (tools.size == 1) {
+        androidx.compose.runtime.key(tools[0].id) { CompactToolRow(tools[0]) }
+        return
+    }
+    var expanded by remember(tools.map { it.id }) { mutableStateOf(false) }
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                toolsGroupTitle(tools.size),
+                color = AppColors.Muted,
+                fontSize = 13.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = if (expanded) "Chiudi attività" else "Mostra attività",
+                tint = AppColors.Faint,
+                modifier = Modifier.size(14.dp)
+            )
+        }
+        if (expanded) {
+            tools.forEach { tool ->
+                androidx.compose.runtime.key(tool.id) {
+                    CompactToolRow(tool)
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun CompactMorePill(hidden: Int, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            color = AppColors.Composer,
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.clickable { onClick() }
+        ) {
+            Text(
+                "↓ $hidden messaggi",
+                color = AppColors.Muted,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            )
         }
     }
 }
@@ -450,11 +467,7 @@ internal fun HermesActivityTimeline(timeline: List<AssistantActivity>, active: B
             PrefillPinnedRow(prefill.text, active)
         }
         if (tools.isNotEmpty()) {
-            tools.forEach { tool ->
-                androidx.compose.runtime.key(tool.id) {
-                    WorkToolRow(tool)
-                }
-            }
+            CompactToolsGroup(tools)
         }
         if (reasoningText.isNotBlank()) {
             ReasoningCanvas(reasoningText, active)
@@ -673,43 +686,39 @@ internal fun friendlyActivityStatus(status: String): String {
 }
 
 @Composable
-internal fun WorkToolRow(tool: ToolCallState) {
+internal fun CompactToolRow(tool: ToolCallState) {
     var expanded by remember(tool.id) { mutableStateOf(false) }
     val outcome = inferToolOutcome(tool)
-    val statusColor = when (outcome) {
+    val dot = when (outcome) {
         ToolOutcome.Success -> Color(0xFF34C759)
         ToolOutcome.Error -> Color(0xFFFF453A)
         ToolOutcome.Pending -> AppColors.Accent
     }
-    val statusIcon = when (outcome) {
-        ToolOutcome.Success -> Icons.Rounded.CheckCircle
-        ToolOutcome.Error -> Icons.Rounded.Error
-        ToolOutcome.Pending -> Icons.Rounded.AutoAwesome
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    val duration = toolDurationLabel(tool)
+    val title = workToolTitle(tool.name, tool.args) +
+        (duration.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: "")
+    Column {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 40.dp)
-                .clickable { expanded = !expanded },
+            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(statusIcon, contentDescription = null, tint = statusColor, modifier = Modifier.size(16.dp))
+            Box(
+                modifier = Modifier.size(7.dp).background(dot, CircleShape)
+            )
             Text(
-                workToolTitle(tool.name, tool.args),
+                title,
                 color = Color.White,
                 fontSize = 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
-            Text(outcome.label, color = statusColor, fontSize = 11.sp)
             Icon(
                 imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                 contentDescription = if (expanded) "Chiudi dettaglio" else "Mostra dettaglio",
-                tint = AppColors.Muted,
-                modifier = Modifier.size(15.dp)
+                tint = AppColors.Faint,
+                modifier = Modifier.size(13.dp)
             )
         }
         if (expanded) {

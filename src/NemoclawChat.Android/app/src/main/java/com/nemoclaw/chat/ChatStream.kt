@@ -229,8 +229,30 @@ data class ToolCallState(
     val status: String = "in esecuzione…",
     val result: String? = null,
     val argsPreview: String = "",
-    val resultPreview: String = ""
+    val resultPreview: String = "",
+    val startedAtMs: Long = 0L,
+    val endedAtMs: Long = 0L
 )
+
+/** Durata reale del tool (0 se sconosciuta o ancora in corso). Puro. */
+internal fun toolDurationMs(tool: ToolCallState): Long {
+    if (tool.startedAtMs <= 0L || tool.endedAtMs <= tool.startedAtMs) return 0L
+    return tool.endedAtMs - tool.startedAtMs
+}
+
+/** "608ms" / "6,2s" / "25s" come il desktop ufficiale. Puro e testabile. */
+internal fun formatToolDuration(ms: Long): String {
+    if (ms <= 0) return ""
+    if (ms < 1000) return "${ms}ms"
+    val s = ms / 1000.0
+    return if (s < 10) String.format(java.util.Locale.US, "%.1f", s).replace('.', ',') + "s"
+    else "${s.roundToInt()}s"
+}
+
+internal fun toolDurationLabel(tool: ToolCallState): String = formatToolDuration(toolDurationMs(tool))
+
+/** Titolo gruppo tool compatti ("4 attività"). Puro. */
+internal fun toolsGroupTitle(count: Int): String = "$count attività"
 
 private const val SAFE_TOOL_ARGUMENTS_SUMMARY = "Argomenti ricevuti; contenuto omesso."
 private const val SAFE_TOOL_RESULT_SUMMARY = "Risultato ricevuto; contenuto omesso."
@@ -501,9 +523,13 @@ data class StreamingState(
         is ChatStreamEvent.ToolCallStart -> copy(
             status = "Tool in esecuzione: ${event.name}",
             toolCalls = if (toolCalls.any { it.id == event.id }) toolCalls
-                else toolCalls + ToolCallState(event.id, event.name)
-        ).flushPendingText().withTimelineTool(event.id, event.name) { it }
-            .appendTranscriptTool(event.id, event.name) { it }
+                else toolCalls + ToolCallState(event.id, event.name, startedAtMs = System.currentTimeMillis())
+        ).flushPendingText().withTimelineTool(event.id, event.name) {
+            if (it.startedAtMs == 0L) it.copy(startedAtMs = System.currentTimeMillis()) else it
+        }
+            .appendTranscriptTool(event.id, event.name) {
+                if (it.startedAtMs == 0L) it.copy(startedAtMs = System.currentTimeMillis()) else it
+            }
         is ChatStreamEvent.ToolCallArgs -> {
             val update: (ToolCallState) -> ToolCallState = {
                 it.copy(
@@ -520,17 +546,18 @@ data class StreamingState(
         is ChatStreamEvent.ToolCallEnd -> copy(
             status = "Tool completato.",
             toolCalls = toolCalls.map {
-                if (it.id == event.id) it.copy(status = "completato") else it
+                if (it.id == event.id) it.copy(status = "completato", endedAtMs = it.endedAtMs.takeIf { e -> e > 0 } ?: System.currentTimeMillis()) else it
             }
         ).flushPendingText()
-            .withTimelineTool(event.id, null) { it.copy(status = "completato") }
-            .appendTranscriptTool(event.id, null) { it.copy(status = "completato") }
+            .withTimelineTool(event.id, null) { it.copy(status = "completato", endedAtMs = it.endedAtMs.takeIf { e -> e > 0 } ?: System.currentTimeMillis()) }
+            .appendTranscriptTool(event.id, null) { it.copy(status = "completato", endedAtMs = it.endedAtMs.takeIf { e -> e > 0 } ?: System.currentTimeMillis()) }
         is ChatStreamEvent.ToolResult -> {
             val update: (ToolCallState) -> ToolCallState = {
                 it.copy(
                     name = if (!event.name.isNullOrBlank()) humanToolName(event.name, it.id, "") else it.name,
                     result = safeToolPayloadSummary(event.output, result = true),
                     resultPreview = scrubToolPayloadPreview(event.output, result = true),
+                    endedAtMs = it.endedAtMs.takeIf { e -> e > 0 } ?: System.currentTimeMillis(),
                     status = "risultato pronto"
                 )
             }
@@ -662,6 +689,7 @@ private fun upsertToolResult(tools: List<ToolCallState>, event: ChatStreamEvent.
             it.copy(
                 result = safeToolPayloadSummary(event.output, result = true),
                 resultPreview = scrubToolPayloadPreview(event.output, result = true),
+                endedAtMs = it.endedAtMs.takeIf { e -> e > 0 } ?: System.currentTimeMillis(),
                 status = "risultato pronto"
             )
         } else {
