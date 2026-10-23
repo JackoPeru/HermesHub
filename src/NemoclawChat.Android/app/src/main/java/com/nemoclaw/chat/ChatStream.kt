@@ -575,20 +575,22 @@ data class StreamingState(
             status = "Approvazione Hermes risolta: ${event.choice}."
         ).withActivity("Approvazione risolta: ${event.choice}")
         is ChatStreamEvent.EnvelopeMetadata -> {
-            val next = if (!event.runId.isNullOrBlank() && event.runId != activeRunId) {
+            // Solo tracking runId: gli envelope non toccano mai lo status
+            // visibile (ciclo di vita: Invio richiesta / Prefill / ...).
+            if (!event.runId.isNullOrBlank() && event.runId != activeRunId) {
                 copy(activeRunId = event.runId)
             } else this
-            next.copy(status = "Evento Hermes correlato: ${event.type}")
         }
         is ChatStreamEvent.VisualBlocks -> copy(
             visualBlocks = mergeVisualBlocks(visualBlocks, event.blocks),
             visualBlocksVersion = event.version
         ).withActivity("Visual blocks ricevuti: ${event.blocks.size}.")
         is ChatStreamEvent.Status -> copy(status = friendlyActivityStatus(event.message)).withActivity(event.message)
-        is ChatStreamEvent.RawHermesEvent -> copy(status = "Evento Hermes: ${event.name}")
-            // Contratto redaction (redactToolRawEvent): l'activity log non
-            // conserva mai payload raw di eventi non fidati, solo il tipo.
-            .withActivity(redactToolRawEvent(event.name, event.json))
+        // Eventi raw: mai nomi tecnici in UI (solo vista debug espandibile);
+        // lo stato visibile resta quello del ciclo di vita (Invio/Prefill/...).
+        is ChatStreamEvent.KeepAlive -> withActivity(null)
+        is ChatStreamEvent.RawHermesEvent ->
+            withActivity(redactToolRawEvent(event.name, event.json))
         is ChatStreamEvent.PromptProgress -> copy(
             promptProgressPercent = event.percent.coerceIn(0, 100),
             promptProgressEstimated = event.estimated,
@@ -1047,6 +1049,9 @@ sealed class ChatStreamEvent {
     data class ApprovalResolved(val runId: String, val approvalId: String, val choice: String) : ChatStreamEvent()
     data class VisualBlocks(val blocks: List<VisualBlock>, val version: Int) : ChatStreamEvent()
     data class Status(val message: String) : ChatStreamEvent()
+    /** Wrapper senza contenuto (es. message.completed senza testo): nessun
+     *  cambio visibile, serve solo a non cadere nel fallback Raw. */
+    data object KeepAlive : ChatStreamEvent()
     data class RawHermesEvent(
         val name: String,
         val json: String,

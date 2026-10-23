@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.301 - 2026-10-23
+
+- Chat Android: mai piu nomi evento grezzi in UI (message.started -> "Invio richiesta", wrapper vuoti -> invisibili, envelope/raw non toccano lo status); niente piu "Evento Hermes: ..." bloccato per minuti.
+- Test: 3 nuovi in HermesModernApiTest (31/31), suite verdi.
+
 ## 0.6.300 - 2026-10-23
 
 - Chat Android: feed attivita minimale stile timeline (Ragionamento + righe tool singole Eseguito/Letto/Esplorato/Modificato/Cercato, espandibili); prefill `Prefill · xk/max tok · tk/s · %` anche quando stimato (~); invio mostra solo "Invio richiesta" con shimmer; metriche messaggio di nuovo attive di default.

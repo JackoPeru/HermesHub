@@ -1,9 +1,7 @@
-Hermes Hub 0.6.300 (feed attivita + prefill + follow robusto)
+Hermes Hub 0.6.301 (status premium, niente piu eventi grezzi)
 
-- Android: feed attivita minimale in italiano (Ragionamento + una riga per tool: Eseguito/Letto/Esplorato/Scritto/Modificato/Scaricato/Cercato/Analizzato, espandibili con argomenti/risultato); collettore "Attivita Hermes N / Mostra".
-- Prefill ripristinato e arricchito: "Prefill · 12,3k/262k tok · 654 tk/s · 45%"; i progress stimati non vengono piu scartati (marcati ~). Invio mostra solo "Invio richiesta" con shimmer classico.
-- Metriche messaggio (TTFT, t/s, tok, prompt, ctx, max) di nuovo attive di default (la scelta manuale resta).
-- Gateway session_follow: cursore monotono + overlap 25 (niente buchi su backlog lunghi), prune cursori orfani, flip a inactive garantito anche oltre la top-25; Android merge single-flight + dismiss banner persistente.
-- Test: WorkFeedFormatTest 7/7, ChatStreamProtocolTest 47/47, AgentTranscriptTest 11/11, session_follow 11/11, consistency 28/28.
+- Problema: dopo l'invio restava bloccato "Evento Hermes: message.started / in attesa" per minuti. Causa: i wrapper senza testo cadevano nel fallback Raw e gli envelope sovrascrivevano lo status a ogni evento.
+- Fix: message.started diventa "Invio richiesta" con shimmer; i wrapper vuoti sono invisibili (KeepAlive); envelope e raw non toccano mai lo status visibile (restano solo nella vista debug espandibile).
+- Test: HermesModernApiTest 31/31 (3 nuovi), suite Android verde, consistency 28/28.
 
-Asset: HermesHub-0.6.300-android.apk (Android, versionCode 304), NemoclawChat.Windows_0.6.300.0_x64.msix (x64) e HermesHub-0.6.300-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.301-android.apk (Android, versionCode 305), NemoclawChat.Windows_0.6.301.0_x64.msix (x64) e HermesHub-0.6.301-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

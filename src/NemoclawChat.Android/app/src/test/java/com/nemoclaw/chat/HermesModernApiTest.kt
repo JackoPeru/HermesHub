@@ -147,8 +147,7 @@ class HermesModernApiTest {
         assertTrue(isTerminalSseEvent("assistant.completed", """{"type":"assistant.completed"}"""))
     }
 
-    @Test fun runProgressAndUnknownEventsNeverCrash() {
-        val progress = parseSseData("hermes.tool.progress", """{"type":"hermes.tool.progress","tool":"shell","preview":"ls"}""")
+    @Test fun runProgressAndUnknownEventsNeverCrash() {        val progress = parseSseData("hermes.tool.progress", """{"type":"hermes.tool.progress","tool":"shell","preview":"ls"}""")
         assertTrue(progress.any { it is ChatStreamEvent.ToolCallStart })
         val unknown = parseSseData("hermes.future.v9", """{"type":"hermes.future.v9","payload":{"x":1}}""")
         // Evento sconosciuto -> tollerato senza crash; preservato per forward-compat (come da contratto esistente),
@@ -157,6 +156,37 @@ class HermesModernApiTest {
         val raw = unknown.filterIsInstance<ChatStreamEvent.RawHermesEvent>().single()
         assertTrue(raw.json.contains("hermes.future.v9"))
         assertTrue(unknown.none { it is ChatStreamEvent.TextDelta || it is ChatStreamEvent.TextSnapshot })
+    }
+
+    @Test fun messageStartedWithoutTextBecomesSendRequestStatus() {
+        val events = parseSseData("message.started", """{"type":"message.started","id":"msg_1"}""")
+        assertTrue(events.none { it is ChatStreamEvent.RawHermesEvent })
+        val status = events.filterIsInstance<ChatStreamEvent.Status>().single()
+        assertEquals("Invio richiesta", status.message)
+        val state = StreamingState().applyEvent(status)
+        assertEquals("Invio richiesta", state.status)
+    }
+
+    @Test fun messageCompletedWithoutTextIsInvisibleKeepAlive() {
+        val events = parseSseData("message.completed", """{"type":"message.completed","id":"msg_1"}""")
+        assertTrue(events.none { it is ChatStreamEvent.RawHermesEvent })
+        assertTrue(events.any { it is ChatStreamEvent.KeepAlive })
+        val before = StreamingState()
+        val after = events.fold(before) { s, e -> s.applyEvent(e) }
+        assertEquals(before.status, after.status)
+        assertEquals(before.text, after.text)
+        assertTrue(after.activityTimeline.isEmpty())
+    }
+
+    @Test fun rawAndEnvelopeEventsNeverLeakTechnicalNamesIntoStatus() {
+        val before = StreamingState(status = "Invio richiesta")
+        val rawState = before.applyEvent(ChatStreamEvent.RawHermesEvent("hermes.future.v9", "{}"))
+        assertEquals("Invio richiesta", rawState.status)
+        val envState = before.applyEvent(
+            ChatStreamEvent.EnvelopeMetadata(1, "e", 1L, "r", "c", "response.output_text.delta", "s", "run_1")
+        )
+        assertEquals("Invio richiesta", envState.status)
+        assertEquals("run_1", envState.activeRunId)
     }
 
     @Test fun approvalOffersAllFourChoicesWhenServerSendsThem() {

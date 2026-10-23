@@ -100,6 +100,12 @@ internal fun parseModernSessionRunEvents(eventName: String?, obj: JSONObject): L
         if (text.isNotBlank()) {
             if (t.contains("completed")) out += ChatStreamEvent.TextSnapshot(text)
             else out += ChatStreamEvent.TextDelta(text)
+        } else if (t.contains("started")) {
+            // Ack della richiesta: stato premium, mai nome evento grezzo in UI.
+            out += ChatStreamEvent.Status("Invio richiesta")
+        } else {
+            // Wrapper senza testo: nessun cambio visibile, niente fallback Raw.
+            out += ChatStreamEvent.KeepAlive
         }
         return out
     }
