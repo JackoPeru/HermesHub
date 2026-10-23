@@ -88,6 +88,54 @@ internal fun GenUiBlock(block: VisualBlock, onSendText: ((String) -> Unit)? = nu
     }
 }
 
+/** Marcatore [genui:id] -> UI inline nel flusso markdown; resto in coda. */
+@Composable
+internal fun GenUiAwareMarkdown(
+    text: String,
+    blocks: List<VisualBlock>,
+    onSendText: ((String) -> Unit)?,
+    genUiEnabled: Boolean,
+    color: Color = Color.White,
+    fontSize: androidx.compose.ui.unit.TextUnit = 14.sp
+) {
+    val genui = remember(blocks) {
+        blocks.filter { it.type.equals("genui", ignoreCase = true) }
+    }
+    val byId = remember(genui) { genui.associateBy { it.id } }
+    val consumed = remember(blocks) { mutableSetOf<String>() }
+    val slot: @Composable (String) -> Unit = { uiId ->
+        val b = byId[uiId]
+        if (b != null && b.isValidVisualBlock()) {
+            consumed += uiId
+            androidx.compose.runtime.key(b.id) {
+                if (genUiEnabled) {
+                    GenUiBlock(b, onSendText)
+                } else {
+                    Text(
+                        b.genuiFallback.ifBlank { "Interfaccia non disponibile." },
+                        color = Color.White,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        }
+    }
+    MarkdownText(text, color, fontSize, genUiSlot = slot)
+    genui.filter { it.id !in consumed && it.isValidVisualBlock() }.forEach {
+        androidx.compose.runtime.key(it.id) {
+            if (genUiEnabled) {
+                GenUiBlock(it, onSendText)
+            } else {
+                Text(
+                    it.genuiFallback.ifBlank { "Interfaccia non disponibile." },
+                    color = Color.White,
+                    fontSize = 14.sp
+                )
+            }
+        }
+    }
+}
+
 /** Holder osservabile con write-through sullo store (persistenza al salvataggio). */
 internal class GenUiUiState(val key: String, seed: Map<String, GenUiValue>) {
     val map = mutableStateMapOf<String, GenUiValue>().also {

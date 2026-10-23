@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.299 - 2026-10-23
+
+- Follow turni detached: sync gateway sessioni->Hub + merge live Android con banner; chiude la dead zone legacy.
+
 ## 0.6.298 - 2026-10-22
 
 - Android: browse immagini con chiave app (fix 401); tripwire anti-regressione.

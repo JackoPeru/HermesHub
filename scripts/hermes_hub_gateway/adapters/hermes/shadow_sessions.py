@@ -253,11 +253,21 @@ def maybe_import_shadows(
 
     Skips work when the response store is unchanged since the last import.
     Never raises: failures return 0 so Hub pulls keep working.
+
+    Esegue anche il follow-up delle sessioni collegate (session_follow):
+    stesso gancio pull, conteggio sommato.
     """
     try:
-        return _maybe_import_shadows(hub_db_path, db_path)
+        applied = _maybe_import_shadows(hub_db_path, db_path)
     except Exception:
-        return 0
+        applied = 0
+    try:
+        from hermes_hub_gateway.adapters.hermes import session_follow
+
+        applied += session_follow.maybe_sync_follow_ups(hub_db_path)
+    except Exception:
+        pass
+    return applied
 
 
 def _maybe_import_shadows(

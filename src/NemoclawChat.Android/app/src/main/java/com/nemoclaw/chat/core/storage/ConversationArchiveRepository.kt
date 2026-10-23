@@ -224,6 +224,12 @@ internal fun conversationsToJsonArray(conversations: List<LocalConversation>): J
                     // rileggerebbe come letterale "null" e il filtro
                     // identita nasconderebbe la chat).
                     .put("botIdentityKey", conversation.botIdentityKey.trim())
+                    .put("followState", conversation.followState?.let {
+                        JSONObject()
+                            .put("active", it.active)
+                            .put("lastMsgId", it.lastMsgId)
+                            .put("checkedAt", it.checkedAt)
+                    } ?: JSONObject.NULL)
                     .put("messages", writeMessages(conversation.messages))
             )
         }
@@ -292,6 +298,13 @@ internal fun readConversationsFromJsonArray(array: JSONArray): List<LocalConvers
                         ?: obj.optJSONArray("linked_conversation_ids")?.toStringList()
                         ?: emptyList(),
                     botIdentityKey = readBotIdentityKey(obj),
+                    followState = obj.optJSONObject("followState")?.let {
+                        SessionFollowState(
+                            active = it.optBoolean("active", false),
+                            lastMsgId = it.optLong("lastMsgId", 0L),
+                            checkedAt = it.optLong("checkedAt", 0L)
+                        )
+                    },
                     deletedAt = obj.optLong("deletedAt").takeIf { it > 0 }
                         ?: obj.optLong("deleted_at").takeIf { it > 0 }
                 )

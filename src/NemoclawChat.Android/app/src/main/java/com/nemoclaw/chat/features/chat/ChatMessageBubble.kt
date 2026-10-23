@@ -308,11 +308,11 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings, onSendTe
                     Box(modifier = Modifier.size(7.dp).background(AppColors.Accent, CircleShape))
                     Text("HERMES", color = AppColors.Faint, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
                 }
-                MarkdownText(displayText, color = Color.White, fontSize = 16.sp)
+                GenUiAwareMarkdown(displayText, message.visualBlocks, onSendText, settings.visualBlocksMode != "never", Color.White, 16.sp)
                 ArchivedActivityDisclosure(message.activityTimeline, message.thinking, settings.showToolCalls)
                 if (message.visualBlocks.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        message.visualBlocks.filter { it.isValidVisualBlock() }.forEach { block ->
+                        message.visualBlocks.filter { it.isValidVisualBlock() && !it.type.equals("genui", ignoreCase = true) }.forEach { block ->
                             VisualBlockView(block, onSendText, settings.visualBlocksMode != "never")
                         }
                     }
@@ -350,13 +350,13 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings, onSendTe
                     if (message.fromUser || message.isAction) {
                         Text(text = message.text, color = Color.White)
                     } else {
-                        MarkdownText(displayText, color = Color.White)
+                        GenUiAwareMarkdown(displayText, message.visualBlocks, onSendText, settings.visualBlocksMode != "never", Color.White)
                         ArchivedActivityDisclosure(message.activityTimeline, message.thinking, settings.showToolCalls)
                     }
                     if (message.visualBlocks.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            message.visualBlocks.filter { it.isValidVisualBlock() }.forEach { block ->
+                            message.visualBlocks.filter { it.isValidVisualBlock() && !it.type.equals("genui", ignoreCase = true) }.forEach { block ->
                                 VisualBlockView(block, onSendText, settings.visualBlocksMode != "never")
                             }
                         }

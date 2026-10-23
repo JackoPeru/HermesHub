@@ -398,6 +398,41 @@ def build_agent_event(ui_id, action_id, payload):
     return "[genui %s %s %s]" % (ui_id, action_id, raw)
 
 
+MARKER_RE = re.compile(r"^\s*\[genui:([A-Za-z0-9_-]{1,64})\]\s*$")
+
+
+def split_genui_markers(text):
+    """Riferimento: riga marcatore [genui:id] fuori dai fence ``` -> inline.
+
+    Ritorna lista di ("text", str) / ("ui", id). I marcatori dentro i fence
+    restano testo letterale. Implementazioni native (MdBlock.GenUiRef su
+    Android, MarkdownRenderer su Windows) devono comportarsi uguale.
+    """
+    segments = []
+    buf = []
+    in_fence = False
+
+    def flush():
+        chunk = "\n".join(buf).strip("\n")
+        if chunk.strip():
+            segments.append(("text", chunk))
+        del buf[:]
+
+    for line in text.replace("\r\n", "\n").split("\n"):
+        if line.startswith("```"):
+            in_fence = not in_fence
+            buf.append(line)
+            continue
+        match = MARKER_RE.match(line) if not in_fence else None
+        if match:
+            flush()
+            segments.append(("ui", match.group(1)))
+        else:
+            buf.append(line)
+    flush()
+    return segments
+
+
 class GenUiContractTests(unittest.TestCase):
     def read(self, name):
         return (FIXTURES / name).read_text(encoding="utf-8")
@@ -483,6 +518,24 @@ class GenUiContractTests(unittest.TestCase):
         for expr in bad:
             with self.assertRaises(ValueError, msg=expr):
                 check_formula(expr)
+
+    def test_inline_markers_split(self):
+        segments = split_genui_markers("Ecco la simulazione:\n[genui:wave-1]\nEd ecco i dati.")
+        self.assertEqual([("text", "Ecco la simulazione:"), ("ui", "wave-1"), ("text", "Ed ecco i dati.")], segments)
+        # Tolleranza spazi, id con trattini/underscore.
+        segments = split_genui_markers("  [genui:my_ui-2]  ")
+        self.assertEqual([("ui", "my_ui-2")], segments)
+        # Dentro i fence resta testo letterale.
+        fenced = "Esempio:\n```\n[genui:wave-1]\n```\nFine."
+        self.assertEqual([("text", fenced)], split_genui_markers(fenced))
+        # Marcatore a meta' riga non conta; id illegale non conta.
+        plain = "vedi [genui:wave-1] qui"
+        self.assertEqual([("text", plain)], split_genui_markers(plain))
+        bad_id = "[genui:bad id!]"
+        self.assertEqual([("text", bad_id)], split_genui_markers(bad_id))
+        # Marcatori adiacenti e multipli.
+        multi = "[genui:a]\n[genui:b]"
+        self.assertEqual([("ui", "a"), ("ui", "b")], split_genui_markers(multi))
 
 
 if __name__ == "__main__":

@@ -1200,6 +1200,43 @@ internal fun ChatScreen(
             detachedNote = null
         }
     }
+    // Follow sessioni detached senza binding (turni legacy continuati sul
+    // server dopo kill/app chiusa/rete morta): il gateway accoda i messaggi
+    // nella conversazione Hub, il pull li porta in archivio, qui si fondono
+    // nella vista live. Reset a ogni conversazione.
+    var serverFollowActive by remember(state.activeConversationId) { mutableStateOf(false) }
+    var serverFollowChecking by remember(state.activeConversationId) { mutableStateOf(false) }
+    var serverSyncNote by remember(state.activeConversationId) { mutableStateOf<String?>(null) }
+    suspend fun mergeServerFollowUp(): Int {
+        val cid = state.activeConversationId ?: return 0
+        val streaming = state.streamingState
+        if (streaming != null && !streaming.isDone) return 0
+        val archived = withContext(Dispatchers.IO) { loadConversation(context, cid) } ?: return 0
+        val follow = archived.followState
+        val recent = follow != null && System.currentTimeMillis() - follow.checkedAt < 10 * 60 * 1000L
+        serverFollowActive = follow?.active == true && recent
+        val missing = missingFollowMessages(state.messages, archived.messages)
+        if (missing.isEmpty()) return 0
+        state.messages.addAll(missing)
+        val whenText = formatDateTime(System.currentTimeMillis())
+        serverSyncNote = if (missing.size == 1) "1 messaggio sincronizzato dal server · $whenText"
+        else "${missing.size} messaggi sincronizzati dal server · $whenText"
+        withContext(NonCancellable + Dispatchers.IO) {
+            runCatching {
+                saveConversationSnapshot(
+                    context = context,
+                    conversationId = cid,
+                    mode = state.mode,
+                    prompt = archived.prompt,
+                    messages = state.messages.toList(),
+                    source = "Hermes",
+                    preserveRemoteContinuity = true,
+                    botIdentityKey = effectiveIdentityKey
+                )
+            }
+        }
+        return missing.size
+    }
     LaunchedEffect(state.activeConversationId) {
         recheckActiveWork(::applyResumeOutcome)
     }
@@ -1293,12 +1330,19 @@ internal fun ChatScreen(
         val cid = state.activeConversationId
         if (cid.isNullOrBlank()) {
             detachedFollowUp = false
+            serverFollowActive = false
             return@PollWhileStarted true
         }
         val hasBinding = withContext(Dispatchers.IO) { loadActiveWorkBinding(context, cid) } != null
         detachedFollowUp = hasBinding
-        if (!hasBinding) return@PollWhileStarted true
+        if (!hasBinding) {
+            // Nessun binding runs/Responses: avanza comunque il follow delle
+            // sessioni detached (turni legacy continuati sul server).
+            mergeServerFollowUp()
+            return@PollWhileStarted true
+        }
         recheckActiveWork(::applyResumeOutcome)
+        mergeServerFollowUp()
         detachedFollowUp = withContext(Dispatchers.IO) { loadActiveWorkBinding(context, cid) } != null
         true
     }
@@ -1519,6 +1563,29 @@ internal fun ChatScreen(
                     }
                     detachedFollowUp = false
                 }
+            )
+        } else if (serverFollowActive && !state.sending && state.streamingState == null) {
+            DetachedFollowBanner(
+                subtitle = "Sessione attiva sul server — i nuovi messaggi arrivano da soli.",
+                checking = serverFollowChecking,
+                onRecheck = {
+                    scope.launch {
+                        serverFollowChecking = true
+                        try {
+                            ConversationArchiveAutoSync.pullFromHub(context)
+                            mergeServerFollowUp()
+                        } finally {
+                            serverFollowChecking = false
+                        }
+                    }
+                },
+                onDismiss = { serverFollowActive = false }
+            )
+        }
+        serverSyncNote?.let { note ->
+            DetachedResumeNote(
+                text = note,
+                onDismiss = { serverSyncNote = null }
             )
         }
         detachedNote?.let { note ->

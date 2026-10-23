@@ -468,6 +468,24 @@ internal fun staleTurnLabel(sinceSignalMs: Long, staleAfterMs: Long = 45_000L): 
 }
 
 /**
+ * Messaggi remoti (sync Hub follow sessione detached) mancanti in locale.
+ * Solo assistente con testo o attivita: i turni utente li possiede l'app,
+ * i duplicati si matchano per id stabile (srv_<n>). Puro e testabile.
+ */
+internal fun missingFollowMessages(
+    local: List<ChatMessage>,
+    remote: List<ChatMessage>
+): List<ChatMessage> {
+    if (remote.isEmpty()) return emptyList()
+    val localIds = local.map { it.id }.toSet()
+    return remote.filter { message ->
+        !message.fromUser &&
+            message.id !in localIds &&
+            (message.text.isNotBlank() || message.activityTimeline.isNotEmpty())
+    }
+}
+
+/**
  * Unione anti-perdita per chat condivise (telefono+desktop sullo stesso id
  * Hub, merge LWW a entita intera): i messaggi remoti arrivati mentre il
  * turno era in corso non vengono sovrascritti. Ordine: remoto esistente,
@@ -526,7 +544,16 @@ data class LocalConversation(
     val branchFromMessageId: String = "",
     val linkedConversationIds: List<String> = emptyList(),
     /** Identita bot proprietaria ("connessione::profilo", "" = Hermes default). */
-    val botIdentityKey: String = ""
+    val botIdentityKey: String = "",
+    /** Follow sessione server (transiente: dal pull Hub, mai archiviato). */
+    val followState: SessionFollowState? = null
+)
+
+/** Stato follow di una sessione agent continuata detached. */
+data class SessionFollowState(
+    val active: Boolean = false,
+    val lastMsgId: Long = 0L,
+    val checkedAt: Long = 0L
 )
 
 data class WorkspaceRequest(

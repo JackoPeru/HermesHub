@@ -1,7 +1,8 @@
-Hermes Hub 0.6.298 (fix browse immagini)
+Hermes Hub 0.6.299 (follow turni detached)
 
-- Android: Sfoglia immagini (:8643/browse, ruolo app) usava ancora la chiave gateway -> 401. Ora usa la chiave app GPU; miniature/download restano con chiave gateway (corretto).
-- Verificati tutti gli altri accessi manager: gia' su chiave app.
-- Test: tripwire anti-regressione in test_manager_lockdown.
+- Problema: i turni continuati sul server dopo uscita/kill restavano invisibili (chat ferma, "niente da mostrare"). Causa: nessun follow per turni legacy + Hub mai aggiornato (dead zone).
+- Gateway: nuovo sync session_follow — le conversazioni Hub collegate (hermesSessionId) ricevono i messaggi nuovi dal session DB del profilo (testi + attivita tool, mai output grezzi); trigger sul pull esistente, mai raise, throttle 45s.
+- Android: merge live dei messaggi sincronizzati nel tick 15s (senza binding), banner "sessione attiva sul server", nota di sync, pull+merge sul Ricontrolla; followState parsato.
+- Test: session_follow 7/7, SessionFollowUpTest 4/4, suite verdi.
 
-Asset: HermesHub-0.6.298-android.apk (Android, versionCode 302), NemoclawChat.Windows_0.6.298.0_x64.msix (x64) e HermesHub-0.6.298-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.299-android.apk (Android, versionCode 303), NemoclawChat.Windows_0.6.299.0_x64.msix (x64) e HermesHub-0.6.299-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

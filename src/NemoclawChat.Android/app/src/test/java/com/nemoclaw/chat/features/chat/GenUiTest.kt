@@ -156,8 +156,7 @@ class GenUiTest {
     }
 
     @Test
-    fun `local actions mutate state`() {
-        val ui = GenUiUiState("test-key", mapOf("n" to GenUiValue.Num(1.0), "b" to GenUiValue.Bool(false)))
+    fun `local actions mutate state`() {        val ui = GenUiUiState("test-key", mapOf("n" to GenUiValue.Num(1.0), "b" to GenUiValue.Bool(false)))
         ui.applyLocal(JSONObject("""{"kind":"local","op":"step","key":"n","delta":2}"""))
         assertEquals(GenUiValue.Num(3.0), ui.snapshot()["n"])
         ui.applyLocal(JSONObject("""{"kind":"local","op":"toggle","key":"b"}"""))
@@ -167,5 +166,28 @@ class GenUiTest {
         ui.applyLocal(JSONObject("""{"kind":"local","op":"reset"}"""))
         assertEquals(GenUiValue.Num(1.0), ui.snapshot()["n"])
         assertEquals(GenUiValue.Bool(false), ui.snapshot()["b"])
+    }
+
+    @Test
+    fun `markdown marker becomes inline ref`() {
+        val blocks = com.nemoclaw.chat.parseMarkdownBlocks("Ecco la simulazione:\n[genui:wave-1]\nEd ecco i dati.")
+        assertEquals(3, blocks.size)
+        assertTrue(blocks[1] is com.nemoclaw.chat.MdBlock.GenUiRef)
+        assertEquals("wave-1", (blocks[1] as com.nemoclaw.chat.MdBlock.GenUiRef).uiId)
+    }
+
+    @Test
+    fun `markdown marker inside fence stays literal`() {
+        val blocks = com.nemoclaw.chat.parseMarkdownBlocks("Esempio:\n```\n[genui:wave-1]\n```\nFine.")
+        assertTrue(blocks.none { it is com.nemoclaw.chat.MdBlock.GenUiRef })
+        val code = blocks.filterIsInstance<com.nemoclaw.chat.MdBlock.CodeBlock>().firstOrNull()
+        assertNotNull(code)
+        assertTrue(code!!.code.contains("[genui:wave-1]"))
+    }
+
+    @Test
+    fun `markdown midline marker stays text`() {
+        val blocks = com.nemoclaw.chat.parseMarkdownBlocks("vedi [genui:wave-1] qui")
+        assertTrue(blocks.none { it is com.nemoclaw.chat.MdBlock.GenUiRef })
     }
 }

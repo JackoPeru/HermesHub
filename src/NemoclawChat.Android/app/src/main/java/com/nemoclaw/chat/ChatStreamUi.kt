@@ -129,7 +129,7 @@ internal fun StreamingBubbleView(
 
                 if (state.text.isNotEmpty() && (state.isDone || transcript.isEmpty())) {
                     val streamText = remember(state.text) { collapseRepeatedBlocks(state.text) }
-                    MarkdownText(streamText, color = Color.White, fontSize = 15.sp)
+                    GenUiAwareMarkdown(streamText, state.visualBlocks, null, true, Color.White, 15.sp)
                 }
 
                 if (state.isDone) {
@@ -145,7 +145,7 @@ internal fun StreamingBubbleView(
             }
 
             val validBlocks = remember(state.visualBlocks) {
-                state.visualBlocks.filter { it.isValidVisualBlock() }
+                state.visualBlocks.filter { it.isValidVisualBlock() && !it.type.equals("genui", ignoreCase = true) }
             }
             validBlocks.forEach { block ->
                 androidx.compose.runtime.key(block.id) {
@@ -1015,7 +1015,8 @@ internal fun prettifyJson(raw: String): String {
 internal fun MarkdownText(
     markdown: String,
     color: Color = Color.White,
-    fontSize: androidx.compose.ui.unit.TextUnit = 14.sp
+    fontSize: androidx.compose.ui.unit.TextUnit = 14.sp,
+    genUiSlot: (@Composable (String) -> Unit)? = null
 ) {
     val blocks = remember(markdown) { parseMarkdownBlocks(markdown) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1045,6 +1046,10 @@ internal fun MarkdownText(
                     Text(text = annotated, color = color, fontSize = fontSize)
                 }
                 is MdBlock.Table -> MarkdownTable(block, color, fontSize)
+                is MdBlock.GenUiRef -> {
+                    // UI inline: il chiamante risolve l'id (niente = marcatore scartato).
+                    genUiSlot?.invoke(block.uiId)
+                }
                 is MdBlock.CodeBlock -> Surface(
                     color = AppColors.Composer,
                     shape = RoundedCornerShape(10.dp),
@@ -1099,6 +1104,14 @@ internal sealed class MdBlock {
     data class Ordered(val index: Int, val text: String) : MdBlock()
     data class Table(val rows: List<List<String>>) : MdBlock()
     data class CodeBlock(val language: String, val code: String) : MdBlock()
+    /** Marcatore [genui:id] su riga propria fuori dai fence: UI inline. */
+    data class GenUiRef(val uiId: String) : MdBlock()
+}
+
+internal val GENUI_MARKER_RE = Regex("""^\s*\[genui:([A-Za-z0-9_-]{1,64})\]\s*$""")
+
+internal fun parseGenUiMarker(line: String): String? {
+    return GENUI_MARKER_RE.matchEntire(line.trim())?.groupValues?.get(1)
 }
 
 @Composable
@@ -1195,6 +1208,11 @@ internal fun parseMarkdownBlocks(markdown: String): List<MdBlock> {
                 i++
             }
             line.isBlank() -> { flushParagraph(); i++ }
+            parseGenUiMarker(line) != null -> {
+                flushParagraph()
+                blocks += MdBlock.GenUiRef(parseGenUiMarker(line)!!)
+                i++
+            }
             else -> {
                 if (paragraph.isNotEmpty()) paragraph.append(' ')
                 paragraph.append(line)
