@@ -1,7 +1,6 @@
-Hermes Hub 0.6.308 (home pulita + audit UI totale)
+Hermes Hub 0.6.309 (home 1:1 rifinita)
 
-- Home esattamente come il riferimento: niente risposte rapide, solo hero + composer.
-- Audit totale: pill "↓ messaggi" in vetro, card grandi a 20dp, hairline, import puliti in 15 file.
+- Toggle Chat|Bot nascosto a chat vuota (era tagliato), riga Legacy nascosta, logo e archi potenziati, bot coerente.
 - Solo stile: suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.308-android.apk (Android, versionCode 312), NemoclawChat.Windows_0.6.308.0_x64.msix (x64) e HermesHub-0.6.308-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.309-android.apk (Android, versionCode 313), NemoclawChat.Windows_0.6.309.0_x64.msix (x64) e HermesHub-0.6.309-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

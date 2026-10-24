@@ -69,10 +69,10 @@ internal fun BotEmptyState(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scroll)
-                .padding(horizontal = 22.dp, vertical = 12.dp)
+                .padding(horizontal = 24.dp)
                 .semantics { liveRegion = LiveRegionMode.Polite },
             verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.Start
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
         if (opening) {
             LinearProgressIndicator()
@@ -90,7 +90,8 @@ internal fun BotEmptyState(
             fontSize = 27.sp,
             lineHeight = 32.sp,
             maxLines = 2,
-            overflow = TextOverflow.Ellipsis
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(10.dp))
         val detailCapped = detail?.takeIf { it.isNotBlank() }?.take(80)
@@ -106,7 +107,8 @@ internal fun BotEmptyState(
             },
             color = AppColors.Muted,
             fontSize = 14.sp,
-            lineHeight = 20.sp
+            lineHeight = 20.sp,
+            textAlign = TextAlign.Center
         )
         if (unreachable && onRetry != null) {
             Spacer(modifier = Modifier.height(14.dp))
@@ -187,11 +189,11 @@ internal fun EmptyState(
                 Box(contentAlignment = Alignment.Center) {
                     Box(
                         modifier = Modifier
-                            .size(190.dp)
+                            .size(220.dp)
                             .background(
                                 Brush.radialGradient(
-                                    0.0f to Color(0xFFF5A524).copy(alpha = 0.30f),
-                                    0.55f to Color(0xFFF5A524).copy(alpha = 0.07f),
+                                    0.0f to Color(0xFFF5A524).copy(alpha = 0.24f),
+                                    0.6f to Color(0xFFF5A524).copy(alpha = 0.05f),
                                     1.0f to Color.Transparent
                                 ),
                                 CircleShape
@@ -202,8 +204,8 @@ internal fun EmptyState(
                         contentDescription = "Logo Hermes Hub",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(96.dp)
-                            .clip(RoundedCornerShape(28.dp))
+                            .size(104.dp)
+                            .clip(RoundedCornerShape(30.dp))
                     )
                 }
                 Spacer(modifier = Modifier.height(28.dp))

@@ -1182,11 +1182,16 @@ internal fun ChatScreen(
             onOpenComfy = onOpenComfy
         )
         }
+        // In hero (chat vuota normale) niente toggle: il riferimento non ce
+        // l'ha e sopra si tagliava. Bot sempre raggiungibile da drawer
+        // (Gestisci bot) e swipe a sinistra.
+        if (!showHeroHeader) {
         ChatBotToggle(
             botActive = chatBotActive,
             onSelectChat = onSelectChat,
             onSelectBot = onSelectBot
         )
+        }
         if (archivedBotWithoutContext) {
             Surface(color = Color(0xFF7A3E00), modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Assertive }) {
                 Row(
@@ -1538,6 +1543,8 @@ internal fun ChatScreen(
             }
         }
 
+        // Niente riga "Legacy/sessione" a chat vuota: rumore sopra l'hero.
+        if (!isEmptyChat) {
         ChatModelSessionBar(
             state = state,
             settings = settings,
@@ -1553,6 +1560,7 @@ internal fun ChatScreen(
                 settings.autoApprove
             )
         )
+        }
         ChatApprovalCards(
             state = state,
             botSettings = botSettings,

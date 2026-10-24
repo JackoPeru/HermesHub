@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.309 - 2026-10-24
+
+- Home 1:1 rifinita: toggle nascosto a chat vuota, riga Legacy nascosta, logo e archi potenziati, bot coerente.
+- Solo stile: suite verdi.
+
 ## 0.6.308 - 2026-10-24
 
 - Home pulita come il riferimento: via le risposte rapide; bot coerente.
