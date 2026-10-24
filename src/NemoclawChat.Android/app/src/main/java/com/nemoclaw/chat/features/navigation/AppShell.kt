@@ -408,8 +408,8 @@ internal fun HermesSidebar(
     }
     Surface(
         modifier = Modifier
-            .width(320.dp)
             .fillMaxSize()
+            .fillMaxWidth(0.78f)
             .clickable { },
         color = AppColors.Sidebar
     ) {
@@ -446,8 +446,8 @@ internal fun HermesSidebar(
                         contentDescription = "Hermes Hub",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(12.dp))
                     )
                     Column(
                         modifier = Modifier.weight(1f),
@@ -457,14 +457,14 @@ internal fun HermesSidebar(
                             "Hermes Hub",
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = AppleType.RowTitle,
+                            fontSize = AppleType.ScreenTitle,
                             letterSpacing = (-0.1).sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            "Pronto",
-                            color = AppColors.Faint,
+                            "Tutto sotto controllo.",
+                            color = AppColors.Muted,
                             fontSize = AppleType.Footnote,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -583,13 +583,13 @@ internal fun HermesSidebar(
                                     modifier = Modifier
                                         .size(40.dp)
                                         .clip(RoundedCornerShape(12.dp))
-                                        .background(Color(0xFF302517)),
+                                        .background(AppColors.Elevated),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         Icons.Rounded.ChatBubbleOutline,
                                         contentDescription = null,
-                                        tint = AppColors.Accent,
+                                        tint = Color.White,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -600,7 +600,7 @@ internal fun HermesSidebar(
                                     Text(
                                         conversation.title,
                                         color = Color.White,
-                                        fontSize = AppleType.RowTitleSmall,
+                                        fontSize = 16.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -992,16 +992,19 @@ internal fun SidebarRow(
     onClick: () -> Unit
 ) {
     val background = when {
-        selected -> AppColors.NavIndicator
+        selected -> AppColors.Accent.copy(alpha = 0.14f)
         primary -> AppColors.Accent.copy(alpha = 0.13f)
         else -> Color.Transparent
     }
+    val iconTile = if (selected || primary) Color.Transparent else AppColors.Elevated
+    val iconTint = if (selected || primary) AppColors.Accent else Color.White
+    val chevronTint = if (selected) AppColors.Accent else AppColors.Faint
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 56.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(14.dp))
                 .background(background)
                 .clickable(onClick = onClick)
                 .padding(horizontal = 8.dp, vertical = 8.dp),
@@ -1012,13 +1015,13 @@ internal fun SidebarRow(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF302517)),
+                    .background(iconTile),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     icon,
                     contentDescription = title,
-                    tint = AppColors.Accent,
+                    tint = iconTint,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -1029,7 +1032,7 @@ internal fun SidebarRow(
             Text(
                 title,
                 color = Color.White,
-                fontSize = AppleType.RowTitleSmall,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1045,7 +1048,7 @@ internal fun SidebarRow(
             Icon(
                 Icons.Rounded.ChevronRight,
                 contentDescription = null,
-                tint = AppColors.Faint,
+                tint = chevronTint,
                 modifier = Modifier.size(16.dp)
             )
         }

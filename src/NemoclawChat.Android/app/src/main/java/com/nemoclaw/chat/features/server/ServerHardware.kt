@@ -1,11 +1,12 @@
 package com.nemoclaw.chat
 
 import android.content.Context
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import com.nemoclaw.chat.ui.apple.AppleType
-import com.nemoclaw.chat.ui.apple.AuroraBackground
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.List
@@ -42,8 +44,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,9 +64,29 @@ internal data class RegisteredDevice(
     val hasToken: Boolean
 )
 
+// Colori dal sistema (niente palette parallele): Panel/Elevated/Accent/Success.
+private fun hwIconForComponent(id: String, title: String): ImageVector {
+    // Ri riusa solo icone gia presenti nel file (Speed / List).
+    val key = id.lowercase() + " " + title.lowercase()
+    return when {
+        key.contains("net") || key.contains("eth") -> Icons.AutoMirrored.Rounded.List
+        key.contains("mem") || key.contains("swap") || key.contains("disk") || key.contains("ssd") -> Icons.Rounded.List
+        else -> Icons.Rounded.Speed
+    }
+}
+
 @Composable
 internal fun ServerMetric(title: String, value: String, detail: String, valueColor: Color = Color.White) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    // Solo rivestimento: stessa firma, stessi dati, card scura 20dp + hairline 0.5dp.
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(AppColors.Panel)
+            .border(BorderStroke(0.5.dp, AppColors.Border), RoundedCornerShape(20.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(title.uppercase(), color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
             Text(value, color = valueColor, fontSize = AppleType.RowTitle, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End, modifier = Modifier.weight(1f), maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -114,65 +139,194 @@ internal fun HardwareScreen(context: Context, settings: AppSettings) {
         }
     }
 
+    // Solo stile mock: sfondo nero puro, niente aurora, card scure 20dp + hairline 0.5dp.
+    // Logica/dati/stati/stringhe/firme invariati sopra.
+    val tempView = temperatureViews.firstOrNull()
+    val tempSourceComponent = components.firstOrNull { it.temperatureC != null }
+    val tempHistoryValues = (tempSourceComponent?.let { history[it.id].orEmpty() }.orEmpty()).mapNotNull { it.temperatureC }
+    val tempCurrent = tempView?.currentC ?: tempSourceComponent?.temperatureC
+    val online = snapshot.status != "unavailable"
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0B0D10))
+            .background(Color.Black)
     ) {
-        AuroraBackground(intensity = 1f)
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
         item {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Header: titolo + sottotitolo esistenti. Niente bottone indietro
+            // decorativo (nessun callback: sarebbe un affordance morto).
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Prestazioni", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.SemiBold)
+                Text(snapshot.message, color = AppColors.Faint, fontSize = AppleType.RowTitleSmall)
+            }
+        }
+        item {
+            // Card server scura 20dp: icona esistente in tile scuro + hostname + stato + dettaglio OS.
+            // Valori esistenti: snapshot.hostname / snapshot.status / operatingSystem / architecture / uptime / processCount.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(AppColors.Panel)
+                    .border(BorderStroke(0.5.dp, AppColors.Border), RoundedCornerShape(20.dp))
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(13.dp))
-                        .background(AppColors.Accent.copy(alpha = 0.18f)),
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(AppColors.Elevated),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Rounded.Speed, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
                 }
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Prestazioni", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
-                    Text("${snapshot.hostname} - ${snapshot.operatingSystem} ${snapshot.architecture}. Uptime ${formatHardwareUptime(snapshot.uptimeSeconds)}. Processi ${snapshot.processCount}.", color = AppColors.Faint, fontSize = AppleType.Footnote)
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(snapshot.hostname, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(if (online) AppColors.Success else AppColors.Faint)
+                        )
+                        Text(
+                            snapshot.status,
+                            color = if (online) AppColors.Success else AppColors.Faint,
+                            fontSize = AppleType.Footnote,
+                            maxLines = 1,
+                            modifier = Modifier.padding(start = 6.dp)
+                        )
+                    }
+                    Text(
+                        "${snapshot.operatingSystem} ${snapshot.architecture}. Uptime ${formatHardwareUptime(snapshot.uptimeSeconds)}. Processi ${snapshot.processCount}.",
+                        color = AppColors.Faint,
+                        fontSize = AppleType.Footnote,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }
         item {
-            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                if (maxWidth > 720.dp) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                        HardwareComponentList(
-                            components = components,
-                            selectedId = selectedComponent?.id.orEmpty(),
-                            onSelect = { selectedComponentId = it },
-                            modifier = Modifier.width(240.dp)
-                        )
-                        HardwareComponentDetail(
-                            component = selectedComponent,
-                            history = selectedComponent?.let { history[it.id].orEmpty() }.orEmpty(),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                } else {
-                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                        HardwareComponentList(
-                            components = components,
-                            selectedId = selectedComponent?.id.orEmpty(),
-                            onSelect = { selectedComponentId = it },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        HardwareComponentDetail(
-                            component = selectedComponent,
-                            history = selectedComponent?.let { history[it.id].orEmpty() }.orEmpty(),
-                            modifier = Modifier.fillMaxWidth()
-                        )
+            // Griglia 2 colonne di card scure 20dp dagli stessi components esistenti.
+            // Selezione invariata: tap -> selectedComponentId (stessa logica di HardwareComponentList).
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                components.chunked(2).forEach { rowItems ->
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        rowItems.forEach { component ->
+                            val selected = component.id == selectedComponent?.id
+                            val points = history[component.id].orEmpty().map { it.utilizationPercent }
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(AppColors.Panel)
+                                    .border(
+                                        BorderStroke(0.5.dp, if (selected) AppColors.Accent else AppColors.Border),
+                                        RoundedCornerShape(20.dp)
+                                    )
+                                    .clickable { selectedComponentId = component.id }
+                                    .padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(11.dp))
+                                        .background(AppColors.Elevated),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(hwIconForComponent(component.id, component.title), contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(20.dp))
+                                }
+                                Text(component.title, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(component.primaryValue, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(component.subtitle, color = AppColors.Faint, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (component.id == "network") {
+                                    HwMiniSparkline(values = points)
+                                } else {
+                                    LinearProgressIndicator(
+                                        progress = { (component.utilizationPercent / 100.0).toFloat().coerceIn(0f, 1f) },
+                                        modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                                        color = AppColors.Accent,
+                                        trackColor = AppColors.Border
+                                    )
+                                }
+                            }
+                        }
+                        if (rowItems.size == 1) {
+                            Box(modifier = Modifier.weight(1f))
+                        }
                     }
                 }
+            }
+        }
+        item {
+            // Card larga Temperatura: stessi dati esistenti (temperatureViews/history), valore ambra + area chart.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(AppColors.Panel)
+                    .border(BorderStroke(0.5.dp, AppColors.Border), RoundedCornerShape(20.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(AppColors.Elevated),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.Speed, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(22.dp))
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(tempView?.title ?: tempSourceComponent?.title ?: "Temperatura", color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(formatTemperature(tempCurrent), color = AppColors.Accent, fontSize = 28.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                HwTempAreaChart(values = tempHistoryValues)
+            }
+        }
+        item {
+            // Riga "Dettagli": testi esistenti (DETTAGLI + subtitle componente), poi dettaglio esistente rivestito.
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(AppColors.Panel)
+                        .border(BorderStroke(0.5.dp, AppColors.Border), RoundedCornerShape(20.dp))
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(AppColors.Elevated),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.List, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(22.dp))
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("DETTAGLI", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(selectedComponent?.subtitle ?: snapshot.message, color = AppColors.Faint, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                HardwareComponentDetail(
+                    component = selectedComponent,
+                    history = selectedComponent?.let { history[it.id].orEmpty() }.orEmpty(),
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }
@@ -186,11 +340,17 @@ internal fun HardwareComponentList(
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    // Solo rivestimento: stessi dati/firme, card scure 20dp + hairline 0.5dp + ambra.
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("COMPONENTI", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         if (components.isEmpty()) {
             Column(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(AppColors.Panel)
+                    .border(BorderStroke(0.5.dp, AppColors.Border), RoundedCornerShape(20.dp))
+                    .padding(vertical = 24.dp, horizontal = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -204,8 +364,11 @@ internal fun HardwareComponentList(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(AppColors.Panel)
+                    .border(BorderStroke(0.5.dp, if (selected) AppColors.Accent else AppColors.Border), RoundedCornerShape(20.dp))
                     .clickable { onSelect(component.id) }
-                    .padding(vertical = 12.dp),
+                    .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -215,7 +378,7 @@ internal fun HardwareComponentList(
                 Text(component.subtitle, color = AppColors.Faint, fontSize = AppleType.Footnote, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 LinearProgressIndicator(
                     progress = { (component.utilizationPercent / 100.0).toFloat().coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(4.dp),
+                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
                     color = AppColors.Accent,
                     trackColor = AppColors.Border
                 )
@@ -232,7 +395,15 @@ internal fun HardwareComponentList(
 
 @Composable
 internal fun HardwareComponentDetail(component: HardwareComponentView?, history: List<HardwareHistoryPoint>, modifier: Modifier = Modifier) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    // Solo rivestimento: stessi dati/firme, card scura 20dp + hairline 0.5dp + ambra.
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(AppColors.Panel)
+            .border(BorderStroke(0.5.dp, AppColors.Border), RoundedCornerShape(20.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
         if (component == null) {
             Column(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
@@ -254,7 +425,7 @@ internal fun HardwareComponentDetail(component: HardwareComponentView?, history:
         }
         HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
         HardwareLineChart("Utilizzo", history.map { it.utilizationPercent }, 100.0, "%", AppColors.Accent)
-        HardwareLineChart("Temperatura", history.mapNotNull { it.temperatureC }, 100.0, " C", Color(0xFFFF7062))
+        HardwareLineChart("Temperatura", history.mapNotNull { it.temperatureC }, 100.0, " C", AppColors.Accent)
         HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
         Text("DETTAGLI", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -270,6 +441,7 @@ internal fun HardwareComponentDetail(component: HardwareComponentView?, history:
 
 @Composable
 internal fun HardwareLineChart(title: String, values: List<Double>, maxValue: Double, unit: String, color: Color) {
+    // Solo rivestimento: stessi dati/firma, linea + area ambra su card scura, hairline 0.5dp.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text((if (values.isEmpty()) "$title: n/d" else "$title: ${String.format(java.util.Locale.US, "%.1f", values.last())}$unit").uppercase(), color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         Canvas(modifier = Modifier.fillMaxWidth().height(170.dp).padding(vertical = 8.dp)) {
@@ -282,6 +454,15 @@ internal fun HardwareLineChart(title: String, values: List<Double>, maxValue: Do
             if (values.size < 2) return@Canvas
             val clamped = values.takeLast(120).map { it.coerceIn(0.0, maxValue) }
             val step = chartWidth / (clamped.size - 1).coerceAtLeast(1)
+            val fill = Path().apply {
+                moveTo(0f, chartHeight)
+                clamped.forEachIndexed { i, v ->
+                    lineTo(step * i, chartHeight - (v / maxValue * chartHeight).toFloat())
+                }
+                lineTo(chartWidth, chartHeight)
+                close()
+            }
+            drawPath(path = fill, brush = Brush.verticalGradient(0f to color.copy(alpha = 0.28f), 1f to color.copy(alpha = 0.02f)))
             for (i in 1 until clamped.size) {
                 val x1 = step * (i - 1)
                 val x2 = step * i
@@ -291,6 +472,67 @@ internal fun HardwareLineChart(title: String, values: List<Double>, maxValue: Do
             }
         }
     }
+}
+
+@Composable
+private fun HwMiniSparkline(values: List<Double>) {
+    // Mini-sparkline ambra per la card Rete: stessi history esistenti, nessun nuovo dato.
+    Canvas(modifier = Modifier.fillMaxWidth().height(36.dp)) {
+        if (values.size < 2) {
+            drawLine(color = AppColors.Accent.copy(alpha = 0.6f), start = Offset(0f, size.height / 2f), end = Offset(size.width, size.height / 2f), strokeWidth = 3f, cap = StrokeCap.Round)
+            return@Canvas
+        }
+        val clamped = values.takeLast(60).map { it.coerceIn(0.0, 100.0) }
+        val step = size.width / (clamped.size - 1).coerceAtLeast(1)
+        for (i in 1 until clamped.size) {
+            val x1 = step * (i - 1)
+            val x2 = step * i
+            val y1 = size.height - (clamped[i - 1] / 100.0 * size.height).toFloat()
+            val y2 = size.height - (clamped[i] / 100.0 * size.height).toFloat()
+            drawLine(color = AppColors.Accent, start = Offset(x1, y1), end = Offset(x2, y2), strokeWidth = 3f, cap = StrokeCap.Round)
+        }
+    }
+}
+
+@Composable
+private fun HwTempAreaChart(values: List<Double>) {
+    // Area chart: stessi valori history, griglia sobria. Niente assi numerate:
+    // il polling e variabile, le ore assolute sarebbero false.
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            val chartH = 160.dp
+            Canvas(modifier = Modifier.fillMaxWidth().height(chartH)) {
+                    val w = size.width
+                    val h = size.height
+                    repeat(4) { index ->
+                        val y = h * index / 3f
+                        drawLine(color = AppColors.Border, start = Offset(0f, y), end = Offset(w, y), strokeWidth = 1f)
+                    }
+                    if (values.size >= 2) {
+                        val clamped = values.takeLast(120).map { it.coerceIn(0.0, 100.0) }
+                        val step = w / (clamped.size - 1).coerceAtLeast(1)
+                        val fill = Path().apply {
+                            moveTo(0f, h)
+                            clamped.forEachIndexed { i, v ->
+                                lineTo(step * i, h - (v / 100.0 * h).toFloat())
+                            }
+                            lineTo(w, h)
+                            close()
+                        }
+                        drawPath(path = fill, brush = Brush.verticalGradient(0f to AppColors.Accent.copy(alpha = 0.32f), 1f to AppColors.Accent.copy(alpha = 0.02f)))
+                        for (i in 1 until clamped.size) {
+                            val x1 = step * (i - 1)
+                            val x2 = step * i
+                            val y1 = h - (clamped[i - 1] / 100.0 * h).toFloat()
+                            val y2 = h - (clamped[i] / 100.0 * h).toFloat()
+                            drawLine(color = AppColors.Accent, start = Offset(x1, y1), end = Offset(x2, y2), strokeWidth = 3f, cap = StrokeCap.Round)
+                        }
+                    } else {
+                        drawLine(color = AppColors.Accent.copy(alpha = 0.7f), start = Offset(0f, h / 2f), end = Offset(w, h / 2f), strokeWidth = 3f, cap = StrokeCap.Round)
+                    }
+                }
+            }
+        }
 }
 
 internal fun buildHardwareComponents(

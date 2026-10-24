@@ -118,7 +118,7 @@ class OperationalHubContractTests(unittest.TestCase):
         self.assertIn('IsHitTestVisible="False"', windows)
         self.assertIn("MessagesList.IsHitTestVisible = visibility != Visibility.Visible", windows_code)
         chat_box = android[android.index("Box(modifier = Modifier.weight(1f))") :]
-        self.assertLess(chat_box.index("LazyColumn("), chat_box.index("EmptyState(onPrompt"))
+        self.assertLess(chat_box.index("LazyColumn("), chat_box.index("EmptyState("))
 
     def test_reasoning_is_persistent_and_collapsible_on_both_clients(self):
         windows = self.read("src/NemoclawChat.Windows/Pages/StreamingBubble.cs")

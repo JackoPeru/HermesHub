@@ -128,7 +128,7 @@ internal fun FleetCard(
     Surface(
         color = AppColors.Surface,
         shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, AppColors.Border),
+        border = BorderStroke(0.5.dp, AppColors.Border),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

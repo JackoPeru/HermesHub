@@ -8,19 +8,28 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Settings
@@ -34,6 +43,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,22 +55,27 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nemoclaw.chat.AppColors
 import com.nemoclaw.chat.AppSettings
 import com.nemoclaw.chat.BuildConfig
+import com.nemoclaw.chat.R
 import com.nemoclaw.chat.jarvis.JarvisInitiativeMode
 import com.nemoclaw.chat.jarvis.JarvisSessionController
 import com.nemoclaw.chat.jarvis.meta.JarvisMetaSetupActivity
 import com.nemoclaw.chat.ui.apple.AppleGlass
 import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.apple.AppleType
-import com.nemoclaw.chat.ui.apple.AuroraBackground
 
 @Composable
 internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
@@ -129,13 +144,22 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
         if (settings.gatewayUrl.isBlank()) "Da configurare" else "Configurato"
     }
     val credentialLabel = if (apiKey.isNullOrBlank()) "non salvata" else "salvata"
+    val metaSetupTitle = if (BuildConfig.META_DAT_ENABLED) "Configura occhiali Meta" else "Info Meta DAT"
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(AppColors.Background)
+            .background(Color.Black)
     ) {
-        AuroraBackground()
+        Image(
+            painter = painterResource(id = R.drawable.aurora_home),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(380.dp)
+                .align(Alignment.TopCenter)
+        )
         LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -143,13 +167,190 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Jarvis Mode", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
+            JarvisBrandHeader()
+        }
+
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        "Jarvis Mode",
+                        color = Color.White,
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    JarvisReadyPill(phaseLabel)
+                }
                 Text(
                     "Assistenza visiva temporanea tramite Hermes locale.",
                     color = AppColors.Muted,
-                    fontSize = AppleType.HeroSubtitle
+                    fontSize = 17.sp,
+                    lineHeight = 22.sp
                 )
+            }
+        }
+
+        item {
+            JarvisWaveform()
+        }
+
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(AppColors.Accent)
+                    )
+                    Text(
+                        "Modalita",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = AppleType.RowTitle
+                    )
+                }
+                AppleGlass(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(999.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        availableModes.forEach { mode ->
+                            val selected = requestedMode == mode
+                            Button(
+                                onClick = {
+                                    requestedModeName = mode.name
+                                    if (state.active) JarvisSessionController.setMode(context, mode)
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(999.dp),
+                                contentPadding = PaddingValues(vertical = 8.dp, horizontal = 4.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selected) AppColors.Accent else Color.Transparent,
+                                    contentColor = if (selected) Color(0xFF171009) else Color.White
+                                )
+                            ) {
+                                Text(
+                                    initiativeModeLabel(mode),
+                                    fontSize = AppleType.RowTitleSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = AppColors.Panel),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.06f))
+                        ) {
+                            Icon(
+                                Icons.Rounded.MyLocation,
+                                contentDescription = null,
+                                tint = AppColors.Accent,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                "Obiettivo corrente",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = AppleType.RowTitle
+                            )
+                            Text(
+                                objective.ifBlank { "Aiutami a montare questo computer" },
+                                color = AppColors.Muted,
+                                fontSize = AppleType.Footnote,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = objective,
+                        onValueChange = { objective = it.take(240) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !state.active,
+                        label = { Text("Obiettivo corrente") },
+                        placeholder = { Text("Aiutami a montare questo computer") },
+                        minLines = 2,
+                        maxLines = 4,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AppColors.Accent,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
+                            disabledBorderColor = Color.White.copy(alpha = 0.10f),
+                            focusedLabelColor = Color.White,
+                            unfocusedLabelColor = AppColors.Muted,
+                            cursorColor = AppColors.Accent,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            disabledTextColor = Color.White.copy(alpha = 0.5f),
+                            focusedPlaceholderColor = AppColors.Faint,
+                            unfocusedPlaceholderColor = AppColors.Faint,
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent
+                        )
+                    )
+                }
+            }
+        }
+
+        if (BuildConfig.DEBUG) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Fotocamera telefono", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
+                        Text("Fallback diagnostico build debug", color = AppColors.Muted, fontSize = AppleType.Footnote)
+                    }
+                    Switch(
+                        checked = preferPhoneDebug,
+                        onCheckedChange = { preferPhoneDebug = it },
+                        enabled = !state.active
+                    )
+                }
             }
         }
 
@@ -173,62 +374,44 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
         }
 
         item {
-            JarvisPanel(title = "Modalita") {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = AppColors.Panel),
+                shape = RoundedCornerShape(20.dp)
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    availableModes.forEach { mode ->
-                        val selected = requestedMode == mode
-                        Button(
-                            onClick = {
-                                requestedModeName = mode.name
-                                if (state.active) JarvisSessionController.setMode(context, mode)
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (selected) AppColors.Accent else Color.White.copy(alpha = 0.06f),
-                                contentColor = if (selected) Color(0xFF171009) else Color.White
-                            )
-                        ) {
-                            Text(initiativeModeLabel(mode), fontSize = AppleType.Caption, maxLines = 2)
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = objective,
-                    onValueChange = { objective = it.take(240) },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !state.active,
-                    label = { Text("Obiettivo corrente") },
-                    placeholder = { Text("Aiutami a montare questo computer") },
-                    minLines = 2,
-                    maxLines = 4
-                )
-
-                if (BuildConfig.DEBUG) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.06f))
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Fotocamera telefono", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
-                            Text("Fallback diagnostico build debug", color = AppColors.Muted, fontSize = AppleType.Footnote)
-                        }
-                        Switch(
-                            checked = preferPhoneDebug,
-                            onCheckedChange = { preferPhoneDebug = it },
-                            enabled = !state.active
+                        Icon(
+                            Icons.Rounded.Settings,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
-                }
-                IconButton(
-                    onClick = { context.startActivity(Intent(context, JarvisMetaSetupActivity::class.java)) },
-                    enabled = !state.active
-                ) {
-                    Icon(Icons.Rounded.Settings, contentDescription = if (BuildConfig.META_DAT_ENABLED) "Configura occhiali Meta" else "Info Meta DAT", tint = Color.White)
+                    Text(
+                        metaSetupTitle,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = AppleType.RowTitle,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2
+                    )
+                    IconButton(
+                        onClick = { context.startActivity(Intent(context, JarvisMetaSetupActivity::class.java)) },
+                        enabled = !state.active
+                    ) {
+                        Icon(Icons.Rounded.KeyboardArrowRight, contentDescription = metaSetupTitle, tint = AppColors.Faint)
+                    }
                 }
             }
         }
@@ -379,6 +562,113 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
 }
 
 @Composable
+private fun JarvisBrandHeader() {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.08f))
+                .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)), CircleShape)
+        ) {
+            Text(
+                "☤",
+                color = AppColors.Accent,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 10.dp)
+        ) {
+            Text(
+                "Jarvis",
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "Hermes Hub",
+                color = AppColors.Faint,
+                fontSize = 12.sp
+            )
+        }
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF1A1D23))
+                .border(BorderStroke(1.5.dp, AppColors.Accent.copy(alpha = 0.75f)), CircleShape)
+        ) {
+            Text(
+                "H",
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
+private fun JarvisReadyPill(text: String) {
+    AppleGlass(shape = RoundedCornerShape(999.dp)) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(AppColors.Success)
+            )
+            Text(
+                text,
+                color = Color.White,
+                fontSize = AppleType.Footnote,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun JarvisWaveform() {
+    val fractions = listOf(0.32f, 0.48f, 0.64f, 0.84f, 1f, 0.84f, 0.64f, 0.48f, 0.32f)
+    val barBrush = Brush.verticalGradient(
+        0.0f to Color(0xFFFFC25E),
+        1.0f to Color(0xFFE8930C)
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        fractions.forEach { fraction ->
+            Box(
+                modifier = Modifier
+                    .size(width = 10.dp, height = 76.dp * fraction)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(barBrush)
+            )
+        }
+    }
+}
+
+@Composable
 private fun JarvisPanel(title: String, content: @Composable ColumnScope.() -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -389,13 +679,23 @@ private fun JarvisPanel(title: String, content: @Composable ColumnScope.() -> Un
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(
-                title.uppercase(),
-                color = AppColors.Accent,
-                fontWeight = FontWeight.Bold,
-                fontSize = AppleType.Eyebrow,
-                letterSpacing = 1.sp
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(AppColors.Accent)
+                )
+                Text(
+                    title,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = AppleType.RowTitle
+                )
+            }
             content()
         }
     }
@@ -403,18 +703,41 @@ private fun JarvisPanel(title: String, content: @Composable ColumnScope.() -> Un
 
 @Composable
 private fun JarvisStatusRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, modifier = Modifier.weight(1f))
-        Text(
-            value,
-            color = Color.White,
-            fontSize = AppleType.RowTitleSmall,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.widthIn(max = 190.dp)
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.35f))
+            )
+            Text(
+                label,
+                color = Color.White,
+                fontSize = AppleType.RowTitleSmall,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                value,
+                color = AppColors.Muted,
+                fontSize = AppleType.RowTitleSmall,
+                modifier = Modifier.widthIn(max = 190.dp),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp)
+                .height(0.5.dp)
+                .background(Color.White.copy(alpha = 0.08f))
         )
     }
 }

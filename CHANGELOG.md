@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.307 - 2026-10-24
+
+- Home vuota 1:1 dal riferimento (header, archi glow, hero) + asset aurora_home.
+- Mock Jarvis/Hardware/Impostazioni/Connessione/drawer applicati; stile Apple esteso a personaggi, bot, navigazione, privacy, setup, dropdown.
+- Solo stile: suite verdi.
+
 ## 0.6.306 - 2026-10-24
 
 - UI Apple su tutta l'app Android: sistema centrale (vetro, aurora, tipi, motion), hero "Che vuoi fare oggi?", composer pill di vetro, banner hairline, transizioni tra schermate, sezioni animate.

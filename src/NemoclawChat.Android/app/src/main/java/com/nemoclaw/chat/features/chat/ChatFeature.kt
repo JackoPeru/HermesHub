@@ -1161,6 +1161,9 @@ internal fun ChatScreen(
         } else {
             "Hermes Hub"
         }
+        // A chat vuota (non bot) l'hero ha il suo header 1:1: niente TopBar.
+        val showHeroHeader = isEmptyChat && botProfile.isNullOrBlank()
+        if (!showHeroHeader) {
         TopBar(
             settings = settings,
             contextUsage = contextUsage,
@@ -1178,6 +1181,7 @@ internal fun ChatScreen(
             onOpenArchive = { onSwitchTab(Tab.Archive) },
             onOpenComfy = onOpenComfy
         )
+        }
         ChatBotToggle(
             botActive = chatBotActive,
             onSelectChat = onSelectChat,
@@ -1362,7 +1366,12 @@ internal fun ChatScreen(
                         onRetry = { botLoadNonce++; gatewayProbed = false; botLive = null }
                     )
                 } else {
-                    EmptyState(onPrompt = { quickPrompt = it })
+                    EmptyState(
+                        onPrompt = { quickPrompt = it },
+                        serverOnline = gatewayAvailable,
+                        onOpenSidebar = onOpenSidebar,
+                        onOpenProfile = { onSwitchTab(Tab.Profile) }
+                    )
                 }
             }
             val showJumpToBottom by remember {

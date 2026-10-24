@@ -694,7 +694,7 @@ internal fun BotRecentSessionsDialog(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    sessions.forEach { session ->
+                    sessions.forEachIndexed { index, session ->
                         val activeMs = recentSessionActiveMs(session)
                         val whenLabel = if (activeMs > 0) {
                             relativeTimeLabel(System.currentTimeMillis(), activeMs)
@@ -722,6 +722,9 @@ internal fun BotRecentSessionsDialog(
                                 contentDescription = "Apri sessione",
                                 tint = AppColors.Muted
                             )
+                        }
+                        if (index < sessions.lastIndex) {
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                         }
                     }
                 }

@@ -247,6 +247,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
+import com.nemoclaw.chat.ui.apple.AppleType
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import com.nemoclaw.chat.createVideoPlayerView
 import com.nemoclaw.chat.FullscreenVideoOrientationEffect
@@ -542,14 +543,15 @@ internal fun TopBar(
                 }
                 DropdownMenu(
                     expanded = menuOpen,
-                    onDismissRequest = { menuOpen = false }
+                    onDismissRequest = { menuOpen = false },
+                    shape = RoundedCornerShape(20.dp)
                 ) {
                     DropdownMenuItem(
-                        text = { Text("Nuova chat") },
+                        text = { Text("Nuova chat", color = Color.White, fontSize = AppleType.RowTitle) },
                         leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null, tint = AppColors.Accent) },
                         onClick = { menuOpen = false; onNewChat() }
                     )
-                    HorizontalDivider()
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                     val loaded = llmLoaded
                     val videoName = mediaModels.firstOrNull()
                     val gpuTitle = when {
@@ -571,8 +573,8 @@ internal fun TopBar(
                     DropdownMenuItem(
                         text = {
                             Column {
-                                Text(gpuTitle)
-                                Text(subtitle, color = AppColors.Muted, fontSize = 12.sp)
+                                Text(gpuTitle, color = Color.White, fontSize = AppleType.RowTitle)
+                                Text(subtitle, color = AppColors.Faint, fontSize = AppleType.Footnote)
                             }
                         },
                         trailingIcon = {
@@ -596,8 +598,8 @@ internal fun TopBar(
                     DropdownMenuItem(
                         text = {
                             Column {
-                                Text("Gestione automatica GPU")
-                                Text(autoSubtitle, color = AppColors.Muted, fontSize = 12.sp)
+                                Text("Gestione automatica GPU", color = Color.White, fontSize = AppleType.RowTitle)
+                                Text(autoSubtitle, color = AppColors.Faint, fontSize = AppleType.Footnote)
                             }
                         },
                         trailingIcon = {
@@ -622,8 +624,8 @@ internal fun TopBar(
                     DropdownMenuItem(
                         text = {
                             Column {
-                                Text("Comfy diretto")
-                                Text(directSubtitle, color = AppColors.Muted, fontSize = 12.sp)
+                                Text("Comfy diretto", color = Color.White, fontSize = AppleType.RowTitle)
+                                Text(directSubtitle, color = AppColors.Faint, fontSize = AppleType.Footnote)
                             }
                         },
                         trailingIcon = {
@@ -636,11 +638,12 @@ internal fun TopBar(
                         enabled = !llmBusy && desiredMode.isNotBlank() && llmError.isBlank(),
                         onClick = { if (!llmBusy && desiredMode.isNotBlank()) setDirectWanted(!direct) }
                     )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                     DropdownMenuItem(
                         text = {
                             Column {
-                                Text("Chat laya")
-                                Text("Chiedi in linguaggio naturale cosa fare al manager", color = AppColors.Muted, fontSize = 12.sp)
+                                Text("Chat laya", color = Color.White, fontSize = AppleType.RowTitle)
+                                Text("Chiedi in linguaggio naturale cosa fare al manager", color = AppColors.Faint, fontSize = AppleType.Footnote)
                             }
                         },
                         leadingIcon = { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, tint = AppColors.Accent) },
@@ -660,16 +663,17 @@ internal fun TopBar(
                     DropdownMenuItem(
                         text = {
                             Column {
-                                Text("Comfy: cosa sta facendo")
-                                Text(comfySubtitle, color = AppColors.Muted, fontSize = 12.sp)
+                                Text("Comfy: cosa sta facendo", color = Color.White, fontSize = AppleType.RowTitle)
+                                Text(comfySubtitle, color = AppColors.Faint, fontSize = AppleType.Footnote)
                             }
                         },
                         leadingIcon = { Icon(Icons.Rounded.Image, contentDescription = null, tint = AppColors.Accent) },
                         onClick = { menuOpen = false; onOpenComfy() }
                     )
                     if (llmError.isNotBlank()) {
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                         DropdownMenuItem(
-                            text = { Text("Riprova lettura") },
+                            text = { Text("Riprova lettura", color = Color.White, fontSize = AppleType.RowTitle) },
                             onClick = { refreshLlm() }
                         )
                     }
@@ -681,13 +685,14 @@ internal fun TopBar(
     if (layaOpen) {
         AlertDialog(
             onDismissRequest = { if (!layaBusy) layaOpen = false },
-            title = { Text("Chat laya") },
+            shape = RoundedCornerShape(20.dp),
+            title = { Text("Chat laya", color = Color.White, fontSize = AppleType.ScreenTitle) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         "Chiedi in linguaggio naturale: \"metti l'LLM ready\", \"attiva comfy\", \"metti in auto\", \"come sta?\".",
-                        color = AppColors.Muted,
-                        fontSize = 12.sp
+                        color = AppColors.Faint,
+                        fontSize = AppleType.Footnote
                     )
                     TextField(
                         value = layaText,
@@ -698,7 +703,7 @@ internal fun TopBar(
                         modifier = Modifier.fillMaxWidth()
                     )
                     if (layaReply.isNotBlank()) {
-                        Text(layaReply, color = Color.White, fontSize = 13.sp)
+                        Text(layaReply, color = Color.White, fontSize = AppleType.RowTitleSmall)
                     }
                 }
             },
@@ -833,7 +838,7 @@ internal fun ChatIdentityTitle(picker: ChatIdentityPicker, title: String) {
                 title,
                 color = Color.White,
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 19.sp,
+                fontSize = AppleType.ScreenTitle,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false)
@@ -845,12 +850,16 @@ internal fun ChatIdentityTitle(picker: ChatIdentityPicker, title: String) {
                 modifier = Modifier.size(20.dp)
             )
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            shape = RoundedCornerShape(20.dp)
+        ) {
             DropdownMenuItem(
                 text = {
                     Column {
-                        Text("Hermes")
-                        Text("Profilo predefinito", color = AppColors.Muted, fontSize = 12.sp)
+                        Text("Hermes", color = Color.White, fontSize = AppleType.RowTitle)
+                        Text("Profilo predefinito", color = AppColors.Faint, fontSize = AppleType.Footnote)
                     }
                 },
                 trailingIcon = {
@@ -860,14 +869,14 @@ internal fun ChatIdentityTitle(picker: ChatIdentityPicker, title: String) {
                 },
                 onClick = { open = false; picker.onPick("") }
             )
-            if (picker.options.isNotEmpty()) HorizontalDivider()
+            if (picker.options.isNotEmpty()) HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
             picker.options.forEach { option ->
                 DropdownMenuItem(
                     text = {
                         Column {
-                            Text(option.label)
+                            Text(option.label, color = Color.White, fontSize = AppleType.RowTitle)
                             if (option.subtitle.isNotBlank()) {
-                                Text(option.subtitle, color = AppColors.Muted, fontSize = 12.sp)
+                                Text(option.subtitle, color = AppColors.Faint, fontSize = AppleType.Footnote)
                             }
                         }
                     },
@@ -881,12 +890,12 @@ internal fun ChatIdentityTitle(picker: ChatIdentityPicker, title: String) {
             }
             when {
                 picker.loading -> DropdownMenuItem(
-                    text = { Text("Caricamento bot…", color = AppColors.Muted) },
+                    text = { Text("Caricamento bot…", color = AppColors.Faint, fontSize = AppleType.Footnote) },
                     enabled = false,
                     onClick = {}
                 )
                 picker.options.isEmpty() && picker.status.isNotBlank() -> DropdownMenuItem(
-                    text = { Text(picker.status.take(120), color = AppColors.Muted, fontSize = 12.sp) },
+                    text = { Text(picker.status.take(120), color = AppColors.Faint, fontSize = AppleType.Footnote) },
                     enabled = false,
                     onClick = {}
                 )

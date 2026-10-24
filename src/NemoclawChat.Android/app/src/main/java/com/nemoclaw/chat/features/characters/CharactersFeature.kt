@@ -5,7 +5,9 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,6 +67,10 @@ import com.nemoclaw.chat.AppColors
 import com.nemoclaw.chat.AppSettings
 import com.nemoclaw.chat.PollWhileStarted
 import com.nemoclaw.chat.httpGetResponse
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -75,7 +81,7 @@ private val AmberDarkText = Color(0xFF171009)
 
 @Composable
 private fun HeaderTile(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String?) {
-    Surface(modifier = Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = Color(0xFF302517)) {
+    Surface(modifier = Modifier.size(40.dp), shape = RoundedCornerShape(13.dp), color = AppColors.Accent.copy(alpha = 0.15f)) {
         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
             Icon(icon, contentDescription = desc, tint = AppColors.Accent, modifier = Modifier.size(20.dp))
         }
@@ -104,7 +110,10 @@ private fun darkFieldColors() = TextFieldDefaults.colors(
     focusedPlaceholderColor = AppColors.Faint,
     unfocusedPlaceholderColor = AppColors.Faint,
     focusedLabelColor = AppColors.Muted,
-    unfocusedLabelColor = AppColors.Muted
+    unfocusedLabelColor = AppColors.Muted,
+    focusedIndicatorColor = Color.Transparent,
+    unfocusedIndicatorColor = Color.Transparent,
+    disabledIndicatorColor = Color.Transparent
 )
 
 @Composable
@@ -160,6 +169,8 @@ internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVid
         status = message
         true
     }
+    Box(modifier = Modifier.fillMaxSize().background(AppColors.Background)) {
+        AuroraBackground()
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 24.dp),
@@ -169,8 +180,8 @@ internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVid
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 HeaderTile(Icons.Rounded.Person, "Personaggi")
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Personaggi", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Identità persistenti per i video H3, tutte locali.", color = AppColors.Muted, fontSize = 14.sp)
+                    Text("Personaggi", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
+                    Text("Identità persistenti per i video H3, tutte locali.", color = AppColors.Muted, fontSize = AppleType.HeroSubtitle)
                 }
                 IconButton(onClick = { refresh++; reload() }) {
                     Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna", tint = AppColors.Muted)
@@ -180,7 +191,7 @@ internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVid
                 }
             }
         }
-        item { Text(status, color = AppColors.Faint, fontSize = 12.sp) }
+        item { Text(status, color = AppColors.Faint, fontSize = AppleType.Footnote) }
         if (items.isEmpty()) {
             item {
                 Column(
@@ -188,13 +199,13 @@ internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVid
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Surface(modifier = Modifier.size(64.dp), shape = RoundedCornerShape(18.dp), color = AppColors.Accent.copy(alpha = 0.16f)) {
+                    Surface(modifier = Modifier.size(64.dp), shape = RoundedCornerShape(20.dp), color = AppColors.Accent.copy(alpha = 0.16f)) {
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                             Icon(Icons.Rounded.Person, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(30.dp))
                         }
                     }
-                    Text("Nessun personaggio", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, textAlign = TextAlign.Center)
-                    Text("Tocca + : dai un nome, carica 20-80 foto della stessa persona, Hermes fa il resto.", color = AppColors.Muted, fontSize = 14.sp, textAlign = TextAlign.Center)
+                    Text("Nessun personaggio", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.ScreenTitle, textAlign = TextAlign.Center)
+                    Text("Tocca + : dai un nome, carica 20-80 foto della stessa persona, Hermes fa il resto.", color = AppColors.Muted, fontSize = AppleType.HeroSubtitle, textAlign = TextAlign.Center)
                     Spacer(modifier = Modifier.height(4.dp))
                     Button(onClick = { wizardOpen = true }, colors = amberPrimaryColors()) { Text("Crea personaggio") }
                 }
@@ -204,6 +215,7 @@ internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVid
                 CharacterGrid(items = items, onOpen = { detailId = it }, onUse = { detailId = it })
             }
         }
+    }
     }
 }
 
@@ -231,8 +243,8 @@ private fun CharacterGrid(items: List<CharacterSummary>, onOpen: (String) -> Uni
 private fun CharacterCard(item: CharacterSummary, onOpen: () -> Unit, onUse: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-        border = BorderStroke(1.dp, AppColors.Border),
-        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(0.5.dp, AppColors.Border),
+        shape = RoundedCornerShape(20.dp),
         onClick = onOpen
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -243,17 +255,17 @@ private fun CharacterCard(item: CharacterSummary, onOpen: () -> Unit, onUse: () 
                     }
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(item.name, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(characterStatusLabel(item.status), color = AppColors.Muted, fontSize = 12.sp)
+                    Text(item.name, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(characterStatusLabel(item.status), color = AppColors.Muted, fontSize = AppleType.Footnote)
                 }
             }
             val score = item.identityScore
             Text(
                 if (score != null) "Identità ${(score * 100).roundToInt()}% · Auto · ${if (item.recommendedEngine == "lora") "LoRA" else "Reference"}"
                 else "Foto: ${item.imageCount}",
-                color = AppColors.Muted, fontSize = 12.sp
+                color = AppColors.Muted, fontSize = AppleType.Footnote
             )
-            HorizontalDivider(color = AppColors.Border)
+            HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onUse, enabled = item.status == "ready", colors = amberTextColors()) { Text("Usa") }
                 TextButton(onClick = onOpen, colors = amberTextColors()) { Text("Apri") }
@@ -298,6 +310,8 @@ private fun CreateCharacterWizard(context: Context, settings: AppSettings, onDon
     }
     val pickPhotos = { picker.launch("image/*") }
 
+    Box(modifier = Modifier.fillMaxSize().background(AppColors.Background)) {
+        AuroraBackground()
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 24.dp),
@@ -308,14 +322,15 @@ private fun CreateCharacterWizard(context: Context, settings: AppSettings, onDon
                 IconButton(onClick = onCancel) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Indietro", tint = AppColors.Accent) }
                 HeaderTile(Icons.Rounded.Add, "Crea personaggio")
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Crea personaggio", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Passo $step di 5", color = AppColors.Muted, fontSize = 14.sp)
+                    Text("Crea personaggio", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
+                    Text("Passo $step di 5", color = AppColors.Muted, fontSize = AppleType.HeroSubtitle)
                 }
             }
         }
         when (step) {
             1 -> item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                AppleGlass(shape = RoundedCornerShape(20.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     SectionLabel("NOME")
                     TextField(value = name, onValueChange = { name = it }, singleLine = true, placeholder = { Text("Sofia") }, modifier = Modifier.fillMaxWidth(), colors = darkFieldColors())
                     Button(
@@ -336,14 +351,17 @@ private fun CreateCharacterWizard(context: Context, settings: AppSettings, onDon
                     ) { Text("Continua") }
                     if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
                 }
+                }
             }
             2 -> item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                AppleGlass(shape = RoundedCornerShape(20.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     SectionLabel("AGGIUNGI FOTO")
                     Text("Carica 20-80 foto della stessa persona (jpg/png/webp, max 15MB). Più angoli ed espressioni = identità migliore.", color = AppColors.Muted, fontSize = 14.sp)
                     TextButton(enabled = !busy, colors = amberTextColors(), onClick = { pickPhotos() }) { Text("Scegli foto") }
                     if (busy) CircularProgressIndicator(color = AppColors.Accent)
                     if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
+                }
                 }
             }
             3, 4 -> item {
@@ -353,6 +371,7 @@ private fun CreateCharacterWizard(context: Context, settings: AppSettings, onDon
                 ReadyStep(context, settings, characterId = characterId, name = name, onDone = onDone, message = message, onMessage = { message = it }, onPickPhotos = { pickPhotos() })
             }
         }
+    }
     }
 }
 
@@ -379,12 +398,13 @@ private fun AnalyzeStep(context: Context, settings: AppSettings, characterId: St
         if (active?.status == "failed") onMessage(active.error.ifBlank { "Analisi fallita" })
         true
     }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    AppleGlass(shape = RoundedCornerShape(20.dp)) {
+    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionLabel("ANALISI FOTO")
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
         val active = job
         if (active != null && state == "analyzing") {
-            LinearProgressIndicator(progress = { active.progress.toFloat() }, modifier = Modifier.fillMaxWidth(), color = AppColors.Accent, trackColor = AppColors.Border)
+            LinearProgressIndicator(progress = { active.progress.toFloat() }, modifier = Modifier.fillMaxWidth(), color = AppColors.Accent, trackColor = Color.White.copy(alpha = 0.08f))
             Text("Analisi ${ (active.progress * 100).toInt()}% · ${active.detail}", color = AppColors.Muted, fontSize = 12.sp)
         } else {
             Text("Stato: ${characterStatusLabel(state)}", color = AppColors.Muted, fontSize = 13.sp)
@@ -401,6 +421,7 @@ private fun AnalyzeStep(context: Context, settings: AppSettings, characterId: St
         if (counts.isNotBlank()) Text(counts, color = Color.White, fontSize = 13.sp)
         if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
     }
+    }
 }
 
 @Composable
@@ -412,13 +433,14 @@ private fun ReadyStep(context: Context, settings: AppSettings, characterId: Stri
     androidx.compose.runtime.LaunchedEffect(characterId) {
         manifest = characterId?.let { loadCharacterManifest(settings, managerKey, it) }
     }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    AppleGlass(shape = RoundedCornerShape(20.dp)) {
+    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         val count = manifest?.optInt("image_count", 0) ?: 0
-        Text("Pronto a creare $name", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-        Text("$count foto pronte per il training.", color = AppColors.Muted, fontSize = 14.sp)
-        HorizontalDivider(color = AppColors.Border)
+        Text("Pronto a creare $name", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.ScreenTitle)
+        Text("$count foto pronte per il training.", color = AppColors.Muted, fontSize = AppleType.HeroSubtitle)
+        HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
         DatasetQualityView(manifest)
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
         Button(
             enabled = !busy && count >= 20,
             colors = amberPrimaryColors(),
@@ -436,6 +458,7 @@ private fun ReadyStep(context: Context, settings: AppSettings, characterId: Stri
             TextButton(onClick = onPickPhotos, colors = amberTextColors()) { Text("Aggiungi foto") }
         }
         if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
+    }
     }
 }
 
@@ -474,6 +497,8 @@ private fun CharacterDetail(context: Context, settings: AppSettings, id: String,
         true
     }
     val name = manifest?.optString("name").orEmpty().ifBlank { "Personaggio" }
+    Box(modifier = Modifier.fillMaxSize().background(AppColors.Background)) {
+        AuroraBackground()
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 24.dp),
@@ -484,18 +509,20 @@ private fun CharacterDetail(context: Context, settings: AppSettings, id: String,
                 IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Indietro", tint = AppColors.Accent) }
                 HeaderTile(Icons.Rounded.Person, null)
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(name, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(characterStatusLabel(state), color = AppColors.Muted, fontSize = 14.sp)
+                    Text(name, color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(characterStatusLabel(state), color = AppColors.Muted, fontSize = AppleType.HeroSubtitle)
                 }
             }
         }
         val active = job
-        if (active != null) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            AnimatedVisibility(visible = active != null, enter = AppleMotion.enter(), exit = AppleMotion.exit()) {
+            if (active != null) {
+                AppleGlass(shape = RoundedCornerShape(20.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("CREAZIONE DI $name")
-                    HorizontalDivider(color = AppColors.Border)
-                    LinearProgressIndicator(progress = { active.progress.toFloat() }, modifier = Modifier.fillMaxWidth(), color = AppColors.Accent, trackColor = AppColors.Border)
+                    HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
+                    LinearProgressIndicator(progress = { active.progress.toFloat() }, modifier = Modifier.fillMaxWidth(), color = AppColors.Accent, trackColor = Color.White.copy(alpha = 0.08f))
                     Text(trainingPhaseLabel(active), color = AppColors.Muted, fontSize = 12.sp)
                     if (active.detail.isNotBlank()) Text(active.detail, color = AppColors.Faint, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -507,26 +534,33 @@ private fun CharacterDetail(context: Context, settings: AppSettings, id: String,
                         }, colors = amberTextColors()) { Text("Annulla") }
                         TextButton(onClick = { advanced = !advanced }, colors = amberTextColors()) { Text("Dettagli tecnici") }
                     }
+                    AnimatedVisibility(visible = advanced, enter = AppleMotion.enter(), exit = AppleMotion.exit()) {
                     if (advanced) {
-                        Text("Job ${active.id} · ${active.kind} · ${active.status}", color = AppColors.Faint, fontSize = 11.sp)
-                        if (active.error.isNotBlank()) Text(active.error, color = AppColors.Error, fontSize = 11.sp)
+                        Text("Job ${active.id} · ${active.kind} · ${active.status}", color = AppColors.Faint, fontSize = AppleType.Caption)
+                        if (active.error.isNotBlank()) Text(active.error, color = AppColors.Error, fontSize = AppleType.Caption)
+                    }
                     }
                 }
+                }
+            }
             }
         }
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            AppleGlass(shape = RoundedCornerShape(20.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 val count = manifest?.optInt("image_count", 0) ?: 0
                 val metrics = manifest?.optJSONObject("metrics")
                 val score = metrics?.optDouble("default_identity_score", Double.NaN)
                 Text("Foto: $count · Versione: v${manifest?.optInt("training_version", 0) ?: 0}", color = Color.White, fontSize = 14.sp)
                 if (score != null && !score.isNaN()) Text("Identità ${(score * 100).roundToInt()}% · Consigliato: ${manifest?.optJSONObject("identity")?.optString("recommended_engine")}", color = AppColors.Muted, fontSize = 13.sp)
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
                 DatasetQualityView(manifest)
+            }
             }
         }
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            AppleGlass(shape = RoundedCornerShape(20.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(enabled = state == "ready", colors = amberPrimaryColors(), onClick = { generateOpen = true }) { Text("Usa personaggio") }
                     TextButton(enabled = state == "draft" || state == "failed" || state == "interrupted", colors = amberTextColors(), onClick = {
@@ -561,6 +595,7 @@ private fun CharacterDetail(context: Context, settings: AppSettings, id: String,
                         }
                     }, colors = redTextColors()) { Text(if (confirmDelete) "Confermi?" else "Elimina") }
                 }
+                AnimatedVisibility(visible = renameOpen, enter = AppleMotion.enter(), exit = AppleMotion.exit()) {
                 if (renameOpen) {
                     var newName by rememberSaveable(id) { mutableStateOf(name) }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -574,15 +609,20 @@ private fun CharacterDetail(context: Context, settings: AppSettings, id: String,
                         }) { Text("OK") }
                     }
                 }
+                }
                 if (message.isNotBlank()) Text(message, color = AppColors.Muted, fontSize = 12.sp)
             }
-        }
-        if (generateOpen) {
-            item {
-                val currentStrength = manifest?.optJSONObject("identity")?.optDouble("lora_strength", 0.9)?.toString() ?: "0.9"
-                GenerateSheet(context, settings, id = id, name = name, strength = currentStrength, onClose = { generateOpen = false }, onOpenVideo = onOpenVideo)
             }
         }
+        item {
+            AnimatedVisibility(visible = generateOpen, enter = AppleMotion.enter(), exit = AppleMotion.exit()) {
+                if (generateOpen) {
+                    val currentStrength = manifest?.optJSONObject("identity")?.optDouble("lora_strength", 0.9)?.toString() ?: "0.9"
+                    GenerateSheet(context, settings, id = id, name = name, strength = currentStrength, onClose = { generateOpen = false }, onOpenVideo = onOpenVideo)
+                }
+            }
+        }
+    }
     }
 }
 
@@ -600,9 +640,10 @@ private fun GenerateSheet(context: Context, settings: AppSettings, id: String, n
     var result by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var modeMenu by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Genera con $name", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-        HorizontalDivider(color = AppColors.Border)
+    AppleGlass(shape = RoundedCornerShape(20.dp)) {
+    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Genera con $name", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.ScreenTitle)
+        HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
         TextField(value = prompt, onValueChange = { prompt = it }, placeholder = { Text("walking through Tokyo at night… (@$name funziona)") }, modifier = Modifier.fillMaxWidth(), minLines = 2, colors = darkFieldColors())
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionLabel("PERSONAGGIO")
@@ -631,6 +672,7 @@ private fun GenerateSheet(context: Context, settings: AppSettings, id: String, n
             }
         }
         TextButton(onClick = { advanced = !advanced }, colors = amberTextColors()) { Text("Impostazioni avanzate identità") }
+        AnimatedVisibility(visible = advanced, enter = AppleMotion.enter(), exit = AppleMotion.exit()) {
         if (advanced) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionLabel("SEED")
@@ -638,7 +680,8 @@ private fun GenerateSheet(context: Context, settings: AppSettings, id: String, n
             }
             Text("Durata: ${duration}s · Formato: $aspect · Strength: $strength (dal server, non modificabile qui).", color = AppColors.Faint, fontSize = 11.sp)
         }
-        HorizontalDivider(color = AppColors.Border)
+        }
+        HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 enabled = prompt.isNotBlank() && !busy,
@@ -660,6 +703,7 @@ private fun GenerateSheet(context: Context, settings: AppSettings, id: String, n
             TextButton(onClick = onOpenVideo, colors = amberTextColors()) { Text("Video") }
         }
         if (result.isNotBlank()) Text(result, color = AppColors.Muted, fontSize = 12.sp)
+    }
     }
 }
 

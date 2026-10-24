@@ -102,6 +102,7 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Download
@@ -157,6 +158,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -292,6 +294,83 @@ import kotlin.math.roundToInt
 import kotlin.random.Random
 
 internal const val SETTINGS_FIELD_MAX_LENGTH = 2048
+
+// Solo stile iOS (mock Impostazioni): helper privati locali, nessuna logica/prefs/stringa toccata.
+@Composable
+private fun settingsSwitchColors() = SwitchDefaults.colors(
+    checkedThumbColor = Color.White,
+    checkedTrackColor = AppColors.Accent,
+    checkedBorderColor = Color.Transparent,
+    uncheckedThumbColor = Color.White,
+    uncheckedTrackColor = Color(0xFF3A3F47),
+    uncheckedBorderColor = Color.Transparent
+)
+
+@Composable
+private fun SettingsHairline() {
+    HorizontalDivider(thickness = 0.5.dp, color = AppColors.Border)
+}
+
+@Composable
+private fun SettingsServerCard(gatewayUrl: String, statusText: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF14171C))
+            .border(0.5.dp, AppColors.Border, RoundedCornerShape(20.dp))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(AppColors.Accent.copy(alpha = 0.16f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Rounded.Dns,
+                contentDescription = null,
+                tint = AppColors.Accent,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                gatewayUrl,
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(AppColors.Success)
+                )
+                Text(
+                    statusText,
+                    color = AppColors.Muted,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 6.dp)
+                )
+            }
+        }
+        Icon(
+            Icons.Rounded.ChevronRight,
+            contentDescription = null,
+            tint = AppColors.Muted,
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
 
 @Composable
 internal fun SettingsScreen(
@@ -637,6 +716,7 @@ internal fun SettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color.Black)
             .imePadding()
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.Top
@@ -648,8 +728,9 @@ internal fun SettingsScreen(
             Box(
                 modifier = Modifier
                     .size(44.dp)
-                    .clip(RoundedCornerShape(13.dp))
-                    .background(AppColors.Accent.copy(alpha = 0.16f)),
+                    .clip(CircleShape)
+                    .background(Color(0xFF1C1F26))
+                    .border(0.5.dp, AppColors.Border, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -660,7 +741,7 @@ internal fun SettingsScreen(
                 )
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text("Impostazioni", color = Color.White, fontSize = AppleType.HeroTitle, fontWeight = FontWeight.SemiBold)
+                Text("Impostazioni", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     "Impostazioni salvate sul dispositivo. Le nuove installazioni non includono endpoint o credenziali preconfigurati.",
                     color = AppColors.Muted,
@@ -669,12 +750,14 @@ internal fun SettingsScreen(
             }
         }
         Spacer(modifier = Modifier.height(18.dp))
+        SettingsServerCard(gatewayUrl = gatewayUrl, statusText = status)
+        Spacer(modifier = Modifier.height(14.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item {
                 SettingsSectionHeader(title = "Connessione", subtitle = "Il tuo server Hermes.")
             }
             item {
-                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0xFF14171C)).border(0.5.dp, AppColors.Border, RoundedCornerShape(20.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(
                             "Dove vive il tuo server e con quale chiave parlarci. Senza questi due, niente funziona.",
                             color = AppColors.Muted,
@@ -687,6 +770,7 @@ internal fun SettingsScreen(
                             color = AppColors.Muted,
                             fontSize = 12.sp
                         )
+                        SettingsHairline()
                         SettingsPasswordField("API key Hermes", apiKey, { apiKey = it })
                         SettingsPasswordField("Chiave app GPU/manager", gpuAppKey, { gpuAppKey = it })
                         Text(
@@ -694,6 +778,7 @@ internal fun SettingsScreen(
                             color = AppColors.Muted,
                             fontSize = 12.sp
                         )
+                        SettingsHairline()
                         SettingsField("Cartella video Hermes (dal server)", videoLibraryPath, { }, readOnly = true)
                         SettingsField("Cartella news Hermes", newsLibraryPath, { newsLibraryPath = it })
                         SettingsField("Cartella immagini Hermes (dal server)", imageLibraryPath, { }, readOnly = true)
@@ -708,6 +793,7 @@ internal fun SettingsScreen(
                             color = AppColors.Muted,
                             fontSize = 12.sp
                         )
+                        SettingsHairline()
                         SettingsField("Limite allegati file (MB, max 150)", maxAttachmentMb.toString(), { value ->
                             maxAttachmentMb = value.filter { it.isDigit() }.toIntOrNull()?.coerceIn(1, 150) ?: maxAttachmentMb
                         })
@@ -722,7 +808,7 @@ internal fun SettingsScreen(
                 SettingsSectionHeader(title = "Voce e chiamata", subtitle = "Voci, velocita, wake word e Bluetooth.")
             }
             item {
-                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0xFF14171C)).border(0.5.dp, AppColors.Border, RoundedCornerShape(20.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(
                             "Profilo progetto: ${settings.activeProjectName.ifBlank { "Generale" }}",
                             color = AppColors.Muted,
@@ -862,7 +948,7 @@ internal fun SettingsScreen(
                     enter = AppleMotion.enter(),
                     exit = AppleMotion.exit()
                 ) {
-                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0xFF14171C)).border(0.5.dp, AppColors.Border, RoundedCornerShape(20.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(
                                 "Parametri letti dal server: cambiali solo se Hermes non risponde o su indicazione specifica.",
                                 color = AppColors.Muted,
@@ -962,15 +1048,15 @@ internal fun SettingsScreen(
                 SettingsSectionHeader(title = "Chat e risposte", subtitle = "Come si presenta la conversazione.")
             }
             item {
-                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0xFF14171C)).border(0.5.dp, AppColors.Border, RoundedCornerShape(20.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Tool call in chat", color = Color.White, modifier = Modifier.weight(1f))
-                            Switch(checked = showToolCalls, onCheckedChange = { showToolCalls = it })
+                            Text("Tool call in chat", color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                            Switch(checked = showToolCalls, onCheckedChange = { showToolCalls = it }, colors = settingsSwitchColors())
                         }
                         Text("ON = mostra il pannello compatto degli strumenti usati da Hermes. Output lunghi restano collassati.", color = AppColors.Muted, fontSize = 12.sp)
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Metriche messaggi", color = Color.White, modifier = Modifier.weight(1f))
-                            Switch(checked = showMessageMetrics, onCheckedChange = { showMessageMetrics = it })
+                            Text("Metriche messaggi", color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                            Switch(checked = showMessageMetrics, onCheckedChange = { showMessageMetrics = it }, colors = settingsSwitchColors())
                         }
                         Text("ON = mostra sotto ogni messaggio tempi e token (TTFT, token, velocita).", color = AppColors.Muted, fontSize = 12.sp)
                         Text("DETTAGLIO METRICHE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
@@ -982,8 +1068,8 @@ internal fun SettingsScreen(
                         MetricSwitch("Durata totale", metricDuration) { metricDuration = it }
                         MetricSwitch("Acceptance rate (speculative)", metricAcceptanceRate) { metricAcceptanceRate = it }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Solo modalità nativa", color = Color.White, modifier = Modifier.weight(1f))
-                            Switch(checked = strictNativeMode, onCheckedChange = { strictNativeMode = it })
+                            Text("Solo modalità nativa", color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                            Switch(checked = strictNativeMode, onCheckedChange = { strictNativeMode = it }, colors = settingsSwitchColors())
                         }
                         Text(
                             "ON = parla solo il protocollo Hermes nativo. Se fallisce, errore esplicito invece di ripiegare su Chat Completions.",
@@ -991,8 +1077,8 @@ internal fun SettingsScreen(
                             fontSize = 12.sp
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Risposta offline di emergenza", color = Color.White, modifier = Modifier.weight(1f))
-                            Switch(checked = demoMode, onCheckedChange = { demoMode = it })
+                            Text("Risposta offline di emergenza", color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                            Switch(checked = demoMode, onCheckedChange = { demoMode = it }, colors = settingsSwitchColors())
                         }
                         Text(
                             "ON = se il server non risponde, l'app prova a rispondere da sola in locale (qualita limitata, niente tool).",
@@ -1023,10 +1109,10 @@ internal fun SettingsScreen(
                 SettingsSectionHeader(title = "Automazione", subtitle = "Lavoro senza mani: background, approvazioni, media.")
             }
             item {
-                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0xFF14171C)).border(0.5.dp, AppColors.Border, RoundedCornerShape(20.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Lavoro in background", color = Color.White, modifier = Modifier.weight(1f))
-                            Switch(checked = backgroundWork, onCheckedChange = { backgroundWork = it })
+                            Text("Lavoro in background", color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                            Switch(checked = backgroundWork, onCheckedChange = { backgroundWork = it }, colors = settingsSwitchColors())
                         }
                         Text("ON = se esci dall'app Hermes continua il lavoro sul gateway e ti avvisa alla fine.", color = AppColors.Muted, fontSize = 12.sp)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1044,7 +1130,7 @@ internal fun SettingsScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("FAST PATH MEDIA", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
-                        Switch(checked = smartFastPath, onCheckedChange = { smartFastPath = it })
+                        Switch(checked = smartFastPath, onCheckedChange = { smartFastPath = it }, colors = settingsSwitchColors())
                     }
                     Text(
                         "Con allegati, prova prima la via veloce (triage + prompt + Comfy) senza turn agentico. Spento = sempre chat normale.",
@@ -1099,15 +1185,16 @@ internal fun SettingsScreen(
                     phoneAccessState.value = isPhoneAccessibilityEnabled(context)
                     phoneLogState.value = loadPhoneLog(context)
                 }
-                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0xFF14171C)).border(0.5.dp, AppColors.Border, RoundedCornerShape(20.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Arma controllo remoto", color = Color.White, modifier = Modifier.weight(1f))
+                        Text("Arma controllo remoto", color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
                         Switch(
                             checked = phoneArmedState.value,
                             onCheckedChange = {
                                 setPhoneArmed(context, it)
                                 refreshPhone()
-                            }
+                            },
+                            colors = settingsSwitchColors()
                         )
                     }
                     Text(
@@ -1138,10 +1225,10 @@ internal fun SettingsScreen(
                 SettingsSectionHeader(title = "Privacy e dati", subtitle = "Screenshot, backup e ripristino.")
             }
             item {
-                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0xFF14171C)).border(0.5.dp, AppColors.Border, RoundedCornerShape(20.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Blocca screenshot", color = Color.White, modifier = Modifier.weight(1f))
-                            Switch(checked = blockScreenshots, onCheckedChange = { blockScreenshots = it })
+                            Text("Blocca screenshot", color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                            Switch(checked = blockScreenshots, onCheckedChange = { blockScreenshots = it }, colors = settingsSwitchColors())
                         }
                         Text("ON = impedisce screenshot e registrazioni dell'app (anche i tuoi). Riavvia l'app per applicare.", color = AppColors.Muted, fontSize = 12.sp)
                         SettingsPasswordField(
@@ -1181,7 +1268,7 @@ internal fun SettingsScreen(
                 SettingsSectionHeader(title = "Salute", subtitle = "Dati dal Galaxy Watch.")
             }
             item {
-                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0xFF14171C)).border(0.5.dp, AppColors.Border, RoundedCornerShape(20.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(
                             "Watch → Samsung Health → Health Connect → Hermes. Solo riepiloghi giornalieri; nessun battito grezzo viene salvato o inviato.",
                             color = AppColors.Muted,
@@ -1408,7 +1495,7 @@ internal fun FontScaleControl(
         if (!editingPercent) percentText = "${(value * 100).toInt()}"
     }
 
-    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0xFF14171C)).border(0.5.dp, AppColors.Border, RoundedCornerShape(20.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("DIMENSIONE CARATTERI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
                 if (editingPercent) {
@@ -1459,13 +1546,14 @@ internal fun FontScaleControl(
 @Composable
 internal fun SettingsField(label: String, value: String, onValueChange: (String) -> Unit, readOnly: Boolean = false) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(label, color = AppColors.Muted, fontSize = AppleType.RowTitleSmall)
+        Text(label, color = AppColors.Muted, fontSize = 13.sp)
         TextField(
             modifier = Modifier.fillMaxWidth(),
             value = value,
             onValueChange = { v -> onValueChange(v.take(SETTINGS_FIELD_MAX_LENGTH)) },
             readOnly = readOnly,
             shape = RoundedCornerShape(12.dp),
+            textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
             colors = TextFieldDefaults.colors(
                 focusedContainerColor = AppColors.Composer,
                 unfocusedContainerColor = AppColors.Composer,
@@ -1484,12 +1572,13 @@ internal fun SettingsField(label: String, value: String, onValueChange: (String)
 internal fun SettingsPasswordField(label: String, value: String, onValueChange: (String) -> Unit) {
     var visible by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(label, color = AppColors.Muted, fontSize = AppleType.RowTitleSmall)
+        Text(label, color = AppColors.Muted, fontSize = 13.sp)
         TextField(
             modifier = Modifier.fillMaxWidth(),
             value = value,
             onValueChange = { v -> onValueChange(v.take(SETTINGS_FIELD_MAX_LENGTH)) },
             shape = RoundedCornerShape(12.dp),
+            textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
             visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
                 IconButton(onClick = { visible = !visible }) {
@@ -1516,8 +1605,8 @@ internal fun SettingsPasswordField(label: String, value: String, onValueChange: 
 @Composable
 internal fun MetricSwitch(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Color.White, fontSize = AppleType.RowTitle, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Text(label, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onCheckedChange, colors = settingsSwitchColors())
     }
 }
 
@@ -1559,8 +1648,8 @@ internal fun SmartCaseRow(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(title, color = Color.White, modifier = Modifier.weight(1f))
-            Switch(checked = enabled, onCheckedChange = onEnabledChange)
+            Text(title, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            Switch(checked = enabled, onCheckedChange = onEnabledChange, colors = settingsSwitchColors())
         }
         Text(subtitle, color = AppColors.Muted, fontSize = 12.sp)
         SettingsField("Prompt incollato (vuoto = auto, {testo} = template)", prompt, onPromptChange)
