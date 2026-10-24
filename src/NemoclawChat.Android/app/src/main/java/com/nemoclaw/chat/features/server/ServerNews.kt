@@ -9,9 +9,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.core.net.toUri
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -130,7 +128,7 @@ internal fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPromp
         }
         if (htmlItems.isEmpty()) {
             item {
-                AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,

@@ -13,8 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.AppColors
+import com.nemoclaw.chat.ui.apple.AppleGlass
 
 internal fun formatGroupTurnTime(atMs: Long): String {
     return try {
@@ -125,10 +124,8 @@ internal fun FleetCard(
     gpuLine: String,
     onRefresh: () -> Unit
 ) {
-    Surface(
-        color = AppColors.Surface,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(0.5.dp, AppColors.Border),
+    AppleGlass(
+        shape = RoundedCornerShape(20.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

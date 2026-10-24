@@ -2,9 +2,7 @@ package com.nemoclaw.chat
 
 import android.content.Context
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,7 +30,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -191,7 +188,7 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
         }
         if (displayedItems.isEmpty()) {
             item {
-                AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,

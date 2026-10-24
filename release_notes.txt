@@ -1,8 +1,7 @@
-Hermes Hub 0.6.307 (home 1:1 + mock + stile ovunque)
+Hermes Hub 0.6.308 (home pulita + audit UI totale)
 
-- Home vuota 1:1 dal riferimento: header con avatar, archi glow veri (asset aurora_home), hero, TopBar sostituita a chat vuota.
-- Mock Jarvis (waveform, segmented, stato), Hardware (griglia, sparkline, area chart), Impostazioni (gruppi, toggle ambra, server card), drawer (75%, pill ambra).
-- Stile Apple esteso a personaggi, bot, navigazione, privacy, setup, dropdown identità.
-- Solo stile: suite Android verde, 886+ python verdi, consistency 28/28.
+- Home esattamente come il riferimento: niente risposte rapide, solo hero + composer.
+- Audit totale: pill "↓ messaggi" in vetro, card grandi a 20dp, hairline, import puliti in 15 file.
+- Solo stile: suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.307-android.apk (Android, versionCode 311), NemoclawChat.Windows_0.6.307.0_x64.msix (x64) e HermesHub-0.6.307-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.308-android.apk (Android, versionCode 312), NemoclawChat.Windows_0.6.308.0_x64.msix (x64) e HermesHub-0.6.308-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

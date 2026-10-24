@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nemoclaw.chat.ui.apple.AppleGlass
 
 /**
  * Selettore [Chat | Bot] in alto alla chat: pill compatta (~36dp).
@@ -53,13 +54,11 @@ internal fun ChatBotToggle(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {
-        Surface(
-            color = AppColors.Surface,
+        AppleGlass(
             shape = CircleShape,
-            border = androidx.compose.foundation.BorderStroke(0.5.dp, AppColors.Border)
+            modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp)
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {

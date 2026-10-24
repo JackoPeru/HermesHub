@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.308 - 2026-10-24
+
+- Home pulita come il riferimento: via le risposte rapide; bot coerente.
+- Audit UI totale: pill vetro, card 20dp, hairline e import ovunque.
+- Solo stile: suite verdi.
+
 ## 0.6.307 - 2026-10-24
 
 - Home vuota 1:1 dal riferimento (header, archi glow, hero) + asset aurora_home.

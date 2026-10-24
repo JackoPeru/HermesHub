@@ -424,10 +424,15 @@ internal fun BotsScreen(
     }
 
     LaunchedEffect(settings.gatewayUrl, refreshNonce) {
-        connections = loadHermesBotConnections(context, settings)
-        groups = loadHermesBotGroupsSynced(context, settings)
+        // Parallelo: latenza = max, non somma. Stessa semantica errori di prima
+        // (il primo await che fallisce rilancia come nel sequenziale).
+        val deferredConnections = async { loadHermesBotConnections(context, settings) }
+        val deferredGroups = async { loadHermesBotGroupsSynced(context, settings) }
+        val deferredRoster = async { loadAllHermesBotRosters(context, settings) }
+        connections = deferredConnections.await()
+        groups = deferredGroups.await()
         reloadBotDisplayPrefs()
-        val result = loadAllHermesBotRosters(context, settings)
+        val result = deferredRoster.await()
         roster = result
         status = result.status
         if (!result.chatSupported) status += " Apri Bot Chat richiede multiplexing profili attivo."

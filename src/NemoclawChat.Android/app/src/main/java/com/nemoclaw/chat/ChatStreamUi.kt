@@ -77,6 +77,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleGlass
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
@@ -434,10 +435,9 @@ private fun CompactMorePill(hidden: Int, onClick: () -> Unit) {    Box(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         contentAlignment = Alignment.Center
     ) {
-        Surface(
-            color = AppColors.Composer,
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.clickable { onClick() }
+        AppleGlass(
+            shape = RoundedCornerShape(20.dp),
+            onClick = onClick
         ) {
             Text(
                 "↓ $hidden messaggi",

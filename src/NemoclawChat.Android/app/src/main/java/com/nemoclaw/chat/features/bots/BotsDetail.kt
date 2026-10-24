@@ -3,17 +3,22 @@ package com.nemoclaw.chat.features.bots
 import android.content.Context
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.nemoclaw.chat.features.screen.ScreenScreen
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -86,17 +91,33 @@ internal fun BotDetailScreen(
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Segmented stile Jarvis: stesso stato tab, solo rivestimento.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color.White.copy(alpha = 0.06f))
+                    .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)), RoundedCornerShape(28.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
                 BotDetailTab.values().forEach { entry ->
                     val selected = tab == entry
-                    TextButton(
-                        onClick = { tab = entry },
-                        modifier = Modifier.heightIn(min = 48.dp)
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(if (selected) AppColors.Accent else Color.Transparent)
+                            .clickable { tab = entry }
+                            .padding(vertical = 10.dp)
                     ) {
                         Text(
                             entry.label,
-                            color = if (selected) AppColors.Accent else AppColors.Muted,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                            color = if (selected) Color(0xFF171009) else AppColors.Muted,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            fontSize = 13.sp,
+                            maxLines = 1
                         )
                     }
                 }

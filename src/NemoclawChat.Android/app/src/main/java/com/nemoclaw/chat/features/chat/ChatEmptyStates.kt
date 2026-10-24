@@ -41,9 +41,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import com.nemoclaw.chat.ui.apple.AppleGlass
 import com.nemoclaw.chat.ui.apple.AppleType
-import com.nemoclaw.chat.ui.apple.AuroraBackground
 import com.nemoclaw.chat.ui.apple.AvatarRing
 import com.nemoclaw.chat.ui.apple.ServerStatusLine
 import androidx.compose.ui.graphics.Shape
@@ -59,12 +57,14 @@ internal fun BotEmptyState(
     onRetry: (() -> Unit)? = null
 ) {
     val scroll = rememberScrollState()
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(AppColors.Background)
-    ) {
-        AuroraBackground(modifier = Modifier.fillMaxSize(), intensity = 1f)
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Stessi archi della home (coerenza totale).
+        Image(
+            painter = painterResource(id = R.drawable.aurora_home),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -225,43 +225,7 @@ internal fun EmptyState(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(modifier = Modifier.height(32.dp))
-                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    SuggestionButton("Prepara setup Hermes", "Avvia Hermes su Tailscale o LAN") {
-                        onPrompt("Preparami i passaggi per avviare Hermes Agent API Server su Tailscale/LAN.")
-                    }
-                    SuggestionButton("Controlla server", "Stato, modello e capabilities") {
-                        onPrompt("Controlla stato Hermes, modello disponibile e capabilities API.")
-                    }
-                    SuggestionButton("Crea ordine agente", "Task con approve prima dei rischi") {
-                        onPrompt("Crea un task agente sicuro con richiesta approve/deny prima di ogni azione rischiosa.")
-                    }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
             }
-        }
-    }
-}
-
-@Composable
-internal fun SuggestionButton(text: String, subtitle: String, onClick: () -> Unit) {
-    AppleGlass(
-        shape = RoundedCornerShape(20.dp),
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 48.dp)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 15.dp, vertical = 13.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(modifier = Modifier.size(7.dp).background(AppColors.Accent, CircleShape))
-            Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
-                Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                Text(subtitle, color = AppColors.Faint, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Text("›", color = AppColors.Faint, fontSize = 22.sp)
         }
     }
 }
