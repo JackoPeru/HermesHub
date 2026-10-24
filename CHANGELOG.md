@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.305 - 2026-10-23
+
+- Chat Android standard intoccabile: follow/resume in staging con Mostra esplicito (mai auto-append), approval solo a chat ferma, flush ordinato su invio.
+- Metriche anche a fine anomala (durata reale), riprova via draft, indicatore prefill unificato, chiavi feed anti-collisione.
+- God file spezzati in 45 moduli, ~2.800 righe morte rimosse, 11k import puliti.
+- Test: staging/durate/metriche, suite verdi.
+
 ## 0.6.304 - 2026-10-23
 
 - Android: UNA SOLA notifica ongoing per i lavori (gli avanzamenti aggiornano la foreground con pulsante Interrompi); fine/approvazioni restano transitorie e cancellabili.
