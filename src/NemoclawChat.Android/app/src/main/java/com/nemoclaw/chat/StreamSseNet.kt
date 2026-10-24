@@ -190,7 +190,7 @@ internal fun streamSseAttempt(request: Request): Flow<SseAttemptSignal> = callba
                     }
 
                     while (!call.isCanceled()) {
-                        val line = source.readUtf8LineBounded(SSE_LINE_MAX_BYTES) ?: break
+                        val line = source.readUtf8LineBounded(MAX_SSE_LINE_BYTES) ?: break
                         markProgress()
                         if (line.isEmpty()) {
                             if (!flushEvent()) return@use

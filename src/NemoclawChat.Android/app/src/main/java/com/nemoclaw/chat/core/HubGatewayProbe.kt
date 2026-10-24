@@ -58,9 +58,6 @@ internal fun isValidGatewayProbeUrl(url: String): Boolean {
     }
 }
 
-internal fun probeHermesGateway(settings: AppSettings, apiKey: String?): Boolean =
-    probeHermesGatewayDetailed(settings, apiKey).first
-
 /**
  * Come probeHermesGateway ma con motivo del fallimento (mai eccezioni):
  * null = raggiunto, altrimenti "URL non valido", "timeout di rete" o

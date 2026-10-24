@@ -14,38 +14,6 @@ import java.net.URLEncoder
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal fun loadWorkspaceRequests(context: Context, kind: String): List<WorkspaceRequest> {
-    val raw = context.getSharedPreferences(CURRENT_WORKSPACE_PREFS, Context.MODE_PRIVATE).getString("items", "[]") ?: "[]"
-    return try {
-        val array = JSONArray(raw)
-        buildList {
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                add(
-                    WorkspaceRequest(
-                        id = obj.optString("id"),
-                        kind = obj.optString("kind"),
-                        title = obj.optString("title", "Nuova richiesta"),
-                        prompt = obj.optString("prompt"),
-                        result = obj.optString("result"),
-                        source = obj.optString("source"),
-                        status = obj.optString("status"),
-                        remoteId = obj.optString("remoteId").ifBlank { null },
-                        streamUrl = obj.optString("streamUrl"),
-                        downloadUrl = obj.optString("downloadUrl"),
-                        feedback = obj.optString("feedback"),
-                        updatedAt = obj.optLong("updatedAt")
-                    )
-                )
-            }
-        }
-            .filter { it.kind.equals(kind, ignoreCase = true) }
-            .sortedByDescending { it.updatedAt }
-            .take(80)
-    } catch (_: Exception) {
-        emptyList()
-    }
-}
 
 internal fun saveWorkspaceRequest(
     context: Context,
@@ -92,94 +60,6 @@ internal fun saveWorkspaceRequest(
     prefs.edit { putString("items", array.toString()) }
 }
 
-internal fun saveWorkspaceFeedback(context: Context, id: String, feedback: String, status: String) {
-    val prefs = context.getSharedPreferences(CURRENT_WORKSPACE_PREFS, Context.MODE_PRIVATE)
-    val existing = try {
-        JSONArray(prefs.getString("items", "[]") ?: "[]")
-    } catch (_: Exception) {
-        JSONArray()
-    }
-    val array = JSONArray()
-    for (i in 0 until existing.length()) {
-        val obj = existing.optJSONObject(i) ?: continue
-        if (obj.optString("id") == id) {
-            obj.put("feedback", feedback)
-            obj.put("status", status)
-            obj.put("updatedAt", System.currentTimeMillis())
-        }
-        array.put(obj)
-    }
-    prefs.edit { putString("items", array.toString()) }
-}
-
-internal suspend fun syncWorkspaceJobs(context: Context, settings: AppSettings, kind: String, apiKey: String?): String = withContext(Dispatchers.IO) {
-    try {
-        val body = httpGet("${hermesRoot(settings)}/api/jobs", apiKey)
-        val array = findWorkspaceJobsArray(body)
-        var imported = 0
-        for (i in 0 until array.length()) {
-            val obj = array.optJSONObject(i) ?: continue
-            val text = obj.toString()
-            if (!text.contains(kind, ignoreCase = true) && !text.contains("\"workspace\":\"${kind.lowercase()}\"", ignoreCase = true)) continue
-            val artifact = parseWorkspaceArtifact(kind, text)
-            saveWorkspaceRequest(
-                context = context,
-                kind = kind,
-                prompt = obj.optString("instructions", obj.optString("detail", artifact.result)),
-                result = artifact.result.ifBlank { obj.optString("summary", text.limitText(900)) },
-                source = "Hermes Jobs",
-                status = artifact.status.ifBlank { obj.optString("status", "Sincronizzato da Hermes.") },
-                remoteId = extractTaskId(text),
-                title = artifact.title.ifBlank { obj.optString("title", "$kind Hermes") },
-                streamUrl = artifact.streamUrl,
-                downloadUrl = artifact.downloadUrl
-            )
-            imported++
-        }
-        "Sincronizzazione completata: $imported elementi $kind importati/aggiornati."
-    } catch (ex: Exception) {
-        "Sincronizzazione fallita: ${ex.message ?: ex.javaClass.simpleName}"
-    }
-}
-
-internal suspend fun sendWorkspaceFeedback(settings: AppSettings, item: WorkspaceRequest, feedback: String, apiKey: String?): String = withContext(Dispatchers.IO) {
-    val instructions = """
-        Feedback utente per ${item.kind} '${item.title}':
-        $feedback
-
-        Aggiorna il contenuto rispettando preferenze utente. Se e' Video, migliora editing/contenuto e mantieni output sul PC con stream_url/download_url. Se e' News, aggiorna articolo e fonti.
-        Se il feedback contiene una preferenza stabile, salvala o incorporala nella memoria agente condivisa Hermes/CLI/app, non solo in questo item.
-        Job originale: ${item.remoteId ?: "non disponibile"}
-    """.trimIndent()
-    try {
-        postHubState(
-            settings,
-            "${item.kind.lowercase()}_feedback",
-            item.id,
-            JSONObject()
-                .put("title", item.title)
-                .put("feedback", feedback)
-                .put("read", true)
-                .put("status", item.status),
-            apiKey
-        )
-        if (item.remoteId != null) {
-            val response = postJson(
-                "${hermesRoot(settings)}/api/jobs/${URLEncoder.encode(item.remoteId, "UTF-8")}",
-                JSONObject().put("feedback", feedback).put("instructions", instructions),
-                apiKey,
-                "PATCH"
-            )
-            if (response.first in 200..299) {
-                return@withContext "Feedback inviato a Hermes Jobs."
-            }
-        }
-        val result = sendWorkspaceRunRequest(settings, item.kind, instructions, apiKey)
-        "Feedback inviato a Hermes: ${result.status}"
-    } catch (ex: Exception) {
-        "Feedback salvato localmente; invio Hermes fallito: ${ex.message ?: ex.javaClass.simpleName}"
-    }
-}
 
 internal fun loadVideoFeedback(context: Context, id: String): String {
     val prefs = context.getSharedPreferences(CURRENT_WORKSPACE_PREFS, Context.MODE_PRIVATE)
@@ -293,13 +173,4 @@ internal suspend fun sendVideoLibraryFeedback(settings: AppSettings, item: Video
     }
 }
 
-internal suspend fun runWorkspaceJobAction(settings: AppSettings, item: WorkspaceRequest, action: String, apiKey: String?): String = withContext(Dispatchers.IO) {
-    val id = item.remoteId ?: return@withContext "Nessun job Hermes collegato."
-    return@withContext try {
-        val response = postJson("${hermesRoot(settings)}/api/jobs/${URLEncoder.encode(id, "UTF-8")}/${URLEncoder.encode(action, "UTF-8")}", JSONObject(), apiKey)
-        if (response.first in 200..299) "Job Hermes aggiornato." else "Hermes HTTP ${response.first}: ${extractHumanError(response.second)}"
-    } catch (ex: Exception) {
-        "Azione job fallita: ${ex.message ?: ex.javaClass.simpleName}"
-    }
-}
 

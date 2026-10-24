@@ -454,19 +454,6 @@ internal fun createAttachmentFromUri(context: Context, uri: Uri, maxAttachmentMb
     )
 }
 
-internal suspend fun captureHermesAppScreenshot(context: Context, maxAttachmentMb: Int): ChatInputAttachment? = withContext(Dispatchers.Main) {
-    val activity = context as? Activity ?: return@withContext null
-    val view = activity.window.decorView.rootView
-    if (view.width <= 0 || view.height <= 0) return@withContext null
-    val bitmap = createBitmap(view.width, view.height)
-    view.draw(android.graphics.Canvas(bitmap))
-    val directory = File(context.cacheDir, "attachments").apply { mkdirs() }
-    val file = File(directory, "screenshot-${System.currentTimeMillis()}.png")
-    val ok = withContext(Dispatchers.IO) { file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }; file.length() in 1..(maxAttachmentMb.coerceIn(1, 150).toLong() * 1024 * 1024) }
-    bitmap.recycle()
-    if (!ok) { file.delete(); return@withContext null }
-    ChatInputAttachment(filename = file.name, mimeType = "image/png", sizeBytes = file.length(), localFilePath = file.absolutePath)
-}
 
 internal fun pruneAttachmentCache(directory: File) {
     val cutoff = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
@@ -489,57 +476,6 @@ internal fun createLocalAttachmentBlocks(attachments: List<ChatInputAttachment>)
         )
     }
 
-internal fun createAttachmentFromClipboard(context: Context, maxAttachmentMb: Int): ChatInputAttachment? {
-    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    val clip = clipboard.primaryClip ?: return null
-    for (index in 0 until clip.itemCount) {
-        val item = clip.getItemAt(index)
-        item.uri?.let { uri ->
-            createAttachmentFromUri(context, uri, maxAttachmentMb)?.takeIf { attachment ->
-                attachment.mimeType.startsWith("image/", ignoreCase = true)
-            }?.let { return it.copy(filename = attachmentFilenameForPaste(it.filename)) }
-        }
-
-        val text = item.text?.toString()?.trim().orEmpty()
-        if (text.startsWith("data:image/", ignoreCase = true)) {
-            createAttachmentFromDataUrl(context, text, maxAttachmentMb)?.let { return it }
-        }
-    }
-    return null
-}
-
-internal fun createAttachmentFromDataUrl(context: Context, dataUrl: String, maxAttachmentMb: Int): ChatInputAttachment? {
-    val comma = dataUrl.indexOf(',')
-    if (comma <= 0) return null
-    val meta = dataUrl.substring(5, comma)
-    val mimeType = meta.substringBefore(';').takeIf { it.startsWith("image/", ignoreCase = true) } ?: return null
-    val payload = dataUrl.substring(comma + 1)
-    val maxBytes = minOf(maxAttachmentMb.coerceIn(1, 150), 8) * 1024 * 1024
-    if ((payload.length.toLong() * 3L / 4L) > maxBytes.toLong()) return null
-    val bytes = runCatching { Base64.decode(payload, Base64.DEFAULT) }.getOrNull() ?: return null
-    if (bytes.isEmpty() || bytes.size > maxBytes) return null
-    val extension = when {
-        mimeType.equals("image/jpeg", ignoreCase = true) -> "jpg"
-        mimeType.equals("image/webp", ignoreCase = true) -> "webp"
-        mimeType.equals("image/bmp", ignoreCase = true) -> "bmp"
-        mimeType.equals("image/gif", ignoreCase = true) -> "gif"
-        else -> "png"
-    }
-    val cacheDir = File(context.cacheDir, "attachments").apply { mkdirs() }
-    pruneAttachmentCache(cacheDir)
-    val file = runCatching { File.createTempFile("clipboard-", ".$extension", cacheDir).apply { writeBytes(bytes) } }.getOrNull() ?: return null
-    return ChatInputAttachment(
-        filename = "clipboard-${System.currentTimeMillis()}.$extension",
-        mimeType = mimeType,
-        sizeBytes = bytes.size.toLong(),
-        localFilePath = file.absolutePath
-    )
-}
-
-internal fun attachmentFilenameForPaste(filename: String): String {
-    val cleaned = filename.substringAfterLast('/').ifBlank { "image" }
-    return if (cleaned.startsWith("clipboard-", ignoreCase = true)) cleaned else "clipboard-$cleaned"
-}
 
 internal fun mimeTypeFromFilename(filename: String): String {
     val lower = filename.lowercase(java.util.Locale.ROOT)

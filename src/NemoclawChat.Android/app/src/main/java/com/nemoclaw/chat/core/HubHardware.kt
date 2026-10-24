@@ -128,52 +128,6 @@ internal suspend fun testGateway(healthUrl: String, apiKey: String?): String = w
     }
 }
 
-internal suspend fun hermesHttpCall(
-    settings: AppSettings,
-    apiKey: String?,
-    target: String,
-    rawPayload: String
-): GatewayRpcCallResult = withContext(Dispatchers.IO) {
-    val trimmed = target.trim()
-    if (trimmed.isBlank()) {
-        return@withContext GatewayRpcCallResult(target, false, "Endpoint obbligatorio.", "", "")
-    }
-
-    val parts = trimmed.split(" ", limit = 2).map { it.trim() }.filter { it.isNotBlank() }
-    val verb = if (parts.size == 2) parts[0].uppercase() else if (rawPayload.isBlank()) "GET" else "POST"
-    val path = if (parts.size == 2) parts[1] else trimmed
-    val url = resolveHermesUrl(settings, path)
-
-    try {
-        val response = if (verb == "GET") {
-            httpGetResponse(url, apiKey)
-        } else {
-            val payload = if (rawPayload.isBlank()) JSONObject() else JSONObject(rawPayload)
-            postJson(url, payload, apiKey, verb)
-        }
-        val body = if (response.first in 200..299) {
-            response.second
-        } else {
-            "HTTP ${response.first}: ${extractHumanError(response.second)}"
-        }
-
-        GatewayRpcCallResult(
-            method = "$verb $path",
-            success = response.first in 200..299,
-            status = if (response.first in 200..299) "Hermes risposta ricevuta." else "Hermes HTTP ${response.first}.",
-            rawJson = body,
-            summary = body.limitText(180)
-        )
-    } catch (ex: Exception) {
-        GatewayRpcCallResult(
-            method = "$verb $path",
-            success = false,
-            status = "Hermes richiesta fallita.",
-            rawJson = "",
-            summary = ex.message ?: ex.javaClass.simpleName
-        )
-    }
-}
 
 internal suspend fun sendWorkspaceRunRequest(
     settings: AppSettings,

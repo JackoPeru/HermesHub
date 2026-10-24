@@ -7,8 +7,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Viewer chat (ChatInlineImage/RemoteGalleryImage) sulla stessa UX di RemoteStreamImage:
- * loading, errore esplicito con Riprova, tentativi esauriti. JVM puro sulla macchina a stati.
+ * Viewer chat (ChatInlineImage/RemoteGalleryImage): loading, errore esplicito
+ * con Riprova, tentativi esauriti. JVM puro sulla macchina a stati.
  */
 class ChatViewerErrorRetryTest {
 

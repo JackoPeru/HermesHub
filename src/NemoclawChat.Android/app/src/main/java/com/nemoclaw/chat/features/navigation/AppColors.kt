@@ -9,7 +9,6 @@ internal object AppColors {
     val Surface = Color(0xFF181C23)
     val Panel = Color(0xFF12151A)
     val Elevated = Color(0xFF20242C)
-    val AssistantBubble = Color(0xFF1F242E)
     val UserBubble = Color(0xFF3E2918)
     // Muted bumped da #A2ADBF (3.8:1 su Background) a #C8D2E0 (~6.5:1) per WCAG AA.
     val Muted = Color(0xFFC8D2E0)

@@ -1,10 +1,5 @@
 package com.nemoclaw.chat
 
-
-internal fun streamHermesNativeInstructions(mode: String): String {
-    return ""
-}
-
 internal fun isVideoRequest(prompt: String): Boolean {
     val text = prompt.lowercase()
     return listOf("video", "filmato", "clip", "montaggio", "remotion", "youtube", "mp4", "render").any { text.contains(it) }

@@ -170,18 +170,9 @@ internal fun StreamingBubbleView(
             if (state.isDone) {
                 val appContext = LocalContext.current.applicationContext
                 val clipboardManager = remember(appContext) { appContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
-                val parts = mutableListOf<String>()
-                if (showMessageMetrics) {
-                    state.stats?.ttftMs?.takeIf { metricFilter.ttft && it > 0 }?.let { parts += "TTFT ${String.format(java.util.Locale.US, "%.1f", it / 1000.0)}s" }
-                    state.stats?.tokensPerSecond?.takeIf { metricFilter.tokensPerSecond && it > 0 }?.let { parts += "${String.format(java.util.Locale.US, "%.2f", it)} t/s" }
-                    state.stats?.acceptanceRate?.takeIf { metricFilter.acceptanceRate && it.isFinite() }?.let {
-                        parts += formatAcceptancePart(it, state.stats?.acceptanceLabel)
-                    }
-                    state.stats?.tokensOut?.takeIf { metricFilter.outputTokens && it > 0 }?.let { parts += "$it tok" }
-                    state.stats?.promptTokens?.takeIf { metricFilter.promptTokens && it > 0 }?.let { parts += "prompt $it" }
-                    state.stats?.contextTokens()?.takeIf { metricFilter.contextTokens && it > 0 }?.let { parts += "ctx $it" }
-                    state.stats?.contextLength?.takeIf { metricFilter.contextTokens && it > 0 }?.let { parts += "max $it" }
-                    state.stats?.totalMs?.takeIf { metricFilter.duration && it > 0 }?.let { parts += "${String.format(java.util.Locale.US, "%.1f", it / 1000.0)}s" }
+                // Riga metriche unificata con MessageFooter (formatChatStatsLine, ChatMessageBubble).
+                val line = remember(state.stats, showMessageMetrics) {
+                    if (showMessageMetrics) formatChatStatsLine(state.stats, metricFilter) else ""
                 }
 
                 Row(
@@ -189,9 +180,9 @@ internal fun StreamingBubbleView(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (parts.isNotEmpty()) {
+                    if (line.isNotBlank()) {
                         Text(
-                            text = parts.joinToString("  ·  "),
+                            text = line,
                             color = AppColors.Muted,
                             fontSize = 11.sp,
                             modifier = Modifier.weight(1f)
@@ -241,58 +232,6 @@ internal fun StreamingBubbleView(
     }
 }
 
-@Composable
-internal fun HermesActivityExpander(state: StreamingState, showToolCalls: Boolean) {
-    var nowNs by remember(state.startedAtNs) { mutableLongStateOf(System.nanoTime()) }
-    LaunchedEffect(state.startedAtNs, state.isDone) {
-        while (!state.isDone) {
-            kotlinx.coroutines.delay(500L)
-            nowNs = System.nanoTime()
-        }
-    }
-    val active = !state.isDone
-    val elapsedNowNs = if (active) nowNs else System.nanoTime()
-    val elapsedSec = (elapsedNowNs - state.startedAtNs) / 1_000_000_000.0
-    var thinkingExpanded by rememberSaveable(state.startedAtNs) { mutableStateOf(false) }
-
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (active && state.text.isBlank()) {
-            FlagRow(
-                title = preGenerationStatusLabel(state.status, state.promptProgressPercent, elapsedSec),
-                value = promptProgressIndicator(state)
-                    ?: "${String.format(java.util.Locale.US, "%.1f", elapsedSec)}s",
-                shimmer = true
-            )
-        }
-
-        if (active || state.hasThinking || state.thinking.isNotBlank()) {
-            ThinkingExpander(
-                thinking = state.thinking,
-                active = active && !state.thinkingFrozen,
-                elapsedSec = if (state.thinkingElapsedSec > 0) state.thinkingElapsedSec else elapsedSec,
-                expanded = thinkingExpanded,
-                onExpandedChange = { thinkingExpanded = it }
-            )
-        }
-
-        if (showToolCalls && state.toolCalls.isNotEmpty()) {
-            state.toolCalls.forEach { tool ->
-                androidx.compose.runtime.key(tool.id) {
-                    CompactToolRow(tool)
-                }
-            }
-        }
-
-        if (active && state.text.isNotBlank()) {
-            FlagRow(
-                title = friendlyActivityStatus(state.status.ifBlank { "Generazione risposta" }),
-                value = activityIndicator(state),
-                shimmer = true
-            )
-        }
-    }
-}
-
 private fun preGenerationStatusLabel(status: String, progressPercent: Int?, elapsedSec: Double): String {
     val normalized = status.lowercase()
     return when {
@@ -328,6 +267,8 @@ internal fun AgentTranscript(
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         visible.forEachIndexed { index, block ->
+            // Chiave di contenuto: la riga si ricompone solo se il blocco cambia.
+            androidx.compose.runtime.key(block.hashCode()) {
             when (block) {
                 is TranscriptBlock.AgentText -> {
                     if (includeAgentText && block.text.isNotBlank()) {
@@ -350,6 +291,7 @@ internal fun AgentTranscript(
                         PrefillPinnedRow(block.text, active)
                     }
                 }
+            }
             }
         }
         if (hidden > 0) {
@@ -410,7 +352,8 @@ private fun CompactToolsGroup(tools: List<ToolCallState>, active: Boolean = fals
         return
     }
     // Live: aperto di default (vedere senza tap); a turno chiuso: compatto.
-    var expanded by remember(tools.map { it.id }, active) { mutableStateOf(active) }
+    // tools confronta strutturalmente: stabile finche il contenuto non cambia.
+    var expanded by remember(tools, active) { mutableStateOf(active) }
     Column {
         Row(
             modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 3.dp),
@@ -533,15 +476,14 @@ internal fun splitTimelinePrefill(timeline: List<AssistantActivity>): Pair<Assis
 
 @Composable
 private fun PrefillPinnedRow(text: String, active: Boolean) {
-    // Shimmer solo quando effettivamente in loading/streaming (derivedStateOf).
-    val showShimmer by remember(active) { derivedStateOf { active } }
+    // active e un semplice parametro: niente derivedStateOf superfluo.
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("Prefill", color = AppColors.Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-        if (showShimmer) {
+        if (active) {
             ShimmerText(text.ifBlank { "…" }, enabled = true)
         } else {
             Text(
@@ -558,7 +500,6 @@ private fun PrefillPinnedRow(text: String, active: Boolean) {
 
 @Composable
 private fun ReasoningCanvas(text: String, active: Boolean) {
-    val showShimmer by remember(active) { derivedStateOf { active } }
     var expanded by remember(text.take(64)) { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
@@ -569,7 +510,7 @@ private fun ReasoningCanvas(text: String, active: Boolean) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (showShimmer) {
+            if (active) {
                 ShimmerText("Ragionamento", enabled = true)
             } else {
                 Text("Ragionamento", color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
@@ -689,13 +630,16 @@ private fun appendScrubbedJson(out: StringBuilder, value: Any?, indent: Int, dep
         else -> out.append(value.toString())
     }
 }
+private val CALL_ID_RE = Regex("^call_[0-9a-fA-F]+$")
+private val LLAMA_PREFIX_RE = Regex("^llama\\.cpp:\\s*", RegexOption.IGNORE_CASE)
+
 /**
  * Nome tool leggibile: se il server manda solo un id (es. call_xxx), prova a
  * leggere il nome funzione dagli argomenti, altrimenti mostra un id corto.
  */
 internal fun humanToolName(name: String, id: String, args: String): String {
     val clean = name.trim()
-    if (clean.isNotEmpty() && clean != id && !clean.matches(Regex("^call_[0-9a-fA-F]+$"))) return clean
+    if (clean.isNotEmpty() && clean != id && !clean.matches(CALL_ID_RE)) return clean
     val fromArgs = runCatching {
         val obj = org.json.JSONObject(args)
         obj.optString("name").ifBlank {
@@ -710,7 +654,7 @@ internal fun humanToolName(name: String, id: String, args: String): String {
 }
 
 internal fun friendlyActivityStatus(status: String): String {
-    val value = status.trim().replace(Regex("^llama\\.cpp:\\s*", RegexOption.IGNORE_CASE), "")
+    val value = status.trim().replace(LLAMA_PREFIX_RE, "")
     return when {
         value.contains("prefill prompt", ignoreCase = true) || value.contains("processing prompt", ignoreCase = true) -> "Elaborazione prompt"
         value.contains("attesa primo token", ignoreCase = true) || value.contains("attendo primo token", ignoreCase = true) -> "Attesa primo token della risposta"
@@ -772,8 +716,6 @@ internal fun CompactToolRow(tool: ToolCallState) {
 
 @Composable
 private fun FlagRow(title: String, value: String, shimmer: Boolean) {
-    // Shimmer solo quando richiesto dal chiamante (che lo alza solo in loading/streaming).
-    val showShimmer by remember(shimmer) { derivedStateOf { shimmer } }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -781,7 +723,7 @@ private fun FlagRow(title: String, value: String, shimmer: Boolean) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        if (showShimmer) {
+        if (shimmer) {
             ShimmerText(title, enabled = true)
         } else {
             Text(text = title, color = AppColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
@@ -826,64 +768,6 @@ private fun promptProgressIndicator(state: StreamingState): String? {
     }
 }
 
-@Composable
-internal fun ThinkingExpander(
-    thinking: String,
-    active: Boolean,
-    elapsedSec: Double,
-    expanded: Boolean? = null,
-    onExpandedChange: ((Boolean) -> Unit)? = null
-) {
-    var localExpanded by rememberSaveable(thinking.take(96)) { mutableStateOf(false) }
-    val isExpanded = expanded ?: localExpanded
-    val setExpanded = onExpandedChange ?: { value: Boolean -> localExpanded = value }
-    val showShimmer by remember(active) { derivedStateOf { active } }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp)
-                .clickable { setExpanded(!isExpanded) },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            if (showShimmer) {
-                ShimmerText("Ragionamento", enabled = true)
-                Spacer(modifier = Modifier.weight(1f))
-                Text(text = if (thinking.isBlank()) "in attesa dal server" else "in corso", color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            } else {
-                val label = if (thinking.isNotBlank() && elapsedSec >= 1) "Ragionamento · ${String.format(java.util.Locale.US, "%.1f", elapsedSec)}s" else "Ragionamento"
-                Text(text = label, color = AppColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Spacer(modifier = Modifier.weight(1f))
-                Text(text = if (thinking.isBlank()) "non inviato" else "ricevuto", color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Icon(
-                imageVector = if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                contentDescription = if (isExpanded) "Chiudi ragionamento" else "Mostra ragionamento",
-                tint = AppColors.Muted,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-        if (isExpanded) {
-            Surface(
-                color = AppColors.Composer.copy(alpha = 0.78f),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    modifier = Modifier
-                        .heightIn(max = 180.dp)
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    text = thinking.ifBlank { "Hermes non ha inviato contenuto di ragionamento per questa risposta." },
-                    color = AppColors.Muted,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp
-                )
-            }
-        }
-    }
-}
 
 @Composable
 internal fun ShimmerText(text: String, enabled: Boolean = true) {
@@ -902,7 +786,7 @@ internal fun ShimmerText(text: String, enabled: Boolean = true) {
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    val shouldAnimate by remember(enabled, resumed) {
+    val shouldAnimate by remember {
         derivedStateOf { enabled && resumed }
     }
     if (!shouldAnimate) {
@@ -1326,7 +1210,7 @@ internal enum class SlashAction {
     PromptSetup, PromptVisual, PromptResearch, PromptWeb, PromptImage, PromptVideo, PromptNews
 }
 
-internal fun slashCommands(): List<SlashCommand> = listOf(
+private val SLASH_COMMANDS = listOf(
     SlashCommand("/chat", "Modalita Chat", "Conversazione normale", SlashAction.ModeChat),
     SlashCommand("/agente", "Modalita Agente", "Esegui Hermes con tool server", SlashAction.ModeAgent),
     SlashCommand("/agent", "Modalita Agente", "Alias di /agente", SlashAction.ModeAgent),
@@ -1350,11 +1234,13 @@ internal fun slashCommands(): List<SlashCommand> = listOf(
     SlashCommand("/help", "Aiuto", "Mostra comandi", SlashAction.Help)
 )
 
+internal fun slashCommands(): List<SlashCommand> = SLASH_COMMANDS
+
 internal fun filterSlashCommands(query: String): List<SlashCommand> {
     if (query.isEmpty() || !query.startsWith("/")) return emptyList()
     val q = query.lowercase()
     val needle = q.trimStart('/')
-    return slashCommands().filter { cmd ->
+    return SLASH_COMMANDS.filter { cmd ->
         cmd.display.startsWith(q, ignoreCase = true) ||
             cmd.display.contains(needle, ignoreCase = true) ||
             cmd.title.contains(needle, ignoreCase = true)
@@ -1433,118 +1319,3 @@ internal fun remoteImageLoadRetrying(current: RemoteImageLoadState): RemoteImage
 
 internal fun remoteImageLoadSucceeded(current: RemoteImageLoadState): RemoteImageLoadState =
     current.copy(phase = RemoteImageLoadPhase.Loaded, errorMessage = null)
-
-/**
- * Viewer inline per immagini remote con stati Loading/Loaded/Failed+retry.
- * Il loader e' iniettato (default: nessun caricamento) cosi' la UI non dipende
- * dal downloader di ChatFeature; applica isStrictRemoteImageUrl per non
- * trattare da immagini URL non classificati come tali.
- */
-@Composable
-internal fun RemoteStreamImage(
-    mediaUrl: String,
-    contentDescription: String?,
-    loadBitmap: suspend (String) -> Bitmap?,
-    modifier: Modifier = Modifier
-) {
-    if (!isStrictRemoteImageUrl(mediaUrl)) {
-        Text(
-            text = contentDescription?.takeIf { it.isNotBlank() } ?: mediaUrl,
-            color = AppColors.Muted,
-            fontSize = 13.sp,
-            modifier = modifier
-        )
-        return
-    }
-    var loadState by remember(mediaUrl) { mutableStateOf(remoteImageLoadInitial()) }
-    var bitmap by remember(mediaUrl) { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(mediaUrl, loadState) {
-        if (loadState.phase != RemoteImageLoadPhase.Loading) return@LaunchedEffect
-        loadState = try {
-            val loaded = withTimeout(REMOTE_IMAGE_LOAD_TIMEOUT_MS) { loadBitmap(mediaUrl) }
-            if (loaded != null) {
-                bitmap = loaded
-                remoteImageLoadSucceeded(loadState)
-            } else {
-                remoteImageLoadFailed(loadState, "download fallito o formato non valido")
-            }
-        } catch (timeout: TimeoutCancellationException) {
-            remoteImageLoadFailed(loadState, "timeout dopo ${REMOTE_IMAGE_LOAD_TIMEOUT_MS / 1000}s")
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (ex: Exception) {
-            remoteImageLoadFailed(loadState, ex.message)
-        }
-    }
-    val snapshot = loadState
-    val loaded = bitmap
-    when {
-        snapshot.phase == RemoteImageLoadPhase.Loaded && loaded != null -> {
-            Image(
-                bitmap = loaded.asImageBitmap(),
-                contentDescription = contentDescription,
-                contentScale = ContentScale.FillWidth,
-                modifier = modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-            )
-        }
-        snapshot.phase == RemoteImageLoadPhase.Failed -> {
-            Column(
-                modifier = modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Error,
-                        contentDescription = null,
-                        tint = Color(0xFFFF453A),
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = "Immagine non caricata.",
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Text(
-                    text = snapshot.errorMessage ?: "download fallito",
-                    color = AppColors.Muted,
-                    fontSize = 12.sp
-                )
-                if (snapshot.canRetry) {
-                    TextButton(onClick = { loadState = remoteImageLoadRetrying(snapshot) }) {
-                        Icon(
-                            imageVector = Icons.Rounded.Refresh,
-                            contentDescription = null,
-                            tint = AppColors.Muted,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.size(6.dp))
-                        Text("Riprova", color = AppColors.Muted, fontSize = 13.sp)
-                    }
-                } else {
-                    Text(
-                        text = "Tentativi esauriti (${snapshot.attempts}).",
-                        color = AppColors.Muted,
-                        fontSize = 12.sp
-                    )
-                }
-            }
-        }
-        else -> {
-            Text(
-                text = if (snapshot.attempts > 0) "Nuovo tentativo di caricamento..." else "Caricamento immagine...",
-                color = AppColors.Muted,
-                fontSize = 13.sp,
-                modifier = modifier
-            )
-        }
-    }
-}
-

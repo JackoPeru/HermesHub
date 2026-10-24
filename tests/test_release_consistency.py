@@ -88,7 +88,9 @@ class ReleaseConsistencyTests(unittest.TestCase):
             'resolveHermesUrl(settings, "/v1/hub/server/action")',
             'resolveHermesUrl(settings, "/v1/hub/server/maintenance")',
             'resolveHermesUrl(settings, "/v1/media/upload")',
-            'resolveHermesUrl(settings, "/v1/image/library',
+            # Libreria immagini live: browse via manager (loadImageBrowse),
+            # non il vecchio path gateway /v1/image/library (funzione morta rimossa).
+            'loadImageBrowse(settings, managerKey',
         ):
             self.assertIn(path, sources)
 

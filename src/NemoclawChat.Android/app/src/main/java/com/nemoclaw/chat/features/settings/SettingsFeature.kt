@@ -306,7 +306,6 @@ internal fun SettingsScreen(
     val scope = rememberCoroutineScope()
     var gatewayUrl by remember(settings.gatewayUrl) { mutableStateOf(settings.gatewayUrl) }
     var localGatewayUrl by remember(settings.localGatewayUrl) { mutableStateOf(settings.localGatewayUrl) }
-    var gatewayWsUrl by remember(settings.gatewayWsUrl) { mutableStateOf(settings.gatewayWsUrl) }
     var adminBridgeUrl by remember(settings.adminBridgeUrl) { mutableStateOf(settings.adminBridgeUrl) }
     var provider by remember(settings.provider) { mutableStateOf(settings.provider) }
     var inferenceEndpoint by remember(settings.inferenceEndpoint) { mutableStateOf(settings.inferenceEndpoint) }
@@ -392,7 +391,6 @@ internal fun SettingsScreen(
         return AppSettings(
             gatewayUrl = gatewayUrl.trim(),
             localGatewayUrl = localGatewayUrl.trim(),
-            gatewayWsUrl = "",
             adminBridgeUrl = hermesRoot(AppSettings(gatewayUrl = gatewayUrl.trim())),
             provider = provider.trim(),
             inferenceEndpoint = inferenceEndpoint.trim(),

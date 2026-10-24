@@ -255,14 +255,6 @@ internal fun loadBotLinks(context: Context): Map<String, String> {
     }.getOrDefault(emptyMap())
 }
 
-internal fun clearBotLink(context: Context, identityKey: String) {
-    val next = loadBotLinks(context).toMutableMap()
-    if (next.remove(identityKey) == null) return
-    val root = JSONObject()
-    next.forEach { (k, v) -> root.put(k, v) }
-    botDisplayPrefs(context).edit { putString("links_json", root.toString()) }
-}
-
 /**
  * True se l'id e target di un link desktop legacy (0.6.218): gli snapshot
  * devono preservare i puntatori altrui. Senza link non succede mai.

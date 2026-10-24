@@ -19,7 +19,7 @@ internal fun extractInlineMediaBlocks(text: String): List<VisualBlock> {
     val proxy = MEDIA_PROXY_LINE_REGEX.findAll(text)
         .map { it.groups[1]?.value.orEmpty().trimEnd('.', ',', ';', ':') }
         .plus(RAW_MEDIA_PROXY_URL_REGEX.findAll(text).map { it.value.trimEnd('.', ',', ';', ':') })
-        .filter { it.isNotBlank() && it !in seen && isSafeInlineMediaUrl(it) }
+        .filter { it.isNotBlank() && it !in seen && isSafeMediaUrl(it) }
         .distinct()
         .take(12 - explicit.size)
         .mapIndexed { index, url ->
@@ -34,7 +34,7 @@ internal fun extractInlineMediaBlocks(text: String): List<VisualBlock> {
         .toList()
     val raw = RAW_IMAGE_URL_REGEX.findAll(text)
         .map { it.value.trimEnd('.', ',', ';', ':') }
-        .filter { it !in seen && isLikelyRemoteImageUrl(it) }
+        .filter { it !in seen && isStrictRemoteImageUrl(it) }
         .take(12 - explicit.size - proxy.size)
         .mapIndexed { index, url ->
             seen += url
@@ -115,7 +115,7 @@ internal fun inferMediaKind(filename: String, url: String): String {
     val value = "$filename $url".lowercase()
     return when {
         listOf(".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp").any { value.contains(it) } -> "image"
-        isLikelyRemoteImageUrl(url) -> "image"
+        isStrictRemoteImageUrl(url) -> "image"
         listOf(".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi", ".wmv", ".flv", ".mpg", ".mpeg", ".ts", ".m2ts", ".3gp", ".ogv").any { value.contains(it) } -> "video"
         listOf(".mp3", ".wav", ".m4a", ".flac", ".ogg").any { value.contains(it) } -> "audio"
         else -> "document"
@@ -129,7 +129,7 @@ internal fun inferMimeType(filename: String, url: String): String {
         value.contains(".jpg") || value.contains(".jpeg") -> "image/jpeg"
         value.contains(".webp") -> "image/webp"
         value.contains(".gif") -> "image/gif"
-        isLikelyRemoteImageUrl(url) -> "image/*"
+        isStrictRemoteImageUrl(url) -> "image/*"
         value.contains(".mp4") || value.contains(".m4v") -> "video/mp4"
         value.contains(".mov") -> "video/quicktime"
         value.contains(".webm") -> "video/webm"
@@ -172,19 +172,6 @@ internal fun isStrictRemoteImageUrl(url: String): Boolean {
     if (REMOTE_IMAGE_EXTENSIONS.any { withoutQuery.endsWith(it) }) return true
     val uriPath = runCatching { URI(url.trim()).path?.lowercase().orEmpty() }.getOrDefault("")
     return uriPath.contains("/media/") || uriPath.contains("/proxy/")
-}
-
-internal fun isLikelyRemoteImageUrl(url: String): Boolean = isStrictRemoteImageUrl(url)
-
-internal fun isSafeInlineMediaUrl(value: String): Boolean {
-    if (value.isBlank()) return false
-    if (value.startsWith("/v1/media/", ignoreCase = true)) return true
-    return try {
-        val uri = URI(value)
-        (uri.scheme == "http" || uri.scheme == "https") && uri.path.startsWith("/v1/media/")
-    } catch (_: Exception) {
-        false
-    }
 }
 
 internal fun extractVisualBlocksFromJson(json: String): List<VisualBlock> {

@@ -318,7 +318,7 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings, onSendTe
                     }
                 }
                 RawHermesEventsView(message.rawEvents)
-                MessageFooter(message.text, message.stats, settings, settings.showMessageMetrics, settings.metricFilter())
+                MessageFooter(message.text, message.stats, settings, settings.showMessageMetrics, remember(settings) { settings.metricFilter() })
             }
             return@SelectionContainer
         }
@@ -362,7 +362,7 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings, onSendTe
                         }
                     }
                     RawHermesEventsView(message.rawEvents)
-                    MessageFooter(message.text, message.stats, settings, settings.showMessageMetrics, settings.metricFilter())
+                    MessageFooter(message.text, message.stats, settings, settings.showMessageMetrics, remember(settings) { settings.metricFilter() })
                 }
             }
         }

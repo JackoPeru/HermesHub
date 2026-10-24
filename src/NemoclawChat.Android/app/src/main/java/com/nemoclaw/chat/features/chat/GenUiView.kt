@@ -300,23 +300,6 @@ private fun genUiProgressBlock(node: JSONObject, state: Map<String, GenUiValue>)
     )
 }
 
-private fun genUiTableBlock(node: JSONObject, state: Map<String, GenUiValue>): VisualBlock {
-    // Conservato per compatibilita': il renderer GenUiTable ordina/filtra da solo.
-    val cols = (0 until (node.optJSONArray("columns")?.length() ?: 0)).map { i ->
-        val c = node.optJSONArray("columns")!!.optJSONObject(i)
-        VisualTableColumn(c.optString("key"), c.optString("label"), c.optString("align", "left"), c.optString("format", "text"), true)
-    }
-    val rows = (0 until (node.optJSONArray("rows")?.length() ?: 0)).map { i ->
-        val r = node.optJSONArray("rows")!!.optJSONObject(i)
-        r.keys().asSequence().associateWith { r.optString(it) }
-    }
-    return VisualBlock(id = node.optString("id"), type = "table", title = renderGenUiText(node.optString("title"), state), columns = cols, rows = rows)
-}
-
-private fun genUiChartBlock(node: JSONObject, state: Map<String, GenUiValue>): VisualBlock {
-    // Conservato per compatibilita': il renderer GenUiChart disegna da solo.
-    return VisualBlock(id = node.optString("id"), type = "chart", chartType = node.optString("chart_type", "line"))
-}
 
 /** Serie risolte (formule valutate sullo stato): logica pura, testabile. */
 internal data class GenUiPoint(val xText: String, val xNum: Double?, val y: Double)

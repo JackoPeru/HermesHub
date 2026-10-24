@@ -105,16 +105,6 @@ internal fun extractTaskId(body: String): String? {
     }
 }
 
-internal fun extractTaskStatus(body: String): String? {
-    return try {
-        val json = JSONObject(body)
-        json.extractString("status")
-            ?: json.extractNestedString("task", "status")
-            ?: json.extractNestedString("job", "status")
-    } catch (_: Exception) {
-        null
-    }
-}
 
 internal fun extractResponseId(body: String): String? {
     return try {
@@ -186,28 +176,6 @@ internal fun buildFallbackReply(settings: AppSettings, mode: String, reason: Str
     return "$prefix Preset: API ${settings.gatewayUrl}, modello ${settings.model}, protocollo ${settings.preferredApi}. Motivo: $reason."
 }
 
-internal fun fallbackTaskResult(settings: AppSettings, task: AgentTask, message: String): GatewayTaskResult {
-    return if (settings.demoMode) {
-        GatewayTaskResult(
-            task.copy(
-                mode = "Locale",
-                status = if (task.requiresApproval) "In attesa approvazione" else "Pronto",
-                source = "Fallback locale",
-                updatedAt = System.currentTimeMillis()
-            ),
-            "$message Salvo il task in locale."
-        )
-    } else {
-        GatewayTaskResult(
-            task.copy(
-                status = "Errore Hermes",
-                source = "Errore Hermes",
-                updatedAt = System.currentTimeMillis()
-            ),
-            message
-        )
-    }
-}
 
 internal suspend fun checkGithubUpdate(localVersion: String): UpdateCheckResult = withContext(Dispatchers.IO) {
     try {

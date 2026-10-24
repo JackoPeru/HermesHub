@@ -305,7 +305,7 @@ internal fun ChatInlineImage(
     isDownloading: Boolean
 ) {
     var viewer by remember(block.mediaUrl) { mutableStateOf(false) }
-    // Stessa macchina a stati di RemoteStreamImage: loading/errore con Riprova, mai loading infinito.
+    // Stessa macchina a stati del viewer immagini: loading/errore con Riprova, mai loading infinito.
     var loadState by remember(mediaUrl) { mutableStateOf(remoteImageLoadInitial()) }
     var bitmap by remember(mediaUrl) { mutableStateOf<Bitmap?>(null) }
     LaunchedEffect(mediaUrl, loadState) {

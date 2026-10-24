@@ -151,34 +151,6 @@ internal suspend fun restoreConversationsFromHub(
     }
 }
 
-internal suspend fun syncRemoteTasks(settings: AppSettings, apiKey: String?): Pair<List<AgentTask>, String> = withContext(Dispatchers.IO) {
-    try {
-        val body = httpGet(resolveHermesUrl(settings, "/api/jobs"), apiKey)
-        val array = findWorkspaceJobsArray(body)
-        val tasks = buildList {
-            for (i in 0 until array.length()) {
-                val obj = array.optJSONObject(i) ?: continue
-                val id = obj.extractString("id") ?: obj.extractString("job_id") ?: "job_${i}_${System.currentTimeMillis()}"
-                add(
-                    AgentTask(
-                        id = "remote_$id",
-                        remoteId = id,
-                        title = obj.optString("title", "Hermes job $id"),
-                        mode = "Job",
-                        status = obj.optString("status", "sincronizzato"),
-                        detail = obj.optString("instructions", obj.optString("detail", obj.toString().limitText(600))),
-                        requiresApproval = obj.optBoolean("requiresApproval", obj.optBoolean("approvalRequired", false)),
-                        source = "Hermes Jobs",
-                        updatedAt = System.currentTimeMillis()
-                    )
-                )
-            }
-        }.sortedByDescending { it.updatedAt }
-        tasks to "Sincronizzati ${tasks.size} job da Hermes."
-    } catch (ex: Exception) {
-        emptyList<AgentTask>() to "Sync Jobs fallita: ${ex.message ?: ex.javaClass.simpleName}"
-    }
-}
 
 internal suspend fun supportsResponsesApi(settings: AppSettings, apiKey: String?): Boolean = withContext(Dispatchers.IO) {
     try {

@@ -11,7 +11,6 @@ internal const val RUN_POLL_TIMEOUT_MS = 60 * 60 * 1000L
 internal const val RUN_POLL_MAX_CONSECUTIVE_FAILURES = 5
 internal const val INLINE_ATTACHMENT_MAX_BYTES = 8L * 1024 * 1024
 internal const val INLINE_ATTACHMENTS_TOTAL_MAX_BYTES = 12L * 1024 * 1024
-internal const val SSE_LINE_MAX_BYTES = MAX_SSE_LINE_BYTES
 internal val plugAndPlayStreamGatewayRoots = emptyList<String>()
 
 internal val streamHttpClient: OkHttpClient = OkHttpClient.Builder()

@@ -119,7 +119,6 @@ internal fun ChatScreen(
     val botSettings = if (remoteBot && !botEndpoint.isNullOrBlank()) {
         settings.copy(
             gatewayUrl = botEndpoint.trimEnd('/'),
-            gatewayWsUrl = "",
             inferenceEndpoint = botEndpoint.trimEnd('/'),
             adminBridgeUrl = botEndpoint.trimEnd('/')
         )
@@ -1293,17 +1292,18 @@ internal fun ChatScreen(
             ) {
                 items(
                     state.messages,
-                    key = { message -> message.id }
+                    key = { message -> message.id },
+                    contentType = { message -> if (message.fromUser) "user" else if (message.isAction) "action" else "hermes" }
                 ) { message ->
                     MessageBubble(message, settings, onSendText = { quickPrompt = it })
                 }
                 state.streamingState?.let { streaming ->
-                    item(key = "streaming") {
+                    item(key = "streaming", contentType = "streaming") {
                         StreamingBubbleView(
                             streaming,
                             settings.showToolCalls,
                             settings.showMessageMetrics,
-                            settings.metricFilter(),
+                            remember(settings) { settings.metricFilter() },
                             onSpeakMessage = { text ->
                                 scope.launch {
                                     runCatching { speakChatMessage(context, botSettings, text, botApiKey) }
@@ -1314,12 +1314,12 @@ internal fun ChatScreen(
                     }
                 }
                 liveFollow?.let { follow ->
-                    item(key = "live-follow") {
+                    item(key = "live-follow", contentType = "live-follow") {
                         StreamingBubbleView(
                             follow,
                             settings.showToolCalls,
                             settings.showMessageMetrics,
-                            settings.metricFilter()
+                            remember(settings) { settings.metricFilter() }
                         )
                     }
                 }

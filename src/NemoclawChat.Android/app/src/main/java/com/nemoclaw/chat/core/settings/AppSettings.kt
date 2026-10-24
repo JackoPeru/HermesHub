@@ -7,7 +7,6 @@ import com.nemoclaw.chat.core.WorkLimits
 data class AppSettings(
     val gatewayUrl: String = AppDefaults.gatewayUrl,
     val localGatewayUrl: String = AppDefaults.localGatewayUrl,
-    val gatewayWsUrl: String = AppDefaults.gatewayWsUrl,
     val adminBridgeUrl: String = AppDefaults.adminBridgeUrl,
     val provider: String = AppDefaults.provider,
     val inferenceEndpoint: String = AppDefaults.inferenceEndpoint,
@@ -102,7 +101,6 @@ internal fun loadSettings(context: Context): AppSettings {
     val settings = AppSettings(
         gatewayUrl = prefOrDefault("gatewayUrl", AppDefaults.gatewayUrl, healBlank = true),
         localGatewayUrl = prefOrDefault("localGatewayUrl", AppDefaults.localGatewayUrl, healBlank = true),
-        gatewayWsUrl = prefs.getString("gatewayWsUrl", AppDefaults.gatewayWsUrl) ?: AppDefaults.gatewayWsUrl,
         adminBridgeUrl = prefs.getString("adminBridgeUrl", AppDefaults.adminBridgeUrl) ?: AppDefaults.adminBridgeUrl,
         provider = prefs.getString("provider", AppDefaults.provider) ?: AppDefaults.provider,
         inferenceEndpoint = prefs.getString("inferenceEndpoint", AppDefaults.inferenceEndpoint) ?: AppDefaults.inferenceEndpoint,
@@ -221,7 +219,6 @@ internal fun saveSettings(context: Context, settings: AppSettings) {
     context.getSharedPreferences(CURRENT_SETTINGS_PREFS, Context.MODE_PRIVATE).edit {
         putString("gatewayUrl", normalizeUrl(settings.gatewayUrl))
         putString("localGatewayUrl", normalizeUrl(settings.localGatewayUrl))
-        putString("gatewayWsUrl", normalizeUrl(settings.gatewayWsUrl))
         putString("adminBridgeUrl", normalizeUrl(settings.adminBridgeUrl))
         putString("provider", settings.provider.trim())
         putString("inferenceEndpoint", normalizeUrl(settings.inferenceEndpoint))
@@ -290,7 +287,6 @@ internal object AppDefaults {
     // (plug-and-play: l'app prova entrambe, vedi GatewayRoots).
     const val gatewayUrl = "http://100.94.223.14:8642"
     const val localGatewayUrl = "http://192.168.1.6:8642"
-    const val gatewayWsUrl = ""
     const val adminBridgeUrl = ""
     const val provider = "hermes-agent"
     const val inferenceEndpoint = ""

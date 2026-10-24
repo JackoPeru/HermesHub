@@ -222,49 +222,6 @@ internal fun ScreenViewer(
     )
 }
 
-@Composable
-internal fun ScreenPreviewImage(
-    settings: AppSettings,
-    width: Int = 480,
-    refreshMs: Long = 5_000L
-) {
-    // applicationContext: nessun retain dell'Activity nel polling.
-    val appContext = LocalContext.current.applicationContext
-    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var lastSignature by remember { mutableStateOf<BitmapImageLoader.FrameSignature?>(null) }
-    LaunchedEffect(settings.gatewayUrl, width) {
-        lastSignature = null
-    }
-    val previewApiKeyHash = remember(settings.gatewayUrl) { (loadGpuAppSecret(appContext) ?: "").hashCode() }
-    PollWhileStarted(settings.gatewayUrl, width, previewApiKeyHash, baseIntervalMs = refreshMs) {
-        val key = withContext(Dispatchers.IO) { loadGpuAppSecret(appContext) }
-        val bytes = withContext(Dispatchers.IO) { fetchScreenFrameBytes(settings, key, width) }
-        // Skip re-decode se i byte sono identici ai precedenti (hash+lunghezza).
-        val signature = BitmapImageLoader.frameSignature(bytes)
-        if (signature != null && signature == lastSignature) {
-            return@PollWhileStarted bytes != null
-        }
-        lastSignature = signature
-        // reqWidth = larghezza view (loader: sampling + cache).
-        val decoded = withContext(Dispatchers.IO) { decodeScreenFrame(bytes, width) }
-        bitmap = decoded
-        bytes != null
-    }
-    val current = bitmap
-    if (current != null) {
-        androidx.compose.foundation.Image(
-            bitmap = current.asImageBitmap(),
-            contentDescription = "Anteprima schermo bot",
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
-    } else {
-        Box(modifier = Modifier.fillMaxSize().background(Color(0xFF101418)), contentAlignment = Alignment.Center) {
-            Text("Schermo non disponibile", color = AppColors.Muted, fontSize = 12.sp)
-        }
-    }
-}
-
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 internal fun ScreenScreen(

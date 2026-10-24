@@ -93,12 +93,6 @@ internal fun savePendingFcmToken(context: Context, token: String) {
         .edit { putString(PENDING_FCM_TOKEN_KEY, token) }
 }
 
-internal fun loadPendingFcmToken(context: Context): String? {
-    return context.applicationContext
-        .getSharedPreferences(DEVICE_PREFS, Context.MODE_PRIVATE)
-        .getString(PENDING_FCM_TOKEN_KEY, null)?.takeIf { it.isNotBlank() }
-}
-
 internal fun deviceSignatureHeaders(): List<String> =
     listOf("X-Hermes-Key-Id", "X-Hermes-Timestamp", "X-Hermes-Nonce", "X-Hermes-Signature")
 
@@ -162,11 +156,6 @@ internal fun devicePublicKeyPem(): String {
     return "-----BEGIN PUBLIC KEY-----\n" +
         b64.chunked(64).joinToString("\n") +
         "\n-----END PUBLIC KEY-----\n"
-}
-
-internal fun devicePublicKeyFingerprint(): String {
-    val publicKey = ensureDeviceKeyPair()
-    return sha256Hex(publicKey.encoded).take(16)
 }
 
 internal data class SignedDeviceRequest(

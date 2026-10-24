@@ -161,52 +161,6 @@ internal fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPromp
 }
 
 @Composable
-internal fun NewsArticleCard(article: WorkspaceRequest, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        color = AppColors.Panel,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, AppColors.Border)
-    ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Surface(modifier = Modifier.size(44.dp), shape = RoundedCornerShape(13.dp), color = AppColors.Accent.copy(alpha = 0.18f)) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
-                    }
-                }
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        article.title,
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 17.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        "${article.source} - ${article.status} - ${formatVideoTimestamp(article.updatedAt)}",
-                        color = AppColors.Muted,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(20.dp))
-            }
-            HorizontalDivider(color = AppColors.Border)
-            val preview = article.result.ifBlank { article.prompt }.limitText(420)
-            MarkdownText(preview, color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp)
-            if (article.feedback.isNotBlank()) {
-                Text("Feedback salvato", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            }
-        }
-    }
-}
-
-@Composable
 internal fun NewsHtmlCard(item: NewsHtmlItem, onClick: () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(

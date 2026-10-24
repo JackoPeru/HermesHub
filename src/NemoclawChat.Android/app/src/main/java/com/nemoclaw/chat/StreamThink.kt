@@ -1,12 +1,16 @@
 package com.nemoclaw.chat
 
 
+private val THINK_BLOCK_RE = Regex("<\\s*think\\s*>.*?<\\s*/\\s*think\\s*>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+private val THINK_OPEN_EOS_RE = Regex("<\\s*think\\s*>.*\\z", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+private val THINK_TAG_RE = Regex("<\\s*/?\\s*think\\s*>", RegexOption.IGNORE_CASE)
+
 internal fun stripReasoningArtifacts(text: String): String {
     if (text.isEmpty()) return ""
     return text
-        .replace(Regex("<\\s*think\\s*>.*?<\\s*/\\s*think\\s*>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
-        .replace(Regex("<\\s*think\\s*>.*\\z", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
-        .replace(Regex("<\\s*/?\\s*think\\s*>", RegexOption.IGNORE_CASE), "")
+        .replace(THINK_BLOCK_RE, "")
+        .replace(THINK_OPEN_EOS_RE, "")
+        .replace(THINK_TAG_RE, "")
         .trimStart('\r', '\n')
 }
 

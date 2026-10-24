@@ -7,15 +7,6 @@ import androidx.compose.runtime.setValue
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal fun findWorkspaceJobsArray(body: String): JSONArray {
-    val trimmed = body.trim()
-    if (trimmed.startsWith("[")) return JSONArray(trimmed)
-    val root = JSONObject(trimmed)
-    return root.optJSONArray("jobs")
-        ?: root.optJSONArray("items")
-        ?: root.optJSONArray("data")
-        ?: JSONArray().put(root)
-}
 
 internal fun saveConversationSnapshot(
     context: Context,

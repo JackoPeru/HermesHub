@@ -334,11 +334,13 @@ internal fun ComposerAttachmentStrip(
         verticalAlignment = Alignment.CenterVertically
     ) {
         attachments.forEach { attachment ->
+            androidx.compose.runtime.key(attachment.localFilePath ?: attachment.dataUrl) {
             ComposerAttachmentThumb(
                 attachment = attachment,
                 onRemove = { onRemoveAttachment(attachment) },
                 onView = { viewing = attachment }
             )
+            }
         }
     }
     viewing?.let { current ->

@@ -271,7 +271,6 @@ internal fun settingsForBotConnection(settings: AppSettings, connection: HermesB
     require(connection.endpoint.isNotBlank()) { "Endpoint Hermes esplicito non configurato." }
     return settings.copy(
         gatewayUrl = connection.endpoint,
-        gatewayWsUrl = "",
         inferenceEndpoint = connection.endpoint,
         adminBridgeUrl = connection.endpoint
     )
