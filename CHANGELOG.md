@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.311 - 2026-10-24
+
+- Archi home: ripristinate le curve ellittiche originali (le bande dritte erano sbagliate), solo più luminose.
+- Solo asset: suite verdi.
+
 ## 0.6.310 - 2026-10-24
 
 - Hero 1:1 verificata dal vivo: header con inset corretto, composer a riga singola, glow logo/avatar senza alone scuro, asset archi rigenerato e ancorato in alto.
