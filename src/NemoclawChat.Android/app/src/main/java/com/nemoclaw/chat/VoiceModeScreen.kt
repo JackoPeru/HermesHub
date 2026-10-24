@@ -17,6 +17,7 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -60,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -70,6 +72,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
@@ -378,10 +383,32 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
             modifier = Modifier.fillMaxSize()
         )
 
-        Column(
+        // Alone ambra centrale premium (radial gradient statico, costo zero, niente blur/RenderEffect).
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            drawCircle(
+                brush = Brush.radialGradient(
+                    0.0f to Color(0xFFF5A524).copy(alpha = 0.12f),
+                    0.55f to Color(0xFFF5A524).copy(alpha = 0.04f),
+                    1.0f to Color.Transparent,
+                    center = center,
+                    radius = size.minDimension * 0.55f
+                ),
+                radius = size.minDimension * 0.55f,
+                center = center
+            )
+        }
+
+        AppleGlass(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 34.dp, start = 20.dp, end = 20.dp),
+                .padding(bottom = 34.dp, start = 20.dp, end = 20.dp)
+                .fillMaxWidth(),
+            shape = RoundedCornerShape(28.dp)
+        ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -409,7 +436,7 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
                 modifier = Modifier
                     .size(78.dp)
                     .clip(CircleShape)
-                    .border(1.dp, if (callActive) AppColors.Error else AppColors.Accent, CircleShape)
+                    .border(0.5.dp, if (callActive) AppColors.Error else AppColors.Accent, CircleShape)
             ) {
                 Icon(
                     imageVector = if (callActive) Icons.Rounded.CallEnd else Icons.Rounded.Call,
@@ -421,18 +448,19 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
             Text(
                 text = status,
                 color = AppColors.Muted,
-                fontSize = 13.sp,
+                fontSize = AppleType.HeroSubtitle,
+                fontWeight = FontWeight.Light,
                 textAlign = TextAlign.Center,
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis
             )
         }
+        }
 
         if (voiceProfile.showTranscript) {
             Card(
                 modifier = Modifier.align(Alignment.TopStart).padding(20.dp).fillMaxWidth(0.72f).heightIn(max = 420.dp),
-                shape = RoundedCornerShape(13.dp),
-                border = BorderStroke(1.dp, AppColors.Border),
+                shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = AppColors.Surface,
                     contentColor = Color.White,
@@ -441,6 +469,11 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
                 )
             ) {
                 if (history.isEmpty()) {
+                    AnimatedVisibility(
+                        visible = true,
+                        enter = AppleMotion.enter(),
+                        exit = AppleMotion.exit()
+                    ) {
                     Column(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp).fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -464,26 +497,33 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
                         Text(
                             text = "Nessuna trascrizione",
                             color = Color.White,
-                            fontSize = 15.sp,
+                            fontSize = AppleType.RowTitle,
                             fontWeight = FontWeight.SemiBold,
                             textAlign = TextAlign.Center
                         )
                         Text(
                             text = "I messaggi appariranno qui durante la chiamata.",
                             color = AppColors.Muted,
-                            fontSize = 13.sp,
+                            fontSize = AppleType.RowTitleSmall,
                             textAlign = TextAlign.Center
                         )
                     }
+                    }
                 } else {
+                    AnimatedVisibility(
+                        visible = true,
+                        enter = AppleMotion.enter(),
+                        exit = AppleMotion.exit()
+                    ) {
                     androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
                         itemsIndexed(history, key = { _, item -> item.id }) { index, message ->
                             Column(modifier = Modifier.padding(vertical = 10.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(message.author.uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                                Text(message.text, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                Text(message.author.uppercase(), color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                Text(message.text, color = Color.White, fontSize = AppleType.RowTitle, fontWeight = FontWeight.SemiBold)
                             }
-                            if (index < history.lastIndex) HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
+                            if (index < history.lastIndex) HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                         }
+                    }
                     }
                 }
             }

@@ -2,10 +2,11 @@ package com.nemoclaw.chat
 
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.core.net.toUri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.core.net.toUri
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -150,7 +151,8 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(8.dp)
-                            .background(Color.Black.copy(alpha = 0.62f), CircleShape),
+                            .background(Color.White.copy(alpha = 0.14f), CircleShape)
+                            .border(0.5.dp, Color.White.copy(alpha = 0.14f), CircleShape),
                         onClick = {
                             fullScreenControlsVisible = true
                             fullScreen = true
@@ -177,11 +179,11 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                             Icon(Icons.Rounded.Videocam, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
                         }
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(item.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(item.title, color = Color.White, fontSize = AppleType.RowTitle, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Text(
                                 "Hermes Hub - ${item.filename} - ${item.sizeBytes.toReadableFileSize()} - ${formatVideoTimestamp(item.modifiedAt)}",
-                                color = AppColors.Muted,
-                                fontSize = 13.sp,
+                                color = AppColors.Faint,
+                                fontSize = AppleType.Footnote,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -278,8 +280,8 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                     )
                     AnimatedVisibility(
                         visible = fullScreenControlsVisible,
-                        enter = fadeIn(),
-                        exit = fadeOut(),
+                        enter = AppleMotion.enter(),
+                        exit = AppleMotion.exit(),
                         modifier = Modifier.align(Alignment.TopCenter)
                     ) {
                         Box(
@@ -303,7 +305,8 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                                 IconButton(
                                     modifier = Modifier
                                         .size(48.dp)
-                                        .background(Color.Black.copy(alpha = 0.42f), CircleShape),
+                                        .background(Color.White.copy(alpha = 0.14f), CircleShape)
+                                        .border(0.5.dp, Color.White.copy(alpha = 0.14f), CircleShape),
                                     onClick = { fullScreen = false }
                                 ) {
                                     Icon(Icons.Rounded.Close, contentDescription = "Chiudi schermo intero", tint = Color.White)
@@ -312,7 +315,7 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                                     Text(
                                         item.title,
                                         color = Color.White,
-                                        fontSize = 15.sp,
+                                        fontSize = AppleType.RowTitle,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -320,7 +323,7 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                                     Text(
                                         "Schermo intero",
                                         color = Color.White.copy(alpha = 0.72f),
-                                        fontSize = 11.sp
+                                        fontSize = AppleType.Footnote
                                     )
                                 }
                             }

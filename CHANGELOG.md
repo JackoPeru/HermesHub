@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.306 - 2026-10-24
+
+- UI Apple su tutta l'app Android: sistema centrale (vetro, aurora, tipi, motion), hero "Che vuoi fare oggi?", composer pill di vetro, banner hairline, transizioni tra schermate, sezioni animate.
+- Solo stile: nessuna logica, stringa o firma cambiata; suite verdi.
+
 ## 0.6.305 - 2026-10-23
 
 - Chat Android standard intoccabile: follow/resume in staging con Mostra esplicito (mai auto-append), approval solo a chat ferma, flush ordinato su invio.

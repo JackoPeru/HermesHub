@@ -1,7 +1,11 @@
 package com.nemoclaw.chat
 
 import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
@@ -68,11 +72,17 @@ internal fun HealthDashboardScreen(context: Context, settings: AppSettings, onOp
         loading = false
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AppColors.Background)
     ) {
+        AuroraBackground(intensity = 1f)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(
@@ -85,11 +95,11 @@ internal fun HealthDashboardScreen(context: Context, settings: AppSettings, onOp
                     Icon(Icons.Rounded.FavoriteBorder, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
                 }
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Salute", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Salute", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
                     Text(
                         "Dati letti dal telefono tramite Samsung Health e Health Connect. Riepiloghi wellness, non diagnosi mediche.",
-                        color = AppColors.Muted,
-                        fontSize = 14.sp
+                        color = AppColors.Faint,
+                        fontSize = AppleType.Footnote
                     )
                 }
             }
@@ -110,14 +120,14 @@ internal fun HealthDashboardScreen(context: Context, settings: AppSettings, onOp
                 ) {
                     Icon(Icons.Rounded.Link, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(40.dp))
                     Text("Dati non disponibili", color = Color.White, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-                    Text(current.message, color = AppColors.Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
-                    Text("Apri Impostazioni salute, collega Health Connect e abilita almeno una categoria.", color = AppColors.Faint, fontSize = 12.sp, textAlign = TextAlign.Center)
+                    Text(current.message, color = AppColors.Faint, fontSize = AppleType.RowTitleSmall, textAlign = TextAlign.Center)
+                    Text("Apri Impostazioni salute, collega Health Connect e abilita almeno una categoria.", color = AppColors.Faint, fontSize = AppleType.Footnote, textAlign = TextAlign.Center)
                     Button(
                         onClick = onOpenSettings,
                         colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(14.dp)
                     ) { Text("Collega Health Connect", fontWeight = FontWeight.SemiBold) }
-                    HorizontalDivider(color = AppColors.Border)
+                    HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
                 }
             }
             is HealthHistoryResult.Success -> {
@@ -154,8 +164,12 @@ internal fun HealthDashboardScreen(context: Context, settings: AppSettings, onOp
                             value = { it.workoutMinutes?.toFloat() }
                         )
                     }
-                    if (items.any { it.heartRateAverage != null }) {
-                        item {
+                    item {
+                        AnimatedVisibility(
+                            visible = items.any { it.heartRateAverage != null },
+                            enter = AppleMotion.enter(),
+                            exit = AppleMotion.exit()
+                        ) {
                             WellbeingBarChart(
                                 title = "Frequenza cardiaca media · ultimi 7 giorni",
                                 unit = "bpm",
@@ -169,6 +183,7 @@ internal fun HealthDashboardScreen(context: Context, settings: AppSettings, onOp
             }
         }
     }
+    }
 }
 
 @Composable
@@ -180,16 +195,16 @@ internal fun HealthLoadingPanel() {
             verticalAlignment = Alignment.CenterVertically
         ) {
             LinearProgressIndicator(modifier = Modifier.width(84.dp), color = AppColors.Accent, trackColor = AppColors.Border)
-            Text("Lettura dati Health Connect...", color = AppColors.Muted, fontSize = 13.sp)
+            Text("Lettura dati Health Connect...", color = AppColors.Faint, fontSize = AppleType.RowTitleSmall)
         }
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
     }
 }
 
 @Composable
 internal fun HealthTodayPanel(summary: DailyWellbeingSummary) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text(("Oggi · ${summary.date}").uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Text(("Oggi · ${summary.date}").uppercase(), color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 HealthMetric("Passi", summary.steps?.toString() ?: "—", Modifier.weight(1f))
                 HealthMetric("Calorie", summary.activeCaloriesKcal?.let { String.format(java.util.Locale.ITALY, "%.0f kcal", it) } ?: "—", Modifier.weight(1f))
@@ -202,14 +217,20 @@ internal fun HealthTodayPanel(summary: DailyWellbeingSummary) {
                 HealthMetric("Sessioni", summary.workoutCount?.toString() ?: "—", Modifier.weight(1f))
                 HealthMetric("FC media", summary.heartRateAverage?.let { String.format(java.util.Locale.ITALY, "%.0f bpm", it) } ?: "—", Modifier.weight(1f))
             }
-            summary.heartRateMin?.let { min ->
-                Text(
-                    "Frequenza cardiaca oggi: ${String.format(java.util.Locale.ITALY, "%.0f", min)}–${String.format(java.util.Locale.ITALY, "%.0f", summary.heartRateMax ?: min)} bpm",
-                    color = AppColors.Muted,
-                    fontSize = 12.sp
-                )
+            AnimatedVisibility(
+                visible = summary.heartRateMin != null,
+                enter = AppleMotion.enter(),
+                exit = AppleMotion.exit()
+            ) {
+                summary.heartRateMin?.let { min ->
+                    Text(
+                        "Frequenza cardiaca oggi: ${String.format(java.util.Locale.ITALY, "%.0f", min)}–${String.format(java.util.Locale.ITALY, "%.0f", summary.heartRateMax ?: min)} bpm",
+                        color = AppColors.Faint,
+                        fontSize = AppleType.Footnote
+                    )
+                }
             }
-            HorizontalDivider(color = AppColors.Border)
+            HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
         }
 }
 
@@ -219,7 +240,7 @@ internal fun HealthMetric(label: String, value: String, modifier: Modifier = Mod
         modifier = modifier.padding(vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        Text(label.uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Text(label.uppercase(), color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         Text(value, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
@@ -236,8 +257,8 @@ internal fun WellbeingBarChart(
     val peak = (values.maxOrNull() ?: 0f).coerceAtLeast(1f)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text(title.uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            Text("max ${String.format(java.util.Locale.ITALY, "%.0f", peak)} $unit", color = AppColors.Faint, fontSize = 11.sp)
+            Text(title.uppercase(), color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Text("max ${String.format(java.util.Locale.ITALY, "%.0f", peak)} $unit", color = AppColors.Faint, fontSize = AppleType.Caption)
         }
         Canvas(
             modifier = Modifier
@@ -260,7 +281,7 @@ internal fun WellbeingBarChart(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 items.forEach { item -> Text(item.date.takeLast(2), color = AppColors.Faint, fontSize = 10.sp) }
             }
-            HorizontalDivider(color = AppColors.Border)
+            HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
         }
 }
 

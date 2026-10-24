@@ -1,10 +1,7 @@
 package com.nemoclaw.chat
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,11 +18,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -42,7 +38,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -56,15 +56,21 @@ internal fun BotEmptyState(
     onRetry: (() -> Unit)? = null
 ) {
     val scroll = rememberScrollState()
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(scroll)
-            .padding(horizontal = 22.dp, vertical = 12.dp)
-            .semantics { liveRegion = LiveRegionMode.Polite },
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.Start
+            .background(AppColors.Background)
     ) {
+        AuroraBackground(modifier = Modifier.fillMaxSize(), intensity = 1f)
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scroll)
+                .padding(horizontal = 22.dp, vertical = 12.dp)
+                .semantics { liveRegion = LiveRegionMode.Polite },
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.Start
+        ) {
         if (opening) {
             LinearProgressIndicator()
             Spacer(modifier = Modifier.height(10.dp))
@@ -109,54 +115,90 @@ internal fun BotEmptyState(
                 Text("Riprova")
             }
         }
+        }
     }
 }
 
 @Composable
 internal fun EmptyState(onPrompt: (String) -> Unit) {
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 22.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.Start
+            .background(AppColors.Background)
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.chatclaw_logo),
-            contentDescription = "Logo Hermes Hub",
-            contentScale = ContentScale.Crop,
+        AuroraBackground(modifier = Modifier.fillMaxSize(), intensity = 1f)
+        Column(
             modifier = Modifier
-                .size(76.dp)
-                .clip(RoundedCornerShape(24.dp))
-        )
-        Spacer(modifier = Modifier.height(22.dp))
-        Text(
-            text = "Che vuoi fare oggi?",
-            color = Color.White,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 27.sp,
-            lineHeight = 32.sp
-        )
-        Spacer(modifier = Modifier.height(10.dp))
-        Text(
-            text = "Chat live, cron e strumenti Hermes Agent sul tuo home-server.",
-            color = AppColors.Muted,
-            fontSize = 14.sp,
-            lineHeight = 20.sp
-        )
-        Spacer(modifier = Modifier.height(28.dp))
-        Text("OPERAZIONI RAPIDE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Spacer(modifier = Modifier.height(10.dp))
-        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            SuggestionButton("Prepara setup Hermes", "Avvia Hermes su Tailscale o LAN") {
-                onPrompt("Preparami i passaggi per avviare Hermes Agent API Server su Tailscale/LAN.")
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 22.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(140.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(140.dp)
+                        .background(
+                            Brush.radialGradient(
+                                0.0f to Color(0xFFF5A524).copy(alpha = 0.32f),
+                                0.6f to Color(0xFFF5A524).copy(alpha = 0.08f),
+                                1.0f to Color.Transparent
+                            ),
+                            CircleShape
+                        )
+                )
+                Image(
+                    painter = painterResource(id = R.drawable.chatclaw_logo),
+                    contentDescription = "Logo Hermes Hub",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(76.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                )
             }
-            SuggestionButton("Controlla server", "Stato, modello e capabilities") {
-                onPrompt("Controlla stato Hermes, modello disponibile e capabilities API.")
-            }
-            SuggestionButton("Crea ordine agente", "Task con approve prima dei rischi") {
-                onPrompt("Crea un task agente sicuro con richiesta approve/deny prima di ogni azione rischiosa.")
+            Spacer(modifier = Modifier.height(22.dp))
+            Text(
+                text = "Che vuoi fare oggi?",
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = AppleType.HeroTitle,
+                lineHeight = 36.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "Chiedi, crea, controlla.\nHermes è qui per aiutarti.",
+                color = AppColors.Muted,
+                fontSize = AppleType.HeroSubtitle,
+                lineHeight = 22.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(28.dp))
+            Text(
+                "OPERAZIONI RAPIDE",
+                color = AppColors.Faint,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.sp,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                SuggestionButton("Prepara setup Hermes", "Avvia Hermes su Tailscale o LAN") {
+                    onPrompt("Preparami i passaggi per avviare Hermes Agent API Server su Tailscale/LAN.")
+                }
+                SuggestionButton("Controlla server", "Stato, modello e capabilities") {
+                    onPrompt("Controlla stato Hermes, modello disponibile e capabilities API.")
+                }
+                SuggestionButton("Crea ordine agente", "Task con approve prima dei rischi") {
+                    onPrompt("Crea un task agente sicuro con richiesta approve/deny prima di ogni azione rischiosa.")
+                }
             }
         }
     }
@@ -164,14 +206,12 @@ internal fun EmptyState(onPrompt: (String) -> Unit) {
 
 @Composable
 internal fun SuggestionButton(text: String, subtitle: String, onClick: () -> Unit) {
-    Surface(
+    AppleGlass(
+        shape = RoundedCornerShape(20.dp),
+        onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
-            .clickable(onClick = onClick),
-        color = AppColors.Panel,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, AppColors.Border)
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 15.dp, vertical = 13.dp),
@@ -180,7 +220,7 @@ internal fun SuggestionButton(text: String, subtitle: String, onClick: () -> Uni
             Box(modifier = Modifier.size(7.dp).background(AppColors.Accent, CircleShape))
             Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
                 Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                Text(subtitle, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, color = AppColors.Faint, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Text("›", color = AppColors.Faint, fontSize = 22.sp)
         }

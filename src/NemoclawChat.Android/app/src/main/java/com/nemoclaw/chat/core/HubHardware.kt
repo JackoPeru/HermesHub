@@ -1,6 +1,5 @@
 package com.nemoclaw.chat
 
-import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers

@@ -469,8 +469,8 @@ internal fun TopBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .heightIn(min = 68.dp)
-                .padding(horizontal = 14.dp),
+                .heightIn(min = 60.dp)
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Image(
@@ -478,16 +478,16 @@ internal fun TopBar(
                 contentDescription = "Apri navigazione",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(13.dp))
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .clickable(role = Role.Button, onClick = onOpenSidebar)
             )
-            Column(modifier = Modifier.padding(start = 11.dp).weight(1f)) {
+            Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
                 val picker = identityPicker
                 if (picker != null) {
                     ChatIdentityTitle(picker = picker, title = title)
                 } else {
-                    Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 19.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { contentDescription = title })
+                    Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { contentDescription = title })
                 }
                 // Testo troncato con ellipsis (niente scroll orizzontale: rubava
                 // lo swipe chat/bot); versione integrale al TalkBack.
@@ -524,14 +524,14 @@ internal fun TopBar(
                     Text(
                         statusText,
                         color = AppColors.Faint,
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
-            IconButton(onClick = onOpenArchive, modifier = Modifier.size(38.dp)) {
-                Icon(Icons.Rounded.FolderOpen, contentDescription = "Archivio chat", tint = AppColors.Muted, modifier = Modifier.size(20.dp))
+            IconButton(onClick = onOpenArchive, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Rounded.FolderOpen, contentDescription = "Archivio chat", tint = AppColors.Muted, modifier = Modifier.size(19.dp))
             }
             Box {
                 IconButton(
@@ -712,7 +712,7 @@ internal fun TopBar(
             }
         )
     }
-    HorizontalDivider(color = AppColors.Border.copy(alpha = 0.72f))
+    HorizontalDivider(thickness = 0.5.dp, color = AppColors.Border.copy(alpha = 0.72f))
 }
 
 @Composable

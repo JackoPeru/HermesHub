@@ -1,6 +1,8 @@
 package com.nemoclaw.chat.features.bots
 
 import android.graphics.Bitmap
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,6 +49,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.AppColors
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
 
 /** Colore avatar deterministico dal profilo. Puro, testabile. */
 internal fun botAvatarColor(profile: String): androidx.compose.ui.graphics.Color {
@@ -55,16 +60,33 @@ internal fun botAvatarColor(profile: String): androidx.compose.ui.graphics.Color
 
 @Composable
 internal fun BotAvatar(name: String, profile: String, size: androidx.compose.ui.unit.Dp = 52.dp) {
+    // Alone ambra tenue dietro l'avatar (radial gradient, niente blur/RenderEffect).
     Box(
-        modifier = Modifier.size(size).clip(CircleShape).background(botAvatarColor(profile)),
+        modifier = Modifier.size(size + 10.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            (name.trim().firstOrNull()?.uppercase() ?: "?"),
-            color = Color.White,
-            fontSize = (size.value / 2.4f).sp,
-            fontWeight = FontWeight.Bold
-        )
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            drawCircle(
+                brush = Brush.radialGradient(
+                    0.0f to Color(0xFFF5A524).copy(alpha = 0.22f),
+                    0.6f to Color(0xFFF5A524).copy(alpha = 0.06f),
+                    1.0f to Color.Transparent
+                ),
+                radius = size.toPx() / 2f + 5.dp.toPx(),
+                center = center
+            )
+        }
+        Box(
+            modifier = Modifier.size(size).clip(CircleShape).background(botAvatarColor(profile)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                (name.trim().firstOrNull()?.uppercase() ?: "?"),
+                color = Color.White,
+                fontSize = (size.value / 2.4f).sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
 }
 
@@ -111,16 +133,16 @@ internal fun BotRosterCard(
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(bot.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.weight(1f, fill = false))
+                    Text(bot.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle, modifier = Modifier.weight(1f, fill = false))
                     if (pinned) Text("FISSATO", color = AppColors.Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     if (hiddenBadge) Text("NASCOSTO", color = AppColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
-                Text("@${bot.handle} · ${bot.connectionLabel}", color = AppColors.Muted, fontSize = 11.sp)
+                Text("@${bot.handle} · ${bot.connectionLabel}", color = AppColors.Faint, fontSize = AppleType.Footnote)
                 if (!previewText.isNullOrBlank()) {
                     Text(
                         (if (!previewTime.isNullOrBlank()) "$previewTime · " else "") + previewText,
                         color = AppColors.Muted,
-                        fontSize = 13.sp,
+                        fontSize = AppleType.RowTitleSmall,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -128,7 +150,7 @@ internal fun BotRosterCard(
                 Text(
                     if (screenRunning) "Schermo live" else if (bot.isDefault) "Profilo predefinito" else bot.profile,
                     color = if (screenRunning) Color(0xFF4CAF50) else AppColors.Faint,
-                    fontSize = 12.sp
+                    fontSize = AppleType.Footnote
                 )
             }
             Box {
@@ -146,26 +168,32 @@ internal fun BotRosterCard(
             }
             Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = AppColors.Faint)
         }
-        if (screenRunning && screenPreview != null) {
-            Box(
-                modifier = Modifier.fillMaxWidth().height(120.dp)
-                    .clip(RoundedCornerShape(12.dp)).background(Color.Black)
-                    .clickable(onClick = onOpenScreen)
-            ) {
-                Image(
-                    bitmap = screenPreview.asImageBitmap(),
-                    contentDescription = "Anteprima schermo",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+        AnimatedVisibility(
+            visible = screenRunning && screenPreview != null,
+            enter = AppleMotion.enter(),
+            exit = AppleMotion.exit()
+        ) {
+            if (screenRunning && screenPreview != null) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(120.dp)
+                        .clip(RoundedCornerShape(12.dp)).background(Color.Black)
+                        .clickable(onClick = onOpenScreen)
+                ) {
+                    Image(
+                        bitmap = screenPreview.asImageBitmap(),
+                        contentDescription = "Anteprima schermo",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
             }
-            Spacer(Modifier.height(8.dp))
         }
         if (!bot.description.isBlank()) {
             Text(
                 bot.description,
                 color = AppColors.Muted,
-                fontSize = 13.sp,
+                fontSize = AppleType.RowTitleSmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(bottom = 4.dp)
@@ -187,7 +215,7 @@ internal fun BotRosterCard(
                 IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina bot", tint = AppColors.Error) }
             }
         }
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
     }
 }
 

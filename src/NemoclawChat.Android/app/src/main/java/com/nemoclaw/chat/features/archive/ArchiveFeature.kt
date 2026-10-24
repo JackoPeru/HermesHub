@@ -242,6 +242,9 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import com.nemoclaw.chat.core.WorkLimits
 import kotlinx.coroutines.CoroutineScope
@@ -319,6 +322,8 @@ internal fun ArchiveScreen(
                 item.prompt.contains(query, ignoreCase = true))
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
+        AuroraBackground()
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -339,22 +344,22 @@ internal fun ArchiveScreen(
                     Icon(Icons.Rounded.FolderOpen, contentDescription = "Archivio", tint = AppColors.Accent)
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Archivio", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Archivio", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
                     Text(
                         "Ricerca locale persistente per chat, progetti e task recenti.",
                         color = AppColors.Muted,
-                        fontSize = 14.sp
+                        fontSize = AppleType.HeroSubtitle
                     )
                 }
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+            AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         "STATO ARCHIVIO",
-                        color = AppColors.Accent,
-                        fontSize = 12.sp,
+                        color = AppColors.Muted,
+                        fontSize = AppleType.RowTitleSmall,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp
                     )
@@ -418,12 +423,12 @@ internal fun ArchiveScreen(
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+            AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         "RICERCA E FILTRI",
-                        color = AppColors.Accent,
-                        fontSize = 12.sp,
+                        color = AppColors.Muted,
+                        fontSize = AppleType.RowTitleSmall,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp
                     )
@@ -579,6 +584,7 @@ internal fun ArchiveScreen(
             )
         }
     }
+    }
 
     results.firstOrNull { it.id != null && it.id == pendingDeleteId }?.let { item ->
         AlertDialog(
@@ -719,16 +725,16 @@ internal fun ArchiveCard(
                 Icon(kindIcon, contentDescription = item.kind, tint = AppColors.Accent)
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     item.kind.uppercase(),
                     color = AppColors.Muted,
-                    fontSize = 11.sp,
+                    fontSize = AppleType.Caption,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.8.sp
                 )
                 if (item.description.isNotBlank()) {
-                    Text(item.description, color = AppColors.Muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(item.description, color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
             IconButton(onClick = onOpen, modifier = Modifier.size(36.dp)) {
@@ -736,7 +742,7 @@ internal fun ArchiveCard(
             }
         }
         if (item.prompt.isNotBlank()) {
-            Text(item.prompt, color = AppColors.Muted, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Text(item.prompt, color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
         if (item.id != null) {
             SettingsField("Rinomina", renameText, { renameText = it })
@@ -766,7 +772,7 @@ internal fun ArchiveCard(
                 TextButton(onClick = onDelete) { Text("Elimina", color = AppColors.Error) }
             }
         }
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
     }
 }
 @Composable
@@ -838,7 +844,7 @@ internal fun ConversationManagerDialog(
                             IconButton(onClick = { onContinue(null, "Continua da questo messaggio:\n\n${message.text}") }) { Icon(Icons.Rounded.Add, contentDescription = "Nuova chat da qui", tint = AppColors.Accent) }
                             IconButton(onClick = { saveProjectConversation(context, "Progetto da ${conversation.title}", message.text, message.text); status = "Nuovo progetto creato." }) { Icon(Icons.Rounded.CreateNewFolder, contentDescription = "Crea progetto", tint = AppColors.Accent) }
                         }
-                        HorizontalDivider(color = AppColors.Border)
+                        HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
                     }
                 }
                 item {
@@ -934,12 +940,12 @@ internal fun HermesSessionSection(
     }
     LaunchedEffect(Unit) { refresh() }
 
-    Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+    AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 "SESSIONI HERMES (SERVER)",
-                color = AppColors.Accent,
-                fontSize = 12.sp,
+                color = AppColors.Muted,
+                fontSize = AppleType.RowTitleSmall,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.sp
             )
@@ -975,18 +981,18 @@ internal fun HermesSessionSection(
                                 s.title.ifBlank { s.id },
                                 color = Color.White,
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp,
+                                fontSize = AppleType.RowTitleSmall,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 "SERVER",
                                 color = AppColors.Muted,
-                                fontSize = 11.sp,
+                                fontSize = AppleType.Caption,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 0.8.sp
                             )
-                            Text(s.id, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(s.id, color = AppColors.Faint, fontSize = AppleType.Footnote, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         IconButton(
                             onClick = {
@@ -1017,7 +1023,7 @@ internal fun HermesSessionSection(
                             modifier = Modifier.size(36.dp)
                         ) { Icon(Icons.Rounded.ChevronRight, contentDescription = "Apri sessione in chat", tint = AppColors.Faint) }
                     }
-                    HorizontalDivider(color = AppColors.Border)
+                    HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
                 }
             }
             if (sessions.size > 15) Text("+${sessions.size - 15} altre...", color = AppColors.Muted, fontSize = 11.sp)

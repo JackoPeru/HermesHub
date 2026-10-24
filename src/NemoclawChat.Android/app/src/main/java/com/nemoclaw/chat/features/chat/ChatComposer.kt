@@ -437,7 +437,6 @@ internal fun Composer(
     }
 
     var showSheet by remember { mutableStateOf(false) }
-    var composerFocused by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -496,18 +495,23 @@ internal fun Composer(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = (104 * fontScale).dp, max = (214 * fontScale).dp),
-            color = AppColors.Composer,
-            shape = RoundedCornerShape(26.dp),
-            border = BorderStroke(
-                1.dp,
-                if (composerFocused) AppColors.Accent.copy(alpha = 0.65f) else AppColors.Border
-            )
+                .heightIn(min = (104 * fontScale).dp, max = (214 * fontScale).dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to Color.White.copy(alpha = 0.10f),
+                        0.5f to Color.White.copy(alpha = 0.05f),
+                        1.0f to Color.White.copy(alpha = 0.07f)
+                    )
+                ),
+            color = Color.Transparent,
+            shape = RoundedCornerShape(24.dp),
+            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f))
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 10.dp),
+                    .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Column(
@@ -536,7 +540,6 @@ internal fun Composer(
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .onFocusChanged { composerFocused = it.isFocused }
                     )
                     if (value.isEmpty()) {
                         Text("Chiedi a Hermes", color = AppColors.Faint, fontSize = 16.sp)
@@ -550,24 +553,24 @@ internal fun Composer(
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(38.dp)
                             .clickable { showSheet = true }
                     ) {
-                        Icon(Icons.Rounded.Add, contentDescription = "Apri menu allegati", tint = Color.White, modifier = Modifier.size(28.dp))
+                        Icon(Icons.Rounded.Add, contentDescription = "Apri menu allegati", tint = Color.White, modifier = Modifier.size(24.dp))
                     }
                     var showReasoningMenu by remember { mutableStateOf(false) }
                     Box(contentAlignment = Alignment.Center) {
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(38.dp)
                                 .clickable { showReasoningMenu = true }
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Speed,
                                 contentDescription = "Sforzo ragionamento: ${reasoningEffort.ifBlank { "Auto" }}",
                                 tint = if (reasoningEffort.isBlank()) AppColors.Muted else AppColors.Accent,
-                                modifier = Modifier.size(25.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                         DropdownMenu(
@@ -590,21 +593,21 @@ internal fun Composer(
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(38.dp)
                             .clickable(enabled = true) { onToggleVoiceNote() }
                     ) {
                         Icon(
                             imageVector = if (isRecordingVoiceNote) Icons.Rounded.Stop else Icons.Rounded.Mic,
                             contentDescription = if (isRecordingVoiceNote) "Ferma registrazione" else "Registra nota vocale",
                             tint = if (isRecordingVoiceNote) Color.Red else Color.White,
-                            modifier = Modifier.size(25.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(4.dp))
                     val canSend = (value.isNotBlank() || attachments.isNotEmpty()) && !isBusy
                     Surface(
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(42.dp)
                             .clickable {
                                 if (isBusy) onStop()
                                 else if (canSend) onSend()
@@ -618,7 +621,7 @@ internal fun Composer(
                                 imageVector = if (isBusy) Icons.Rounded.Stop else if (canSend) Icons.Rounded.ArrowUpward else Icons.Rounded.GraphicEq,
                                 contentDescription = if (isBusy) "Interrompi generazione" else if (canSend) "Invia" else "Tocca per parlare",
                                 tint = if (canSend || isBusy) Color(0xFF171009) else AppColors.Muted,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                     }

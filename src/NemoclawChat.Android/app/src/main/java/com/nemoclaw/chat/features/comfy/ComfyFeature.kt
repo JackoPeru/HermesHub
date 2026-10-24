@@ -2,7 +2,11 @@ package com.nemoclaw.chat.features.comfy
 
 import android.content.Context
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -288,10 +292,16 @@ internal fun ComfyScreen(
         true
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().background(AppColors.Background).padding(horizontal = 20.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AppColors.Background)
     ) {
+        AuroraBackground(intensity = 1f)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -309,11 +319,11 @@ internal fun ComfyScreen(
                     Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = AppColors.Accent)
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Comfy", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Comfy", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
                     Text(
                         "Cosa sta facendo la GPU: stato, lavoro e avanzamento live.",
-                        color = AppColors.Muted,
-                        fontSize = 14.sp
+                        color = AppColors.Faint,
+                        fontSize = AppleType.Footnote
                     )
                 }
                 TextButton(onClick = { refreshNonce++ }, modifier = Modifier.heightIn(min = 48.dp)) {
@@ -343,8 +353,8 @@ internal fun ComfyScreen(
                     )
                     Text(
                         "Leggo lo stato dal manager…",
-                        color = AppColors.Muted,
-                        fontSize = 14.sp,
+                        color = AppColors.Faint,
+                        fontSize = AppleType.Footnote,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
                     )
@@ -373,8 +383,8 @@ internal fun ComfyScreen(
                     )
                     Text(
                         current.error.ifBlank { "Controlla la connessione e riprova." },
-                        color = AppColors.Muted,
-                        fontSize = 14.sp,
+                        color = AppColors.Faint,
+                        fontSize = AppleType.Footnote,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
                     )
@@ -389,7 +399,7 @@ internal fun ComfyScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text("STATO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("STATO", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -408,15 +418,19 @@ internal fun ComfyScreen(
                         )
                         Text(
                             current.desired.ifBlank { "AUTO" },
-                            color = AppColors.Muted,
-                            fontSize = 12.sp,
+                            color = AppColors.Faint,
+                            fontSize = AppleType.Footnote,
                             maxLines = 1
                         )
                     }
                     HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
-                    if (current.state == "MEDIA_BUSY") {
+                    AnimatedVisibility(
+                        visible = current.state == "MEDIA_BUSY",
+                        enter = AppleMotion.enter(),
+                        exit = AppleMotion.exit()
+                    ) {
                         val pct = current.progress?.let { "${(it * 100).roundToInt()}%" } ?: "…"
-                        Text("Avanzamento $pct", color = AppColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Avanzamento $pct", color = AppColors.Accent, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.SemiBold)
                         if (current.progress != null) {
                             LinearProgressIndicator(
                                 progress = { current.progress },
@@ -432,11 +446,15 @@ internal fun ComfyScreen(
                             )
                         }
                     }
-                    if (current.error.isNotBlank() || current.state == "ERROR") {
+                    AnimatedVisibility(
+                        visible = current.error.isNotBlank() || current.state == "ERROR",
+                        enter = AppleMotion.enter(),
+                        exit = AppleMotion.exit()
+                    ) {
                         Text(
                             current.error.ifBlank { "Errore senza dettagli: riprova o cambia modo." },
                             color = AppColors.Error,
-                            fontSize = 13.sp,
+                            fontSize = AppleType.RowTitleSmall,
                             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }
                         )
                     }
@@ -447,7 +465,7 @@ internal fun ComfyScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text("LAVORO IN CORSO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("LAVORO IN CORSO", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold)
                     Column(modifier = Modifier.fillMaxWidth()) {
                         ComfyRow("Preset", current.preset.ifBlank { "—" })
                         HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
@@ -468,7 +486,7 @@ internal fun ComfyScreen(
                         }
                     }
                     if (current.hint.isNotBlank()) {
-                        Text(current.hint, color = AppColors.Muted, fontSize = 12.sp)
+                        Text(current.hint, color = AppColors.Faint, fontSize = AppleType.Footnote)
                     }
                 }
             }
@@ -480,15 +498,20 @@ internal fun ComfyScreen(
                 }
             if (comfyProblem != null) {
                 item {
+                    AnimatedVisibility(
+                        visible = comfyProblem != null,
+                        enter = AppleMotion.enter(),
+                        exit = AppleMotion.exit()
+                    ) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text("ERRORI COMFY", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("ERRORI COMFY", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold)
                         Text(
                             comfyProblem,
                             color = AppColors.Error,
-                            fontSize = 13.sp,
+                            fontSize = AppleType.RowTitleSmall,
                             maxLines = 8,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.semantics {
@@ -497,6 +520,7 @@ internal fun ComfyScreen(
                             }
                         )
                     }
+                    }
                 }
             }
             item {
@@ -504,10 +528,11 @@ internal fun ComfyScreen(
                 Text(
                     "Aggiornato ogni 5 secondi mentre guardi. LLM ${if (current.llmLoaded) "caricato" else "scarico"}.",
                     color = AppColors.Faint,
-                    fontSize = 12.sp
+                    fontSize = AppleType.Footnote
                 )
             }
         }
+    }
     }
 }
 
@@ -518,11 +543,11 @@ private fun ComfyRow(label: String, value: String) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, color = AppColors.Muted, fontSize = 13.sp)
+        Text(label, color = AppColors.Faint, fontSize = AppleType.RowTitleSmall)
         Text(
             value,
             color = Color.White,
-            fontSize = 13.sp,
+            fontSize = AppleType.RowTitleSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = 12.dp).semantics { contentDescription = value }

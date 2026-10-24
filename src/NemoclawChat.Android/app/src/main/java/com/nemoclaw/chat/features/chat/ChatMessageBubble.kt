@@ -301,17 +301,14 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings, onSendTe
                 modifier = Modifier
                     .fillMaxWidth()
                     .animateContentSize()
-                    .padding(horizontal = 2.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .padding(horizontal = 2.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Box(modifier = Modifier.size(7.dp).background(AppColors.Accent, CircleShape))
-                    Text("HERMES", color = AppColors.Faint, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
-                }
+                Text("HERMES", color = AppColors.Faint, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.1.sp)
                 GenUiAwareMarkdown(displayText, message.visualBlocks, onSendText, settings.visualBlocksMode != "never", Color.White, 16.sp)
                 ArchivedActivityDisclosure(message.activityTimeline, message.thinking, settings.showToolCalls)
                 if (message.visualBlocks.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         message.visualBlocks.filter { it.isValidVisualBlock() && !it.type.equals("genui", ignoreCase = true) }.forEach { block ->
                             VisualBlockView(block, onSendText, settings.visualBlocksMode != "never")
                         }
@@ -330,23 +327,20 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings, onSendTe
             Surface(
                 modifier = Modifier.fillMaxWidth(if (message.fromUser) 0.86f else 0.92f),
                 color = if (message.fromUser) AppColors.UserBubble else AppColors.Panel,
-                shape = if (message.fromUser) {
-                    RoundedCornerShape(topStart = 20.dp, topEnd = 7.dp, bottomEnd = 20.dp, bottomStart = 20.dp)
-                } else {
-                    RoundedCornerShape(16.dp)
-                },
-                border = BorderStroke(1.dp, if (message.fromUser) AppColors.Accent.copy(alpha = 0.28f) else AppColors.Border),
+                shape = RoundedCornerShape(20.dp),
                 shadowElevation = 0.dp,
                 tonalElevation = 0.dp
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = message.author,
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.sp
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
+                Column(modifier = Modifier.padding(12.dp)) {
+                    if (message.isAction) {
+                        Text(
+                            text = message.author,
+                            color = AppColors.Faint,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 11.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
                     if (message.fromUser || message.isAction) {
                         Text(text = message.text, color = Color.White)
                     } else {
@@ -354,8 +348,8 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings, onSendTe
                         ArchivedActivityDisclosure(message.activityTimeline, message.thinking, settings.showToolCalls)
                     }
                     if (message.visualBlocks.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             message.visualBlocks.filter { it.isValidVisualBlock() && !it.type.equals("genui", ignoreCase = true) }.forEach { block ->
                                 VisualBlockView(block, onSendText, settings.visualBlocksMode != "never")
                             }
@@ -387,7 +381,7 @@ internal fun MessageFooter(text: String, stats: ChatStreamStats?, settings: AppS
         if (line.isNotBlank()) {
             Text(
                 text = line,
-                color = AppColors.Muted,
+                color = AppColors.Faint,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.weight(1f)
@@ -412,26 +406,26 @@ internal fun MessageFooter(text: String, stats: ChatStreamStats?, settings: AppS
                     speaking = false
                 }
             },
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(20.dp),
             enabled = text.isNotBlank()
         ) {
             Icon(
                 imageVector = if (speaking) Icons.Rounded.Stop else Icons.Rounded.PlayCircle,
                 contentDescription = if (speaking) "Ferma lettura" else "Leggi messaggio",
-                tint = AppColors.Muted,
-                modifier = Modifier.size(16.dp)
+                tint = AppColors.Faint,
+                modifier = Modifier.size(14.dp)
             )
         }
 
         androidx.compose.material3.IconButton(
             onClick = { clipboardManager.setPrimaryClip(ClipData.newPlainText("Hermes", text)) },
-            modifier = Modifier.size(24.dp)
+            modifier = Modifier.size(20.dp)
         ) {
             Icon(
                 imageVector = androidx.compose.material.icons.Icons.Rounded.ContentCopy,
                 contentDescription = "Copia messaggio",
-                tint = AppColors.Muted,
-                modifier = Modifier.size(16.dp)
+                tint = AppColors.Faint,
+                modifier = Modifier.size(14.dp)
             )
         }
     }

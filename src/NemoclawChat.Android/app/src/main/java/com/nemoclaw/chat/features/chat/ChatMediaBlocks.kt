@@ -43,6 +43,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleType
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -303,14 +305,13 @@ internal fun VisualBlockView(block: VisualBlock, onSendText: ((String) -> Unit)?
         MediaFileBlock(block)
         return
     }
-    Surface(
+    AppleGlass(
         modifier = Modifier.fillMaxWidth(),
-        color = AppColors.Surface,
-        shape = RoundedCornerShape(14.dp)
+        shape = RoundedCornerShape(20.dp)
     ) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (block.title.isNotBlank()) {
-                Text(block.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text(block.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
             }
             when (block.type.lowercase()) {
                 "markdown" -> MarkdownBlock(block.text)
@@ -332,7 +333,7 @@ internal fun VisualBlockView(block: VisualBlock, onSendText: ((String) -> Unit)?
                 "unknown_block" -> CodeBlock("json", block.rawJson.ifBlank { "{}" }, "hermes-unknown-block.json")
             }
             if (block.caption.isNotBlank()) {
-                Text(block.caption, color = AppColors.Muted, fontSize = 12.sp)
+                Text(block.caption, color = AppColors.Muted, fontSize = AppleType.Footnote)
             }
         }
     }
@@ -341,9 +342,9 @@ internal fun VisualBlockView(block: VisualBlock, onSendText: ((String) -> Unit)?
 @Composable
 internal fun MetricBlock(block: VisualBlock) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("${block.value}${block.unit}", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
-        if (block.status.isNotBlank()) Text(block.status, color = AppColors.Muted, fontSize = 12.sp)
-        if (block.summary.isNotBlank()) Text(block.summary, color = AppColors.Muted, fontSize = 13.sp)
+        Text("${block.value}${block.unit}", color = Color.White, fontSize = AppleType.HeroTitle, fontWeight = FontWeight.SemiBold)
+        if (block.status.isNotBlank()) Text(block.status, color = AppColors.Muted, fontSize = AppleType.Footnote)
+        if (block.summary.isNotBlank()) Text(block.summary, color = AppColors.Muted, fontSize = AppleType.RowTitleSmall)
     }
 }
 
@@ -550,7 +551,7 @@ internal fun CodeBlock(language: String, code: String, filename: String) {
         Text(
             text = if (filename.isBlank()) language else "$filename · $language",
             color = AppColors.Muted,
-            fontSize = 12.sp
+            fontSize = AppleType.Footnote
         )
         Surface(color = AppColors.Composer, shape = RoundedCornerShape(10.dp)) {
             Text(
@@ -597,7 +598,7 @@ internal fun TableCell(text: String, header: Boolean) {
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
             text = text,
             color = Color.White,
-            fontSize = 12.sp,
+            fontSize = AppleType.Footnote,
             fontWeight = if (header) FontWeight.SemiBold else FontWeight.Normal,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
@@ -964,7 +965,7 @@ internal fun DocumentSlimRow(
             Text(
                 block.filename.ifBlank { block.title.ifBlank { "Documento" } },
                 color = Color.White,
-                fontSize = 13.sp,
+                fontSize = AppleType.RowTitleSmall,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -972,7 +973,7 @@ internal fun DocumentSlimRow(
             val meta = listOf(block.mediaKind.ifBlank { "file" }, block.mimeType, formatMediaBytes(block.sizeBytes))
                 .filter { it.isNotBlank() }.joinToString(" · ")
             if (meta.isNotBlank()) {
-                Text(meta, color = AppColors.Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(meta, color = AppColors.Muted, fontSize = AppleType.Caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -1097,12 +1098,12 @@ internal fun MediaFileBlock(block: VisualBlock) {
             )
         }
 
-        Surface(color = AppColors.Composer, shape = RoundedCornerShape(10.dp)) {
+        AppleGlass(shape = RoundedCornerShape(20.dp)) {
             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     text = block.filename.ifBlank { block.title.ifBlank { block.alt } },
                     color = Color.White,
-                    fontSize = 14.sp,
+                    fontSize = AppleType.RowTitle,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
@@ -1115,12 +1116,12 @@ internal fun MediaFileBlock(block: VisualBlock) {
                         formatMediaDuration(block.durationMs)
                     ).filter { it.isNotBlank() }.joinToString(" · "),
                     color = AppColors.Muted,
-                    fontSize = 12.sp
+                    fontSize = AppleType.Footnote
                 )
                 if (isLocalAttachment) {
-                    Text("Condiviso con Hermes.", color = AppColors.Muted, fontSize = 12.sp)
+                    Text("Condiviso con Hermes.", color = AppColors.Muted, fontSize = AppleType.Footnote)
                 } else if (!canOpen) {
-                    Text("media non proxy rifiutato.", color = AppColors.Muted, fontSize = 12.sp)
+                    Text("media non proxy rifiutato.", color = AppColors.Muted, fontSize = AppleType.Footnote)
                 }
                 if (canOpen) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     IconButton(

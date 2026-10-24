@@ -57,6 +57,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleType
 import kotlinx.coroutines.launch
 
 @Composable
@@ -161,8 +163,8 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
                     Icon(Icons.Rounded.Image, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
                 }
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Hermes Immagini", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(status, color = AppColors.Muted, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text("Hermes Immagini", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(status, color = AppColors.Muted, fontSize = AppleType.HeroSubtitle, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -241,7 +243,7 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
                         Text(
                             folder.name,
                             color = Color.White,
-                            fontSize = 15.sp,
+                            fontSize = AppleType.RowTitle,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.weight(1f),
                             maxLines = 1,
@@ -249,13 +251,13 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
                         )
                         Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Apri cartella", tint = AppColors.Muted)
                     }
-                    HorizontalDivider(color = AppColors.Border)
+                    HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
                 }
             }
         }
         if (items.isEmpty() && folders.isEmpty()) {
             item {
-                Surface(color = AppColors.Surface, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, AppColors.Border)) {
+                AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 28.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,

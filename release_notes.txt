@@ -1,8 +1,7 @@
-Hermes Hub 0.6.305 (chat standard + pulizia profonda)
+Hermes Hub 0.6.306 (UI Apple su tutta l'app)
 
-- Chat standard intoccabile dal background: follow e resume vanno in staging con banner "↓ N nuovi dal server" + Mostra (mai auto-append); approval solo a chat ferma; flush ordinato al nuovo invio; riprova via draft a turno fallito.
-- Metriche anche a fine anomala (durata reale sopra 1s, mai token inventati); indicatore prefill unificato (stimati visibili ovunque).
-- Refactor: 4 god file eliminati + ChatFeature ridotta (45 moduli per dominio), ~2.800 righe morte rimosse (3 schermate mai raggiungibili + 30 funzioni), 11k import inutili puliti, costanti e metriche unificate.
-- Test: staging/durate/metriche/follow/approval; suite Android verde, 886 python verdi, consistency 28/28.
+- Nuovo sistema visivo centrale (vetro, aurora, tipi, motion condivisi).
+- Home "Che vuoi fare oggi?" come da riferimento, composer pill di vetro, banner hairline, transizioni fluide tra schermate, sezioni animate, liste hairline ovunque.
+- Solo stile: nessuna logica, stringa o firma cambiata. Suite Android verde, 886 python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.305-android.apk (Android, versionCode 309), NemoclawChat.Windows_0.6.305.0_x64.msix (x64) e HermesHub-0.6.305-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.306-android.apk (Android, versionCode 310), NemoclawChat.Windows_0.6.306.0_x64.msix (x64) e HermesHub-0.6.306-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

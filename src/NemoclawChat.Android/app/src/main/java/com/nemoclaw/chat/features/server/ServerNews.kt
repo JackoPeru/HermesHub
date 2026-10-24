@@ -26,7 +26,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.rounded.Add
@@ -60,6 +59,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleType
 import java.net.URL
 
 @Composable
@@ -110,8 +111,8 @@ internal fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPromp
                     }
                 }
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Hermes News", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-                    Text(status, color = AppColors.Muted, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text("Hermes News", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
+                    Text(status, color = AppColors.Muted, fontSize = AppleType.HeroSubtitle, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 IconButton(onClick = { onOpenChatPrompt("Crea un articolo per la sezione News di Hermes Hub: ") }) {
                     Icon(Icons.Rounded.Add, contentDescription = "Nuovo articolo", tint = AppColors.Accent)
@@ -129,7 +130,7 @@ internal fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPromp
         }
         if (htmlItems.isEmpty()) {
             item {
-                Surface(color = AppColors.Panel, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, AppColors.Border)) {
+                AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -175,18 +176,18 @@ internal fun NewsHtmlCard(item: NewsHtmlItem, onClick: () -> Unit) {
                 Icon(Icons.Rounded.Language, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(22.dp))
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(
                     "${item.filename} - ${item.sizeBytes.toReadableFileSize()} - ${formatVideoTimestamp(item.modifiedAt)}",
-                    color = AppColors.Muted,
-                    fontSize = 12.sp,
+                    color = AppColors.Faint,
+                    fontSize = AppleType.Footnote,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
             Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(20.dp))
         }
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
     }
 }
 

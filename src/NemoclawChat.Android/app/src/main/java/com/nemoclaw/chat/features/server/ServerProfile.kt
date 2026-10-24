@@ -2,7 +2,11 @@ package com.nemoclaw.chat
 
 import android.content.Context
 import android.provider.Settings
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
@@ -90,11 +94,17 @@ internal fun ProfileScreen(
         memoryStatus = loaded.second
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AppColors.Background)
     ) {
+        AuroraBackground(intensity = 1f)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(
@@ -107,8 +117,8 @@ internal fun ProfileScreen(
                     Icon(Icons.Rounded.AccountCircle, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
                 }
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Profilo", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Profilo locale. Nessun account cloud, nessun token provider nel client.", color = AppColors.Muted, fontSize = 14.sp)
+                    Text("Profilo", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
+                        Text("Profilo locale. Nessun account cloud, nessun token provider nel client.", color = AppColors.Faint, fontSize = AppleType.Footnote)
                 }
             }
         }
@@ -128,12 +138,12 @@ internal fun ProfileScreen(
                             .clip(RoundedCornerShape(18.dp))
                     )
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Profilo locale", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Home-server Hermes Agent locale", color = AppColors.Muted, fontSize = 14.sp)
-                        Text("App: $version", color = AppColors.Muted, fontSize = 12.sp)
+                        Text("Profilo locale", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
+                        Text("Home-server Hermes Agent locale", color = AppColors.Muted, fontSize = AppleType.Footnote)
+                        Text("App: $version", color = AppColors.Muted, fontSize = AppleType.Footnote)
                     }
                 }
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
             }
         }
         item {
@@ -150,8 +160,8 @@ internal fun ProfileScreen(
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("AREE RAPIDE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                Text("Schermate secondarie spostate qui per lasciare la barra bassa pulita.", color = AppColors.Muted, fontSize = 12.sp)
+                Text("AREE RAPIDE", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("Schermate secondarie spostate qui per lasciare la barra bassa pulita.", color = AppColors.Muted, fontSize = AppleType.Footnote)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = { onOpenTab(Tab.Server) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Hermes") }
                     TextButton(onClick = { onOpenTab(Tab.Cron) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Cron") }
@@ -162,34 +172,38 @@ internal fun ProfileScreen(
                     TextButton(onClick = { onOpenTab(Tab.Projects) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Progetti") }
                     TextButton(onClick = { onOpenTab(Tab.Archive) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Archivio") }
                 }
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
             }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("SERVER HERMES", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("SERVER HERMES", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 Text(
                     "Riavvio completo del server (come sudo reboot now). Da usare se il server non risponde più.",
                     color = AppColors.Muted,
-                    fontSize = 12.sp
+                    fontSize = AppleType.Footnote
                 )
-                if (rebootStatus.isNotBlank()) {
-                    Text(rebootStatus, color = AppColors.Muted, fontSize = 12.sp)
+                AnimatedVisibility(
+                    visible = rebootStatus.isNotBlank(),
+                    enter = AppleMotion.enter(),
+                    exit = AppleMotion.exit()
+                ) {
+                    Text(rebootStatus, color = AppColors.Faint, fontSize = AppleType.Footnote)
                 }
                 Button(
                     onClick = { showRebootConfirm = true },
                     enabled = !rebootBusy,
                     colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(14.dp)
                 ) {
                     Text(if (rebootBusy) "Riavvio in corso..." else "Riavvia server", fontWeight = FontWeight.SemiBold)
                 }
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
             }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("PROGETTO ATTIVO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("PROGETTO ATTIVO", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 if (settings.activeProjectId.isBlank()) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
@@ -198,20 +212,20 @@ internal fun ProfileScreen(
                     ) {
                         Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(40.dp))
                         Text("Nessun progetto selezionato.", color = Color.White, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-                        Text("Scegli un progetto per continuare.", color = AppColors.Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
-                        Button(onClick = { onOpenTab(Tab.Projects) }, colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)), shape = RoundedCornerShape(12.dp)) { Text("Apri Progetti", fontWeight = FontWeight.SemiBold) }
+                        Text("Scegli un progetto per continuare.", color = AppColors.Muted, fontSize = AppleType.Footnote, textAlign = TextAlign.Center)
+                        Button(onClick = { onOpenTab(Tab.Projects) }, colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)), shape = RoundedCornerShape(14.dp)) { Text("Apri Progetti", fontWeight = FontWeight.SemiBold) }
                     }
                 } else {
-                    Text("Attivo: ${settings.activeProjectName}", color = AppColors.Muted, fontSize = 14.sp)
+                    Text("Attivo: ${settings.activeProjectName}", color = AppColors.Muted, fontSize = AppleType.Footnote)
                     TextButton(onClick = { onOpenTab(Tab.Projects) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Apri Progetti") }
                 }
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
             }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("MEMORIA HERMES", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                Text(memoryStatus, color = AppColors.Muted, fontSize = 12.sp)
+                Text("MEMORIA HERMES", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(memoryStatus, color = AppColors.Faint, fontSize = AppleType.Footnote)
                 SettingsField("Preferenze video", memory.videoPreferences, { memory = memory.copy(videoPreferences = it) })
                 SettingsField("Preferenze news", memory.newsPreferences, { memory = memory.copy(newsPreferences = it) })
                 SettingsField("Stile risposta", memory.responseStyle, { memory = memory.copy(responseStyle = it) })
@@ -226,7 +240,7 @@ internal fun ProfileScreen(
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(14.dp)
                     ) { Text("Salva memoria", fontWeight = FontWeight.SemiBold) }
                     TextButton(
                         onClick = {
@@ -236,25 +250,29 @@ internal fun ProfileScreen(
                         colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Error)
                     ) { Text("Svuota memoria") }
                 }
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
             }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("AGGIORNAMENTI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                Text("Installata: $version", color = AppColors.Muted, fontSize = 12.sp)
-                updateState.latestVersion?.let { Text("Latest: $it", color = AppColors.Muted, fontSize = 12.sp) }
-                updateState.releaseAssetUrl?.let { Text("Asset: ${it.substringAfterLast('/')}", color = AppColors.Muted, fontSize = 12.sp) }
-                updateState.downloadedApkPath?.let { Text("APK pronto: $it", color = AppColors.Muted, fontSize = 12.sp) }
-                Text(updateState.status, color = AppColors.Muted)
+                Text("AGGIORNAMENTI", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("Installata: $version", color = AppColors.Muted, fontSize = AppleType.Footnote)
+                updateState.latestVersion?.let { Text("Latest: $it", color = AppColors.Muted, fontSize = AppleType.Footnote) }
+                updateState.releaseAssetUrl?.let { Text("Asset: ${it.substringAfterLast('/')}", color = AppColors.Muted, fontSize = AppleType.Footnote) }
+                updateState.downloadedApkPath?.let { Text("APK pronto: $it", color = AppColors.Muted, fontSize = AppleType.Footnote) }
+                Text(updateState.status, color = AppColors.Faint)
                 if (updateState.releaseSummary.isNotBlank()) {
                     Text(
                         "Changelog:\n${updateState.releaseSummary}",
                         color = Color.White,
-                        fontSize = 13.sp
+                        fontSize = AppleType.RowTitleSmall
                     )
                 }
-                if (updateState.progress != null) {
+                AnimatedVisibility(
+                    visible = updateState.progress != null,
+                    enter = AppleMotion.enter(),
+                    exit = AppleMotion.exit()
+                ) {
                     LinearProgressIndicator(
                         progress = { updateState.progress ?: 0f },
                         modifier = Modifier.fillMaxWidth(),
@@ -263,8 +281,8 @@ internal fun ProfileScreen(
                     )
                         Text(
                             downloadProgressLabel(updateState.progress, updateState.downloadLabel),
-                            color = AppColors.Muted,
-                            fontSize = 12.sp
+                            color = AppColors.Faint,
+                            fontSize = AppleType.Footnote
                         )
                     }
                     FlowRow(
@@ -354,7 +372,7 @@ internal fun ProfileScreen(
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
-                                shape = RoundedCornerShape(12.dp)
+                                shape = RoundedCornerShape(14.dp)
                             ) {
                                 Text("Scarica APK", fontWeight = FontWeight.SemiBold)
                             }
@@ -372,9 +390,10 @@ internal fun ProfileScreen(
                             }
                         }
                     }
-                    HorizontalDivider(color = AppColors.Border)
+                    HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
                 }
         }
+    }
     }
     if (showRebootConfirm) {
         AlertDialog(
@@ -386,7 +405,7 @@ internal fun ProfileScreen(
                 Button(
                     onClick = { showRebootConfirm = false; doReboot() },
                     colors = ButtonDefaults.buttonColors(containerColor = AppColors.Error, contentColor = Color.White),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(14.dp)
                 ) { Text("Riavvia ora", fontWeight = FontWeight.SemiBold) }
             },
             dismissButton = {

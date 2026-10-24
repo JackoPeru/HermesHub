@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -75,6 +76,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nemoclaw.chat.ui.apple.AppleMotion
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
@@ -106,7 +108,7 @@ internal fun StreamingBubbleView(
                 .semantics {
                     liveRegion = LiveRegionMode.Polite
                 },
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             val timeline = state.activityTimeline.filter { showToolCalls || it.kind != AssistantActivity.Kind.Tool }
             val transcript = state.transcript
@@ -183,8 +185,9 @@ internal fun StreamingBubbleView(
                     if (line.isNotBlank()) {
                         Text(
                             text = line,
-                            color = AppColors.Muted,
+                            color = AppColors.Faint,
                             fontSize = 11.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                             modifier = Modifier.weight(1f)
                         )
                     } else {
@@ -199,7 +202,7 @@ internal fun StreamingBubbleView(
                         Icon(
                             imageVector = Icons.Rounded.PlayCircle,
                             contentDescription = "Leggi messaggio",
-                            tint = AppColors.Muted,
+                            tint = AppColors.Faint,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -211,7 +214,7 @@ internal fun StreamingBubbleView(
                         Icon(
                             imageVector = Icons.Rounded.ContentCopy,
                             contentDescription = "Copia messaggio",
-                            tint = AppColors.Muted,
+                            tint = AppColors.Faint,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -295,7 +298,11 @@ internal fun AgentTranscript(
             }
             }
         }
-        if (hidden > 0) {
+        AnimatedVisibility(
+            visible = hidden > 0,
+            enter = AppleMotion.enter(),
+            exit = AppleMotion.exit()
+        ) {
             CompactMorePill(hidden) { expandedMore = true }
         }
         if (includeAgentText && tailText.isNotBlank()) {
@@ -318,7 +325,7 @@ private fun CompactThoughtRow(text: String, elapsedSec: Double, active: Boolean,
     }
     Column {
         Row(
-            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 3.dp),
+            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
@@ -332,13 +339,17 @@ private fun CompactThoughtRow(text: String, elapsedSec: Double, active: Boolean,
                 imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                 contentDescription = if (expanded) "Chiudi pensiero" else "Mostra pensiero",
                 tint = AppColors.Faint,
-                modifier = Modifier.size(13.dp)
+                modifier = Modifier.size(12.dp)
             )
         }
-        if (expanded) {
+        AnimatedVisibility(
+            visible = expanded,
+            enter = AppleMotion.enter(),
+            exit = AppleMotion.exit()
+        ) {
             Text(
                 text = text.ifBlank { "—" },
-                color = AppColors.Muted,
+                color = AppColors.Faint,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(start = 12.dp, end = 4.dp).heightIn(max = 160.dp).verticalScroll(rememberScrollState())
             )
@@ -357,13 +368,13 @@ private fun CompactToolsGroup(tools: List<ToolCallState>, active: Boolean = fals
     var expanded by remember(tools, active) { mutableStateOf(active) }
     Column {
         Row(
-            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 3.dp),
+            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
                 toolsGroupTitle(tools.size),
-                color = AppColors.Muted,
+                color = AppColors.Faint,
                 fontSize = 13.sp,
                 modifier = Modifier.weight(1f)
             )
@@ -371,13 +382,19 @@ private fun CompactToolsGroup(tools: List<ToolCallState>, active: Boolean = fals
                 imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                 contentDescription = if (expanded) "Chiudi attività" else "Mostra attività",
                 tint = AppColors.Faint,
-                modifier = Modifier.size(14.dp)
+                modifier = Modifier.size(12.dp)
             )
         }
-        if (expanded) {
-            tools.forEach { tool ->
-                androidx.compose.runtime.key(tool.id) {
-                    CompactToolRow(tool)
+        AnimatedVisibility(
+            visible = expanded,
+            enter = AppleMotion.enter(),
+            exit = AppleMotion.exit()
+        ) {
+            Column {
+                tools.forEach { tool ->
+                    androidx.compose.runtime.key(tool.id) {
+                        CompactToolRow(tool)
+                    }
                 }
             }
         }
@@ -426,7 +443,7 @@ private fun CompactMorePill(hidden: Int, onClick: () -> Unit) {    Box(
                 "↓ $hidden messaggi",
                 color = AppColors.Muted,
                 fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
             )
         }
     }
@@ -483,13 +500,13 @@ private fun PrefillPinnedRow(text: String, active: Boolean) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text("Prefill", color = AppColors.Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text("Prefill", color = AppColors.Faint, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         if (active) {
             ShimmerText(text.ifBlank { "…" }, enabled = true)
         } else {
             Text(
                 text.ifBlank { "—" },
-                color = AppColors.Muted,
+                color = AppColors.Faint,
                 fontSize = 11.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -506,7 +523,6 @@ private fun ReasoningCanvas(text: String, active: Boolean) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 40.dp)
                 .clickable { expanded = !expanded },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -514,7 +530,7 @@ private fun ReasoningCanvas(text: String, active: Boolean) {
             if (active) {
                 ShimmerText("Ragionamento", enabled = true)
             } else {
-                Text("Ragionamento", color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("Ragionamento", color = AppColors.Faint, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
             Text(
                 text.take(90).replace("\n", " "),
@@ -527,11 +543,15 @@ private fun ReasoningCanvas(text: String, active: Boolean) {
             Icon(
                 imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                 contentDescription = if (expanded) "Chiudi ragionamento" else "Mostra ragionamento",
-                tint = AppColors.Muted,
-                modifier = Modifier.size(15.dp)
+                tint = AppColors.Faint,
+                modifier = Modifier.size(12.dp)
             )
         }
-        if (expanded) {
+        AnimatedVisibility(
+            visible = expanded,
+            enter = AppleMotion.enter(),
+            exit = AppleMotion.exit()
+        ) {
             Surface(
                 color = AppColors.Composer.copy(alpha = 0.62f),
                 shape = RoundedCornerShape(8.dp),
@@ -539,7 +559,7 @@ private fun ReasoningCanvas(text: String, active: Boolean) {
             ) {
                 Text(
                     text = text.ifBlank { "—" },
-                    color = AppColors.Muted,
+                    color = AppColors.Faint,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
                     modifier = Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())
@@ -678,12 +698,12 @@ internal fun CompactToolRow(tool: ToolCallState) {
         (duration.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: "")
     Column {
         Row(
-            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 3.dp),
+            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Box(
-                modifier = Modifier.size(7.dp).background(dot, CircleShape)
+                modifier = Modifier.size(6.dp).background(dot, CircleShape)
             )
             Text(
                 title,
@@ -697,19 +717,25 @@ internal fun CompactToolRow(tool: ToolCallState) {
                 imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                 contentDescription = if (expanded) "Chiudi dettaglio" else "Mostra dettaglio",
                 tint = AppColors.Faint,
-                modifier = Modifier.size(13.dp)
+                modifier = Modifier.size(12.dp)
             )
         }
-        if (expanded) {
-            val argsText = tool.argsPreview.ifBlank {
-                if (tool.args.isBlank()) "-" else prettifyJson(tool.args)
-            }
-            ActivityLine("Argomenti", argsText, monospaced = true)
-            val resultText = tool.resultPreview.ifBlank {
-                tool.result?.takeIf { it.isNotBlank() }?.let { prettifyJson(it) }.orEmpty()
-            }
-            if (resultText.isNotBlank()) {
-                ActivityLine("Risultato", resultText, monospaced = true)
+        AnimatedVisibility(
+            visible = expanded,
+            enter = AppleMotion.enter(),
+            exit = AppleMotion.exit()
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                val argsText = tool.argsPreview.ifBlank {
+                    if (tool.args.isBlank()) "-" else prettifyJson(tool.args)
+                }
+                ActivityLine("Argomenti", argsText, monospaced = true)
+                val resultText = tool.resultPreview.ifBlank {
+                    tool.result?.takeIf { it.isNotBlank() }?.let { prettifyJson(it) }.orEmpty()
+                }
+                if (resultText.isNotBlank()) {
+                    ActivityLine("Risultato", resultText, monospaced = true)
+                }
             }
         }
     }
@@ -718,19 +744,17 @@ internal fun CompactToolRow(tool: ToolCallState) {
 @Composable
 private fun FlagRow(title: String, value: String, shimmer: Boolean) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 44.dp),
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         if (shimmer) {
             ShimmerText(title, enabled = true)
         } else {
-            Text(text = title, color = AppColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text(text = title, color = AppColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
         }
         Spacer(modifier = Modifier.weight(1f))
-        Text(text = value, color = AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(text = value, color = AppColors.Faint, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -837,13 +861,13 @@ internal fun shouldShowShimmer(isLoadingOrStreaming: Boolean, isVisible: Boolean
 @Composable
 internal fun ActivityLine(label: String, value: String, monospaced: Boolean = false) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, color = AppColors.Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = AppColors.Faint, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         Text(
             modifier = Modifier
                 .heightIn(max = 180.dp)
                 .verticalScroll(rememberScrollState()),
             text = value,
-            color = if (value.startsWith("Nessun token")) AppColors.Muted else Color.White,
+            color = if (value.startsWith("Nessun token")) AppColors.Faint else Color.White,
             fontFamily = if (monospaced) FontFamily.Monospace else FontFamily.Default,
             fontSize = 12.sp
         )
@@ -944,9 +968,9 @@ internal fun MarkdownText(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             if (block.language.isNotBlank()) {
-                                Text(block.language, color = AppColors.Muted, fontSize = 11.sp)
+                                Text(block.language, color = AppColors.Faint, fontSize = 11.sp)
                             } else {
-                                Text("code", color = AppColors.Muted, fontSize = 11.sp)
+                                Text("code", color = AppColors.Faint, fontSize = 11.sp)
                             }
                             androidx.compose.material3.IconButton(
                                 onClick = { clipboardManager.setPrimaryClip(ClipData.newPlainText("Codice Hermes", block.code)) },
@@ -955,8 +979,8 @@ internal fun MarkdownText(
                                 Icon(
                                     imageVector = Icons.Rounded.ContentCopy,
                                     contentDescription = "Copia codice",
-                                    tint = AppColors.Muted,
-                                    modifier = Modifier.size(16.dp)
+                                    tint = AppColors.Faint,
+                                    modifier = Modifier.size(12.dp)
                                 )
                             }
                         }
@@ -1272,7 +1296,7 @@ internal fun SlashCommandList(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(text = cmd.display, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                        Text(text = "${cmd.title} · ${cmd.description}", color = AppColors.Muted, fontSize = 11.sp)
+                        Text(text = "${cmd.title} · ${cmd.description}", color = AppColors.Faint, fontSize = 11.sp)
                     }
                 }
             }

@@ -239,6 +239,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
+import com.nemoclaw.chat.ui.apple.AppleType
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -296,7 +297,7 @@ internal fun StartupLoadingScreen() {
                 Text(
                     "Avvio Hermes Hub…",
                     color = AppColors.Muted,
-                    fontSize = 14.sp,
+                    fontSize = AppleType.RowTitleSmall,
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
                 )
             }
@@ -335,7 +336,7 @@ internal fun SectionTopBar(tab: Tab, onOpenSidebar: () -> Unit, onBackToChat: ()
                 Text(
                     tab.label,
                     color = Color.White,
-                    fontSize = 19.sp,
+                    fontSize = AppleType.ScreenTitle,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = (-0.2).sp,
                     maxLines = 1,
@@ -344,7 +345,7 @@ internal fun SectionTopBar(tab: Tab, onOpenSidebar: () -> Unit, onBackToChat: ()
                 Text(
                     "Hermes Hub",
                     color = AppColors.Faint,
-                    fontSize = 12.sp,
+                    fontSize = AppleType.Footnote,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -360,8 +361,8 @@ internal fun SectionTopBar(tab: Tab, onOpenSidebar: () -> Unit, onBackToChat: ()
         }
     }
     HorizontalDivider(
-        color = AppColors.Border.copy(alpha = 0.7f),
-        thickness = 0.75.dp
+        color = Color.White.copy(alpha = 0.08f),
+        thickness = 0.5.dp
     )
 }
 
@@ -456,7 +457,7 @@ internal fun HermesSidebar(
                             "Hermes Hub",
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = 15.sp,
+                            fontSize = AppleType.RowTitle,
                             letterSpacing = (-0.1).sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -464,7 +465,7 @@ internal fun HermesSidebar(
                         Text(
                             "Pronto",
                             color = AppColors.Faint,
-                            fontSize = 12.sp,
+                            fontSize = AppleType.Footnote,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -549,8 +550,8 @@ internal fun HermesSidebar(
             }
             item {
                 HorizontalDivider(
-                    color = AppColors.Border.copy(alpha = 0.7f),
-                    thickness = 0.75.dp,
+                    color = Color.White.copy(alpha = 0.08f),
+                    thickness = 0.5.dp,
                     modifier = Modifier.padding(top = 10.dp, bottom = 6.dp)
                 )
                 SidebarSectionLabel("RECENTI", settings.sidebarRecenti) { onToggleSidebarSection("recenti") }
@@ -562,8 +563,8 @@ internal fun HermesSidebar(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            Text("Nessuna chat ancora.", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Text("Tocca + per iniziarne una.", color = AppColors.Muted, fontSize = 12.sp)
+                            Text("Nessuna chat ancora.", color = Color.White, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.SemiBold)
+                            Text("Tocca + per iniziarne una.", color = AppColors.Muted, fontSize = AppleType.Footnote)
                         }
                     }
                 } else {
@@ -599,7 +600,7 @@ internal fun HermesSidebar(
                                     Text(
                                         conversation.title,
                                         color = Color.White,
-                                        fontSize = 13.sp,
+                                        fontSize = AppleType.RowTitleSmall,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -607,7 +608,7 @@ internal fun HermesSidebar(
                                     Text(
                                         conversation.description.ifBlank { conversation.prompt },
                                         color = AppColors.Muted,
-                                        fontSize = 12.sp,
+                                        fontSize = AppleType.Footnote,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -751,7 +752,7 @@ internal fun HermesBotSidebar(
                         "Bot",
                         color = Color.White,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp,
+                        fontSize = AppleType.RowTitle,
                         letterSpacing = (-0.1).sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -759,7 +760,7 @@ internal fun HermesBotSidebar(
                     Text(
                         if (bots.isEmpty()) status else if (bots.size == 1) "1 bot · tocca per parlare" else "${bots.size} bot · tocca per parlare",
                         color = AppColors.Faint,
-                        fontSize = 12.sp,
+                        fontSize = AppleType.Footnote,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1025,18 +1026,18 @@ internal fun SidebarRow(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(1.dp)
             ) {
-                Text(
-                    title,
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    subtitle,
-                    color = AppColors.Muted,
-                    fontSize = 12.sp,
+            Text(
+                title,
+                color = Color.White,
+                fontSize = AppleType.RowTitleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                subtitle,
+                color = AppColors.Muted,
+                fontSize = AppleType.Footnote,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1068,9 +1069,9 @@ internal fun SidebarSectionLabel(title: String, expanded: Boolean, onToggle: () 
     ) {
         Text(
             title.uppercase(),
-            color = AppColors.Accent,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
+            color = AppColors.Muted,
+            fontSize = AppleType.RowTitleSmall,
+            fontWeight = FontWeight.SemiBold,
             letterSpacing = 1.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -1079,7 +1080,7 @@ internal fun SidebarSectionLabel(title: String, expanded: Boolean, onToggle: () 
         Icon(
             if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
             contentDescription = if (expanded) "Chiudi $title" else "Apri $title",
-            tint = AppColors.Accent,
+            tint = AppColors.Muted,
             modifier = Modifier.size(16.dp)
         )
     }

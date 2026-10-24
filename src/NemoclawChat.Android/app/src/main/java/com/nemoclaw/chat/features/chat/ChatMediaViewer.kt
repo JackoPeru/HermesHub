@@ -534,12 +534,12 @@ internal fun ChatImageViewerDialog(
         return
     }
     Dialog(onDismissRequest = onClose) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color.Black)
-        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.Black)
+            ) {
             zoomableImage(
                 modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)
             )
@@ -699,12 +699,12 @@ internal fun ChatImageGalleryDialog(
         return
     }
     Dialog(onDismissRequest = onClose) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color.Black)
-        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.Black)
+            ) {
             HorizontalPager(
                 state = pagerState,
                 userScrollEnabled = scale <= 1f,
@@ -848,12 +848,12 @@ internal fun LocalAttachmentViewerDialog(source: String, alt: String, onClose: (
     val bitmap = full
     if (bitmap == null) {
         Dialog(onDismissRequest = onClose) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color.Black)
-                    .padding(24.dp),
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color.Black)
+                        .padding(24.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text("Caricamento immagine...", color = AppColors.Muted, fontSize = 13.sp)

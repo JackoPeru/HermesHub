@@ -1,5 +1,6 @@
 package com.nemoclaw.chat
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -56,6 +57,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -76,7 +80,7 @@ internal fun GenUiBlock(block: VisualBlock, onSendText: ((String) -> Unit)? = nu
         Text(
             block.genuiFallback.ifBlank { "Interfaccia non disponibile in questa versione dell'app." },
             color = Color.White,
-            fontSize = 14.sp
+            fontSize = AppleType.RowTitle
         )
         return
     }
@@ -96,7 +100,7 @@ internal fun GenUiAwareMarkdown(
     onSendText: ((String) -> Unit)?,
     genUiEnabled: Boolean,
     color: Color = Color.White,
-    fontSize: androidx.compose.ui.unit.TextUnit = 14.sp
+    fontSize: androidx.compose.ui.unit.TextUnit = AppleType.RowTitle
 ) {
     val genui = remember(blocks) {
         blocks.filter { it.type.equals("genui", ignoreCase = true) }
@@ -114,7 +118,7 @@ internal fun GenUiAwareMarkdown(
                     Text(
                         b.genuiFallback.ifBlank { "Interfaccia non disponibile." },
                         color = Color.White,
-                        fontSize = 14.sp
+                        fontSize = AppleType.RowTitle
                     )
                 }
             }
@@ -129,7 +133,7 @@ internal fun GenUiAwareMarkdown(
                 Text(
                     it.genuiFallback.ifBlank { "Interfaccia non disponibile." },
                     color = Color.White,
-                    fontSize = 14.sp
+                    fontSize = AppleType.RowTitle
                 )
             }
         }
@@ -212,20 +216,17 @@ private fun GenUiNodeView(node: JSONObject, ui: GenUiUiState, uiId: String, onSe
                 }
             }
         }
-        "card" -> Card(
-            colors = CardDefaults.cardColors(containerColor = AppColors.Elevated),
-            shape = RoundedCornerShape(10.dp)
-        ) {
+        "card" -> AppleGlass(shape = RoundedCornerShape(20.dp)) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (node.optString("title").isNotBlank()) {
-                    Text(node.optString("title"), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text(node.optString("title"), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
                 }
                 genUiChildren(node, "children").forEach { GenUiNodeView(it, ui, uiId, onSendText, level + 1) }
             }
         }
         "section" -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (node.optString("title").isNotBlank()) {
-                Text(node.optString("title").uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(node.optString("title").uppercase(), color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold)
             }
             genUiChildren(node, "children").forEach { GenUiNodeView(it, ui, uiId, onSendText, level + 1) }
         }
@@ -234,7 +235,7 @@ private fun GenUiNodeView(node: JSONObject, ui: GenUiUiState, uiId: String, onSe
         "text" -> Text(
             renderGenUiText(node.optString("text"), state),
             color = Color.White,
-            fontSize = 14.sp
+            fontSize = AppleType.RowTitle
         )
         "markdown" -> MarkdownBlock(renderGenUiText(node.optString("text"), state))
         "metric" -> MetricBlock(genUiMetricBlock(node, state))
@@ -257,7 +258,7 @@ private fun GenUiNodeView(node: JSONObject, ui: GenUiUiState, uiId: String, onSe
         "alert", "callout" -> CalloutBlock(
             VisualBlock(id = node.optString("id"), type = "callout", variant = node.optString("variant", "info"), text = renderGenUiText(node.optString("text"), state))
         )
-        "divider" -> HorizontalDivider(color = AppColors.Border)
+            "divider" -> HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
         "spacer" -> Spacer(Modifier.height((node.optDouble("height", 8.0)).toFloat().coerceIn(2f, 64f).dp))
     }
 }
@@ -339,13 +340,13 @@ private val GENUI_PALETTE = listOf(
 private fun GenUiChart(node: JSONObject, state: Map<String, GenUiValue>) {
     val series = resolveGenUiSeries(node, state)
     if (series.isEmpty() || series.all { it.points.isEmpty() }) {
-        Text("Nessun dato.", color = AppColors.Muted, fontSize = 13.sp)
+        Text("Nessun dato.", color = AppColors.Muted, fontSize = AppleType.RowTitleSmall)
         return
     }
     val type = node.optString("chart_type", "line").lowercase()
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (node.optString("title").isNotBlank()) {
-            Text(renderGenUiText(node.optString("title"), state), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text(renderGenUiText(node.optString("title"), state), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
         }
         if (type == "pie") {
             GenUiPie(series.first())
@@ -362,7 +363,7 @@ private fun GenUiChart(node: JSONObject, state: Map<String, GenUiValue>) {
                                 .fillMaxWidth(0.06f)
                                 .background(GENUI_PALETTE[i % GENUI_PALETTE.size], RoundedCornerShape(2.dp))
                         )
-                        Text(s.name.ifBlank { "Serie ${i + 1}" }, color = AppColors.Muted, fontSize = 12.sp)
+                        Text(s.name.ifBlank { "Serie ${i + 1}" }, color = AppColors.Muted, fontSize = AppleType.Footnote)
                     }
                 }
             }
@@ -372,7 +373,7 @@ private fun GenUiChart(node: JSONObject, state: Map<String, GenUiValue>) {
             node.optString("y_label").takeIf { it.isNotBlank() }?.let { "y: $it" },
             node.optString("unit").takeIf { it.isNotBlank() }
         ).joinToString(" · ")
-        if (axes.isNotBlank()) Text(axes, color = AppColors.Muted, fontSize = 12.sp)
+        if (axes.isNotBlank()) Text(axes, color = AppColors.Muted, fontSize = AppleType.Footnote)
     }
 }
 
@@ -419,10 +420,10 @@ private fun GenUiButton(node: JSONObject, ui: GenUiUiState, uiId: String, onSend
         Text(node.optString("label", node.optString("title", "Vai")))
     }
     if (action != null && action.optString("kind") == "agent" && onSendText == null) {
-        Text("Rispondi dalla cronologia per usare questo pulsante.", color = AppColors.Muted, fontSize = 11.sp)
+        Text("Rispondi dalla cronologia per usare questo pulsante.", color = AppColors.Muted, fontSize = AppleType.Caption)
     }
     sendError?.let {
-        Text(it, color = Color(0xFFE05D5D), fontSize = 11.sp)
+        Text(it, color = Color(0xFFE05D5D), fontSize = AppleType.Caption)
     }
 }
 
@@ -434,8 +435,8 @@ private fun GenUiSlider(node: JSONObject, ui: GenUiUiState, enabled: Boolean) {
     val cur = (ui.snapshot()[bind]?.asNumber() ?: node.optDouble("value", min.toDouble())).toFloat().coerceIn(min, max)
     Column {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(node.optString("label"), color = Color.White, fontSize = 13.sp)
-            Text(GenUiValue.Num(cur.toDouble()).asText(), color = AppColors.Muted, fontSize = 13.sp)
+            Text(node.optString("label"), color = Color.White, fontSize = AppleType.RowTitleSmall)
+            Text(GenUiValue.Num(cur.toDouble()).asText(), color = AppColors.Muted, fontSize = AppleType.RowTitleSmall)
         }
         Slider(
             value = cur,
@@ -456,7 +457,7 @@ private fun GenUiToggle(node: JSONObject, ui: GenUiUiState, isSwitch: Boolean, e
         } else {
             Checkbox(checked = checked, onCheckedChange = { if (bind.isNotBlank() && enabled) ui.setValueState(bind, GenUiValue.Bool(it)) }, enabled = enabled)
         }
-        Text(node.optString("label"), color = Color.White, fontSize = 14.sp)
+        Text(node.optString("label"), color = Color.White, fontSize = AppleType.RowTitle)
     }
 }
 
@@ -478,11 +479,11 @@ private fun GenUiRadio(node: JSONObject, ui: GenUiUiState, enabled: Boolean) {
     val bind = node.optString("bind")
     val cur = ui.snapshot()[bind]?.asText() ?: node.optString("value", "")
     Column {
-        if (node.optString("label").isNotBlank()) Text(node.optString("label"), color = Color.White, fontSize = 13.sp)
+        if (node.optString("label").isNotBlank()) Text(node.optString("label"), color = Color.White, fontSize = AppleType.RowTitleSmall)
         genUiOptionPairs(node).forEach { (value, label) ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(selected = cur == value, onClick = { if (bind.isNotBlank() && enabled) ui.setValueState(bind, GenUiValue.Str(value)) }, enabled = enabled)
-                Text(label, color = Color.White, fontSize = 14.sp)
+                Text(label, color = Color.White, fontSize = AppleType.RowTitle)
             }
         }
     }
@@ -495,7 +496,7 @@ private fun GenUiSelect(node: JSONObject, ui: GenUiUiState, enabled: Boolean) {
     var open by remember { mutableStateOf(false) }
     val pairs = genUiOptionPairs(node)
     Column {
-        if (node.optString("label").isNotBlank()) Text(node.optString("label"), color = Color.White, fontSize = 13.sp)
+        if (node.optString("label").isNotBlank()) Text(node.optString("label"), color = Color.White, fontSize = AppleType.RowTitleSmall)
         Box {
             OutlinedButton(onClick = { open = true }, enabled = enabled) {
                 Text(pairs.firstOrNull { it.first == cur }?.second ?: cur.ifBlank { "Scegli…" })
@@ -522,7 +523,7 @@ private fun GenUiTextInput(node: JSONObject, ui: GenUiUiState, enabled: Boolean)
         return
     }
     Column {
-        if (node.optString("label").isNotBlank()) Text(node.optString("label"), color = Color.White, fontSize = 13.sp)
+        if (node.optString("label").isNotBlank()) Text(node.optString("label"), color = Color.White, fontSize = AppleType.RowTitleSmall)
         TextField(
             value = cur,
             onValueChange = { if (bind.isNotBlank() && enabled) ui.setValueState(bind, GenUiValue.Str(it)) },
@@ -539,7 +540,7 @@ private fun GenUiNumber(node: JSONObject, ui: GenUiUiState, enabled: Boolean) {
     val bind = node.optString("bind")
     val cur = ui.snapshot()[bind]?.asText() ?: node.optString("value", "")
     Column {
-        if (node.optString("label").isNotBlank()) Text(node.optString("label"), color = Color.White, fontSize = 13.sp)
+        if (node.optString("label").isNotBlank()) Text(node.optString("label"), color = Color.White, fontSize = AppleType.RowTitleSmall)
         TextField(
             value = cur,
             onValueChange = { if (bind.isNotBlank() && enabled) ui.setValueState(bind, GenUiValue.Str(it)) },
@@ -555,7 +556,7 @@ private fun GenUiNumber(node: JSONObject, ui: GenUiUiState, enabled: Boolean) {
 private fun GenUiDateField(node: JSONObject, ui: GenUiUiState, bind: String, cur: String, enabled: Boolean) {
     var show by remember { mutableStateOf(false) }
     Column {
-        if (node.optString("label").isNotBlank()) Text(node.optString("label"), color = Color.White, fontSize = 13.sp)
+        if (node.optString("label").isNotBlank()) Text(node.optString("label"), color = Color.White, fontSize = AppleType.RowTitleSmall)
         OutlinedButton(onClick = { show = true }, enabled = enabled) {
             Text(cur.ifBlank { "Scegli data…" })
         }
@@ -590,8 +591,8 @@ private fun GenUiSteps(node: JSONObject, ui: GenUiUiState, enabled: Boolean) {
     }
     val item = items[idx]
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(item.optString("title"), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-        Text(item.optString("text"), color = Color.White, fontSize = 14.sp)
+        Text(item.optString("title"), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
+        Text(item.optString("text"), color = Color.White, fontSize = AppleType.RowTitle)
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             items.forEachIndexed { i, _ ->
                 Box(
@@ -614,7 +615,7 @@ private fun GenUiSteps(node: JSONObject, ui: GenUiUiState, enabled: Boolean) {
                 }
             }
         }
-        Text("Passo ${idx + 1} di ${items.size}", color = AppColors.Muted, fontSize = 12.sp)
+        Text("Passo ${idx + 1} di ${items.size}", color = AppColors.Muted, fontSize = AppleType.Footnote)
     }
 }
 
@@ -641,16 +642,16 @@ private fun GenUiNodes(node: JSONObject, ui: GenUiUiState, enabled: Boolean) {
                     if (bind.isNotBlank()) ui.setValueState(bind, GenUiValue.Str(id))
                 }
             ) {
-                Text(entry.optString("label", id), color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(8.dp))
+                Text(entry.optString("label", id), color = Color.White, fontSize = AppleType.RowTitle, modifier = Modifier.padding(8.dp))
             }
         }
         entries.firstOrNull { it.optString("id") == selected }?.let { entry ->
             if (entry.optString("detail").isNotBlank()) {
-                Text(entry.optString("detail"), color = AppColors.Muted, fontSize = 13.sp)
+                Text(entry.optString("detail"), color = AppColors.Muted, fontSize = AppleType.RowTitleSmall)
             }
         }
         if (edges.isNotEmpty()) {
-            Text(edges.joinToString("   ") { "${it.first} → ${it.second}" }, color = AppColors.Muted, fontSize = 12.sp)
+            Text(edges.joinToString("   ") { "${it.first} → ${it.second}" }, color = AppColors.Muted, fontSize = AppleType.Footnote)
         }
     }
 }
@@ -683,7 +684,7 @@ private fun GenUiPie(series: GenUiResolvedSeries) {
     val values = series.points.map { it.y.coerceAtLeast(0.0) }
     val total = values.sum()
     if (total <= 0.0) {
-        Text("Nessun dato.", color = AppColors.Muted, fontSize = 13.sp)
+        Text("Nessun dato.", color = AppColors.Muted, fontSize = AppleType.RowTitleSmall)
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -700,7 +701,7 @@ private fun GenUiPie(series: GenUiResolvedSeries) {
         series.points.forEachIndexed { i, p ->
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.height(10.dp).fillMaxWidth(0.05f).background(GENUI_PALETTE[i % GENUI_PALETTE.size], RoundedCornerShape(2.dp)))
-                Text("${p.xText}: ${GenUiValue.Num(p.y).asText()} (${(p.y / total * 100).toInt()}%)", color = Color.White, fontSize = 12.sp)
+                Text("${p.xText}: ${GenUiValue.Num(p.y).asText()} (${(p.y / total * 100).toInt()}%)", color = Color.White, fontSize = AppleType.Footnote)
             }
         }
     }
@@ -840,7 +841,7 @@ private fun GenUiTable(node: JSONObject, state: Map<String, GenUiValue>) {
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (node.optString("title").isNotBlank()) {
-            Text(renderGenUiText(node.optString("title"), state), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text(renderGenUiText(node.optString("title"), state), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
         }
         if (node.optBoolean("filter", false)) {
             TextField(
@@ -874,7 +875,7 @@ private fun GenUiTable(node: JSONObject, state: Map<String, GenUiValue>) {
                 }
             }
         }
-        Text("${rows.size} righe", color = AppColors.Muted, fontSize = 12.sp)
+        Text("${rows.size} righe", color = AppColors.Muted, fontSize = AppleType.Footnote)
     }
 }
 
@@ -888,15 +889,17 @@ private fun GenUiAccordion(node: JSONObject, ui: GenUiUiState, uiId: String, onS
             Surface(
                 color = AppColors.Elevated,
                 shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, AppColors.Border),
+                border = BorderStroke(0.5.dp, AppColors.Border),
                 modifier = Modifier.fillMaxWidth().clickable(enabled = enabled) { open[i] = !isOpen }
             ) {
                 Column(Modifier.padding(8.dp)) {
-                    Text((if (isOpen) "▾ " else "▸ ") + item.optString("title"), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    if (isOpen) {
-                        Spacer(Modifier.height(6.dp))
-                        if (item.optString("text").isNotBlank()) Text(item.optString("text"), color = Color.White, fontSize = 14.sp)
-                        item.optJSONObject("body")?.let { GenUiNodeView(it, ui, uiId, onSendText, level + 1) }
+                    Text((if (isOpen) "▾ " else "▸ ") + item.optString("title"), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
+                    AnimatedVisibility(visible = isOpen, enter = AppleMotion.enter(), exit = AppleMotion.exit()) {
+                        Column {
+                            Spacer(Modifier.height(6.dp))
+                            if (item.optString("text").isNotBlank()) Text(item.optString("text"), color = Color.White, fontSize = AppleType.RowTitle)
+                            item.optJSONObject("body")?.let { GenUiNodeView(it, ui, uiId, onSendText, level + 1) }
+                        }
                     }
                 }
             }

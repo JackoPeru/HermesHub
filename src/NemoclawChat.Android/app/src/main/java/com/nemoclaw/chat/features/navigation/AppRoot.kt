@@ -252,6 +252,7 @@ import com.nemoclaw.chat.features.bots.loadLastBot
 import com.nemoclaw.chat.features.bots.resolveCanonicalBotContext
 import com.nemoclaw.chat.features.bots.saveLastBot
 import com.nemoclaw.chat.features.screen.ScreenScreen
+import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -983,10 +984,10 @@ internal fun ChatApp() {
                 NavHost(
                     navController = tabNavController,
                     startDestination = tabNavStartDestination,
-                    enterTransition = { androidx.compose.animation.EnterTransition.None },
-                    exitTransition = { androidx.compose.animation.ExitTransition.None },
-                    popEnterTransition = { androidx.compose.animation.EnterTransition.None },
-                    popExitTransition = { androidx.compose.animation.ExitTransition.None }
+                    enterTransition = { AppleMotion.enter() },
+                    exitTransition = { AppleMotion.exit() },
+                    popEnterTransition = { AppleMotion.enter() },
+                    popExitTransition = { AppleMotion.exit() }
                 ) {
                 composable(Tab.Chat.navRoute) { Column(modifier = Modifier.fillMaxSize()) {
                 if (showComfy) {

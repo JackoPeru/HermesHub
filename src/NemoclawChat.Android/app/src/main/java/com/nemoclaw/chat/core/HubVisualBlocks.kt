@@ -5,11 +5,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URI
-import java.net.URLEncoder
 import java.net.URL
 import org.json.JSONArray
 import org.json.JSONObject

@@ -56,7 +56,7 @@ internal fun ChatBotToggle(
         Surface(
             color = AppColors.Surface,
             shape = CircleShape,
-            border = androidx.compose.foundation.BorderStroke(1.dp, AppColors.Border)
+            border = androidx.compose.foundation.BorderStroke(0.5.dp, AppColors.Border)
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp),

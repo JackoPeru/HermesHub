@@ -45,8 +45,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -660,11 +660,11 @@ internal fun SettingsScreen(
                 )
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text("Impostazioni", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                Text("Impostazioni", color = Color.White, fontSize = AppleType.HeroTitle, fontWeight = FontWeight.SemiBold)
                 Text(
                     "Impostazioni salvate sul dispositivo. Le nuove installazioni non includono endpoint o credenziali preconfigurati.",
                     color = AppColors.Muted,
-                    fontSize = 14.sp
+                    fontSize = AppleType.HeroSubtitle
                 )
             }
         }
@@ -856,8 +856,12 @@ internal fun SettingsScreen(
                     }
                 }
             }
-            if (advancedVisible) {
-                item {
+            item {
+                AnimatedVisibility(
+                    visible = advancedVisible,
+                    enter = AppleMotion.enter(),
+                    exit = AppleMotion.exit()
+                ) {
                     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(
                                 "Parametri letti dal server: cambiali solo se Hermes non risponde o su indicazione specifica.",
@@ -1455,13 +1459,13 @@ internal fun FontScaleControl(
 @Composable
 internal fun SettingsField(label: String, value: String, onValueChange: (String) -> Unit, readOnly: Boolean = false) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(label, color = AppColors.Muted, fontSize = 13.sp)
+        Text(label, color = AppColors.Muted, fontSize = AppleType.RowTitleSmall)
         TextField(
             modifier = Modifier.fillMaxWidth(),
             value = value,
             onValueChange = { v -> onValueChange(v.take(SETTINGS_FIELD_MAX_LENGTH)) },
             readOnly = readOnly,
-            shape = RoundedCornerShape(10.dp),
+            shape = RoundedCornerShape(12.dp),
             colors = TextFieldDefaults.colors(
                 focusedContainerColor = AppColors.Composer,
                 unfocusedContainerColor = AppColors.Composer,
@@ -1480,12 +1484,12 @@ internal fun SettingsField(label: String, value: String, onValueChange: (String)
 internal fun SettingsPasswordField(label: String, value: String, onValueChange: (String) -> Unit) {
     var visible by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(label, color = AppColors.Muted, fontSize = 13.sp)
+        Text(label, color = AppColors.Muted, fontSize = AppleType.RowTitleSmall)
         TextField(
             modifier = Modifier.fillMaxWidth(),
             value = value,
             onValueChange = { v -> onValueChange(v.take(SETTINGS_FIELD_MAX_LENGTH)) },
-            shape = RoundedCornerShape(10.dp),
+            shape = RoundedCornerShape(12.dp),
             visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
                 IconButton(onClick = { visible = !visible }) {
@@ -1512,7 +1516,7 @@ internal fun SettingsPasswordField(label: String, value: String, onValueChange: 
 @Composable
 internal fun MetricSwitch(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Color.White, modifier = Modifier.weight(1f))
+        Text(label, color = Color.White, fontSize = AppleType.RowTitle, modifier = Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
@@ -1523,7 +1527,7 @@ internal fun AutoApproveChip(label: String, value: String, current: String, onSe
     Surface(
         color = if (selected) AppColors.Accent else AppColors.Elevated,
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, if (selected) AppColors.Accent else AppColors.Border),
+        border = BorderStroke(0.5.dp, if (selected) AppColors.Accent else AppColors.Border),
         modifier = Modifier.clickable { onSelect(value) }
     ) {
         Text(
@@ -1539,8 +1543,8 @@ internal fun AutoApproveChip(label: String, value: String, current: String, onSe
 @Composable
 internal fun SettingsSectionHeader(modifier: Modifier = Modifier, title: String, subtitle: String = "") {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(title.uppercase(java.util.Locale.ROOT), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        if (subtitle.isNotBlank()) Text(subtitle, color = AppColors.Muted, fontSize = 12.sp)
+        Text(title.uppercase(java.util.Locale.ROOT), color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        if (subtitle.isNotBlank()) Text(subtitle, color = AppColors.Muted, fontSize = AppleType.Footnote)
     }
 }
 

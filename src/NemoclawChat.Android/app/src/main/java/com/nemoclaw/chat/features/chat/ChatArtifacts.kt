@@ -49,6 +49,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 import com.nemoclaw.chat.resolveHermesUrl
 import java.io.File
 import java.net.URL
@@ -76,6 +79,8 @@ internal fun ArtifactLibraryScreen(
     }
     val selected = artifacts.firstOrNull { it.id == selectedId }
 
+    Box(modifier = Modifier.fillMaxSize()) {
+        AuroraBackground()
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
@@ -97,20 +102,22 @@ internal fun ArtifactLibraryScreen(
                     }
                 }
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Artifact", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Output persistenti prodotti da chat, run e automazioni.", color = AppColors.Muted, fontSize = 14.sp)
+                    Text("Artifact", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
+                    Text("Output persistenti prodotti da chat, run e automazioni.", color = AppColors.Muted, fontSize = AppleType.HeroSubtitle)
                 }
             }
         }
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("FILTRI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("FILTRI", color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 SettingsField("Cerca nome, file o tag", query, { query = it })
                 SettingsField("Filtra progetto", projectFilter, { projectFilter = it })
-                Text("${artifacts.size} artifact", color = AppColors.Muted, fontSize = 12.sp)
+                Text("${artifacts.size} artifact", color = AppColors.Muted, fontSize = AppleType.Footnote)
+            }
             }
         }
-        item { HorizontalDivider(color = AppColors.Border) }
+        item { HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp) }
         if (artifacts.isEmpty()) {
             item {
                 Column(
@@ -130,7 +137,7 @@ internal fun ArtifactLibraryScreen(
         } else {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("ARTIFACT", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text("ARTIFACT", color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     artifacts.forEachIndexed { index, artifact ->
                         Row(
                             modifier = Modifier.fillMaxWidth().clickable {
@@ -149,9 +156,9 @@ internal fun ArtifactLibraryScreen(
                                 }
                             }
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(artifact.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("${artifact.artifactType} · v${artifact.version} · ${artifact.projectId}", color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(artifact.description, color = AppColors.Muted, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                Text(artifact.title, color = Color.White, fontSize = AppleType.RowTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${artifact.artifactType} · v${artifact.version} · ${artifact.projectId}", color = AppColors.Faint, fontSize = AppleType.Footnote, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(artifact.description, color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
                             }
                             if (artifact.id == selectedId) {
                                 Text("SELEZIONATO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -159,17 +166,18 @@ internal fun ArtifactLibraryScreen(
                                 Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(20.dp))
                             }
                         }
-                        if (index < artifacts.lastIndex) HorizontalDivider(color = AppColors.Border)
+                        if (index < artifacts.lastIndex) HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
                     }
                 }
             }
         }
         if (selected != null) {
-            item { HorizontalDivider(color = AppColors.Border) }
+            item { HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp) }
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("DETTAGLIO · V${selected.version}", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                    Text("File: ${selected.artifactFileName}\nMIME: ${selected.artifactMimeType}\nChat: ${selected.sourceConversationId}\nRun: ${selected.sourceRunId}", color = AppColors.Muted, fontSize = 12.sp)
+                AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("DETTAGLIO · V${selected.version}", color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text("File: ${selected.artifactFileName}\nMIME: ${selected.artifactMimeType}\nChat: ${selected.sourceConversationId}\nRun: ${selected.sourceRunId}", color = AppColors.Muted, fontSize = AppleType.Footnote)
                     SettingsField("Nome", rename, { rename = it })
                     SettingsField("Tag", tags, { tags = it })
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -213,16 +221,18 @@ internal fun ArtifactLibraryScreen(
                             Text("Rigenera")
                         }
                     }
-                    Text("VERSIONI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text("VERSIONI", color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     val key = selected.artifactFileName.ifBlank { selected.title }
                     loadConversations(context).filter { it.kind == "Artifact" && it.artifactFileName.ifBlank { it.title }.equals(key, true) }
                         .sortedByDescending { it.version }.forEach { version ->
-                            Text("v${version.version} · ${formatDateTime(version.updatedAt)} · ${version.description}", color = AppColors.Muted, fontSize = 12.sp)
+                            Text("v${version.version} · ${formatDateTime(version.updatedAt)} · ${version.description}", color = AppColors.Muted, fontSize = AppleType.Footnote)
                         }
-                    Text(status, color = AppColors.Muted, fontSize = 12.sp)
+                    Text(status, color = AppColors.Muted, fontSize = AppleType.Footnote)
+                }
                 }
             }
         }
+    }
     }
 }
 

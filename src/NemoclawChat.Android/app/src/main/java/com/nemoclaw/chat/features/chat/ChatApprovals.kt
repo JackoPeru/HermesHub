@@ -43,6 +43,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -351,14 +354,14 @@ internal fun ChatApprovalCards(
     }
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         approvals.take(3).forEach { approval ->
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Elevated)) {
+            AppleGlass(shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Approvazione Hermes richiesta", fontWeight = FontWeight.SemiBold, color = Color.White, fontSize = 13.sp)
+                    Text("Approvazione Hermes richiesta", fontWeight = FontWeight.SemiBold, color = Color.White, fontSize = AppleType.RowTitleSmall)
                     Text(
                         listOf(approval.tool, approval.command, approval.description)
                             .filter { it.isNotBlank() }.joinToString(" — ").take(WorkLimits.TRUNC_300)
                             .ifBlank { "Il run attende una decisione." },
-                        color = AppColors.Muted, fontSize = 12.sp
+                        color = AppColors.Muted, fontSize = AppleType.Footnote
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         // Renderizza ESATTAMENTE le choices offerte dal server per questa richiesta.
@@ -413,7 +416,7 @@ internal fun ChatApprovalCards(
                                         }
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
-                                ) { Text(if (busy) "..." else choice, fontSize = 12.sp) }
+                                ) { Text(if (busy) "..." else choice, fontSize = AppleType.Footnote) }
                             } else {
                                 TextButton(
                                     enabled = resolving.isBlank(),
@@ -459,11 +462,13 @@ internal fun ChatApprovalCards(
                                         }
                                     },
                                     colors = ButtonDefaults.textButtonColors(contentColor = if (isDeny) AppColors.Error else AppColors.Accent)
-                                ) { Text(if (busy) "..." else choice, fontSize = 12.sp, color = if (isDeny) AppColors.Error else AppColors.Accent) }
+                                ) { Text(if (busy) "..." else choice, fontSize = AppleType.Footnote, color = if (isDeny) AppColors.Error else AppColors.Accent) }
                             }
                         }
                     }
-                    if (status.isNotBlank()) Text(status, color = AppColors.Muted, fontSize = 11.sp)
+                    AnimatedVisibility(visible = status.isNotBlank(), enter = AppleMotion.enter(), exit = AppleMotion.exit()) {
+                        Text(status, color = AppColors.Muted, fontSize = AppleType.Caption)
+                    }
                 }
             }
         }

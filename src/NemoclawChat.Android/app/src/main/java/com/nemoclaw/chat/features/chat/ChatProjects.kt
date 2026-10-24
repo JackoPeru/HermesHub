@@ -49,6 +49,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 import com.nemoclaw.chat.features.git.GitHubPr
 import com.nemoclaw.chat.features.git.diffLineKind
 import com.nemoclaw.chat.features.git.fetchPrDiff
@@ -145,6 +148,8 @@ internal fun ProjectsScreen(
         }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
+        AuroraBackground()
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
@@ -166,15 +171,16 @@ internal fun ProjectsScreen(
                     }
                 }
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Progetti", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Scegli un nome e, se serve, un system prompt personalizzato. Il resto e' automatico.", color = AppColors.Muted, fontSize = 14.sp)
+                    Text("Progetti", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
+                    Text("Scegli un nome e, se serve, un system prompt personalizzato. Il resto e' automatico.", color = AppColors.Muted, fontSize = AppleType.HeroSubtitle)
                 }
             }
         }
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("I TUOI PROGETTI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
+                    Text("I TUOI PROGETTI", color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
                     TextButton(
                         onClick = { edit(null); status = "Inserisci nome e system prompt facoltativo." },
                         colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
@@ -202,12 +208,14 @@ internal fun ProjectsScreen(
                     }
                 }
             }
+            }
         }
-        item { HorizontalDivider(color = AppColors.Border) }
+        item { HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp) }
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("DETTAGLIO PROGETTO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                Text(if (selected == null) "Nuovo progetto" else selected.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("DETTAGLIO PROGETTO", color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(if (selected == null) "Nuovo progetto" else selected.title, color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
                 if (selected?.id == settings.activeProjectId) Text("PROGETTO ATTIVO", color = AppColors.Success, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 SettingsField("Nome progetto", title, { title = it })
                 SettingsField("System prompt (facoltativo)", instructions, { instructions = it })
@@ -254,13 +262,14 @@ internal fun ProjectsScreen(
                         Text("Apri chat")
                     }
                 }
-                Text(status, color = AppColors.Muted, fontSize = 12.sp)
+                Text(status, color = AppColors.Muted, fontSize = AppleType.Footnote)
+            }
             }
         }
         item {
             val repo = prRepo()
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("PULL REQUEST", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("PULL REQUEST", color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 if (repo == null) {
                     Text("Repository non GitHub: niente PR da qui.", color = AppColors.Muted, fontSize = 12.sp)
                 } else {
@@ -276,7 +285,7 @@ internal fun ProjectsScreen(
                         ) { Text("Leggi PR") }
                     }
                     if (prMsg.isNotBlank()) {
-                        Text(prMsg, color = AppColors.Muted, fontSize = 12.sp)
+                        Text(prMsg, color = AppColors.Muted, fontSize = AppleType.Footnote)
                     }
                     prList.forEach { pr ->
                         Column(
@@ -289,12 +298,12 @@ internal fun ProjectsScreen(
                                 "#${pr.number} ${pr.title}",
                                 color = Color.White,
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp
+                                fontSize = AppleType.RowTitleSmall
                             )
                             Text(
                                 "${pr.state} · ${pr.author} · ${pr.createdAt}",
-                                color = AppColors.Muted,
-                                fontSize = 11.sp
+                                color = AppColors.Faint,
+                                fontSize = AppleType.Caption
                             )
                         }
                         if (prOpen == pr.number) {
@@ -334,6 +343,7 @@ internal fun ProjectsScreen(
                 }
             }
         }
+    }
     }
 }
 

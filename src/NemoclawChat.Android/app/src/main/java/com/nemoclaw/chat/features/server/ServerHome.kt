@@ -7,7 +7,12 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -205,12 +210,18 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
         diagnostics = runDiagnostics(settings, loadGatewaySecret(context))
     }
 
-    LazyColumn(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp)
+            .background(Color(0xFF0B0D10))
     ) {
+        AuroraBackground(intensity = 1f)
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(
@@ -223,8 +234,8 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                     Icon(Icons.Rounded.Dns, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
-                    Text("Hermes Server", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Dashboard Hermes Agent API: health, detailed health, models e capabilities.", color = AppColors.Muted, fontSize = 14.sp)
+                    Text("Hermes Server", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
+                        Text("Dashboard Hermes Agent API: health, detailed health, models e capabilities.", color = AppColors.Faint, fontSize = AppleType.Footnote)
                 }
             }
         }
@@ -245,10 +256,10 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             GpuComputeCard(context = context, settings = settings)
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+            AppleGlass(shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("AZIONI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                    Text(snapshot.statusMessage, color = AppColors.Muted)
+                    Text("AZIONI", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text(snapshot.statusMessage, color = AppColors.Faint)
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -267,7 +278,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(14.dp)
                         ) {
                             Text("Test Hermes", fontWeight = FontWeight.SemiBold)
                         }
@@ -295,9 +306,9 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+            AppleGlass(shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("CENTRO CONTROLLO SERVER", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text("CENTRO CONTROLLO SERVER", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     Text("Azioni tipizzate per Hermes, gateway, llama.cpp e Tailscale; nessuna shell arbitraria.", color = AppColors.Muted)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("hermes", "gateway", "llama", "tailscale").forEach { service ->
@@ -307,8 +318,8 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                                     containerColor = if (controlService == service) AppColors.Accent else AppColors.Panel,
                                     contentColor = if (controlService == service) Color(0xFF171009) else Color.White
                                 ),
-                                border = if (controlService == service) null else BorderStroke(1.dp, AppColors.Border),
-                                shape = RoundedCornerShape(10.dp)
+                                border = if (controlService == service) null else BorderStroke(0.5.dp, AppColors.Border),
+                                shape = RoundedCornerShape(14.dp)
                             ) { Text(service) }
                         }
                     }
@@ -322,19 +333,19 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("update", "rollback", "backup", "restore", "diagnostic").forEach { operation -> TextButton(onClick = { pendingMaintenanceAction = operation }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text(maintenanceLabels[operation] ?: operation) } }
                     }
-                    SelectionContainer { Text(controlOutput, color = AppColors.Muted, fontSize = 11.sp) }
+                    SelectionContainer { Text(controlOutput, color = AppColors.Faint, fontSize = AppleType.Caption) }
                 }
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+            AppleGlass(shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("DIAGNOSTICA GATEWAY", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text("DIAGNOSTICA GATEWAY", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     if (diagnostics.isEmpty()) {
                         Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Icon(Icons.Rounded.NetworkCheck, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(40.dp))
                             Text("Nessuna diagnostica eseguita.", color = Color.White, fontWeight = FontWeight.SemiBold)
-                            Text("Esegui un controllo per verificare Hermes.", color = AppColors.Muted, fontSize = 12.sp)
+                            Text("Esegui un controllo per verificare Hermes.", color = AppColors.Muted, fontSize = AppleType.Footnote)
                             Button(
                                 onClick = {
                                     scope.launch {
@@ -343,28 +354,28 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
-                                shape = RoundedCornerShape(12.dp)
+                                shape = RoundedCornerShape(14.dp)
                             ) { Text("Esegui diagnostica", fontWeight = FontWeight.SemiBold) }
                         }
                     } else {
                         diagnostics.forEach { check ->
                             Column(modifier = Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text("${if (check.ok) "OK" else "Errore"} - ${check.label}", color = if (check.ok) AppColors.Success else AppColors.Error, fontWeight = FontWeight.SemiBold)
-                                Text(check.endpoint, color = AppColors.Faint, fontSize = 11.sp)
-                                Text(check.message, color = AppColors.Muted, fontSize = 12.sp)
-                                if (!check.ok) Text("Azione: ${check.action}", color = AppColors.Accent, fontSize = 12.sp)
+                                Text(check.endpoint, color = AppColors.Faint, fontSize = AppleType.Caption)
+                                Text(check.message, color = AppColors.Muted, fontSize = AppleType.Footnote)
+                                if (!check.ok) Text("Azione: ${check.action}", color = AppColors.Accent, fontSize = AppleType.Footnote)
                             }
-                            HorizontalDivider(color = AppColors.Border)
+                            HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
                         }
                     }
                 }
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+            AppleGlass(shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("CAPABILITIES HERMES", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                    Text(wsProbe.detail, color = AppColors.Muted)
+                    Text("CAPABILITIES HERMES", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text(wsProbe.detail, color = AppColors.Faint)
                     Button(
                         onClick = {
                             wsProbe = wsProbe.copy(status = "Lettura capabilities...", detail = "Chiamata a /v1/capabilities e /v1/models.")
@@ -381,14 +392,18 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(14.dp)
                     ) {
                         Text("Leggi capabilities", fontWeight = FontWeight.SemiBold)
                     }
-                    if (wsProbe.capabilityLines.isNotEmpty()) {
+                    AnimatedVisibility(
+                        visible = wsProbe.capabilityLines.isNotEmpty(),
+                        enter = AppleMotion.enter(),
+                        exit = AppleMotion.exit()
+                    ) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             wsProbe.capabilityLines.forEach { line ->
-                                Text(line, color = AppColors.Muted, fontSize = 12.sp)
+                                Text(line, color = AppColors.Faint, fontSize = AppleType.Footnote)
                             }
                         }
                     }
@@ -396,19 +411,19 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             }
         }
         item {
-        Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+        AppleGlass(shape = RoundedCornerShape(20.dp)) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("TELEFONO SICURO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("TELEFONO SICURO", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 Text(
                     if (deviceIdState == null) deviceStatus
                     else "Registrato: ${deviceIdState!!.take(12)}… · $deviceStatus",
                     color = AppColors.Muted,
-                    fontSize = 13.sp
+                    fontSize = AppleType.RowTitleSmall
                 )
                 Text(
                     "La chiave firma ogni azione server dopo impronta o PIN. Senza firma il server rifiuta (appena un telefono e' registrato).",
                     color = AppColors.Faint,
-                    fontSize = 12.sp
+                    fontSize = AppleType.Footnote
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
@@ -477,7 +492,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                         colors = ButtonDefaults.buttonColors(containerColor = AppColors.Error, contentColor = Color.White)
                     ) { Text("Revoca") }
                 }
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -487,13 +502,17 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                         "Telefoni registrati",
                         color = Color.White,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp,
+                        fontSize = AppleType.RowTitleSmall,
                         modifier = Modifier.weight(1f)
                     )
                     TextButton(onClick = { refreshDevices() }) { Text("Vedi", color = AppColors.Accent) }
                 }
-                if (devicesMsg.isNotBlank()) {
-                    Text(devicesMsg, color = AppColors.Muted, fontSize = 12.sp)
+                AnimatedVisibility(
+                    visible = devicesMsg.isNotBlank(),
+                    enter = AppleMotion.enter(),
+                    exit = AppleMotion.exit()
+                ) {
+                    Text(devicesMsg, color = AppColors.Faint, fontSize = AppleType.Footnote)
                 }
                 registeredDevices.forEach { device ->
                     Row(
@@ -505,12 +524,12 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                             Text(
                                 (device.label.ifBlank { device.id }) + if (device.revoked) " (revocato)" else "",
                                 color = if (device.revoked) AppColors.Muted else Color.White,
-                                fontSize = 13.sp
+                                fontSize = AppleType.RowTitleSmall
                             )
                             Text(
                                 device.id + if (device.hasToken) " · push" else "",
                                 color = AppColors.Faint,
-                                fontSize = 11.sp
+                                fontSize = AppleType.Caption
                             )
                         }
                         if (!device.revoked) {
@@ -519,19 +538,20 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                             }
                         }
                     }
+                    HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
                 }
             }
         }
     }
     item {
-        Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+        AppleGlass(shape = RoundedCornerShape(20.dp)) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("NOTIFICHE PUSH", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                Text(pushStatus, color = AppColors.Muted, fontSize = 13.sp)
+                Text("NOTIFICHE PUSH", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(pushStatus, color = AppColors.Faint, fontSize = AppleType.RowTitleSmall)
                 Text(
                     "Avvisa a telefono spento quando un job finisce. Il server manda solo il segnale, mai i contenuti.",
                     color = AppColors.Faint,
-                    fontSize = 12.sp
+                    fontSize = AppleType.Footnote
                 )
                 Button(
                     onClick = {
@@ -622,6 +642,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                 ) { Text("Attiva notifiche") }
             }
         }
+        }
     }
     }
     pendingControlAction?.let { (service, action) ->
@@ -646,7 +667,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                         containerColor = if (action == "restart") AppColors.Error else AppColors.Accent,
                         contentColor = if (action == "restart") Color.White else Color(0xFF171009)
                     ),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(14.dp)
                 ) { Text("Conferma") }
             },
             dismissButton = { TextButton(onClick = { pendingControlAction = null }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Annulla") } }
@@ -675,7 +696,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                         containerColor = if (operation == "update" || operation == "rollback" || operation == "restore") AppColors.Error else AppColors.Accent,
                         contentColor = if (operation == "update" || operation == "rollback" || operation == "restore") Color.White else Color(0xFF171009)
                     ),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(14.dp)
                 ) { Text("Conferma") }
             },
             dismissButton = { TextButton(onClick = { pendingMaintenanceAction = null }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Annulla") } }

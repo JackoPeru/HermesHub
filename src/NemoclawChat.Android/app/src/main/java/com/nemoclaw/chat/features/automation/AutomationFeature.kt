@@ -249,6 +249,8 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -317,16 +319,16 @@ internal fun AutomationHeader(icon: ImageVector, title: String, subtitle: String
             Icon(icon, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(20.dp))
         }
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+            Text(title, color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.height(2.dp))
-            Text(subtitle, color = AppColors.Muted, fontSize = 14.sp)
+            Text(subtitle, color = AppColors.Muted, fontSize = AppleType.HeroSubtitle)
         }
     }
 }
 
 @Composable
 internal fun AutomationSectionLabel(text: String) {
-    Text(text.uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+    Text(text.uppercase(), color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
 }
 
 @Composable
@@ -456,6 +458,8 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
         status = result.second
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
+        AuroraBackground()
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -588,7 +592,7 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                         Text("Duplica")
                     }
                 }
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
             }
         }
         item {
@@ -607,7 +611,7 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Aggiorna")
                 }
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
             }
         }
         if (jobs.isNotEmpty()) {
@@ -646,6 +650,7 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                 onDelete = { pendingDeleteJob = job }
             )
         }
+    }
     }
 
     pendingDeleteJob?.let { target ->
@@ -690,10 +695,10 @@ internal fun CronCard(
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             AutomationRowTile(Icons.Rounded.Tune)
             Column(modifier = Modifier.weight(1f)) {
-                Text(job.name, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-                Text(job.schedule.ifBlank { job.id }, color = AppColors.Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(job.name, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
+                Text(job.schedule.ifBlank { job.id }, color = AppColors.Faint, fontSize = AppleType.Footnote, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text(if (job.enabled) "Attivo" else "Pausa", color = if (job.enabled) AppColors.Accent else AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(if (job.enabled) "Attivo" else "Pausa", color = if (job.enabled) AppColors.Accent else AppColors.Muted, fontSize = AppleType.Footnote, fontWeight = FontWeight.SemiBold)
         }
         CronDetail("ID", job.id)
         CronDetail("Programmazione", job.schedule)
@@ -713,7 +718,7 @@ internal fun CronCard(
         CronDetail("Toolset abilitati", job.enabledToolsets)
         CronDetail("Origine", job.origin)
         CronDetail("Ultimo output", job.lastStatus)
-        Text(job.prompt.ifBlank { "Prompt non disponibile." }, color = Color.White, fontSize = 14.sp)
+        Text(job.prompt.ifBlank { "Prompt non disponibile." }, color = Color.White, fontSize = AppleType.RowTitleSmall)
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -732,7 +737,7 @@ internal fun CronCard(
             }
             TextButton(onClick = onDelete, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Error)) { Text("Elimina") }
         }
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
     }
 }
 
@@ -764,6 +769,8 @@ internal fun NotificationsScreen(context: Context, settings: AppSettings, onOpen
         status = result.second
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
+        AuroraBackground()
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
@@ -815,7 +822,7 @@ internal fun NotificationsScreen(context: Context, settings: AppSettings, onOpen
                     Switch(dnd, { dnd = it; context.getSharedPreferences("notification_settings", Context.MODE_PRIVATE).edit { putBoolean("dnd", it) } }); Text("Non disturbare", color = AppColors.Muted)
                 }
                 Text("Badge: ${items.count { it.readAt <= 0 && !it.archived }} non lette · ${items.count { it.priority.equals("Critica", true) && !it.archived }} critiche", color = AppColors.Muted, fontSize = 12.sp)
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
             }
         }
         if (items.isEmpty()) {
@@ -865,6 +872,7 @@ internal fun NotificationsScreen(context: Context, settings: AppSettings, onOpen
             )
         }
     }
+    }
 }
 
 @Composable
@@ -874,13 +882,13 @@ internal fun NotificationCard(item: HubNotification, onRead: () -> Unit, onOpenC
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             AutomationRowTile(Icons.Rounded.Notifications)
             Column(modifier = Modifier.weight(1f)) {
-                Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-                Text("${item.category} · ${item.priority} · ${formatDateTime(item.createdAt)}", color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
+                Text("${item.category} · ${item.priority} · ${formatDateTime(item.createdAt)}", color = AppColors.Faint, fontSize = AppleType.Footnote, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text(if (unread) "Nuova" else "Letta", color = if (unread) AppColors.Accent else AppColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(if (unread) "Nuova" else "Letta", color = if (unread) AppColors.Accent else AppColors.Muted, fontSize = AppleType.Footnote, fontWeight = FontWeight.SemiBold)
         }
-        Text("${item.category} · ${item.priority} · ${item.source} · ${formatDateTime(item.createdAt)}", color = AppColors.Faint, fontSize = 12.sp)
-        Text(item.message, color = Color.White, fontSize = 14.sp)
+        Text("${item.category} · ${item.priority} · ${item.source} · ${formatDateTime(item.createdAt)}", color = AppColors.Faint, fontSize = AppleType.Footnote)
+        Text(item.message, color = Color.White, fontSize = AppleType.RowTitleSmall)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             TextButton(onClick = onOpenChat, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Apri chat") }
             TextButton(onClick = onRead, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Letta") }
@@ -890,7 +898,7 @@ internal fun NotificationCard(item: HubNotification, onRead: () -> Unit, onOpenC
             }
             if (item.fileUrl.isNotBlank() || item.projectId.isNotBlank() || item.automationId.isNotBlank() || item.runId.isNotBlank()) TextButton(onClick = onReference, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Riferimento") }
         }
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
     }
 }
 
@@ -910,6 +918,8 @@ internal fun ContinuityScreen(context: Context, settings: AppSettings, onOpenCon
         if (uri != null) scope.launch { status = uploadContinuityFile(context, settings, uri, deviceId, loadGatewaySecret(context)); refresh++ }
     }
     LaunchedEffect(settings.gatewayUrl, refresh) { val loaded = loadContinuityItems(settings, loadGatewaySecret(context)); items = loaded.first; status = loaded.second }
+    Box(modifier = Modifier.fillMaxSize()) {
+        AuroraBackground()
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         item {
             AutomationHeader(
@@ -923,7 +933,7 @@ internal fun ContinuityScreen(context: Context, settings: AppSettings, onOpenCon
                 AutomationSectionLabel("Questo dispositivo")
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     AutomationRowTile(Icons.Rounded.Sync)
-                    Text("$deviceId · Android", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.weight(1f))
+                    Text("$deviceId · Android", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle, modifier = Modifier.weight(1f))
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(
@@ -960,7 +970,7 @@ internal fun ContinuityScreen(context: Context, settings: AppSettings, onOpenCon
                     ) { Text("Invia file") }
                 }
                 Text(status, color = AppColors.Muted, fontSize = 12.sp)
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
             }
         }
         if (items.isEmpty()) {
@@ -999,7 +1009,7 @@ internal fun ContinuityScreen(context: Context, settings: AppSettings, onOpenCon
                     if (item.type == "continuity.clipboard") TextButton(onClick = { context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Hermes Hub", item.value)) }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Copia") }
                     if (item.fileUrl.isNotBlank()) TextButton(onClick = { resolveMediaUrl(settings, item.fileUrl, allowExternalMedia = true)?.let { url -> context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) } }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Apri file") }
                 }
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
             }
         }
         item {
@@ -1008,6 +1018,7 @@ internal fun ContinuityScreen(context: Context, settings: AppSettings, onOpenCon
             Spacer(modifier = Modifier.height(4.dp))
             if (conflicts.isEmpty()) Text("Nessun conflitto.", color = AppColors.Muted, fontSize = 14.sp) else conflicts.forEach { (type, values) -> Text("$type: modifiche concorrenti da ${values.map { it.device }.distinct().joinToString()}; prevale la più recente.", color = AppColors.Muted, fontSize = 14.sp) }
         }
+    }
     }
 }
 
@@ -1150,6 +1161,8 @@ internal data class AuditItem(val id: String, val timestamp: Long, val event: St
 internal fun AuditScreen(context: Context, settings: AppSettings) {
     var project by rememberSaveable { mutableStateOf("") }; var run by rememberSaveable { mutableStateOf("") }; var tool by rememberSaveable { mutableStateOf("") }; var device by rememberSaveable { mutableStateOf("") }; var risk by rememberSaveable { mutableStateOf("") }; var refresh by remember { mutableIntStateOf(0) }; var items by remember { mutableStateOf<List<AuditItem>>(emptyList()) }; var status by remember { mutableStateOf("Carico audit...") }
     LaunchedEffect(settings.gatewayUrl, refresh) { val loaded = loadAuditItems(settings, project, run, tool, device, risk, loadGatewaySecret(context)); items = loaded.first; status = loaded.second }
+    Box(modifier = Modifier.fillMaxSize()) {
+        AuroraBackground()
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         item {
             AutomationHeader(
@@ -1174,7 +1187,7 @@ internal fun AuditScreen(context: Context, settings: AppSettings) {
                     ) { Text("Applica", fontWeight = FontWeight.SemiBold) }
                 }
                 Text(status, color = AppColors.Muted, fontSize = 12.sp)
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
             }
         }
         if (items.isEmpty()) {
@@ -1198,15 +1211,16 @@ internal fun AuditScreen(context: Context, settings: AppSettings) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     AutomationRowTile(Icons.Rounded.ManageSearch)
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("${formatDateTime(item.timestamp)} · ${item.event}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text("rischio ${item.risk}".uppercase(), color = if (isHighRisk) AppColors.Error else AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text("${formatDateTime(item.timestamp)} · ${item.event}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text("rischio ${item.risk}".uppercase(), color = if (isHighRisk) AppColors.Error else AppColors.Accent, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     }
                 }
-                Text(item.summary, color = Color.White, fontSize = 14.sp)
-                Text("Progetto ${item.project} · Run ${item.run} · Tool ${item.tool} · Device ${item.device} · ${item.status}", color = AppColors.Muted, fontSize = 11.sp)
-                HorizontalDivider(color = AppColors.Border)
+                Text(item.summary, color = Color.White, fontSize = AppleType.RowTitleSmall)
+                Text("Progetto ${item.project} · Run ${item.run} · Tool ${item.tool} · Device ${item.device} · ${item.status}", color = AppColors.Faint, fontSize = AppleType.Caption)
+                HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
             }
         }
+    }
     }
 }
 

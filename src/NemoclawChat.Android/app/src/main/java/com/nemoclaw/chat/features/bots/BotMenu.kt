@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.DriveFileMove
 import androidx.compose.material.icons.rounded.Add
@@ -45,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nemoclaw.chat.ui.apple.AppleType
 import androidx.core.content.edit
 import com.nemoclaw.chat.AppColors
 import com.nemoclaw.chat.isBotConversationId
@@ -347,7 +349,7 @@ private fun BotMenuItem(
     onClick: () -> Unit
 ) {
     DropdownMenuItem(
-        text = { Text(label, color = if (enabled) Color.White else AppColors.Faint, fontSize = 14.sp) },
+        text = { Text(label, color = if (enabled) Color.White else AppColors.Faint, fontSize = AppleType.RowTitle) },
         leadingIcon = icon,
         trailingIcon = trailing,
         enabled = enabled,
@@ -359,7 +361,8 @@ private fun BotMenuItem(
 internal fun BotCardMenu(bot: HermesBotItem, host: BotMenuHost) {
     DropdownMenu(
         expanded = host.expanded,
-        onDismissRequest = host.onDismiss
+        onDismissRequest = host.onDismiss,
+        shape = RoundedCornerShape(20.dp)
     ) {
         if (host.page == 1) {
             BotMenuItem(
@@ -367,7 +370,7 @@ internal fun BotCardMenu(bot: HermesBotItem, host: BotMenuHost) {
                 icon = { Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AppColors.Muted) },
                 onClick = { host.onPage(0) }
             )
-            HorizontalDivider(color = AppColors.Border)
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
             host.sections.forEach { name ->
                 BotMenuItem(
                     label = name,
@@ -403,7 +406,7 @@ internal fun BotCardMenu(bot: HermesBotItem, host: BotMenuHost) {
             } else null,
             onClick = host.onToggleAutoScreen
         )
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
         BotMenuItem(
             label = if (host.pinned) "Togli dai fissati" else "Fissa in alto",
             icon = { Icon(Icons.Rounded.PushPin, contentDescription = null, tint = Color.White) },
@@ -420,7 +423,7 @@ internal fun BotCardMenu(bot: HermesBotItem, host: BotMenuHost) {
             },
             onClick = host.onToggleHide
         )
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
         BotMenuItem(
             label = "Modifica…",
             icon = { Icon(Icons.Rounded.Edit, contentDescription = null, tint = Color.White) },
@@ -436,7 +439,7 @@ internal fun BotCardMenu(bot: HermesBotItem, host: BotMenuHost) {
             icon = { Icon(Icons.Rounded.ContentCopy, contentDescription = null, tint = Color.White) },
             onClick = host.onDuplicate
         )
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
         BotMenuItem(
             label = "Sposta in sezione",
             icon = { Icon(Icons.AutoMirrored.Rounded.DriveFileMove, contentDescription = null, tint = Color.White) },
@@ -456,7 +459,8 @@ internal fun BotSectionNameDialog(    initial: String = "",
     var name by remember(initial) { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Nuova sezione", color = Color.White) },
+        shape = RoundedCornerShape(20.dp),
+        title = { Text("Nuova sezione", color = Color.White, fontSize = AppleType.ScreenTitle) },
         text = {
             OutlinedTextField(
                 value = name,
@@ -485,7 +489,7 @@ internal fun BotSectionHeader(name: String) {
     Text(
         name.uppercase(),
         color = AppColors.Accent,
-        fontSize = 12.sp,
+        fontSize = AppleType.Eyebrow,
         fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
         letterSpacing = 1.sp,
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
@@ -501,11 +505,11 @@ internal fun BotHiddenRow(hiddenCount: Int, showing: Boolean, onToggle: () -> Un
         Text(
             if (showing) "$hiddenCount bot nascosti (visibili)" else "$hiddenCount bot nascosti",
             color = AppColors.Muted,
-            fontSize = 12.sp,
+            fontSize = AppleType.Footnote,
             modifier = Modifier.weight(1f)
         )
         TextButton(onClick = onToggle, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text(if (showing) "Nascondi" else "Mostra", color = AppColors.Accent, fontSize = 13.sp)
+            Text(if (showing) "Nascondi" else "Mostra", color = AppColors.Accent, fontSize = AppleType.RowTitleSmall)
         }
     }
 }
@@ -547,7 +551,8 @@ private val BotDeleteRed = AppColors.Error
 internal fun BotSidebarMenu(bot: HermesBotItem, host: BotSidebarMenuHost) {
     DropdownMenu(
         expanded = host.expanded,
-        onDismissRequest = host.onDismiss
+        onDismissRequest = host.onDismiss,
+        shape = RoundedCornerShape(20.dp)
     ) {
         if (host.page == 1) {
             BotMenuItem(
@@ -555,7 +560,7 @@ internal fun BotSidebarMenu(bot: HermesBotItem, host: BotSidebarMenuHost) {
                 icon = { Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AppColors.Muted) },
                 onClick = { host.onPage(0) }
             )
-            HorizontalDivider(color = AppColors.Border)
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
             host.sections.forEach { name ->
                 BotMenuItem(
                     label = name,
@@ -591,7 +596,7 @@ internal fun BotSidebarMenu(bot: HermesBotItem, host: BotSidebarMenuHost) {
             } else null,
             onClick = host.onToggleAutoScreen
         )
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
         BotMenuItem(
             label = if (host.pinned) "Togli dai fissati" else "Fissa in alto",
             icon = { Icon(Icons.Rounded.PushPin, contentDescription = null, tint = Color.White) },
@@ -608,7 +613,7 @@ internal fun BotSidebarMenu(bot: HermesBotItem, host: BotSidebarMenuHost) {
             },
             onClick = host.onToggleHide
         )
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
         BotMenuItem(
             label = "Modifica…",
             icon = { Icon(Icons.Rounded.Edit, contentDescription = null, tint = Color.White) },
@@ -642,7 +647,7 @@ internal fun BotSidebarMenu(bot: HermesBotItem, host: BotSidebarMenuHost) {
             trailing = { Icon(Icons.Rounded.ChevronRight, contentDescription = "Sotto menu", tint = AppColors.Muted) },
             onClick = { host.onPage(1) }
         )
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
         BotMenuItem(
             label = "Elimina",
             icon = { Icon(Icons.Rounded.Delete, contentDescription = null, tint = BotDeleteRed) },
@@ -675,7 +680,8 @@ internal fun BotRecentSessionsDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Sessioni di ${bot.displayName}", color = Color.White) },
+        shape = RoundedCornerShape(20.dp),
+        title = { Text("Sessioni di ${bot.displayName}", color = Color.White, fontSize = AppleType.ScreenTitle) },
         text = {
             when {
                 sessions == null -> Text("Carico le sessioni…", color = AppColors.Muted)
@@ -703,7 +709,7 @@ internal fun BotRecentSessionsDialog(
                                 Text(
                                     recentSessionLabel(session),
                                     color = Color.White,
-                                    fontSize = 14.sp,
+                                    fontSize = AppleType.RowTitle,
                                     maxLines = 1,
                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )

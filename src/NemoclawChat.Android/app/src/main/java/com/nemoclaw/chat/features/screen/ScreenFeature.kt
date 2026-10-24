@@ -35,6 +35,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -69,6 +70,9 @@ import com.nemoclaw.chat.loadGpuAppSecret
 import com.nemoclaw.chat.postScreenRelease
 import com.nemoclaw.chat.postScreenTakeover
 import com.nemoclaw.chat.postScreenTicket
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -149,7 +153,7 @@ internal fun ScreenViewer(
         Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 CircularProgressIndicator(color = AppColors.Accent)
-                Text("Connessione allo schermo…", color = AppColors.Muted, fontSize = 13.sp)
+                Text("Connessione allo schermo…", color = AppColors.Muted, fontSize = AppleType.RowTitleSmall)
             }
         }
         return
@@ -312,14 +316,18 @@ internal fun ScreenScreen(
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().background(AppColors.Background).padding(horizontal = 20.dp, vertical = 16.dp),
+        modifier = Modifier.fillMaxSize().background(Color.Black).padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
-        Row(
+        AppleGlass(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            shape = RoundedCornerShape(28.dp)
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
             if (onBack != null) {
                 IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Torna ai bot", tint = Color.White)
@@ -332,7 +340,7 @@ internal fun ScreenScreen(
                 Icon(Icons.Rounded.Computer, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(20.dp))
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text("Schermo bot", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+                Text("Schermo bot", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
                 val st = status
                 Text(
                     when {
@@ -343,15 +351,20 @@ internal fun ScreenScreen(
                         else -> "Bot is in control"
                     },
                     color = if (st?.humanInControl == true) Color(0xFFFF7B8E) else AppColors.Muted,
-                    fontSize = 14.sp
+                    fontSize = AppleType.HeroSubtitle
                 )
             }
             IconButton(onClick = { reloadNonce++ }) {
                 Icon(Icons.Rounded.Refresh, contentDescription = "Ricarica", tint = Color.White)
             }
+            }
         }
-        Row(
+        AppleGlass(
             modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(28.dp)
+        ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -377,6 +390,7 @@ internal fun ScreenScreen(
                 ) { Text("Take over") }
             }
         }
+        }
         Column(
             modifier = Modifier.fillMaxWidth().weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -384,13 +398,13 @@ internal fun ScreenScreen(
             Text(
                 "Viewer".uppercase(java.util.Locale.ROOT),
                 color = AppColors.Accent,
-                fontSize = 12.sp,
+                fontSize = AppleType.Eyebrow,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.sp
             )
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color.Black),
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedCornerShape(20.dp),
                 modifier = Modifier.fillMaxWidth().weight(1f)
             ) {
                 val st = status
@@ -408,9 +422,15 @@ internal fun ScreenScreen(
                         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
                                 if (status == null) "Connessione al gateway…" else "Schermo spento: avvialo dal bot o via CLI.",
-                                color = AppColors.Muted, fontSize = 13.sp
+                                color = AppColors.Muted, fontSize = AppleType.RowTitleSmall
                             )
-                            if (viewerState.isNotBlank()) Text(viewerState, color = AppColors.Faint, fontSize = 11.sp)
+                            AnimatedVisibility(
+                                visible = viewerState.isNotBlank(),
+                                enter = AppleMotion.enter(),
+                                exit = AppleMotion.exit()
+                            ) {
+                                if (viewerState.isNotBlank()) Text(viewerState, color = AppColors.Faint, fontSize = AppleType.Caption)
+                            }
                         }
                     }
                 }
@@ -420,13 +440,13 @@ internal fun ScreenScreen(
             Text(
                 "Note".uppercase(java.util.Locale.ROOT),
                 color = AppColors.Accent,
-                fontSize = 12.sp,
+                fontSize = AppleType.Eyebrow,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.sp
             )
             Text(
                 "Guardando non disturbi il bot. Take over mette in pausa i suoi tool schermo; Hand back (o chiudere) restituisce il controllo.",
-                color = AppColors.Faint, fontSize = 11.sp
+                color = AppColors.Faint, fontSize = AppleType.Caption
             )
         }
     }

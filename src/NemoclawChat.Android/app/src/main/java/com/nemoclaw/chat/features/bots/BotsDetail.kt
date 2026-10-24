@@ -2,6 +2,8 @@ package com.nemoclaw.chat.features.bots
 
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +43,9 @@ import com.nemoclaw.chat.saveBotAutoApprove
 import com.nemoclaw.chat.core.WorkLimits
 import com.nemoclaw.chat.loadBotAutoApproveMap
 import com.nemoclaw.chat.saveBotAutoApprove
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 
 private enum class BotDetailTab(val label: String) { Chat("Chat"), Screen("Screen"), Info("Info") }
 
@@ -64,17 +69,19 @@ internal fun BotDetailScreen(
     var autoMode by remember(bot.identityKey) {
         mutableStateOf(loadBotAutoApproveMap(appContext)[bot.profile] ?: "off")
     }
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+    Box(modifier = Modifier.fillMaxSize().background(AppColors.Background)) {
+        AuroraBackground()
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = Color.White)
             }
             BotAvatar(bot.displayName, bot.profile, 40.dp)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(bot.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
+                Text(bot.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.ScreenTitle)
                 Text(
                     "@${bot.handle} · " + if (screenStatus?.running == true) "schermo live" else "schermo spento",
-                    color = AppColors.Muted, fontSize = 11.sp
+                    color = AppColors.Faint, fontSize = AppleType.Footnote
                 )
             }
         }
@@ -94,12 +101,13 @@ internal fun BotDetailScreen(
                     }
                 }
             }
-            HorizontalDivider(color = AppColors.Border)
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
         }
         when (tab) {
             BotDetailTab.Chat -> {
+                AnimatedVisibility(visible = true, enter = AppleMotion.enter(), exit = AppleMotion.exit()) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (bot.description.isNotBlank()) Text(bot.description, color = AppColors.Muted, fontSize = 14.sp)
+                    if (bot.description.isNotBlank()) Text(bot.description, color = AppColors.Muted, fontSize = AppleType.HeroSubtitle)
                     Button(
                         // Delega all'handler esterno (singola POST persistente):
                         // prima faceva POST qui + POST fuori (doppia sessione).
@@ -108,7 +116,7 @@ internal fun BotDetailScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                     ) { Text("Apri Bot Chat", color = Color(0xFF171009)) }
-                    Text("Auto-approvazione run di ${bot.displayName}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    Text("Auto-approvazione run di ${bot.displayName}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         for ((label, value) in listOf("Chiedi" to WorkLimits.AUTO_APPROVE_OFF, "Sessione" to WorkLimits.AUTO_APPROVE_SESSION, "Sempre" to WorkLimits.AUTO_APPROVE_ALWAYS)) {
                             val selected = autoMode == value
@@ -126,7 +134,8 @@ internal fun BotDetailScreen(
                             }
                         }
                     }
-                    Text("Mai deny automatico; ogni auto-approvazione resta visibile.", color = AppColors.Faint, fontSize = 12.sp)
+                    Text("Mai deny automatico; ogni auto-approvazione resta visibile.", color = AppColors.Faint, fontSize = AppleType.Footnote)
+                }
                 }
             }
             BotDetailTab.Screen -> {
@@ -135,31 +144,34 @@ internal fun BotDetailScreen(
                 }
             }
             BotDetailTab.Info -> {
+                AnimatedVisibility(visible = true, enter = AppleMotion.enter(), exit = AppleMotion.exit()) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("PROFILO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                        Text(bot.profile, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("PROFILO", color = AppColors.Accent, fontSize = AppleType.Eyebrow, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text(bot.profile, color = Color.White, fontSize = AppleType.RowTitle, fontWeight = FontWeight.SemiBold)
                     }
-                    HorizontalDivider(color = AppColors.Border)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("CONNESSIONE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                        Text(bot.connectionLabel, color = Color.White, fontSize = 14.sp)
+                        Text("CONNESSIONE", color = AppColors.Accent, fontSize = AppleType.Eyebrow, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text(bot.connectionLabel, color = Color.White, fontSize = AppleType.RowTitle)
                     }
-                    HorizontalDivider(color = AppColors.Border)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                     if (bot.description.isNotBlank()) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("DESCRIZIONE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                            Text(bot.description, color = AppColors.Muted, fontSize = 14.sp)
+                            Text("DESCRIZIONE", color = AppColors.Accent, fontSize = AppleType.Eyebrow, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Text(bot.description, color = AppColors.Muted, fontSize = AppleType.HeroSubtitle)
                         }
-                        HorizontalDivider(color = AppColors.Border)
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("ROUTINE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text("ROUTINE", color = AppColors.Accent, fontSize = AppleType.Eyebrow, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                         TextButton(onClick = onOpenCron, modifier = Modifier.heightIn(min = 48.dp)) { Text("Routine e Cron", color = AppColors.Accent) }
                         TextButton(onClick = onOpenScreen, modifier = Modifier.heightIn(min = 48.dp)) { Text("Apri schermo live", color = AppColors.Accent) }
                     }
                 }
+                }
             }
+        }
         }
     }
 }

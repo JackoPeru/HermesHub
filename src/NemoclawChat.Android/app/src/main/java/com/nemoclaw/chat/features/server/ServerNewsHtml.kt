@@ -36,7 +36,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import com.nemoclaw.chat.ui.apple.AppleType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -106,14 +109,14 @@ internal fun NewsHtmlScreen(context: Context, settings: AppSettings, item: NewsH
                         }
                     }
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(status, color = AppColors.Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(item.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(status, color = AppColors.Faint, fontSize = AppleType.Footnote, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     IconButton(onClick = { fullScreen = true }) {
                         Icon(Icons.Rounded.CropFree, contentDescription = "Apri a schermo intero", tint = AppColors.Accent)
                     }
                 }
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = ::createNewsWebView,
@@ -139,7 +142,10 @@ internal fun NewsHtmlScreen(context: Context, settings: AppSettings, item: NewsH
                 TextButton(
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .padding(16.dp),
+                        .padding(16.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color.White.copy(alpha = 0.14f))
+                        .border(0.5.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(24.dp)),
                     onClick = { fullScreen = false },
                     colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
                 ) {

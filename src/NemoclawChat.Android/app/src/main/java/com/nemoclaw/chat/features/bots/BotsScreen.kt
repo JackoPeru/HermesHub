@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -86,6 +87,9 @@ import com.nemoclaw.chat.loadBotAutoApproveMap
 import com.nemoclaw.chat.loadGpuAppSecret
 import com.nemoclaw.chat.saveBotAutoApprove
 import com.nemoclaw.chat.core.WorkLimits
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 import com.nemoclaw.chat.loadBotAutoApproveMap
 import com.nemoclaw.chat.saveBotAutoApprove
 import com.nemoclaw.chat.saveGatewayConnectionSecret
@@ -587,7 +591,9 @@ internal fun BotsScreen(
         return
     }
 
-    LazyColumn(
+    Box(modifier = Modifier.fillMaxSize().background(AppColors.Background)) {
+        AuroraBackground()
+        LazyColumn(
         state = botListState,
         modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
         contentPadding = PaddingValues(bottom = 24.dp),
@@ -613,8 +619,8 @@ internal fun BotsScreen(
                         )
                     }
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("Bot Hermes", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Profili reali con configurazione, memoria, skill e credenziali separate. Le routine bot richiedono multiplexing attivo.", color = AppColors.Muted, fontSize = 14.sp)
+                        Text("Bot Hermes", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
+                        Text("Profili reali con configurazione, memoria, skill e credenziali separate. Le routine bot richiedono multiplexing attivo.", color = AppColors.Muted, fontSize = AppleType.HeroSubtitle)
                     }
                 }
                 Row(
@@ -644,7 +650,7 @@ internal fun BotsScreen(
                     IconButton(onClick = { refreshNonce++ }) { Icon(Icons.Rounded.Refresh, contentDescription = "Aggiorna bot", tint = Color.White) }
                 }
             }
-            Text(status, color = AppColors.Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp).semantics { liveRegion = LiveRegionMode.Polite })
+            Text(status, color = AppColors.Muted, fontSize = AppleType.Footnote, modifier = Modifier.padding(top = 12.dp).semantics { liveRegion = LiveRegionMode.Polite })
         }
         // Loading: roster null = primo fetch in corso (skeleton/progress +
         // liveRegion per screen reader). Distinto da empty/error.
@@ -670,12 +676,12 @@ internal fun BotsScreen(
                     LinearProgressIndicator(
                         modifier = Modifier.fillMaxWidth(),
                         color = AppColors.Accent,
-                        trackColor = AppColors.Border
+                        trackColor = Color.White.copy(alpha = 0.08f)
                     )
                     Text(
                         "Carico il roster reale Hermes…",
                         color = Color.White,
-                        fontSize = 17.sp,
+                        fontSize = AppleType.ScreenTitle,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
                     )
@@ -687,7 +693,7 @@ internal fun BotsScreen(
         if (sourceFailures.isNotEmpty()) {
             item(key = "sources-error") {
                 Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Alcune fonti Hermes non rispondono.", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Alcune fonti Hermes non rispondono.", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
                     Text(
                         "Fonti con errore: ${sourceFailures.joinToString(", ")}.",
                         color = AppColors.Muted,
@@ -697,8 +703,8 @@ internal fun BotsScreen(
                     TextButton(
                         onClick = { refreshNonce++ },
                         modifier = Modifier.heightIn(min = 48.dp)
-                    ) { Text("Riprova", color = AppColors.Accent) }
-                    HorizontalDivider(color = AppColors.Border)
+                    ) {                     Text("Riprova", color = AppColors.Accent) }
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                 }
             }
         }
@@ -713,7 +719,7 @@ internal fun BotsScreen(
         }
         item {
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("ENDPOINT HERMES", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("ENDPOINT HERMES", color = AppColors.Accent, fontSize = AppleType.Eyebrow, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 connections.items.forEach { connection ->
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -721,11 +727,11 @@ internal fun BotsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(connection.label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text(connection.label, color = Color.White, fontSize = AppleType.RowTitle, fontWeight = FontWeight.SemiBold)
                             Text(
                                 if (connection.endpoint.isBlank()) "Endpoint non configurato" else connection.endpoint,
-                                color = AppColors.Muted,
-                                fontSize = 11.sp
+                                color = AppColors.Faint,
+                                fontSize = AppleType.Footnote
                             )
                         }
                         if (!connection.isPrimary) {
@@ -734,7 +740,7 @@ internal fun BotsScreen(
                             Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = AppColors.Faint)
                         }
                     }
-                    HorizontalDivider(color = AppColors.Border)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                 }
                 connections.warnings.forEach { warning ->
                     Text(warning, color = AppColors.Muted, fontSize = 12.sp)
@@ -743,8 +749,8 @@ internal fun BotsScreen(
         }
         item {
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("GRUPPI HERMES", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                Text("Seleziona da 2 a 6 bot anche su connessioni diverse. Max 3 turni e 10 risposte per turno.", color = AppColors.Muted, fontSize = 14.sp)
+                Text("GRUPPI HERMES", color = AppColors.Accent, fontSize = AppleType.Eyebrow, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("Seleziona da 2 a 6 bot anche su connessioni diverse. Max 3 turni e 10 risposte per turno.", color = AppColors.Muted, fontSize = AppleType.HeroSubtitle)
                 OutlinedTextField(
                     value = groupNameInput,
                     onValueChange = { groupNameInput = it },
@@ -773,12 +779,12 @@ internal fun BotsScreen(
                         )
                         BotAvatar(bot.displayName, bot.profile, 40.dp)
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("@${bot.handle} · ${bot.displayName}", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                            Text(bot.connectionLabel, color = AppColors.Muted, fontSize = 11.sp)
+                            Text("@${bot.handle} · ${bot.displayName}", color = Color.White, fontSize = AppleType.RowTitle, fontWeight = FontWeight.SemiBold)
+                            Text(bot.connectionLabel, color = AppColors.Faint, fontSize = AppleType.Footnote)
                         }
                         Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = AppColors.Faint)
                     }
-                    HorizontalDivider(color = AppColors.Border)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                 }
                 if (roster?.items.isNullOrEmpty()) {
                     Text("Crea prima almeno 2 bot qui sopra per formare un gruppo.", color = AppColors.Muted, fontSize = 13.sp)
@@ -816,11 +822,11 @@ internal fun BotsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(group.name, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text(group.name, color = Color.White, fontSize = AppleType.RowTitle, fontWeight = FontWeight.SemiBold)
                             Text(
                                 if (group.members.size == 1) "1 membro · sessioni Group persistenti" else "${group.members.size} membri · sessioni Group persistenti",
-                                color = AppColors.Muted,
-                                fontSize = 11.sp
+                                color = AppColors.Faint,
+                                fontSize = AppleType.Footnote
                             )
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -841,7 +847,7 @@ internal fun BotsScreen(
                             }) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina gruppo", tint = AppColors.Error) }
                         }
                     }
-                    HorizontalDivider(color = AppColors.Border)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                 }
             }
         }
@@ -870,7 +876,7 @@ internal fun BotsScreen(
                     Text(
                         "Nessun bot disponibile.",
                         color = Color.White,
-                        fontSize = 20.sp,
+                        fontSize = AppleType.ScreenTitle,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
@@ -920,6 +926,7 @@ internal fun BotsScreen(
                 BotCardWithMenu(bot = bot, cardIndex = botOrderIndex[bot.identityKey] ?: Int.MAX_VALUE)
             }
         }
+        }
     }
 
     newSectionFor?.let { bot ->
@@ -947,7 +954,8 @@ internal fun BotsScreen(
         }
         AlertDialog(
             onDismissRequest = { if (!groupRunning) openGroup = null },
-            title = { Text("Turno · ${group.name}", color = Color.White) },
+            shape = RoundedCornerShape(20.dp),
+            title = { Text("Turno · ${group.name}", color = Color.White, fontSize = AppleType.ScreenTitle) },
             text = {
                 Column(
                     modifier = Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
@@ -967,23 +975,37 @@ internal fun BotsScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
                     if (groupRunning) Text("Esecuzione in corso...", color = AppColors.Muted)
-                    groupResult?.let { result ->
-                        GroupTurnActivity(
-                            result = result,
-                            sourceLabel = { connectionId ->
-                                connections.items.firstOrNull { it.id.equals(connectionId, true) }?.label
-                                    ?: "Connessione Hermes"
-                            }
-                        )
-                    }
-                    if (!groupRunning && turnHistory.isNotEmpty()) {
-                        Text("Turni recenti", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                        turnHistory.take(5).forEach { summary ->
-                            Text(
-                                "${summary.group} · ${groupOutcomeLabel(summary.outcome)} · ${summary.replies} risposte · ${formatGroupTurnTime(summary.atMs)}",
-                                color = AppColors.Muted,
-                                fontSize = 12.sp
+                    AnimatedVisibility(
+                        visible = groupResult != null,
+                        enter = AppleMotion.enter(),
+                        exit = AppleMotion.exit()
+                    ) {
+                        groupResult?.let { result ->
+                            GroupTurnActivity(
+                                result = result,
+                                sourceLabel = { connectionId ->
+                                    connections.items.firstOrNull { it.id.equals(connectionId, true) }?.label
+                                        ?: "Connessione Hermes"
+                                }
                             )
+                        }
+                    }
+                    AnimatedVisibility(
+                        visible = !groupRunning && turnHistory.isNotEmpty(),
+                        enter = AppleMotion.enter(),
+                        exit = AppleMotion.exit()
+                    ) {
+                        if (!groupRunning && turnHistory.isNotEmpty()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Turni recenti", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.Footnote)
+                                turnHistory.take(5).forEach { summary ->
+                                    Text(
+                                        "${summary.group} · ${groupOutcomeLabel(summary.outcome)} · ${summary.replies} risposte · ${formatGroupTurnTime(summary.atMs)}",
+                                        color = AppColors.Muted,
+                                        fontSize = AppleType.Footnote
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1037,7 +1059,8 @@ internal fun BotsScreen(
         val autoApproveMap = remember(editing?.profile, showEditor) { loadBotAutoApproveMap(appContext) }
         AlertDialog(
             onDismissRequest = { if (!mutating) showEditor = false },
-            title = { Text(if (editing == null) "Nuovo bot Hermes" else "Modifica ${editing.displayName}", color = Color.White) },
+            shape = RoundedCornerShape(20.dp),
+            title = { Text(if (editing == null) "Nuovo bot Hermes" else "Modifica ${editing.displayName}", color = Color.White, fontSize = AppleType.ScreenTitle) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(profileInput, { profileInput = it; editorError = "" }, label = { Text("Nome profilo") }, enabled = editing == null, singleLine = true)
@@ -1131,7 +1154,8 @@ internal fun BotsScreen(
     deleteBot?.let { bot ->
         AlertDialog(
             onDismissRequest = { if (!mutating) deleteBot = null },
-            title = { Text("Elimina ${bot.displayName}", color = Color.White) },
+            shape = RoundedCornerShape(20.dp),
+            title = { Text("Elimina ${bot.displayName}", color = Color.White, fontSize = AppleType.ScreenTitle) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("L'eliminazione rimuove il profilo Hermes e i suoi dati dal server. Scrivi esattamente ${bot.profile} per confermare.", color = AppColors.Muted)
@@ -1173,7 +1197,8 @@ internal fun BotsScreen(
     removeConnection?.let { connection ->
         AlertDialog(
             onDismissRequest = { removeConnection = null },
-            title = { Text("Rimuovi ${connection.label}", color = Color.White) },
+            shape = RoundedCornerShape(20.dp),
+            title = { Text("Rimuovi ${connection.label}", color = Color.White, fontSize = AppleType.ScreenTitle) },
             text = { Text("La connessione endpoint verrà eliminata dal dispositivo. I bot su questa connessione smetteranno di funzionare.", color = AppColors.Muted) },
             confirmButton = {
                 Button(
@@ -1198,7 +1223,8 @@ internal fun BotsScreen(
     if (showConnectionEditor) {
         AlertDialog(
             onDismissRequest = { if (!mutating) showConnectionEditor = false },
-            title = { Text("Nuova connessione Hermes", color = Color.White) },
+            shape = RoundedCornerShape(20.dp),
+            title = { Text("Nuova connessione Hermes", color = Color.White, fontSize = AppleType.ScreenTitle) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(connectionLabelInput, { connectionLabelInput = it }, label = { Text("Nome") }, singleLine = true)

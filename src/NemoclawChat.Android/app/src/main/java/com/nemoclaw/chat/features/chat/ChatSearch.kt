@@ -46,6 +46,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -91,6 +94,8 @@ internal fun UniversalSearchScreen(context: Context, settings: AppSettings, onOp
         }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
+        AuroraBackground()
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
@@ -112,23 +117,25 @@ internal fun UniversalSearchScreen(context: Context, settings: AppSettings, onOp
                     }
                 }
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Ricerca universale", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Chat, tool call, artifact, progetti, memoria, cron e notifiche.", color = AppColors.Muted, fontSize = 14.sp)
+                    Text("Ricerca universale", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
+                    Text("Chat, tool call, artifact, progetti, memoria, cron e notifiche.", color = AppColors.Muted, fontSize = AppleType.HeroSubtitle)
                 }
             }
         }
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("CERCA", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("CERCA", color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 SettingsField("Cerca ovunque", query, { query = it })
                 Button(
                     onClick = { runSearch() },
                     colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
                 ) { Text("Cerca") }
-                Text(status, color = AppColors.Muted, fontSize = 12.sp)
+                Text(status, color = AppColors.Muted, fontSize = AppleType.Footnote)
+            }
             }
         }
-        item { HorizontalDivider(color = AppColors.Border) }
+        item { HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp) }
         if (results.isEmpty()) {
             item {
                 Column(
@@ -173,16 +180,17 @@ internal fun UniversalSearchScreen(context: Context, settings: AppSettings, onOp
                                 }
                             }
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text("${result.first} · ${result.third.first}", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Text(result.third.second, color = AppColors.Muted, fontSize = 12.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                                Text("${result.first} · ${result.third.first}", color = Color.White, fontSize = AppleType.RowTitle, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(result.third.second, color = AppColors.Faint, fontSize = AppleType.Footnote, maxLines = 4, overflow = TextOverflow.Ellipsis)
                             }
                             Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(20.dp))
                         }
-                        if (index < results.lastIndex) HorizontalDivider(color = AppColors.Border)
+                        if (index < results.lastIndex) HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
                     }
                 }
             }
         }
+    }
     }
 }
 

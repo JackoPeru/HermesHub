@@ -7,8 +7,10 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -55,6 +57,10 @@ import com.nemoclaw.chat.BuildConfig
 import com.nemoclaw.chat.jarvis.JarvisInitiativeMode
 import com.nemoclaw.chat.jarvis.JarvisSessionController
 import com.nemoclaw.chat.jarvis.meta.JarvisMetaSetupActivity
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 
 @Composable
 internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
@@ -124,20 +130,25 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
     }
     val credentialLabel = if (apiKey.isNullOrBlank()) "non salvata" else "salvata"
 
-    LazyColumn(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(AppColors.Background)
+    ) {
+        AuroraBackground()
+        LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Jarvis Mode", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                Text("Jarvis Mode", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
                 Text(
                     "Assistenza visiva temporanea tramite Hermes locale.",
                     color = AppColors.Muted,
-                    fontSize = 13.sp
+                    fontSize = AppleType.HeroSubtitle
                 )
             }
         }
@@ -176,11 +187,11 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                             },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (selected) AppColors.Accent else AppColors.Elevated,
+                                containerColor = if (selected) AppColors.Accent else Color.White.copy(alpha = 0.06f),
                                 contentColor = if (selected) Color(0xFF171009) else Color.White
                             )
                         ) {
-                            Text(initiativeModeLabel(mode), fontSize = 11.sp, maxLines = 2)
+                            Text(initiativeModeLabel(mode), fontSize = AppleType.Caption, maxLines = 2)
                         }
                     }
                 }
@@ -203,8 +214,8 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Fotocamera telefono", color = Color.White, fontWeight = FontWeight.SemiBold)
-                            Text("Fallback diagnostico build debug", color = AppColors.Muted, fontSize = 12.sp)
+                            Text("Fotocamera telefono", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
+                            Text("Fallback diagnostico build debug", color = AppColors.Muted, fontSize = AppleType.Footnote)
                         }
                         Switch(
                             checked = preferPhoneDebug,
@@ -224,18 +235,23 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
 
         if (state.active) {
             item {
+                AnimatedVisibility(
+                    visible = true,
+                    enter = AppleMotion.enter(),
+                    exit = AppleMotion.exit()
+                ) {
                 JarvisPanel(title = "Attivita") {
                     JarvisStatusRow("Modello attivo", state.currentModel.orEmpty().ifBlank { "In attesa" })
                     JarvisStatusRow("Ultima latenza", latencyLabel(state.lastLatencyMs))
-                    Text("Ultima osservazione", color = AppColors.Muted, fontSize = 12.sp)
+                    Text("Ultima osservazione", color = AppColors.Muted, fontSize = AppleType.Footnote)
                     Text(
                         state.lastObservation.orEmpty().ifBlank { "Nessuna osservazione rilevante." },
                         color = Color.White,
-                        fontSize = 14.sp
+                        fontSize = AppleType.RowTitle
                     )
                     if (state.shortTermSummary.orEmpty().isNotBlank()) {
-                        Text("Memoria breve", color = AppColors.Muted, fontSize = 12.sp)
-                        Text(state.shortTermSummary.orEmpty(), color = Color.White, fontSize = 13.sp)
+                        Text("Memoria breve", color = AppColors.Muted, fontSize = AppleType.Footnote)
+                        Text(state.shortTermSummary.orEmpty(), color = Color.White, fontSize = AppleType.RowTitleSmall)
                     }
                     if (state.conversationTopic.orEmpty().isNotBlank()) {
                         JarvisStatusRow(
@@ -244,12 +260,12 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                         )
                     }
                     if (state.situation.orEmpty().isNotBlank()) {
-                        Text("Situazione", color = AppColors.Muted, fontSize = 12.sp)
-                        Text(state.situation.orEmpty(), color = Color.White, fontSize = 13.sp)
+                        Text("Situazione", color = AppColors.Muted, fontSize = AppleType.Footnote)
+                        Text(state.situation.orEmpty(), color = Color.White, fontSize = AppleType.RowTitleSmall)
                     }
                     if (state.lastInterventionText.orEmpty().isNotBlank()) {
-                        Text("Ultimo intervento", color = AppColors.Muted, fontSize = 12.sp)
-                        Text(state.lastInterventionText.orEmpty(), color = Color.White, fontSize = 13.sp)
+                        Text("Ultimo intervento", color = AppColors.Muted, fontSize = AppleType.Footnote)
+                        Text(state.lastInterventionText.orEmpty(), color = Color.White, fontSize = AppleType.RowTitleSmall)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -264,22 +280,28 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                             ) { Icon(Icons.Rounded.ThumbDown, contentDescription = "Non utile", tint = Color.White) }
                         }
                         state.feedbackStatus?.let {
-                            Text(it, color = AppColors.Muted, fontSize = 12.sp)
+                            Text(it, color = AppColors.Muted, fontSize = AppleType.Footnote)
                         }
                     }
                     if (state.transcript.orEmpty().isNotBlank()) {
-                        Text("Trascrizione", color = AppColors.Muted, fontSize = 12.sp)
-                        Text(state.transcript.orEmpty(), color = Color.White, fontSize = 13.sp)
+                        Text("Trascrizione", color = AppColors.Muted, fontSize = AppleType.Footnote)
+                        Text(state.transcript.orEmpty(), color = Color.White, fontSize = AppleType.RowTitleSmall)
                     }
+                }
                 }
             }
         }
 
         if (state.error.orEmpty().isNotBlank()) {
             item {
+                AnimatedVisibility(
+                    visible = true,
+                    enter = AppleMotion.enter(),
+                    exit = AppleMotion.exit()
+                ) {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF3B1F1F)),
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(20.dp)
                 ) {
                     Text(
                         state.error.orEmpty(),
@@ -287,13 +309,18 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                         color = Color(0xFFFFB4AB)
                     )
                 }
+                }
             }
         }
 
         item {
+            AppleGlass(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(28.dp)
+            ) {
             if (state.active) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     IconButton(
@@ -315,6 +342,10 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                     }
                 }
             } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.Start
+                ) {
                 IconButton(
                     onClick = {
                         if (settings.gatewayUrl.isBlank()) {
@@ -330,6 +361,8 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                 ) {
                     Icon(Icons.Rounded.PlayArrow, contentDescription = "Avvia Jarvis Mode", tint = Color.White)
                 }
+                }
+            }
             }
         }
 
@@ -337,9 +370,10 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
             Text(
                 "Frame e audio restano effimeri. Credenziale Hermes $credentialLabel; nessun endpoint personale incorporato.",
                 color = AppColors.Faint,
-                fontSize = 11.sp,
+                fontSize = AppleType.Caption,
                 modifier = Modifier.padding(bottom = 18.dp)
             )
+        }
         }
     }
 }
@@ -349,7 +383,7 @@ private fun JarvisPanel(title: String, content: @Composable ColumnScope.() -> Un
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = AppColors.Panel),
-        shape = RoundedCornerShape(18.dp)
+        shape = RoundedCornerShape(20.dp)
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -359,7 +393,7 @@ private fun JarvisPanel(title: String, content: @Composable ColumnScope.() -> Un
                 title.uppercase(),
                 color = AppColors.Accent,
                 fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
+                fontSize = AppleType.Eyebrow,
                 letterSpacing = 1.sp
             )
             content()
@@ -374,11 +408,11 @@ private fun JarvisStatusRow(label: String, value: String) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, color = AppColors.Muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text(label, color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, modifier = Modifier.weight(1f))
         Text(
             value,
             color = Color.White,
-            fontSize = 13.sp,
+            fontSize = AppleType.RowTitleSmall,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.widthIn(max = 190.dp)
         )

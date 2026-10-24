@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.AuroraBackground
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -61,11 +63,11 @@ internal data class RegisteredDevice(
 internal fun ServerMetric(title: String, value: String, detail: String, valueColor: Color = Color.White) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text(title.uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
-            Text(value, color = valueColor, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End, modifier = Modifier.weight(1f), maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Text(title.uppercase(), color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
+            Text(value, color = valueColor, fontSize = AppleType.RowTitle, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End, modifier = Modifier.weight(1f), maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
-        Text(detail, color = AppColors.Muted, fontSize = 12.sp)
-        HorizontalDivider(color = AppColors.Border)
+        Text(detail, color = AppColors.Faint, fontSize = AppleType.Footnote)
+        HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
     }
 }
 
@@ -112,11 +114,17 @@ internal fun HardwareScreen(context: Context, settings: AppSettings) {
         }
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0B0D10))
     ) {
+        AuroraBackground(intensity = 1f)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(
@@ -129,8 +137,8 @@ internal fun HardwareScreen(context: Context, settings: AppSettings) {
                     Icon(Icons.Rounded.Speed, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
                 }
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Prestazioni", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-                    Text("${snapshot.hostname} - ${snapshot.operatingSystem} ${snapshot.architecture}. Uptime ${formatHardwareUptime(snapshot.uptimeSeconds)}. Processi ${snapshot.processCount}.", color = AppColors.Muted, fontSize = 14.sp)
+                    Text("Prestazioni", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
+                    Text("${snapshot.hostname} - ${snapshot.operatingSystem} ${snapshot.architecture}. Uptime ${formatHardwareUptime(snapshot.uptimeSeconds)}. Processi ${snapshot.processCount}.", color = AppColors.Faint, fontSize = AppleType.Footnote)
                 }
             }
         }
@@ -168,6 +176,7 @@ internal fun HardwareScreen(context: Context, settings: AppSettings) {
             }
         }
     }
+    }
 }
 
 @Composable
@@ -178,7 +187,7 @@ internal fun HardwareComponentList(
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("COMPONENTI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Text("COMPONENTI", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         if (components.isEmpty()) {
             Column(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
@@ -187,7 +196,7 @@ internal fun HardwareComponentList(
             ) {
                 Icon(Icons.Rounded.Speed, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(40.dp))
                 Text("Nessun componente", color = Color.White, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-                Text("In attesa di dati hardware dal server.", color = AppColors.Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                Text("In attesa di dati hardware dal server.", color = AppColors.Faint, fontSize = AppleType.RowTitleSmall, textAlign = TextAlign.Center)
             }
         }
         components.forEachIndexed { index, component ->
@@ -200,10 +209,10 @@ internal fun HardwareComponentList(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(component.title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Text(component.primaryValue, color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
+                    Text(component.title, color = Color.White, fontSize = AppleType.RowTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(component.primaryValue, color = AppColors.Accent, fontSize = AppleType.RowTitle, fontWeight = FontWeight.SemiBold)
                 }
-                Text(component.subtitle, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(component.subtitle, color = AppColors.Faint, fontSize = AppleType.Footnote, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 LinearProgressIndicator(
                     progress = { (component.utilizationPercent / 100.0).toFloat().coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth().height(4.dp),
@@ -211,11 +220,11 @@ internal fun HardwareComponentList(
                     trackColor = AppColors.Border
                 )
                 if (selected) {
-                    Text("SELEZIONATO", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text("SELEZIONATO", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 }
             }
             if (index != components.lastIndex) {
-                HorizontalDivider(color = AppColors.Border)
+                HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
             }
         }
     }
@@ -232,26 +241,26 @@ internal fun HardwareComponentDetail(component: HardwareComponentView?, history:
             ) {
                 Icon(Icons.Rounded.Speed, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(40.dp))
                 Text("Nessun componente disponibile.", color = Color.White, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-                Text("Seleziona un componente per vederne i dettagli.", color = AppColors.Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                Text("Seleziona un componente per vederne i dettagli.", color = AppColors.Faint, fontSize = AppleType.RowTitleSmall, textAlign = TextAlign.Center)
             }
             return@Column
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(component.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-                Text(component.subtitle, color = AppColors.Muted, fontSize = 13.sp)
+                Text(component.title, color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
+                Text(component.subtitle, color = AppColors.Faint, fontSize = AppleType.RowTitleSmall)
             }
             Text(component.primaryValue, color = AppColors.Accent, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
         }
-        HorizontalDivider(color = AppColors.Border)
+        HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
         HardwareLineChart("Utilizzo", history.map { it.utilizationPercent }, 100.0, "%", AppColors.Accent)
         HardwareLineChart("Temperatura", history.mapNotNull { it.temperatureC }, 100.0, " C", Color(0xFFFF7062))
-        HorizontalDivider(color = AppColors.Border)
-        Text("DETTAGLI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
+        Text("DETTAGLI", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             component.stats.forEach { stat ->
                 Column(modifier = Modifier.widthIn(min = 120.dp, max = 220.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(stat.label.uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text(stat.label.uppercase(), color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     Text(stat.value, color = Color.White, fontWeight = FontWeight.SemiBold)
                 }
             }
@@ -262,7 +271,7 @@ internal fun HardwareComponentDetail(component: HardwareComponentView?, history:
 @Composable
 internal fun HardwareLineChart(title: String, values: List<Double>, maxValue: Double, unit: String, color: Color) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text((if (values.isEmpty()) "$title: n/d" else "$title: ${String.format(java.util.Locale.US, "%.1f", values.last())}$unit").uppercase(), color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Text((if (values.isEmpty()) "$title: n/d" else "$title: ${String.format(java.util.Locale.US, "%.1f", values.last())}$unit").uppercase(), color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         Canvas(modifier = Modifier.fillMaxWidth().height(170.dp).padding(vertical = 8.dp)) {
             val chartWidth = size.width
             val chartHeight = size.height

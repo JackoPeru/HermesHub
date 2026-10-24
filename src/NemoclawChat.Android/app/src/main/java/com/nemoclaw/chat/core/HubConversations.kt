@@ -4,8 +4,6 @@ import android.content.Context
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
-import org.json.JSONArray
-import org.json.JSONObject
 
 
 internal fun saveConversationSnapshot(

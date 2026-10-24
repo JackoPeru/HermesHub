@@ -53,6 +53,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleType
 import java.net.URL
 
 @Composable
@@ -120,8 +122,8 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
                     Icon(Icons.Rounded.Videocam, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(24.dp))
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Hermes Video", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(settings.videoLibraryPath.ifBlank { "Sincronizzo cartella video Hermes..." }, color = AppColors.Muted, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Hermes Video", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(settings.videoLibraryPath.ifBlank { "Sincronizzo cartella video Hermes..." }, color = AppColors.Muted, fontSize = AppleType.HeroSubtitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 IconButton(onClick = {
                     onOpenChatPrompt(
@@ -147,10 +149,10 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
             }
         }
         item {
-            Text(status, color = AppColors.Faint, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(status, color = AppColors.Faint, fontSize = AppleType.Footnote, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         item {
-            Surface(color = AppColors.Panel, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, AppColors.Border)) {
+            AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("URL VIDEO MANUALE", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     TextField(
@@ -189,7 +191,7 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
         }
         if (displayedItems.isEmpty()) {
             item {
-                Surface(color = AppColors.Panel, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, AppColors.Border)) {
+                AppleGlass(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,

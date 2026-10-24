@@ -2,7 +2,11 @@ package com.nemoclaw.chat
 
 import android.content.Context
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
+import com.nemoclaw.chat.ui.apple.AppleGlass
+import com.nemoclaw.chat.ui.apple.AppleMotion
+import com.nemoclaw.chat.ui.apple.AppleType
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -130,21 +134,25 @@ internal fun PulseCard(context: Context, settings: AppSettings) {
     }
 
     LaunchedEffect(base) { refresh() }
-    Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+    AppleGlass(shape = RoundedCornerShape(20.dp)) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     "PULSE · 7 GIORNI",
                     color = AppColors.Accent,
-                    fontSize = 12.sp,
+                    fontSize = AppleType.Footnote,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.sp,
                     modifier = Modifier.weight(1f)
                 )
                 TextButton(onClick = { refresh() }, enabled = !busy) { Text("Aggiorna", color = AppColors.Accent) }
             }
-            Text(line, color = Color.White, fontSize = 13.sp)
-            if (days.size == 7) {
+                Text(line, color = Color.White, fontSize = AppleType.RowTitleSmall)
+            AnimatedVisibility(
+                visible = days.size == 7,
+                enter = AppleMotion.enter(),
+                exit = AppleMotion.exit()
+            ) {
                 val max = (days.maxOf { it.done + it.failed }).coerceAtLeast(1)
                 Canvas(
                     modifier = Modifier
@@ -238,14 +246,14 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
         refreshSuspend()
     }
 
-    Card(colors = CardDefaults.cardColors(containerColor = AppColors.Surface), shape = RoundedCornerShape(20.dp)) {
+    AppleGlass(shape = RoundedCornerShape(20.dp)) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("MODALITÀ GPU (QWEN / COMFYUI)", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Text("MODALITÀ GPU (QWEN / COMFYUI)", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             if (body == null) {
                 Text(
                     if (error.isBlank()) "Lettura stato GPU..." else "GPU Manager non raggiungibile ($base). Verifica che hermes-gpu-manager sia attivo.",
-                    color = AppColors.Muted,
-                    fontSize = 12.sp
+                    color = AppColors.Faint,
+                    fontSize = AppleType.Footnote
                 )
                 IconButton(onClick = { refresh() }, enabled = !busy) { Icon(Icons.Rounded.Refresh, contentDescription = "Riprova lettura GPU", tint = AppColors.Accent) }
             } else {
@@ -272,20 +280,24 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                             containerColor = if (desired == mode) AppColors.Accent else AppColors.Panel,
                             contentColor = if (desired == mode) Color(0xFF171009) else Color.White
                         ),
-                        border = if (desired == mode) null else BorderStroke(1.dp, AppColors.Border),
-                        shape = RoundedCornerShape(10.dp)
+                        border = if (desired == mode) null else BorderStroke(0.5.dp, AppColors.Border),
+                        shape = RoundedCornerShape(14.dp)
                     ) { Text(if (desired == mode) "$mode ✓" else mode) }
                 }
             }
             Text("Stato: $state", color = Color.White, fontWeight = FontWeight.SemiBold)
-            if (layaReply.isNotBlank()) {
-                Text(layaReply, color = AppColors.Muted, fontSize = 12.sp)
+            AnimatedVisibility(
+                visible = layaReply.isNotBlank(),
+                enter = AppleMotion.enter(),
+                exit = AppleMotion.exit()
+            ) {
+                Text(layaReply, color = AppColors.Faint, fontSize = AppleType.Footnote)
             }
             Text(
                 "Qwen: ${if (status.optBoolean("llm_loaded", false)) "Online" else if (status.optBoolean("llm_online", false)) "Avvio..." else "Offline"} · " +
                     "ComfyUI: ${if (status.optBoolean("media_online", false)) "Online" else "Offline"}",
                 color = AppColors.Muted,
-                fontSize = 12.sp
+                fontSize = AppleType.Footnote
             )
             val gpus = status.optJSONArray("gpu") ?: JSONArray()
             for (i in 0 until gpus.length()) {
@@ -296,19 +308,19 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                 Text(
                     "GPU${gpu.optInt("index")} %.1f / %.1f GB (%d%%)".format(usedGb, totalGb, pct),
                     color = AppColors.Muted,
-                    fontSize = 12.sp
+                    fontSize = AppleType.Footnote
                 )
             }
             Text(
                 "Coda media: ${status.optInt("queue_length", 0)}" +
                     (status.optString("current_job", "").takeIf { it.isNotBlank() }?.let { " · Job $it" } ?: ""),
                 color = AppColors.Muted,
-                fontSize = 12.sp
+                fontSize = AppleType.Footnote
             )
-            Text("MEDIA JOBS RECENTI", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Text("MEDIA JOBS RECENTI", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             val recentJobs = jobsBody ?: JSONArray()
             if (recentJobs.length() == 0) {
-                Text("Nessun job media.", color = AppColors.Muted, fontSize = 12.sp)
+                Text("Nessun job media.", color = AppColors.Muted, fontSize = AppleType.Footnote)
             }
             for (i in 0 until minOf(recentJobs.length(), 5)) {
                 val job = recentJobs.optJSONObject(i) ?: continue
@@ -317,7 +329,7 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                     Text(
                         "${job.optString("job_id", "?")} · ${job.optString("preset", job.optString("kind", "?"))} · ${job.optString("status", "?")}",
                         color = Color.White,
-                        fontSize = 12.sp,
+                        fontSize = AppleType.Footnote,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
@@ -325,25 +337,26 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                             (job.optString("phase", "").takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") +
                             (job.optString("error", "").takeIf { it.isNotBlank() }?.let { " · Errore: $it" } ?: "") +
                             (job.optString("model", "").takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
-                        color = AppColors.Muted,
-                        fontSize = 11.sp
+                        color = AppColors.Faint,
+                        fontSize = AppleType.Caption
                     )
                 }
+                HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
             }
             status.optString("last_error", "").takeIf { it.isNotBlank() }?.let {
-                Text("Ultimo errore: $it", color = AppColors.Error, fontSize = 12.sp)
+                Text("Ultimo errore: $it", color = AppColors.Error, fontSize = AppleType.Footnote)
             }
             status.optString("h3_license_state", "").takeIf { it.isNotBlank() }?.let {
-                Text("Video H3: $it", color = AppColors.Muted, fontSize = 12.sp)
+                Text("Video H3: $it", color = AppColors.Muted, fontSize = AppleType.Footnote)
             }
                 TextButton(onClick = { refresh() }, enabled = !busy, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Aggiorna") }
             }
-            HorizontalDivider(color = AppColors.Border)
-            Text("CHAT LAYA (canale diretto)", color = AppColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
+            Text("CHAT LAYA (canale diretto)", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             Text(
                 "Chiedi in linguaggio naturale: \"metti l'LLM ready\", \"attiva comfy\", \"metti in auto\", \"come sta?\".",
                 color = AppColors.Muted,
-                fontSize = 12.sp
+                fontSize = AppleType.Footnote
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextField(
@@ -357,11 +370,16 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                 Button(
                     onClick = { sendLaya() },
                     enabled = !layaBusy && layaText.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
+                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
+                    shape = RoundedCornerShape(14.dp)
                 ) { Text(if (layaBusy) "..." else "Invia") }
             }
-            if (layaReply.isNotBlank()) {
-                Text(layaReply, color = Color.White, fontSize = 13.sp)
+            AnimatedVisibility(
+                visible = layaReply.isNotBlank(),
+                enter = AppleMotion.enter(),
+                exit = AppleMotion.exit()
+            ) {
+                Text(layaReply, color = Color.White, fontSize = AppleType.RowTitleSmall)
             }
         }
     }

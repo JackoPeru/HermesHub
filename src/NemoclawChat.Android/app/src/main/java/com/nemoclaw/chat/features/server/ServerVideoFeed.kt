@@ -55,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogWindowProvider
+import com.nemoclaw.chat.ui.apple.AppleType
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -105,15 +106,15 @@ internal fun ImageFeedCard(
         Text(
             item.title.ifBlank { item.filename },
             color = Color.White,
-            fontSize = 13.sp,
+            fontSize = AppleType.RowTitleSmall,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
         Text(
             "${item.sizeBytes.toReadableFileSize()} - ${folderLabel(item.folder)}",
-            color = AppColors.Muted,
-            fontSize = 11.sp,
+            color = AppColors.Faint,
+            fontSize = AppleType.Footnote,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -180,7 +181,7 @@ internal fun VideoFeedChip(label: String, selected: Boolean = false, onClick: ()
         color = if (selected) AppColors.Accent else AppColors.Panel,
         contentColor = if (selected) Color(0xFF171009) else Color.White,
         shape = RoundedCornerShape(20.dp),
-        border = if (selected) null else BorderStroke(1.dp, AppColors.Border)
+        border = if (selected) null else BorderStroke(0.5.dp, AppColors.Border)
     ) {
         Text(
             text = label,
@@ -205,14 +206,14 @@ internal fun VideoFeedCard(settings: AppSettings, item: VideoLibraryItem, apiKey
                     item.title,
                     color = Color.White,
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 17.sp,
+                    fontSize = AppleType.RowTitle,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     "Hermes Hub - ${item.sizeBytes.toReadableFileSize()} - ${formatVideoTimestamp(item.modifiedAt)}",
-                    color = AppColors.Muted,
-                    fontSize = 13.sp,
+                    color = AppColors.Faint,
+                    fontSize = AppleType.Footnote,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

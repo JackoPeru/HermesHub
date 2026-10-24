@@ -11,9 +11,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -87,16 +88,16 @@ internal fun BotLiveBanner(statusText: String, turnStartMs: Long = 0L, lastSigna
     val stale = if (lastSignalMs > 0) staleTurnLabel(nowMs - lastSignalMs) else null
     val main = (stale ?: statusText.ifBlank { "Sta lavorando…" })
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Box(modifier = Modifier.size(8.dp).background(AppColors.Accent, CircleShape))
+        Box(modifier = Modifier.size(6.dp).background(AppColors.Accent, CircleShape))
         ShimmerText(main, enabled = true)
         if (elapsed != null) {
             Text(
                 elapsed,
-                color = AppColors.Muted,
+                color = AppColors.Faint,
                 fontSize = 12.sp,
                 modifier = Modifier.semantics { contentDescription = "Turno attivo da $elapsed" }
             )
@@ -126,19 +127,19 @@ internal fun ChatModelSessionBar(
     val steerable = !runId.isNullOrBlank() && streaming?.isDone == false &&
         (caps?.supportsSteer() ?: false) && streaming?.runStatus !in listOf("completed", "failed", "cancelled")
 
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             val routeLabel = when (state.sessionRoute) {
                 "sessions" -> "Sessione Hermes${state.hermesSessionId?.take(8)?.let { " · ${it}" }.orEmpty()}"
                 "legacy-fallback" -> "Legacy (sessions non riuscite)"
                 else -> "Legacy"
             }
-            Text(routeLabel, color = AppColors.Muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
+            Text(routeLabel, color = AppColors.Faint, fontSize = 11.sp, modifier = Modifier.weight(1f))
             if (autoApproveMode == WorkLimits.AUTO_APPROVE_SESSION || autoApproveMode == WorkLimits.AUTO_APPROVE_ALWAYS) {
                 Surface(
                     color = AppColors.Elevated,
                     shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, AppColors.Accent)
+                    border = BorderStroke(0.5.dp, AppColors.Accent)
                 ) {
                     Text(
                         if (autoApproveMode == WorkLimits.AUTO_APPROVE_ALWAYS) "AUTO SEMPRE" else "AUTO SESSIONE",
@@ -150,11 +151,11 @@ internal fun ChatModelSessionBar(
                 }
             }
             if (steerable) {
-                IconButton(onClick = { steerStatus = ""; showSteerDialog = true }, modifier = Modifier.size(34.dp)) { Icon(Icons.Rounded.Edit, contentDescription = "Correggi run in corso", tint = AppColors.Muted, modifier = Modifier.size(20.dp)) }
+                IconButton(onClick = { steerStatus = ""; showSteerDialog = true }, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Edit, contentDescription = "Correggi run in corso", tint = AppColors.Faint, modifier = Modifier.size(18.dp)) }
             }
         }
         if (streaming?.pendingSteer?.isNotBlank() == true) {
-            Text("Steer non consegnato: riproponilo come turno successivo.", color = AppColors.Muted, fontSize = 11.sp)
+            Text("Steer non consegnato: riproponilo come turno successivo.", color = AppColors.Faint, fontSize = 11.sp)
         }
     }
 
@@ -204,46 +205,67 @@ internal fun BackgroundWorkBanner(
     onStop: () -> Unit
 ) {
     val ctx = LocalContext.current
-    Surface(
-        color = AppColors.Elevated,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, AppColors.Border),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+    AppleBannerRow(
+        icon = Icons.Rounded.Refresh,
+        tint = AppColors.Accent,
+        title = if (work.goal.isBlank()) "Hermes al lavoro in background" else "Hermes al lavoro: ${work.goal.take(WorkLimits.TRUNC_80)}",
+        subtitle = work.statusText
     ) {
+        IconButton(
+            onClick = {
+                onStop()
+                Toast.makeText(ctx, "Interruzione richiesta.", Toast.LENGTH_SHORT).show()
+            },
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(Icons.Rounded.Stop, contentDescription = "Ferma lavoro", tint = AppColors.Error, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+/**
+ * Riga banner stile Apple: niente card, solo hairline + riga densa.
+ * Unico contenitore per tutti i banner chat (coerenza visiva).
+ */
+@Composable
+private fun AppleBannerRow(
+    icon: ImageVector,
+    tint: Color,
+    title: String,
+    subtitle: String,
+    actions: @Composable RowScope.() -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        HorizontalDivider(thickness = 0.5.dp, color = AppColors.Border)
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            modifier = Modifier.padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(
-                Icons.Rounded.Refresh,
-                contentDescription = null,
-                tint = AppColors.Accent,
-                modifier = Modifier.size(20.dp)
-            )
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(
-                    text = if (work.goal.isBlank()) "Hermes al lavoro in background" else "Hermes al lavoro: ${work.goal.take(WorkLimits.TRUNC_80)}",
+                    text = title,
                     color = Color.White,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Text(work.statusText, color = AppColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (subtitle.isNotBlank()) {
+                    Text(
+                        text = subtitle,
+                        color = AppColors.Muted,
+                        fontSize = 12.sp,
+                        maxLines = 3,
+                        overflow = TextOverflow.Clip
+                    )
+                }
             }
-            IconButton(
-                onClick = {
-                    onStop()
-                    Toast.makeText(ctx, "Interruzione richiesta.", Toast.LENGTH_SHORT).show()
-                },
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(Icons.Rounded.Stop, contentDescription = "Ferma lavoro", tint = AppColors.Error)
-            }
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically, content = actions)
         }
+        HorizontalDivider(thickness = 0.5.dp, color = AppColors.Border)
     }
-    Spacer(modifier = Modifier.height(4.dp))
 }
 
 
@@ -256,49 +278,19 @@ internal fun LiveFollowBanner(
     chars: Int,
     onStop: () -> Unit
 ) {
-    Surface(
-        color = AppColors.Elevated,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, AppColors.Border),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+    AppleBannerRow(
+        icon = Icons.Rounded.CloudSync,
+        tint = AppColors.Success,
+        title = "Seguo il turno live",
+        subtitle = "$chars caratteri · si aggiorna da solo"
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        TextButton(
+            onClick = onStop,
+            colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
         ) {
-            Icon(
-                Icons.Rounded.CloudSync,
-                contentDescription = null,
-                tint = AppColors.Success,
-                modifier = Modifier.size(20.dp)
-            )
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = "Seguo il turno live",
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    "$chars caratteri · si aggiorna da solo",
-                    color = AppColors.Muted,
-                    fontSize = 12.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Clip
-                )
-            }
-            TextButton(
-                onClick = onStop,
-                colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
-            ) {
-                Text("Ferma", color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
-            }
+            Text("Ferma", color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
         }
     }
-    Spacer(modifier = Modifier.height(4.dp))
 }
 
 @Composable
@@ -308,57 +300,27 @@ internal fun DetachedFollowBanner(
     onRecheck: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    Surface(
-        color = AppColors.Elevated,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, AppColors.Border),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+    AppleBannerRow(
+        icon = Icons.Rounded.CloudSync,
+        tint = AppColors.Accent,
+        title = "Hermes continua sul server",
+        subtitle = subtitle
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        TextButton(
+            onClick = onRecheck,
+            enabled = !checking,
+            colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
         ) {
-            Icon(
-                Icons.Rounded.CloudSync,
-                contentDescription = null,
-                tint = AppColors.Accent,
-                modifier = Modifier.size(20.dp)
+            Text(
+                if (checking) "Attendi…" else "Ricontrolla",
+                color = if (checking) AppColors.Muted else AppColors.Accent,
+                fontWeight = FontWeight.SemiBold
             )
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = "Hermes continua sul server",
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    subtitle,
-                    color = AppColors.Muted,
-                    fontSize = 12.sp,
-                    maxLines = 3,
-                    overflow = TextOverflow.Clip
-                )
-            }
-            TextButton(
-                onClick = onRecheck,
-                enabled = !checking,
-                colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
-            ) {
-                Text(
-                    if (checking) "Attendi…" else "Ricontrolla",
-                    color = if (checking) AppColors.Muted else AppColors.Accent,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-            IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Rounded.Close, contentDescription = "Ignora", tint = AppColors.Muted)
-            }
+        }
+        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Rounded.Close, contentDescription = "Ignora", tint = AppColors.Muted, modifier = Modifier.size(16.dp))
         }
     }
-    Spacer(modifier = Modifier.height(4.dp))
 }
 
 @Composable
@@ -366,37 +328,16 @@ internal fun DetachedResumeNote(
     text: String,
     onDismiss: () -> Unit
 ) {
-    Surface(
-        color = AppColors.Elevated,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, AppColors.Border),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+    AppleBannerRow(
+        icon = Icons.Rounded.CloudSync,
+        tint = AppColors.Muted,
+        title = text,
+        subtitle = ""
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Icon(
-                Icons.Rounded.CloudSync,
-                contentDescription = null,
-                tint = AppColors.Muted,
-                modifier = Modifier.size(20.dp)
-            )
-            Text(
-                text,
-                color = AppColors.Muted,
-                fontSize = 12.sp,
-                maxLines = 3,
-                overflow = TextOverflow.Clip,
-                modifier = Modifier.weight(1f)
-            )
-            IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = AppColors.Muted)
-            }
+        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = AppColors.Muted, modifier = Modifier.size(16.dp))
         }
     }
-    Spacer(modifier = Modifier.height(4.dp))
 }
 
 /**
@@ -409,43 +350,21 @@ internal fun ServerStagedBanner(
     onShow: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    Surface(
-        color = AppColors.Elevated,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, AppColors.Border),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+    AppleBannerRow(
+        icon = Icons.Rounded.CloudSync,
+        tint = AppColors.Success,
+        title = if (count == 1) "↓ 1 nuovo dal server" else "↓ $count nuovi dal server",
+        subtitle = ""
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        TextButton(
+            onClick = onShow,
+            colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
         ) {
-            Icon(
-                Icons.Rounded.CloudSync,
-                contentDescription = null,
-                tint = AppColors.Success,
-                modifier = Modifier.size(20.dp)
-            )
-            Text(
-                text = if (count == 1) "↓ 1 nuovo dal server" else "↓ $count nuovi dal server",
-                color = Color.White,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            TextButton(
-                onClick = onShow,
-                colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
-            ) {
-                Text("Mostra", color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
-            }
-            IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Rounded.Close, contentDescription = "Ignora", tint = AppColors.Muted)
-            }
+            Text("Mostra", color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
+        }
+        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Rounded.Close, contentDescription = "Ignora", tint = AppColors.Muted, modifier = Modifier.size(16.dp))
         }
     }
-    Spacer(modifier = Modifier.height(4.dp))
 }
 
