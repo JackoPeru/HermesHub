@@ -165,7 +165,9 @@ class OperationalHubContractTests(unittest.TestCase):
             ):
                 self.assertNotIn(visible_label, source)
         self.assertIn("if (progress.Estimated)", windows_ui)
-        self.assertIn("if (state.promptProgressEstimated) return null", android_ui)
+        # Stimati mai nascosti: stesso formato della riga Prefill (marcati ~).
+        self.assertIn("formatPrefillLine(", android_ui)
+        self.assertNotIn("if (state.promptProgressEstimated) return null", android_ui)
         self.assertIn('setdefault(\\"return_progress\\", True)', gateway)
         self.assertIn('setdefault(\\"timings_per_token\\", True)', gateway)
         self.assertIn('payload[\\"percent\\"] = round(progress * 100.0)', gateway)

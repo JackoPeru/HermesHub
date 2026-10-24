@@ -663,6 +663,37 @@ internal fun ChatScreen(
     // Single-flight resume: LaunchedEffect + PollWhileStarted chiamano
     // recheckActiveWork in concorrenza, il secondo giro fa skip (niente doppie GET).
     val recheckMutex = remember { Mutex() }
+    var stagedServerMessages by remember(state.activeConversationId) { mutableStateOf(emptyList<ChatMessage>()) }
+    var stagedDismissedSize by remember(state.activeConversationId) { mutableStateOf(0) }
+    // Mette in staging senza toccare il live. Ritorna i nuovi messi in coda.
+    fun stageServerMessages(incoming: List<ChatMessage>): Int {
+        val before = stagedServerMessages.size
+        stagedServerMessages = stageNewServerMessages(stagedServerMessages, state.messages, incoming)
+        return stagedServerMessages.size - before
+    }
+    // Mostra esplicita: live + snapshot. Solo da tap utente o nuovo invio.
+    fun showStagedServerMessages() {
+        if (stagedServerMessages.isEmpty()) return
+        state.messages.addAll(stagedServerMessages)
+        stagedServerMessages = emptyList()
+        stagedDismissedSize = 0
+        val cid = state.activeConversationId ?: return
+        scope.launch(NonCancellable + Dispatchers.IO) {
+            runCatching {
+                val archived = loadConversation(context, cid)
+                saveConversationSnapshot(
+                    context = context,
+                    conversationId = cid,
+                    mode = state.mode,
+                    prompt = archived?.prompt.orEmpty(),
+                    messages = state.messages.toList(),
+                    source = "Hermes",
+                    preserveRemoteContinuity = true,
+                    botIdentityKey = effectiveIdentityKey
+                )
+            }
+        }
+    }
     suspend fun resumeResponseBinding(binding: ActiveWorkBinding): DetachedResumeOutcome {
         val cid = state.activeConversationId ?: return DetachedResumeOutcome.SKIPPED
         val respId = binding.responseId?.takeIf { it.isNotBlank() } ?: return DetachedResumeOutcome.SKIPPED
@@ -711,15 +742,19 @@ internal fun ChatScreen(
             else "Turno precedente del server: $storedStatus."
         val idx = state.messages.indexOfFirst { !it.fromUser && it.id == binding.partialMessageId }
         if (idx >= 0) {
+            // Il parziale del turno atteso esiste: completarlo sul posto e
+            // prevedibile (e la sua risposta, non un'intrusione).
             val old = state.messages[idx]
             state.messages[idx] = old.copy(
                 text = replacement,
                 thinking = fullThinking.ifBlank { old.thinking }
             )
         } else if (replacement.isNotBlank() &&
-            state.messages.none { !it.fromUser && it.text.contains(replacement.take(WorkLimits.TRUNC_60)) }
+            state.messages.none { !it.fromUser && it.text.contains(replacement.take(WorkLimits.TRUNC_60)) } &&
+            stagedServerMessages.none { it.id == "srv_resp_${respId}" }
         ) {
-            state.messages.add(ChatMessage("Hermes", replacement, fromUser = false, thinking = fullThinking))
+            // Nuovo messaggio da recupero: staging + Mostra, mai auto-append.
+            stageServerMessages(listOf(ChatMessage("Hermes", replacement, fromUser = false, thinking = fullThinking, id = "srv_resp_${respId}")))
         }
         withContext(NonCancellable + Dispatchers.IO) {
             clearActiveWorkBinding(context, cid)
@@ -739,7 +774,6 @@ internal fun ChatScreen(
         }
         return DetachedResumeOutcome.RECOVERED
     }
-
     suspend fun recheckActiveWork(onResumeOutcome: ((DetachedResumeOutcome) -> Unit)? = null) {
         // Single-flight: se un altro giro e' dentro, skip senza accodare.
         if (!recheckMutex.tryLock()) return
@@ -788,9 +822,12 @@ internal fun ChatScreen(
                     }
                 }
             }
-            BackgroundWorkState.WAITING_FOR_APPROVAL -> {
-                val req = approval
-                if (req != null) {
+                BackgroundWorkState.WAITING_FOR_APPROVAL -> {
+                    val req = approval
+                    // Mai toccare il turno locale vivo: solo a chat ferma. Altrimenti
+                    // banner+notifica bastano, e al prossimo tick libero si mostra.
+                    val idleForApproval = state.streamingState == null && !state.sending
+                    if (req != null && idleForApproval) {
                     state.streamingState = (state.streamingState ?: StreamingState()).copy(
                         activeRunId = binding.runId,
                         runStatus = "waiting_for_approval",
@@ -820,16 +857,19 @@ internal fun ChatScreen(
                     }
                 }
             }
-            BackgroundWorkState.DONE_COMPLETED -> {
-                val output = info.output.orEmpty()
-                // Niente gate su historyLoadedCid: dopo kill/ritorno la storia
-                // puo non essere marcata ma il dedup qui sotto basta (il
-                // binding e per-cid, non puo finire in un'altra chat).
-                if (output.isNotBlank() &&
-                    state.messages.none { !it.fromUser && it.text.contains(output.take(WorkLimits.TRUNC_60)) }
-                ) {
-                    state.messages.add(ChatMessage("Hermes", output, fromUser = false))
-                }
+                BackgroundWorkState.DONE_COMPLETED -> {
+                    val output = info.output.orEmpty()
+                    // Staging esplicito con id stabile (niente doppi, niente sorprese
+                    // nel live): l'utente lo mostra con Mostra o parte un nuovo invio.
+                    if (output.isNotBlank()) {
+                        val finalId = "srv_run_${binding.runId}_final"
+                        val known = state.messages.any { it.id == finalId } ||
+                            stagedServerMessages.any { it.id == finalId } ||
+                            state.messages.any { !it.fromUser && it.text.contains(output.take(WorkLimits.TRUNC_60)) }
+                        if (!known) {
+                            stageServerMessages(listOf(ChatMessage("Hermes", output, fromUser = false, id = finalId)))
+                        }
+                    }
                 withContext(Dispatchers.IO) { clearActiveWorkBinding(context, cid) }
                 HermesWorkService.stop(context, binding.runId)
                 if (state.backgroundWork?.runId == binding.runId) state.backgroundWork = null
@@ -881,15 +921,14 @@ internal fun ChatScreen(
     }
     // Follow sessioni detached senza binding (turni legacy continuati sul
     // server dopo kill/app chiusa/rete morta): il gateway accoda i messaggi
-    // nella conversazione Hub, il pull li porta in archivio, qui si fondono
-    // nella vista live. Reset a ogni conversazione.
+    // nella conversazione Hub, il pull li porta in archivio. MAI auto-append
+    // nel live: vanno in staging e l'utente li mostra con Mostra (chat
+    // standard intoccabile dal background). Reset a ogni conversazione.
     var serverFollowActive by remember(state.activeConversationId) { mutableStateOf(false) }
     var serverFollowChecking by remember(state.activeConversationId) { mutableStateOf(false) }
-    var serverSyncNote by remember(state.activeConversationId) { mutableStateOf<String?>(null) }
-    // Dismiss intenzionale: il tick non riapre il banner (il merge silenzioso continua).
-    var serverFollowDismissed by remember(state.activeConversationId) { mutableStateOf(false) }
+    var serverBannerDismissed by remember(state.activeConversationId) { mutableStateOf(false) }
     // Single-flight merge: tick 15s + Ricontrolla manuale corrono insieme;
-    // senza, doppio addAll degli stessi messaggi (duplicati live+archivio).
+    // senza, doppio staging degli stessi messaggi.
     val mergeFollowMutex = remember { Mutex() }
     suspend fun mergeServerFollowUp(): Int {
         if (!mergeFollowMutex.tryLock()) return 0
@@ -903,25 +942,8 @@ internal fun ChatScreen(
         serverFollowActive = follow?.active == true && recent
         val missing = missingFollowMessages(state.messages, archived.messages)
         if (missing.isEmpty()) return 0
-        state.messages.addAll(missing)
-        val whenText = formatDateTime(System.currentTimeMillis())
-        serverSyncNote = if (missing.size == 1) "1 messaggio sincronizzato dal server · $whenText"
-        else "${missing.size} messaggi sincronizzati dal server · $whenText"
-        withContext(NonCancellable + Dispatchers.IO) {
-            runCatching {
-                saveConversationSnapshot(
-                    context = context,
-                    conversationId = cid,
-                    mode = state.mode,
-                    prompt = archived.prompt,
-                    messages = state.messages.toList(),
-                    source = "Hermes",
-                    preserveRemoteContinuity = true,
-                    botIdentityKey = effectiveIdentityKey
-                )
-            }
-        }
-        return missing.size
+        // Staging esplicito: il live non si muove finche l'utente non tocca Mostra.
+        return stageServerMessages(missing)
         } finally {
             mergeFollowMutex.unlock()
         }
@@ -1253,9 +1275,9 @@ internal fun ChatScreen(
                     detachedFollowUp = false
                 }
             )
-        } else if (serverFollowActive && !serverFollowDismissed && !state.sending && state.streamingState == null) {
+        } else if (serverFollowActive && !serverBannerDismissed && !state.sending && state.streamingState == null) {
             DetachedFollowBanner(
-                subtitle = "Sessione attiva sul server — i nuovi messaggi arrivano da soli.",
+                subtitle = "Sessione attiva sul server — i nuovi messaggi aspettano il tuo Mostra.",
                 checking = serverFollowChecking,
                 onRecheck = {
                     scope.launch {
@@ -1268,13 +1290,15 @@ internal fun ChatScreen(
                         }
                     }
                 },
-                onDismiss = { serverFollowDismissed = true }
+                onDismiss = { serverBannerDismissed = true }
             )
         }
-        serverSyncNote?.let { note ->
-            DetachedResumeNote(
-                text = note,
-                onDismiss = { serverSyncNote = null }
+        val stagedCount = stagedServerMessages.size
+        if (stagedCount > 0 && stagedCount != stagedDismissedSize && !state.sending && state.streamingState == null) {
+            ServerStagedBanner(
+                count = stagedCount,
+                onShow = { showStagedServerMessages() },
+                onDismiss = { stagedDismissedSize = stagedCount }
             )
         }
         detachedNote?.let { note ->
@@ -1654,6 +1678,16 @@ internal fun ChatScreen(
                     val userMessage = ChatMessage("Tu", displayText, true, visualBlocks = createLocalAttachmentBlocks(attachments))
                     localHistory.add(userMessage)
 
+                    // Novita server piu vecchie del nuovo invio: dentro prima del
+                    // messaggio utente (ordine cronologico, niente sorprese dopo).
+                    // Anche nella history inviata (i legacy la mandano al server).
+                    if (stagedServerMessages.isNotEmpty()) {
+                        state.messages.addAll(stagedServerMessages)
+                        // userMessage e ultimo in localHistory: inserisci prima di lui.
+                        localHistory.addAll((localHistory.size - 1).coerceAtLeast(0), stagedServerMessages)
+                        stagedServerMessages = emptyList()
+                        stagedDismissedSize = 0
+                    }
                     state.messages.add(userMessage)
                     state.draft = ""
                     // Marca inizio turno: lo stop cancellera anche i job media nati dopo.
@@ -2064,6 +2098,9 @@ internal fun ChatScreen(
 
                             val serverTerminalRun = finalState.runStatus.lowercase() in setOf("completed", "failed", "cancelled")
                             val cleanDone = !interrupted && finalState.error == null && !transportDetached
+                            // Fine anomala senza stats (timeout/stop/disconnect): durata reale
+                            // onesta invece di riga metriche vuota. Solo sopra 1s, mai inventati.
+                            val finalStats = partialTurnStats(finalState.stats, finalState.startedAtNs, System.nanoTime())
                             if (boundRunIdForTurn != null && !interrupted) {
                                 // Mai su stop locale (interrupted): il POST dello stop decide
                                 // (clear), e ri-salvare qui resusciterebbe il binding in gara.
@@ -2109,7 +2146,7 @@ internal fun ChatScreen(
                                         activityTimeline = finalState.activityTimeline,
                                         visualBlocksVersion = finalState.visualBlocksVersion,
                                         visualBlocks = finalState.visualBlocks,
-                                        stats = finalState.stats,
+                                        stats = finalStats,
                                         rawEvents = rawEvents.toList(),
                                         id = resumeMessageId!!
                                     )
@@ -2117,6 +2154,11 @@ internal fun ChatScreen(
                             }
                             if (finalState.error != null && finalText.isEmpty()) {
                                 newMessagesToAppend.add(ChatMessage("Stato", finalState.error, fromUser = false, isAction = true))
+                                // Riprova senza riscrivere: rimette il prompt nel composer, solo se
+                                // vuoto e senza allegati (niente sovrascritture ne ref monchi).
+                                if (attachments.isEmpty() && state.draft.isBlank() && displayText.isNotBlank()) {
+                                    state.draft = displayText
+                                }
                             }
                             val workspaceKind = if (!interrupted && mode == "Agente") detectWorkspaceIntent(text) else null
                             if (workspaceKind != null) {

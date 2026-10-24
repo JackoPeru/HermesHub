@@ -37,9 +37,36 @@ class LiveFollowTests(unittest.TestCase):
 
     def test_follow_renders_streaming_bubble_and_banner(self) -> None:
         src = text(CHAT_FEATURE)
-        self.assertIn('item(key = "live-follow")', src)
+        self.assertIn('item(key = "live-follow"', src)
         self.assertIn("Seguo il turno live", src)
         self.assertIn("Ferma", src)
+
+    def test_background_never_appends_to_live_chat(self) -> None:
+        # Chat standard intoccabile: niente addAll/add diretti dal background,
+        # solo staging + Mostra esplicita.
+        src = text(CHAT_FEATURE)
+        self.assertNotIn("state.messages.addAll(missing)", src)
+        self.assertIn("fun stageServerMessages(", src)
+        self.assertIn("fun showStagedServerMessages()", src)
+        self.assertIn("ServerStagedBanner(", src)
+        self.assertIn("stagedServerMessages", src)
+        banners = text(
+            REPO / "src/NemoclawChat.Android/app/src/main/java/com/nemoclaw/chat/features/chat/ChatBanners.kt"
+        )
+        self.assertIn("internal fun ServerStagedBanner(", banners)
+        self.assertIn("Mostra", banners)
+
+    def test_approval_never_touches_live_turn(self) -> None:
+        src = text(CHAT_FEATURE)
+        self.assertIn("idleForApproval", src)
+        self.assertIn("state.streamingState == null && !state.sending", src)
+
+    def test_resume_recovery_stages_instead_of_appending(self) -> None:
+        src = text(CHAT_FEATURE)
+        self.assertNotIn(
+            'state.messages.add(ChatMessage("Hermes", replacement', src
+        )
+        self.assertIn('"srv_resp_${respId}"', src)
 
     def test_android_unit_test_covers_fold(self) -> None:
         self.assertIn("snapshot wins over previous text", text(AND_TEST))

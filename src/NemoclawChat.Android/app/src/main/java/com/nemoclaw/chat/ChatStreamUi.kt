@@ -267,8 +267,9 @@ internal fun AgentTranscript(
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         visible.forEachIndexed { index, block ->
-            // Chiave di contenuto: la riga si ricompone solo se il blocco cambia.
-            androidx.compose.runtime.key(block.hashCode()) {
+            // Chiave posizione+contenuto: niente riusi incrociati su hash uguali,
+            // ricomposizione mirata quando il blocco cambia davvero.
+            androidx.compose.runtime.key(index, block.hashCode()) {
             when (block) {
                 is TranscriptBlock.AgentText -> {
                     if (includeAgentText && block.text.isNotBlank()) {
@@ -748,24 +749,18 @@ internal fun activityIndicator(state: StreamingState): String {
 }
 
 private fun promptProgressIndicator(state: StreamingState): String? {
-    if (state.promptProgressEstimated) return null
-    val percent = state.promptProgressPercent ?: return null
-    val details = buildList {
-        val processed = state.promptProgressProcessedTokens
-        val total = state.promptProgressTotalTokens
-        if (processed != null && total != null && total > 0) add("$processed/$total tok")
-        val cached = state.promptProgressCachedTokens
-        if (cached != null && cached > 0) add("cache $cached")
-        val timeMs = state.promptProgressTimeMs
-        if (timeMs != null && timeMs >= 0.0) {
-            add("${String.format(java.util.Locale.US, "%.1f", timeMs / 1000.0)}s")
-        }
-    }
-    return if (details.isEmpty()) {
-        "${percent.coerceIn(0, 100)}%"
-    } else {
-        "${percent.coerceIn(0, 100)}% (${details.joinToString(", ")})"
-    }
+    // Stesso formato della riga Prefill (stimati marcati ~, mai nascosti).
+    val percent = state.promptProgressPercent
+    val hasTokens = state.promptProgressProcessedTokens != null || state.promptProgressTotalTokens != null
+    if (percent == null && !hasTokens) return null
+    return formatPrefillLine(
+        processed = state.promptProgressProcessedTokens,
+        total = state.promptProgressTotalTokens,
+        maxTokens = state.stats?.contextLength,
+        tps = state.stats?.tokensPerSecond,
+        percent = percent,
+        estimated = state.promptProgressEstimated
+    )
 }
 
 

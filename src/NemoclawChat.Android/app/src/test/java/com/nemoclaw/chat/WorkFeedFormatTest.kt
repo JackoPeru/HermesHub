@@ -1,6 +1,7 @@
 package com.nemoclaw.chat
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -110,5 +111,45 @@ class WorkFeedFormatTest {
     fun toolsGroupTitleCounts() {
         assertEquals("1 attività", toolsGroupTitle(1))
         assertEquals("4 attività", toolsGroupTitle(4))
+    }
+
+    @Test
+    fun partialTurnStatsKeepsRealOnesAndFillsDurationOnly() {
+        val real = ChatStreamStats(totalMs = 12.0, tokensOut = 5)
+        assertEquals(real, partialTurnStats(real, 1L, 100_000_000_000L))
+        assertEquals(null, partialTurnStats(null, 0L, 100_000_000_000L))
+        assertEquals(null, partialTurnStats(null, 1L, 500_000_000L))
+        val filled = partialTurnStats(null, 1L, 91_000_000_000L)
+        assertEquals(91_000.0, filled?.totalMs ?: -1.0, 1.0)
+        assertEquals(null, filled?.tokensOut)
+    }
+
+    @Test
+    fun failedTurnShowsDurationLineInsteadOfBlank() {        // Catena completa: timeout senza Done -> stats parziali -> riga visibile.
+        val stats = partialTurnStats(null, 1L, 90_000_000_001L)
+        val line = formatChatStatsLine(stats, MetricDisplayFilter())
+        assertTrue(line.isNotBlank())
+        assertTrue(line.contains("90.0s"))
+        // Mai token inventati.
+        assertFalse(line.contains("tok"))
+        // Turno sano invariato: stats reali passano lisce.
+        val healthy = ChatStreamStats(ttftMs = 1200.0, totalMs = 5000.0, tokensOut = 42)
+        assertTrue(formatChatStatsLine(healthy, MetricDisplayFilter()).contains("tok"))
+    }
+
+    @Test
+    fun stageNewServerMessagesDedupesAndPreservesOrder() {
+        val visible = listOf(ChatMessage("Tu", "ciao", true, id = "u1"))
+        val staged = listOf(ChatMessage("Hermes", "vecchio", false, id = "s1"))
+        val incoming = listOf(
+            ChatMessage("Hermes", "vecchio", false, id = "s1"),
+            ChatMessage("Hermes", "nuovo-1", false, id = "s2"),
+            ChatMessage("Hermes", "nuovo-2", false, id = "s3"),
+            ChatMessage("Hermes", "blank", false, id = "")
+        )
+        val out = stageNewServerMessages(staged, visible, incoming)
+        assertEquals(listOf("s1", "s2", "s3"), out.map { it.id })
+        // Secondo giro: tutto noto, niente cambia (stessa istanza).
+        assertEquals(out, stageNewServerMessages(out, visible + out, incoming))
     }
 }

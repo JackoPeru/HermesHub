@@ -86,6 +86,18 @@ internal fun silentTurnEndMessage(transportDetached: Boolean): String =
     }
 
 /**
+ * Stats parziali oneste a fine anomala (timeout/stop/disconnect senza Done):
+ * solo durata reale sopra 1s, mai token inventati. Pura e testabile.
+ */
+internal fun partialTurnStats(existing: ChatStreamStats?, startedAtNs: Long, nowNs: Long): ChatStreamStats? {
+    if (existing != null) return existing
+    if (startedAtNs <= 0L) return null
+    val elapsedMs = (nowNs - startedAtNs) / 1_000_000.0
+    if (!elapsedMs.isFinite() || elapsedMs < 1000.0) return null
+    return ChatStreamStats(totalMs = elapsedMs)
+}
+
+/**
  * Fail-closed bot remoto: connessione secondaria senza secret salvato = invio vietato.
  * Pura/testabile: true solo se remota E chiave assente/blank (mai NPE su apiKey null).
  */
@@ -187,6 +199,24 @@ internal fun foldLiveFollowThinking(previous: String, events: List<ChatStreamEve
     var acc = previous
     events.filterIsInstance<ChatStreamEvent.ThinkingDelta>().forEach { acc = mergeTextDelta(acc, it.delta) }
     return acc
+}
+
+/**
+ * Staging messaggi server: entra solo novita (mai duplicati per id, mai
+ * riordini). Il live resta intoccato finche l'utente non tocca Mostra.
+ * Puro e testabile.
+ */
+internal fun stageNewServerMessages(
+    staged: List<ChatMessage>,
+    visible: List<ChatMessage>,
+    incoming: List<ChatMessage>
+): List<ChatMessage> {
+    if (incoming.isEmpty()) return staged
+    val known = HashSet<String>(visible.size + staged.size + incoming.size)
+    visible.forEach { known.add(it.id) }
+    staged.forEach { known.add(it.id) }
+    val fresh = incoming.filter { it.id.isNotBlank() && known.add(it.id) }
+    return if (fresh.isEmpty()) staged else staged + fresh
 }
 
 

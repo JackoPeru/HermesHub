@@ -399,3 +399,53 @@ internal fun DetachedResumeNote(
     Spacer(modifier = Modifier.height(4.dp))
 }
 
+/**
+ * Novita dal server in attesa: il live non si e mosso, l'utente decide
+ * con Mostra. Stesso stile degli altri banner, una sola azione chiara.
+ */
+@Composable
+internal fun ServerStagedBanner(
+    count: Int,
+    onShow: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Surface(
+        color = AppColors.Elevated,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, AppColors.Border),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(
+                Icons.Rounded.CloudSync,
+                contentDescription = null,
+                tint = AppColors.Success,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = if (count == 1) "↓ 1 nuovo dal server" else "↓ $count nuovi dal server",
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(
+                onClick = onShow,
+                colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
+            ) {
+                Text("Mostra", color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
+            }
+            IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Rounded.Close, contentDescription = "Ignora", tint = AppColors.Muted)
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(4.dp))
+}
+
