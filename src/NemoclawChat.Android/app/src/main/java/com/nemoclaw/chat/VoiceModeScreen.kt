@@ -389,7 +389,7 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
                 brush = Brush.radialGradient(
                     0.0f to Color(0xFFF5A524).copy(alpha = 0.12f),
                     0.55f to Color(0xFFF5A524).copy(alpha = 0.04f),
-                    1.0f to Color.Transparent,
+                    1.0f to Color(0xFFF5A524).copy(alpha = 0f),
                     center = center,
                     radius = size.minDimension * 0.55f
                 ),

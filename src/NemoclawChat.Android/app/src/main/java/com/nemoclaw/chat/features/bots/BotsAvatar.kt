@@ -70,7 +70,7 @@ internal fun BotAvatar(name: String, profile: String, size: androidx.compose.ui.
                 brush = Brush.radialGradient(
                     0.0f to Color(0xFFF5A524).copy(alpha = 0.22f),
                     0.6f to Color(0xFFF5A524).copy(alpha = 0.06f),
-                    1.0f to Color.Transparent
+                    1.0f to Color(0xFFF5A524).copy(alpha = 0f)
                 ),
                 radius = size.toPx() / 2f + 5.dp.toPx(),
                 center = center

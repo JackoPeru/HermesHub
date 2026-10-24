@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -62,7 +63,8 @@ internal fun BotEmptyState(
         Image(
             painter = painterResource(id = R.drawable.aurora_home),
             contentDescription = null,
-            contentScale = ContentScale.Crop,
+            contentScale = ContentScale.FillWidth,
+            alignment = Alignment.TopCenter,
             modifier = Modifier.fillMaxSize()
         )
         Column(
@@ -135,14 +137,16 @@ internal fun EmptyState(
         Image(
             painter = painterResource(id = R.drawable.aurora_home),
             contentDescription = null,
-            contentScale = ContentScale.Crop,
+            contentScale = ContentScale.FillWidth,
+            alignment = Alignment.TopCenter,
             modifier = Modifier.fillMaxSize()
         )
         Column(modifier = Modifier.fillMaxSize()) {
-            // Header home 1:1 dal riferimento (sostituisce la TopBar a chat vuota).
+            // Header home: sotto la status bar, mai tagliato.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .statusBarsPadding()
                     .padding(horizontal = 24.dp)
                     .padding(top = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -194,7 +198,7 @@ internal fun EmptyState(
                                 Brush.radialGradient(
                                     0.0f to Color(0xFFF5A524).copy(alpha = 0.24f),
                                     0.6f to Color(0xFFF5A524).copy(alpha = 0.05f),
-                                    1.0f to Color.Transparent
+                                    1.0f to Color(0xFFF5A524).copy(alpha = 0f)
                                 ),
                                 CircleShape
                             )

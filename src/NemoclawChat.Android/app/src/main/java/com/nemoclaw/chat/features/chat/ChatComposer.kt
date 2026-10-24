@@ -437,6 +437,7 @@ internal fun Composer(
     }
 
     var showSheet by remember { mutableStateOf(false) }
+    var showReasoningMenu by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -479,6 +480,30 @@ internal fun Composer(
                         subtitle = "Scatto singolo nominato scansione",
                         onClick = { showSheet = false; onScanDocument() }
                     )
+                    // Sforzo ragionamento vive qui (composer a riga singola).
+                    Box {
+                        AttachSheetRow(
+                            icon = Icons.Rounded.Speed,
+                            title = "Sforzo ragionamento",
+                            subtitle = reasoningEffort.ifBlank { "Auto" },
+                            onClick = { showReasoningMenu = true }
+                        )
+                        DropdownMenu(
+                            expanded = showReasoningMenu,
+                            onDismissRequest = { showReasoningMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Auto") },
+                                onClick = { showReasoningMenu = false; onReasoningChange("") }
+                            )
+                            reasoningOptions.forEach { eff ->
+                                DropdownMenuItem(
+                                    text = { Text(eff) },
+                                    onClick = { showReasoningMenu = false; onReasoningChange(eff) }
+                                )
+                            }
+                        }
+                    }
                     Spacer(modifier = Modifier.navigationBarsPadding().height(12.dp))
                 }
             }
@@ -508,19 +533,34 @@ internal fun Composer(
             shape = RoundedCornerShape(24.dp),
             border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f))
         ) {
-            Column(
+            // Pill a riga singola come il riferimento: [+] campo [mic] [invio].
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                    .padding(horizontal = 6.dp, vertical = 6.dp)
+                    .heightIn(min = 56.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
+                // + allegati in cerchio vetro.
+                Box(
+                    contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = (38 * fontScale).dp, max = (138 * fontScale).dp)
-                        .padding(vertical = 5.dp)
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)), CircleShape)
+                        .clickable { showSheet = true }
                 ) {
-                    Box(contentAlignment = Alignment.CenterStart, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.Add, contentDescription = "Apri menu allegati", tint = Color.White, modifier = Modifier.size(22.dp))
+                }
+                // Campo: cresce in altezza scrivendo, resta centrato da vuoto.
+                Box(
+                    contentAlignment = Alignment.CenterStart,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = (38 * fontScale).dp, max = (138 * fontScale).dp)
+                        .padding(horizontal = 10.dp)
+                ) {
                     BasicTextField(
                         value = value,
                         onValueChange = onValueChange,
@@ -538,92 +578,48 @@ internal fun Composer(
                             keyboardType = KeyboardType.Text,
                             imeAction = ImeAction.Default
                         ),
-                        modifier = Modifier
-                            .fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth()
                     )
                     if (value.isEmpty()) {
-                        Text("Chiedi a Hermes", color = AppColors.Faint, fontSize = 16.sp)
-                    }
+                        Text("Chiedi a Hermes", color = AppColors.Faint, fontSize = 16.sp, maxLines = 1)
                     }
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)), CircleShape)
+                        .clickable(enabled = true) { onToggleVoiceNote() }
                 ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clickable { showSheet = true }
-                    ) {
-                        Icon(Icons.Rounded.Add, contentDescription = "Apri menu allegati", tint = Color.White, modifier = Modifier.size(24.dp))
-                    }
-                    var showReasoningMenu by remember { mutableStateOf(false) }
-                    Box(contentAlignment = Alignment.Center) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clickable { showReasoningMenu = true }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Speed,
-                                contentDescription = "Sforzo ragionamento: ${reasoningEffort.ifBlank { "Auto" }}",
-                                tint = if (reasoningEffort.isBlank()) AppColors.Muted else AppColors.Accent,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = showReasoningMenu,
-                            onDismissRequest = { showReasoningMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Auto") },
-                                onClick = { showReasoningMenu = false; onReasoningChange("") }
-                            )
-                            reasoningOptions.forEach { eff ->
-                                DropdownMenuItem(
-                                    text = { Text(eff) },
-                                    onClick = { showReasoningMenu = false; onReasoningChange(eff) }
-                                )
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.weight(1f))
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clickable(enabled = true) { onToggleVoiceNote() }
-                    ) {
+                    Icon(
+                        imageVector = if (isRecordingVoiceNote) Icons.Rounded.Stop else Icons.Rounded.Mic,
+                        contentDescription = if (isRecordingVoiceNote) "Ferma registrazione" else "Registra nota vocale",
+                        tint = if (isRecordingVoiceNote) Color.Red else Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                val canSend = (value.isNotBlank() || attachments.isNotEmpty()) && !isBusy
+                Surface(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clickable {
+                            if (isBusy) onStop()
+                            else if (canSend) onSend()
+                            else onToggleVoiceNote()
+                        },
+                    color = if (canSend || isBusy) AppColors.Accent else Color.White.copy(alpha = 0.06f),
+                    shape = CircleShape,
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                         Icon(
-                            imageVector = if (isRecordingVoiceNote) Icons.Rounded.Stop else Icons.Rounded.Mic,
-                            contentDescription = if (isRecordingVoiceNote) "Ferma registrazione" else "Registra nota vocale",
-                            tint = if (isRecordingVoiceNote) Color.Red else Color.White,
+                            imageVector = if (isBusy) Icons.Rounded.Stop else if (canSend) Icons.Rounded.ArrowUpward else Icons.Rounded.GraphicEq,
+                            contentDescription = if (isBusy) "Interrompi generazione" else if (canSend) "Invia" else "Tocca per parlare",
+                            tint = if (canSend || isBusy) Color(0xFF171009) else AppColors.Muted,
                             modifier = Modifier.size(22.dp)
                         )
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    val canSend = (value.isNotBlank() || attachments.isNotEmpty()) && !isBusy
-                    Surface(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clickable {
-                                if (isBusy) onStop()
-                                else if (canSend) onSend()
-                                else onToggleVoiceNote()
-                            },
-                        color = if (canSend || isBusy) AppColors.Accent else AppColors.Surface,
-                        shape = CircleShape,
-                    ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Icon(
-                                imageVector = if (isBusy) Icons.Rounded.Stop else if (canSend) Icons.Rounded.ArrowUpward else Icons.Rounded.GraphicEq,
-                                contentDescription = if (isBusy) "Interrompi generazione" else if (canSend) "Invia" else "Tocca per parlare",
-                                tint = if (canSend || isBusy) Color(0xFF171009) else AppColors.Muted,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
                     }
                 }
             }

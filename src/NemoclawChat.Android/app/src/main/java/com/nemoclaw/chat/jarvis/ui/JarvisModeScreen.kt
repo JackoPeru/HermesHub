@@ -56,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -154,11 +155,12 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
         Image(
             painter = painterResource(id = R.drawable.aurora_home),
             contentDescription = null,
-            contentScale = ContentScale.Crop,
+            contentScale = ContentScale.FillWidth,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(380.dp)
                 .align(Alignment.TopCenter)
+                .clipToBounds()
         )
         LazyColumn(
         modifier = Modifier

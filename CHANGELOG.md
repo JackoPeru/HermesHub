@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.310 - 2026-10-24
+
+- Hero 1:1 verificata dal vivo: header con inset corretto, composer a riga singola, glow logo/avatar senza alone scuro, asset archi rigenerato e ancorato in alto.
+- Solo stile: suite verdi.
+
 ## 0.6.309 - 2026-10-24
 
 - Home 1:1 rifinita: toggle nascosto a chat vuota, riga Legacy nascosta, logo e archi potenziati, bot coerente.

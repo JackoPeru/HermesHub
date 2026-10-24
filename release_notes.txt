@@ -1,6 +1,6 @@
-Hermes Hub 0.6.309 (home 1:1 rifinita)
+Hermes Hub 0.6.310 (hero 1:1 verificata dal vivo)
 
-- Toggle Chat|Bot nascosto a chat vuota (era tagliato), riga Legacy nascosta, logo e archi potenziati, bot coerente.
+- Header hero con inset status bar, composer pill a riga singola con invio ambra, glow logo/avatar/bot senza alone scuro, asset archi rigenerato luminoso e ancorato in alto.
 - Solo stile: suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.309-android.apk (Android, versionCode 313), NemoclawChat.Windows_0.6.309.0_x64.msix (x64) e HermesHub-0.6.309-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.310-android.apk (Android, versionCode 314), NemoclawChat.Windows_0.6.310.0_x64.msix (x64) e HermesHub-0.6.310-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
