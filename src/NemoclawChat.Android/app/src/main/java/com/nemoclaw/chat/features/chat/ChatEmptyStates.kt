@@ -87,6 +87,16 @@ internal fun BotEmptyState(
             LinearProgressIndicator()
             Spacer(modifier = Modifier.height(10.dp))
         }
+        // Marchio bot come nell'hero (coerenza sezione bot).
+        Image(
+            painter = painterResource(id = R.drawable.chatclaw_logo_hero),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(72.dp)
+                .clip(RoundedCornerShape(20.dp))
+        )
+        Spacer(modifier = Modifier.height(18.dp))
         Text(
             text = when {
                 opening -> "Apro la chat…"

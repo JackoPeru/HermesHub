@@ -111,4 +111,20 @@ class ChatIdentityTest {
         val legacyMissing = JSONArray().put(JSONObject().put("id", "c4"))
         assertEquals("", readConversationsFromJsonArray(legacyMissing).single().botIdentityKey)
     }
+
+    @Test
+    fun mostRecentNormalConversationSkipsPersistentBotChats() {
+        val j = bot("jarvis")
+        val r = roster(j)
+        val legacyId = com.nemoclaw.chat.features.bots.stableBotConversationId(j)
+        // 1:1 persistente prima, normale dopo: vince la normale.
+        val all = listOf(conv(legacyId), conv("conv_normal", "primary::jarvis"))
+        assertEquals("conv_normal", mostRecentNormalConversationId(all, "primary::jarvis", r))
+        // Solo 1:1 persistenti (legacy + id botchat- stampato): null = chat nuova.
+        val onlyBots = listOf(conv(legacyId), conv("botchat-x", "primary::jarvis"))
+        assertEquals(null, mostRecentNormalConversationId(onlyBots, "primary::jarvis", r))
+        // Normale prima: resta la prima.
+        val normalFirst = listOf(conv("conv_a", "primary::jarvis"), conv(legacyId))
+        assertEquals("conv_a", mostRecentNormalConversationId(normalFirst, "primary::jarvis", r))
+    }
 }

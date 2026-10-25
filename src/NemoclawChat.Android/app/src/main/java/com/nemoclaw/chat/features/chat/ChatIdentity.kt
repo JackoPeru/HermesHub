@@ -59,6 +59,18 @@ internal fun conversationsForIdentity(
     return conversations.filter { conversationIdentityKey(it, roster) == clean }
 }
 
+/**
+ * Ultima chat NORMALE dell'identita per il cambio bot dal titolo: mai le
+ * 1:1 persistenti dei bot (id "bot-" o "botchat-"), che restano nella
+ * sezione bot. Null = nessuna normale (si apre una chat nuova). Pura e testabile.
+ */
+internal fun mostRecentNormalConversationId(
+    conversations: List<LocalConversation>,
+    key: String,
+    roster: HermesBotRoster?
+): String? = conversationsForIdentity(conversations, key, roster)
+    .firstOrNull { !isBotConversationId(it.id) }?.id
+
 /** Voce del menu identita (chiave vuota = Hermes default, aggiunta dalla UI). */
 internal data class ChatIdentityOption(
     val key: String,

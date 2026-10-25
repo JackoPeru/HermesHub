@@ -99,7 +99,7 @@ private fun ChatBotSegment(
             .semantics(mergeDescendants = true) {
                 stateDescription = stateDesc
             },
-        color = if (selected) AppColors.Accent else Color.Transparent,
+        color = if (selected) AppColors.Accent.copy(alpha = 0.16f) else Color.Transparent,
         shape = CircleShape
     ) {
         Row(
@@ -112,12 +112,12 @@ private fun ChatBotSegment(
                     modifier = Modifier
                         .padding(end = 4.dp)
                         .size(6.dp)
-                        .background(Color(0xFF171009), CircleShape)
+                        .background(AppColors.Accent, CircleShape)
                 )
             }
             Text(
                 text = label,
-                color = if (selected) Color(0xFF171009) else AppColors.Muted,
+                color = if (selected) AppColors.Accent else AppColors.Muted,
                 fontSize = 12.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 lineHeight = 14.sp,

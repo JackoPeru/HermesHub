@@ -1,0 +1,83 @@
+package com.nemoclaw.chat
+
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onRoot
+import com.github.takahirom.roborazzi.captureRoboImage
+import com.nemoclaw.chat.ui.theme.ChatClawTheme
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import java.io.File
+
+/**
+ * Screenshot della sezione bot vera su JVM. PNG in
+ * C:/Users/matte/AppData/Local/Temp/opencode/robo_bot*.png
+ */
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [35], qualifiers = "w411dp-h891dp-xhdpi")
+@RunWith(RobolectricTestRunner::class)
+class BotSectionScreenshotTest {
+    @get:Rule
+    val composeRule = createAndroidComposeRule<TestHarnessActivity>()
+
+    @Test
+    fun botEmpty() {
+        composeRule.setContent {
+            ChatClawTheme {
+                BotEmptyState(
+                    displayName = "Socrate",
+                    opening = false,
+                    unreachable = false
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage(
+            file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_botempty.png")
+        )
+    }
+
+    @Test
+    fun botTopBar() {
+        composeRule.setContent {
+            ChatClawTheme {
+                TopBar(
+                    settings = AppSettings(),
+                    contextUsage = ContextUsage(tokens = 12000, percent = 9),
+                    connected = true,
+                    gatewayRuntime = null,
+                    title = "Socrate",
+                    identityPicker = null,
+                    onNewChat = {},
+                    onOpenSidebar = {},
+                    onOpenArchive = {},
+                    onOpenComfy = {}
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage(
+            file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_bottopbar.png")
+        )
+    }
+
+    @Test
+    fun botToggle() {
+        composeRule.setContent {
+            ChatClawTheme {
+                ChatBotToggle(
+                    botActive = true,
+                    onSelectChat = {},
+                    onSelectBot = {}
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage(
+            file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_bottoggle.png")
+        )
+    }
+}

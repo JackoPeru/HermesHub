@@ -606,7 +606,8 @@ internal fun ChatApp() {
         pendingPrompt = ""
         chatScope.launch(Dispatchers.IO) {
             val recent = runCatching { loadConversations(context.applicationContext) }.getOrDefault(emptyList())
-            val target = conversationsForIdentity(recent, clean, chatRoster).firstOrNull()?.id
+            // Solo chat normali (mai la schermata bot): vedi mostRecentNormalConversationId.
+            val target = mostRecentNormalConversationId(recent, clean, chatRoster)
             withContext(Dispatchers.Main) {
                 if (target == null) chatState.resetForNewChat()
                 pendingConversationId = target

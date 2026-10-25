@@ -124,7 +124,39 @@ class HomeScreenshotTest {
         composeRule.onNodeWithContentDescription("Menu rapido: contesto 24% e manager").performClick()
         composeRule.waitForIdle()
         captureScreenRoboImage(
-            file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_avatarmenu.png")
+            file = java.io.File("C:/Users/matte/AppData/Local/Temp/opencode/robo_avatarmenu.png")
+        )
+    }
+
+    @Test
+    fun heroBotPickDismissesAndPicks() {
+        var picked = "none"
+        composeRule.setContent {
+            ChatClawTheme {
+                EmptyState(
+                    onPrompt = {},
+                    serverOnline = true,
+                    onOpenSidebar = {},
+                    identityPicker = ChatIdentityPicker(
+                        currentLabel = "Hermes",
+                        activeKey = "",
+                        loading = false,
+                        status = "",
+                        options = listOf(ChatIdentityOption("conn::socrate", "Socrate", "primary")),
+                        onPick = { picked = it },
+                        onRefresh = {}
+                    )
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Hermes Hub").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Socrate").performClick()
+        composeRule.waitForIdle()
+        org.junit.Assert.assertEquals("conn::socrate", picked)
+        composeRule.onRoot().captureRoboImage(
+            file = java.io.File("C:/Users/matte/AppData/Local/Temp/opencode/robo_botpick.png")
         )
     }
 }

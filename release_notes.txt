@@ -1,6 +1,6 @@
-Hermes Hub 0.6.314 (hero rifinito)
+Hermes Hub 0.6.315 (cambio bot + sezione bot)
 
-- Alone di luce largo dietro il logo centrale e proporzioni come il riferimento (logo ~29%, titolo ~40%).
-- Solo stile: suite Android verde, python verdi, consistency 28/28.
+- Cambio bot dal titolo: apre solo l'ultima chat normale (mai la schermata bot); sezione bot in stile Apple (banda trasparente, toggle tenue, marchio logo).
+- Fix + stile: suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.314-android.apk (Android, versionCode 318), NemoclawChat.Windows_0.6.314.0_x64.msix (x64) e HermesHub-0.6.314-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.315-android.apk (Android, versionCode 319), NemoclawChat.Windows_0.6.315.0_x64.msix (x64) e HermesHub-0.6.315-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

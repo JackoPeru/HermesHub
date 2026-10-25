@@ -311,7 +311,8 @@ internal fun TopBar(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
 
-    Surface(color = AppColors.Background) {
+    // Banda trasparente stile Apple (niente blocco solido): hairline sotto.
+    Surface(color = Color.Transparent) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -377,13 +378,26 @@ internal fun TopBar(
                     )
                 }
             }
-            IconButton(onClick = onOpenArchive, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Rounded.FolderOpen, contentDescription = "Archivio chat", tint = AppColors.Muted, modifier = Modifier.size(19.dp))
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.06f))
+                    .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)), CircleShape)
+                    .clickable { onOpenArchive() }
+            ) {
+                Icon(Icons.Rounded.FolderOpen, contentDescription = "Archivio chat", tint = Color.White, modifier = Modifier.size(19.dp))
             }
             Box {
-                IconButton(
-                onClick = { menuOpen = true },
-                    modifier = Modifier.size(38.dp)
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)), CircleShape)
+                        .clickable { menuOpen = true }
                 ) {
                     Icon(Icons.Rounded.MoreVert, contentDescription = "Impostazioni rapide", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
