@@ -89,7 +89,7 @@ import com.nemoclaw.chat.saveBotAutoApprove
 import com.nemoclaw.chat.core.WorkLimits
 import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.apple.AppleType
-import com.nemoclaw.chat.ui.apple.AuroraBackground
+import com.nemoclaw.chat.ui.apple.BubbleBackground
 import com.nemoclaw.chat.loadBotAutoApproveMap
 import com.nemoclaw.chat.saveBotAutoApprove
 import com.nemoclaw.chat.saveGatewayConnectionSecret
@@ -249,10 +249,11 @@ internal fun BotsScreen(
     // (l'handler AppRoot consumerebbe il back altrimenti).
     BackHandler(enabled = detailBot != null) { detailKey = null }
 
-    // Funnel unico di apertura canonica: guard SINCRONA anti doppio-tap
+    // Funnel unico di apertura: guard SINCRONA anti doppio-tap
     // (lo state write e immediato, la ricomposizione che disabilita i
-    // bottoni no) + finally (mai opening appeso su cancel). Risolve la
-    // forever-chat condivisa col desktop (mai fork, mai sessioni per-tap).
+    // bottoni no) + finally (mai opening appeso su cancel). Apre SEMPRE
+    // una chat pulita (nuova sessione, mai l'ultima): le 1:1 persistenti
+    // restano solo nel registro, non si riusano all'apertura.
     // Ritorna false se non acquisisce la guard (chiamante: non chiudere menu).
     fun openBotSession(bot: HermesBotItem): Boolean {
         if (opening != null) {
@@ -263,33 +264,12 @@ internal fun BotsScreen(
         opening = bot.identityKey
         scope.launch {
             try {
-                // Niente lock esterno qui: il lock e dentro
-                // resolveCanonicalBotChat (stessa chiave = deadlock,
-                // Mutex non rientrante). La guard `opening` sopra copre
-                // gia il doppio-tap.
-                when (val resolved = resolveCanonicalBotChat(appContext, settings, bot, roster?.multiplexEnabled == true)) {
-                    is CanonicalBotResolve.Found -> {
-                        if (resolved.duplicates > 0) {
-                            status = "Attenzione: ${resolved.duplicates + 1} Bot Chat per ${bot.displayName}, uso la prima."
-                        }
-                        val connection = withContext(Dispatchers.IO) { connectionForBot(appContext, settings, bot) }
-                        onOpenBot(
-                            BotChatContext(
-                                profile = bot.profile,
-                                sessionId = resolved.chat.sessionId,
-                                displayName = bot.displayName,
-                                localConversationId = stableBotConversationId(bot),
-                                multiplexEnabled = roster?.multiplexEnabled == true,
-                                connectionId = connection.id,
-                                endpoint = connection.endpoint
-                            )
-                        )
+                createBotChatSession(appContext, settings, bot, roster?.multiplexEnabled == true)
+                    .mapCatching { created ->
+                        botSessionContext(appContext, settings, bot, roster?.multiplexEnabled == true, created).getOrThrow()
                     }
-                    is CanonicalBotResolve.Empty ->
-                        status = "Nessuna Bot Chat per ${bot.displayName}: riprova."
-                    is CanonicalBotResolve.Failed ->
-                        status = resolved.message
-                }
+                    .onSuccess { onOpenBot(it) }
+                    .onFailure { status = it.message ?: "Nuova chat non creata." }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (e: Exception) {
@@ -597,7 +577,7 @@ internal fun BotsScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(AppColors.Background)) {
-        AuroraBackground()
+        BubbleBackground()
         LazyColumn(
         state = botListState,
         modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),

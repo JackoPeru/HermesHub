@@ -23,7 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nemoclaw.chat.ui.apple.AppleType
-import com.nemoclaw.chat.ui.apple.AuroraBackground
+import com.nemoclaw.chat.ui.apple.BubbleBackground
 
 class HealthPrivacyActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,7 +37,7 @@ private fun HealthPrivacyNotice() {
     Box(
         modifier = Modifier.fillMaxSize().background(AppColors.Background)
     ) {
-        AuroraBackground()
+        BubbleBackground()
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)

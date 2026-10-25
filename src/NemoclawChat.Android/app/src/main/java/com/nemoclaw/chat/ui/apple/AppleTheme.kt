@@ -82,47 +82,6 @@ object AppleMotion {
         fadeOut(tween(180)) + slideOutVertically(tween(200)) { it / 10 }
 }
 
-/** Sfondo aurora: curve ambrate morbide su nero. Statico (costo zero a regime). */
-@Composable
-fun AuroraBackground(modifier: Modifier = Modifier, intensity: Float = 1f) {
-    Canvas(modifier = modifier.fillMaxSize()) {
-        val w = size.width
-        val h = size.height
-        // Alone caldo in alto a destra.
-        drawCircle(
-            brush = Brush.radialGradient(
-                0.0f to Color(0xFFF5A524).copy(alpha = 0.10f * intensity),
-                0.55f to Color(0xFFF5A524).copy(alpha = 0.03f * intensity),
-                1.0f to Color.Transparent,
-                center = Offset(w * 0.92f, -h * 0.06f),
-                radius = w * 0.85f
-            ),
-            radius = w * 0.85f,
-            center = Offset(w * 0.92f, -h * 0.06f)
-        )
-        // Arco luce che attraversa in alto.
-        drawArc(
-            color = Color(0xFFF5A524).copy(alpha = 0.16f * intensity),
-            startAngle = 200f,
-            sweepAngle = 70f,
-            useCenter = false,
-            topLeft = Offset(-w * 0.55f, -h * 0.42f),
-            size = androidx.compose.ui.geometry.Size(w * 1.5f, h * 0.75f),
-            style = Stroke(width = h * 0.012f)
-        )
-        // Arco basso di rientro.
-        drawArc(
-            color = Color.White.copy(alpha = 0.05f * intensity),
-            startAngle = 290f,
-            sweepAngle = 80f,
-            useCenter = false,
-            topLeft = Offset(-w * 0.35f, h * 0.52f),
-            size = androidx.compose.ui.geometry.Size(w * 1.7f, h * 0.8f),
-            style = Stroke(width = h * 0.02f)
-        )
-    }
-}
-
 /**
  * Bolle del riferimento: due sfere scure con bordo oro rim-light e alone
  * volumetrico, in deriva lenta con respiro della luce. Ogni elemento di luce
@@ -151,7 +110,12 @@ fun BubbleBackground(modifier: Modifier = Modifier) {
         animationSpec = infiniteRepeatable(tween(9000, easing = LinearEasing), RepeatMode.Restart),
         label = "glowPhase"
     )
-    Canvas(modifier = modifier.fillMaxSize()) {
+    Canvas(
+        modifier = modifier
+            .fillMaxSize()
+            // Le sfere debordano dal box: tagliare qui o velano i fratelli sopra.
+            .clip(androidx.compose.ui.graphics.RectangleShape)
+    ) {
         val w = size.width
         val h = size.height
         if (w <= 0f || h <= 0f) return@Canvas

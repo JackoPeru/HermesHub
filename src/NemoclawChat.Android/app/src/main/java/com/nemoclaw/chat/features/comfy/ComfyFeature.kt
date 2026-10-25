@@ -6,7 +6,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.apple.AppleType
-import com.nemoclaw.chat.ui.apple.AuroraBackground
+import com.nemoclaw.chat.ui.apple.BubbleBackground
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -297,7 +297,7 @@ internal fun ComfyScreen(
             .fillMaxSize()
             .background(AppColors.Background)
     ) {
-        AuroraBackground(intensity = 1f)
+        BubbleBackground()
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp)

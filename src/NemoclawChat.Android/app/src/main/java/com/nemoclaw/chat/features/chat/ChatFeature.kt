@@ -1133,19 +1133,6 @@ internal fun ChatScreen(
     }
 
     val isEmptyChat = state.messages.isEmpty() && state.streamingState == null
-    val emptyChatBrush = remember {
-        Brush.verticalGradient(
-            colors = listOf(
-                Color(0x34F5A524),
-                Color(0x241F1710),
-                Color(0x12181510),
-                AppColors.Background,
-                AppColors.Background
-            ),
-            startY = -260f,
-            endY = 1440f
-        )
-    }
     val solidBrush = remember {
         Brush.verticalGradient(listOf(AppColors.Background, AppColors.Background))
     }
@@ -1153,7 +1140,7 @@ internal fun ChatScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(if (isEmptyChat) emptyChatBrush else solidBrush)
+            .background(solidBrush)
     ) {
         // In chat bot il titolo e il nome del bot (niente banda separata).
         val topTitle = if (!botProfile.isNullOrBlank()) {

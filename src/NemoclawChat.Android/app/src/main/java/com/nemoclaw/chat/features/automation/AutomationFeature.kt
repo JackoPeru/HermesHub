@@ -250,7 +250,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
 import com.nemoclaw.chat.ui.apple.AppleType
-import com.nemoclaw.chat.ui.apple.AuroraBackground
+import com.nemoclaw.chat.ui.apple.BubbleBackground
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -459,7 +459,7 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        AuroraBackground()
+        BubbleBackground()
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -770,7 +770,7 @@ internal fun NotificationsScreen(context: Context, settings: AppSettings, onOpen
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        AuroraBackground()
+        BubbleBackground()
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
@@ -919,7 +919,7 @@ internal fun ContinuityScreen(context: Context, settings: AppSettings, onOpenCon
     }
     LaunchedEffect(settings.gatewayUrl, refresh) { val loaded = loadContinuityItems(settings, loadGatewaySecret(context)); items = loaded.first; status = loaded.second }
     Box(modifier = Modifier.fillMaxSize()) {
-        AuroraBackground()
+        BubbleBackground()
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         item {
             AutomationHeader(
@@ -1162,7 +1162,7 @@ internal fun AuditScreen(context: Context, settings: AppSettings) {
     var project by rememberSaveable { mutableStateOf("") }; var run by rememberSaveable { mutableStateOf("") }; var tool by rememberSaveable { mutableStateOf("") }; var device by rememberSaveable { mutableStateOf("") }; var risk by rememberSaveable { mutableStateOf("") }; var refresh by remember { mutableIntStateOf(0) }; var items by remember { mutableStateOf<List<AuditItem>>(emptyList()) }; var status by remember { mutableStateOf("Carico audit...") }
     LaunchedEffect(settings.gatewayUrl, refresh) { val loaded = loadAuditItems(settings, project, run, tool, device, risk, loadGatewaySecret(context)); items = loaded.first; status = loaded.second }
     Box(modifier = Modifier.fillMaxSize()) {
-        AuroraBackground()
+        BubbleBackground()
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         item {
             AutomationHeader(

@@ -5,7 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.apple.AppleType
-import com.nemoclaw.chat.ui.apple.AuroraBackground
+import com.nemoclaw.chat.ui.apple.BubbleBackground
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
@@ -77,7 +77,7 @@ internal fun HealthDashboardScreen(context: Context, settings: AppSettings, onOp
             .fillMaxSize()
             .background(AppColors.Background)
     ) {
-        AuroraBackground(intensity = 1f)
+        BubbleBackground()
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),

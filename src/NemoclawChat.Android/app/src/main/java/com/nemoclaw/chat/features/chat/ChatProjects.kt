@@ -51,7 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.ui.apple.AppleGlass
 import com.nemoclaw.chat.ui.apple.AppleType
-import com.nemoclaw.chat.ui.apple.AuroraBackground
+import com.nemoclaw.chat.ui.apple.BubbleBackground
 import com.nemoclaw.chat.features.git.GitHubPr
 import com.nemoclaw.chat.features.git.diffLineKind
 import com.nemoclaw.chat.features.git.fetchPrDiff
@@ -149,7 +149,7 @@ internal fun ProjectsScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        AuroraBackground()
+        BubbleBackground()
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),

@@ -51,7 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.ui.apple.AppleGlass
 import com.nemoclaw.chat.ui.apple.AppleType
-import com.nemoclaw.chat.ui.apple.AuroraBackground
+import com.nemoclaw.chat.ui.apple.BubbleBackground
 import com.nemoclaw.chat.resolveHermesUrl
 import java.io.File
 import java.net.URL
@@ -80,7 +80,7 @@ internal fun ArtifactLibraryScreen(
     val selected = artifacts.firstOrNull { it.id == selectedId }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        AuroraBackground()
+        BubbleBackground()
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),

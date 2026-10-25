@@ -50,7 +50,7 @@ import com.nemoclaw.chat.loadBotAutoApproveMap
 import com.nemoclaw.chat.saveBotAutoApprove
 import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.apple.AppleType
-import com.nemoclaw.chat.ui.apple.AuroraBackground
+import com.nemoclaw.chat.ui.apple.BubbleBackground
 
 private enum class BotDetailTab(val label: String) { Chat("Chat"), Screen("Screen"), Info("Info") }
 
@@ -75,7 +75,7 @@ internal fun BotDetailScreen(
         mutableStateOf(loadBotAutoApproveMap(appContext)[bot.profile] ?: "off")
     }
     Box(modifier = Modifier.fillMaxSize().background(AppColors.Background)) {
-        AuroraBackground()
+        BubbleBackground()
         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {

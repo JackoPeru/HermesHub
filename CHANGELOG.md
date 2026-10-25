@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.318 - 2026-10-25
+
+- Bot sempre puliti all'apertura, niente più veli tra gli strati, bolle in tutta l'app.
+- Fix strutturali + stile: suite verdi.
+
 ## 0.6.317 - 2026-10-25
 
 - Riverifica completa: suite verdi e 11 screenshot ricontrollati, nessuna regressione.

@@ -244,7 +244,7 @@ import androidx.work.WorkerParameters
 import com.nemoclaw.chat.jarvis.ui.JarvisModeScreen
 import com.nemoclaw.chat.ui.apple.AppleGlass
 import com.nemoclaw.chat.ui.apple.AppleType
-import com.nemoclaw.chat.ui.apple.AuroraBackground
+import com.nemoclaw.chat.ui.apple.BubbleBackground
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import com.nemoclaw.chat.core.WorkLimits
 import kotlinx.coroutines.CoroutineScope
@@ -323,7 +323,7 @@ internal fun ArchiveScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        AuroraBackground()
+        BubbleBackground()
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()

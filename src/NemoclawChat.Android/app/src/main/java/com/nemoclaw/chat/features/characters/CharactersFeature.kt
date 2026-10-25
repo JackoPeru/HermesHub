@@ -70,7 +70,7 @@ import com.nemoclaw.chat.httpGetResponse
 import com.nemoclaw.chat.ui.apple.AppleGlass
 import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.apple.AppleType
-import com.nemoclaw.chat.ui.apple.AuroraBackground
+import com.nemoclaw.chat.ui.apple.BubbleBackground
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -170,7 +170,7 @@ internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVid
         true
     }
     Box(modifier = Modifier.fillMaxSize().background(AppColors.Background)) {
-        AuroraBackground()
+        BubbleBackground()
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 24.dp),
@@ -311,7 +311,7 @@ private fun CreateCharacterWizard(context: Context, settings: AppSettings, onDon
     val pickPhotos = { picker.launch("image/*") }
 
     Box(modifier = Modifier.fillMaxSize().background(AppColors.Background)) {
-        AuroraBackground()
+        BubbleBackground()
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 24.dp),
@@ -498,7 +498,7 @@ private fun CharacterDetail(context: Context, settings: AppSettings, id: String,
     }
     val name = manifest?.optString("name").orEmpty().ifBlank { "Personaggio" }
     Box(modifier = Modifier.fillMaxSize().background(AppColors.Background)) {
-        AuroraBackground()
+        BubbleBackground()
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 24.dp),

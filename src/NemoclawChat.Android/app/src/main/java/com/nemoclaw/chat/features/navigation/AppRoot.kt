@@ -249,7 +249,6 @@ import com.nemoclaw.chat.features.bots.connectionForBot
 import com.nemoclaw.chat.features.bots.createBotChatSession
 import com.nemoclaw.chat.features.bots.loadAllHermesBotRosters
 import com.nemoclaw.chat.features.bots.loadLastBot
-import com.nemoclaw.chat.features.bots.resolveCanonicalBotContext
 import com.nemoclaw.chat.features.bots.saveLastBot
 import com.nemoclaw.chat.features.screen.ScreenScreen
 import com.nemoclaw.chat.ui.apple.AppleMotion
@@ -755,10 +754,11 @@ internal fun ChatApp() {
         sidebarBotOpening = true
         chatScope.launch {
             try {
-                // Niente lock esterno: e dentro resolveCanonicalBotChat
-                // (stessa chiave = deadlock). La guard sidebarBotOpening
-                // copre il doppio-tap.
-                resolveCanonicalBotContext(context.applicationContext, settings, bot, rosterMultiplex = true)
+                // Sempre pulita: nuova sessione, mai l'ultima (niente schermata bot vecchia).
+                createBotChatSession(context.applicationContext, settings, bot, rosterMultiplex = true)
+                    .mapCatching { created ->
+                        botSessionContext(context.applicationContext, settings, bot, rosterMultiplex = true, created).getOrThrow()
+                    }
                     .onSuccess {
                         chatState.resetForNewChat()
                         pendingBot = it
@@ -769,7 +769,7 @@ internal fun ChatApp() {
                         sidebarOpen = false
                     }
                     .onFailure {
-                        Toast.makeText(context, it.message ?: "Apertura Bot Chat fallita.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, it.message ?: "Nuova chat non creata.", Toast.LENGTH_LONG).show()
                     }
             } finally {
                 sidebarBotOpening = false
@@ -786,8 +786,8 @@ internal fun ChatApp() {
         botSectionVisible = false
         sidebarOpen = false
     }
-    // Nuova chat pulita col bot: sessione dedicata appena creata, mai la
-    // forever-chat canonica (che resta intatta per "Apri Bot Chat").
+    // Nuova chat pulita col bot: sessione dedicata appena creata, mai una
+    // chat vecchia. E la regola per OGNI apertura bot.
     fun openNewBotChat(bot: HermesBotItem) {
         if (sidebarBotOpening) {
             Toast.makeText(context, "Apertura gia in corso.", Toast.LENGTH_SHORT).show()
@@ -830,8 +830,8 @@ internal fun ChatApp() {
             }
         }
     }
-    // Riapre l'ultimo bot usato (main page della sezione): risolve la
-    // forever-chat condivisa. Ritorna false se nessun ultimo bot
+    // Riapre l'ultimo bot usato con chat PULITA (main page della sezione):
+    // nuova sessione, mai l'ultima. Ritorna false se nessun ultimo bot
     // (chiamante: mostra il roster).
     fun openLastBot(): Boolean {
         val ref = loadLastBot(context.applicationContext) ?: return false
@@ -842,10 +842,11 @@ internal fun ChatApp() {
         sidebarBotOpening = true
         chatScope.launch {
             try {
-                // Niente lock esterno: e dentro resolveCanonicalBotChat
-                // (stessa chiave = deadlock). La guard sidebarBotOpening
-                // copre il doppio-tap.
-                resolveCanonicalBotContext(context.applicationContext, settings, ref.toItem(), rosterMultiplex = true)
+                // Sempre pulita come ogni altra apertura bot.
+                createBotChatSession(context.applicationContext, settings, ref.toItem(), rosterMultiplex = true)
+                    .mapCatching { created ->
+                        botSessionContext(context.applicationContext, settings, ref.toItem(), rosterMultiplex = true, created).getOrThrow()
+                    }
                     .onSuccess {
                         chatState.resetForNewChat()
                         pendingBot = it

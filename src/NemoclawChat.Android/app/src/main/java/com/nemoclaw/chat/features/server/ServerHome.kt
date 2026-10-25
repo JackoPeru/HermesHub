@@ -12,7 +12,7 @@ import androidx.compose.foundation.BorderStroke
 import com.nemoclaw.chat.ui.apple.AppleGlass
 import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.apple.AppleType
-import com.nemoclaw.chat.ui.apple.AuroraBackground
+import com.nemoclaw.chat.ui.apple.BubbleBackground
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -214,7 +214,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
             .fillMaxSize()
             .background(Color(0xFF0B0D10))
     ) {
-        AuroraBackground(intensity = 1f)
+        BubbleBackground()
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()

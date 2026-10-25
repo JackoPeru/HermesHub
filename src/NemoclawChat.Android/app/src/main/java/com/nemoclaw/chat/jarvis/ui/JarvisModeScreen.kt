@@ -77,6 +77,7 @@ import com.nemoclaw.chat.jarvis.meta.JarvisMetaSetupActivity
 import com.nemoclaw.chat.ui.apple.AppleGlass
 import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.apple.AppleType
+import com.nemoclaw.chat.ui.apple.BubbleBackground
 
 @Composable
 internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
@@ -152,10 +153,7 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.aurora_home),
-            contentDescription = null,
-            contentScale = ContentScale.FillWidth,
+        BubbleBackground(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(380.dp)

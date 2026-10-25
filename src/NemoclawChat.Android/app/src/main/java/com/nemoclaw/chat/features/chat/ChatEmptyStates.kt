@@ -122,7 +122,7 @@ internal fun BotEmptyState(
                 } else {
                     "Il gateway non risponde ($detailCapped): controlla la connessione e tocca Riprova."
                 }
-                else -> "Questa e la chat persistente del bot: la stessa su telefono e desktop. Scrivi per iniziare."
+                else -> "Nuova chat pulita: ogni apertura ricomincia da qui. Scrivi per iniziare."
             },
             color = AppColors.Muted,
             fontSize = 14.sp,

@@ -27,7 +27,7 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.Modifier
-import com.nemoclaw.chat.ui.apple.AuroraBackground
+import com.nemoclaw.chat.ui.apple.BubbleBackground
 
 internal enum class Tab(val label: String, val icon: ImageVector) {
     Chat("Chat", Icons.Rounded.ChatBubbleOutline),
@@ -82,7 +82,7 @@ internal fun AppNavigation(
             .background(AppColors.Background)
     ) {
         // Stile Apple: alone aurora dietro al contenuto (nessuna logica toccata).
-        AuroraBackground()
+        BubbleBackground()
         Column(modifier = Modifier.fillMaxSize()) {
             if (selectedTab != Tab.Chat) {
                 topBar()

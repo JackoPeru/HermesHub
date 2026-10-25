@@ -179,31 +179,3 @@ internal suspend fun resolveCanonicalBotChat(
     }
 }
 
-/**
- * Contesto chat per un bot: sessione CANONICA condivisa col desktop
- * (stessa transcript, stessi turni). localConversationId resta l'id
- * stabile locale (cache/snapshot); la storia autorevole e sul server.
- */
-internal suspend fun resolveCanonicalBotContext(
-    context: Context,
-    settings: AppSettings,
-    bot: HermesBotItem,
-    rosterMultiplex: Boolean
-): Result<BotChatContext> = runCatching {
-    val found = when (val resolved = resolveCanonicalBotChat(context, settings, bot, rosterMultiplex)) {
-        is CanonicalBotResolve.Found -> resolved.chat
-        is CanonicalBotResolve.Empty -> error("Nessuna Bot Chat per ${bot.displayName}: riprova.")
-        is CanonicalBotResolve.Failed -> error(resolved.message)
-    }
-    val connection = withContext(Dispatchers.IO) { connectionForBot(context.applicationContext, settings, bot) }
-    BotChatContext(
-        profile = bot.profile,
-        sessionId = found.sessionId,
-        displayName = bot.displayName,
-        localConversationId = stableBotConversationId(bot),
-        multiplexEnabled = rosterMultiplex,
-        connectionId = connection.id,
-        endpoint = connection.endpoint
-    )
-}
-

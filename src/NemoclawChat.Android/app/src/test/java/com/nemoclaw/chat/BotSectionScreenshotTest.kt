@@ -1,5 +1,12 @@
 package com.nemoclaw.chat
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -78,6 +85,88 @@ class BotSectionScreenshotTest {
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage(
             file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_bottoggle.png")
+        )
+    }
+
+    @Test
+    fun botChatStackNoEmpty() {
+        composeRule.setContent {
+            ChatClawTheme {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF0A0A0C))
+                ) {
+                    TopBar(
+                        settings = AppSettings(),
+                        contextUsage = ContextUsage(tokens = 8000, percent = 6),
+                        connected = true,
+                        gatewayRuntime = null,
+                        title = "Socrate",
+                        identityPicker = null,
+                        onNewChat = {},
+                        onOpenSidebar = {},
+                        onOpenArchive = {},
+                        onOpenComfy = {}
+                    )
+                    ChatBotToggle(
+                        botActive = true,
+                        onSelectChat = {},
+                        onSelectBot = {}
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage(
+            file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_botstack_noempty.png")
+        )
+    }
+
+    @Test
+    fun botChatStack() {
+        // Replica fedele dell'ordine ChatScreen: TopBar + toggle + empty.
+        // Prova che non ci siano veli/sanguinamenti tra gli strati.
+        composeRule.setContent {
+            ChatClawTheme {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF0A0A0C))
+                ) {
+                    TopBar(
+                        settings = AppSettings(),
+                        contextUsage = ContextUsage(tokens = 8000, percent = 6),
+                        connected = true,
+                        gatewayRuntime = null,
+                        title = "Socrate",
+                        identityPicker = null,
+                        onNewChat = {},
+                        onOpenSidebar = {},
+                        onOpenArchive = {},
+                        onOpenComfy = {}
+                    )
+                    ChatBotToggle(
+                        botActive = true,
+                        onSelectChat = {},
+                        onSelectBot = {}
+                    )
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        BotEmptyState(
+                            displayName = "Socrate",
+                            opening = false,
+                            unreachable = false
+                        )
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage(
+            file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_botstack.png")
         )
     }
 }
