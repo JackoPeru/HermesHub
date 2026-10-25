@@ -443,7 +443,7 @@ internal fun Composer(
             .fillMaxWidth()
             .imePadding()
             .navigationBarsPadding()
-            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 10.dp)
+            .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 10.dp)
             .widthIn(max = 1040.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -520,8 +520,8 @@ internal fun Composer(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = (104 * fontScale).dp, max = (214 * fontScale).dp)
-                .clip(RoundedCornerShape(24.dp))
+                .heightIn(min = 52.dp, max = (214 * fontScale).dp)
+                .clip(CircleShape)
                 .background(
                     Brush.verticalGradient(
                         0.0f to Color.White.copy(alpha = 0.10f),
@@ -530,28 +530,48 @@ internal fun Composer(
                     )
                 ),
             color = Color.Transparent,
-            shape = RoundedCornerShape(24.dp),
+            shape = CircleShape,
             border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f))
         ) {
-            // Pill a riga singola come il riferimento: [+] campo [mic] [invio].
+            // Pill minimale del riferimento: vetro + highlight in alto + alone ambra a sx.
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Canvas(modifier = Modifier.matchParentSize()) {
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            0.0f to Color(0xFFF5A524).copy(alpha = 0.13f),
+                            0.55f to Color(0xFFF5A524).copy(alpha = 0.03f),
+                            1.0f to Color.Transparent,
+                            center = Offset(-size.width * 0.02f, size.height / 2f),
+                            radius = size.width * 0.38f
+                        ),
+                        size = size
+                    )
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            0.0f to Color.White.copy(alpha = 0.14f),
+                            1.0f to Color.Transparent
+                        ),
+                        size = Size(size.width, (12.dp).toPx())
+                    )
+                }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 6.dp)
-                    .heightIn(min = 56.dp),
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .heightIn(min = 40.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // + allegati in cerchio vetro.
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(42.dp)
+                        .size(40.dp)
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.06f))
                         .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)), CircleShape)
                         .clickable { showSheet = true }
                 ) {
-                    Icon(Icons.Rounded.Add, contentDescription = "Apri menu allegati", tint = Color.White, modifier = Modifier.size(22.dp))
+                    Icon(Icons.Rounded.Add, contentDescription = "Apri menu allegati", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
                 // Campo: cresce in altezza scrivendo, resta centrato da vuoto.
                 Box(
@@ -568,7 +588,7 @@ internal fun Composer(
                         maxLines = 5,
                         textStyle = TextStyle(
                             color = Color.White,
-                            fontSize = 16.sp,
+                            fontSize = 15.sp,
                             lineHeight = 23.sp
                         ),
                         cursorBrush = SolidColor(AppColors.Accent),
@@ -581,13 +601,13 @@ internal fun Composer(
                         modifier = Modifier.fillMaxWidth()
                     )
                     if (value.isEmpty()) {
-                        Text("Chiedi a Hermes", color = AppColors.Faint, fontSize = 16.sp, maxLines = 1)
+                        Text("Chiedi a Hermes", color = AppColors.Faint, fontSize = 15.sp, maxLines = 1)
                     }
                 }
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(42.dp)
+                        .size(40.dp)
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.06f))
                         .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)), CircleShape)
@@ -597,14 +617,14 @@ internal fun Composer(
                         imageVector = if (isRecordingVoiceNote) Icons.Rounded.Stop else Icons.Rounded.Mic,
                         contentDescription = if (isRecordingVoiceNote) "Ferma registrazione" else "Registra nota vocale",
                         tint = if (isRecordingVoiceNote) Color.Red else Color.White,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(6.dp))
                 val canSend = (value.isNotBlank() || attachments.isNotEmpty()) && !isBusy
                 Surface(
                     modifier = Modifier
-                        .size(42.dp)
+                        .size(40.dp)
                         .clickable {
                             if (isBusy) onStop()
                             else if (canSend) onSend()
@@ -618,10 +638,11 @@ internal fun Composer(
                             imageVector = if (isBusy) Icons.Rounded.Stop else if (canSend) Icons.Rounded.ArrowUpward else Icons.Rounded.GraphicEq,
                             contentDescription = if (isBusy) "Interrompi generazione" else if (canSend) "Invia" else "Tocca per parlare",
                             tint = if (canSend || isBusy) Color(0xFF171009) else AppColors.Muted,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
+            }
             }
         }
     }

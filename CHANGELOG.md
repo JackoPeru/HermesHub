@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.312 - 2026-10-25
+
+- Home come il riferimento: bolle animate in Canvas (niente PNG), composer minimale con alone ambra, hero in alto.
+- Solo stile: suite verdi, screenshot JVM di verifica.
+
 ## 0.6.311 - 2026-10-24
 
 - Archi home: ripristinate le curve ellittiche originali (le bande dritte erano sbagliate), solo più luminose.

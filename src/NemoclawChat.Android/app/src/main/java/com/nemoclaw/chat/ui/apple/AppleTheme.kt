@@ -9,6 +9,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -25,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +47,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.AppColors
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
  * Sistema visivo Apple condiviso da tutta l'app (riferimento: home iOS
@@ -109,6 +119,145 @@ fun AuroraBackground(modifier: Modifier = Modifier, intensity: Float = 1f) {
             topLeft = Offset(-w * 0.35f, h * 0.52f),
             size = androidx.compose.ui.geometry.Size(w * 1.7f, h * 0.8f),
             style = Stroke(width = h * 0.02f)
+        )
+    }
+}
+
+/**
+ * Bolle del riferimento: due sfere scure con bordo oro rim-light e alone
+ * volumetrico, in deriva lenta con respiro della luce. Ogni elemento di luce
+ * deriva dagli stessi centri animati, quindi la luce segue le bolle. Solo
+ * Canvas e gradienti: niente PNG, niente blur/RenderEffect (minSdk 26).
+ * Solo stile.
+ */
+@Composable
+fun BubbleBackground(modifier: Modifier = Modifier) {
+    val drift = rememberInfiniteTransition(label = "bubbleDrift")
+    val topPhase by drift.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(tween(16000, easing = LinearEasing), RepeatMode.Restart),
+        label = "topPhase"
+    )
+    val bottomPhase by drift.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(tween(21000, easing = LinearEasing), RepeatMode.Restart),
+        label = "bottomPhase"
+    )
+    val glowPhase by drift.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(tween(9000, easing = LinearEasing), RepeatMode.Restart),
+        label = "glowPhase"
+    )
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val w = size.width
+        val h = size.height
+        if (w <= 0f || h <= 0f) return@Canvas
+        val breathe = 0.88f + 0.12f * sin(glowPhase)
+        val amber = Color(0xFFF5A524)
+        val rimLight = Color(0xFFFFD694)
+        val body = Color(0xFF0E0E11)
+
+        // --- Bolla alta: il bordo entra in alto a 28% ed esce a destra a 24% ---
+        // Curva quadratica in frazioni: identica su ogni aspect (niente cerchi).
+        val dxTop = 0.025f * sin(topPhase)
+        val dyTop = 0.012f * cos(topPhase * 0.8f)
+        val topCx = w * (0.30f + dxTop)
+        drawCircle(
+            brush = Brush.radialGradient(
+                0.0f to body,
+                0.8f to body.copy(alpha = 0.6f),
+                1.0f to Color.Transparent,
+                center = Offset(topCx, -h * 0.12f),
+                radius = w * 0.95f
+            ),
+            radius = w * 0.95f,
+            center = Offset(topCx, -h * 0.12f)
+        )
+        // volume appena sopra il bordo
+        drawCircle(
+            brush = Brush.radialGradient(
+                0.0f to Color.White.copy(alpha = 0.009f * breathe),
+                1.0f to Color.Transparent,
+                center = Offset(w * (0.55f + dxTop), h * 0.10f),
+                radius = w * 0.45f
+            ),
+            radius = w * 0.45f,
+            center = Offset(w * (0.55f + dxTop), h * 0.10f)
+        )
+        val topPath = androidx.compose.ui.graphics.Path().apply {
+            moveTo(w * (0.28f + dxTop), -4f)
+            quadraticBezierTo(
+                w * (0.76f + dxTop), h * 0.18f,
+                w + 4f, h * (0.24f + dyTop)
+            )
+        }
+        // alone a strati (finto blur), poi anima luminosa
+        drawPath(path = topPath, color = amber.copy(alpha = 0.03f * breathe), style = Stroke(width = h * 0.008f))
+        drawPath(path = topPath, color = amber.copy(alpha = 0.08f * breathe), style = Stroke(width = h * 0.0035f))
+        drawPath(path = topPath, color = amber.copy(alpha = 0.25f * breathe), style = Stroke(width = h * 0.0016f))
+        drawPath(path = topPath, color = rimLight.copy(alpha = 0.85f * breathe), style = Stroke(width = (1.6.dp).toPx()))
+        // bacio di luce dove il bordo entra in alto
+        drawCircle(
+            brush = Brush.radialGradient(
+                0.0f to amber.copy(alpha = 0.06f * breathe),
+                1.0f to Color.Transparent,
+                center = Offset(w * (0.28f + dxTop), 0f),
+                radius = w * 0.24f
+            ),
+            radius = w * 0.24f,
+            center = Offset(w * (0.28f + dxTop), 0f)
+        )
+
+        // --- Bolla bassa: il bordo entra a sx a 62% ed esce a dx a 52% ---
+        val dxBottom = 0.022f * sin(bottomPhase + 1.3f)
+        val dyBottom = 0.010f * cos(bottomPhase * 0.7f)
+        val botCx = w * (0.45f + dxBottom)
+        drawCircle(
+            brush = Brush.radialGradient(
+                0.0f to body,
+                0.8f to body.copy(alpha = 0.6f),
+                1.0f to Color.Transparent,
+                center = Offset(botCx, h * 1.05f),
+                radius = w * 0.95f
+            ),
+            radius = w * 0.95f,
+            center = Offset(botCx, h * 1.05f)
+        )
+        // luce diffusa sopra il bordo, segue la curva
+        drawCircle(
+            brush = Brush.radialGradient(
+                0.0f to amber.copy(alpha = 0.020f * breathe),
+                1.0f to Color.Transparent,
+                center = Offset(w * (0.55f + dxBottom), h * 0.60f),
+                radius = w * 0.45f
+            ),
+            radius = w * 0.45f,
+            center = Offset(w * (0.55f + dxBottom), h * 0.60f)
+        )
+        val botPath = androidx.compose.ui.graphics.Path().apply {
+            moveTo(-4f, h * (0.616f + dyBottom))
+            quadraticBezierTo(
+                w * (0.20f + dxBottom), h * 0.71f,
+                w + 4f, h * (0.525f + dyBottom)
+            )
+        }
+        drawPath(path = botPath, color = amber.copy(alpha = 0.04f * breathe), style = Stroke(width = h * 0.008f))
+        drawPath(path = botPath, color = amber.copy(alpha = 0.10f * breathe), style = Stroke(width = h * 0.0035f))
+        drawPath(path = botPath, color = amber.copy(alpha = 0.30f * breathe), style = Stroke(width = h * 0.0016f))
+        drawPath(path = botPath, color = rimLight.copy(alpha = 0.90f * breathe), style = Stroke(width = (1.6.dp).toPx()))
+        // alone caldo dove il bordo esce a destra
+        drawCircle(
+            brush = Brush.radialGradient(
+                0.0f to amber.copy(alpha = 0.07f * breathe),
+                1.0f to Color.Transparent,
+                center = Offset(w * (0.97f + dxBottom), h * 0.53f),
+                radius = w * 0.35f
+            ),
+            radius = w * 0.35f,
+            center = Offset(w * (0.97f + dxBottom), h * 0.53f)
         )
     }
 }

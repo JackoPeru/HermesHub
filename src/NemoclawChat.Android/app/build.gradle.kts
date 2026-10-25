@@ -58,8 +58,8 @@ android {
         applicationId = "com.nemoclaw.chat"
         minSdk = if (enableMetaDat) 29 else 26
         targetSdk = 36
-        versionCode = 315
-        versionName = "0.6.311"
+        versionCode = 316
+        versionName = "0.6.312"
         resConfigs("en", "it")
         buildConfigField("boolean", "META_DAT_ENABLED", enableMetaDat.toString())
         // Nessuna chiave API nel BuildConfig: la release APK non contiene
@@ -129,6 +129,14 @@ android {
             disable += "ObsoleteSdkInt"
         }
     }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        // Screenshot home: registra sempre i PNG (verifica visiva umana, non assert).
+        unitTests.all {
+            it.systemProperty("roborazzi.test.record", "true")
+        }
+    }
 }
 
 dependencies {
@@ -152,6 +160,10 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
+    // Screenshot test della home vera (Roborazzi + Robolectric, niente emulatore).
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.77.0")
+    testImplementation("org.robolectric:robolectric:4.17")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("com.squareup.okhttp3:logging-interceptor:5.3.2")
     if (enableMetaDat) {

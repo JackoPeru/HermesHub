@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import com.nemoclaw.chat.ui.apple.AppleType
 import com.nemoclaw.chat.ui.apple.AvatarRing
+import com.nemoclaw.chat.ui.apple.BubbleBackground
 import com.nemoclaw.chat.ui.apple.ServerStatusLine
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
@@ -58,15 +59,13 @@ internal fun BotEmptyState(
     onRetry: (() -> Unit)? = null
 ) {
     val scroll = rememberScrollState()
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Stessi archi della home (coerenza totale).
-        Image(
-            painter = painterResource(id = R.drawable.aurora_home),
-            contentDescription = null,
-            contentScale = ContentScale.FillWidth,
-            alignment = Alignment.TopCenter,
-            modifier = Modifier.fillMaxSize()
-        )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0A0A0C))
+    ) {
+        // Stesse bolle vive della home (coerenza totale, niente PNG statico).
+        BubbleBackground()
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -133,14 +132,13 @@ internal fun EmptyState(
     onOpenSidebar: (() -> Unit)? = null,
     onOpenProfile: (() -> Unit)? = null
 ) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        Image(
-            painter = painterResource(id = R.drawable.aurora_home),
-            contentDescription = null,
-            contentScale = ContentScale.FillWidth,
-            alignment = Alignment.TopCenter,
-            modifier = Modifier.fillMaxSize()
-        )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0A0A0C))
+    ) {
+        // Bolle vive del riferimento (niente PNG statico).
+        BubbleBackground()
         Column(modifier = Modifier.fillMaxSize()) {
             // Header home: sotto la status bar, mai tagliato.
             Row(
@@ -187,17 +185,19 @@ internal fun EmptyState(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp),
-                verticalArrangement = Arrangement.Center,
+                verticalArrangement = Arrangement.Top,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Contenuto in alto come il riferimento (logo ~29%, titolo ~40%).
+                Spacer(modifier = Modifier.height(56.dp))
                 Box(contentAlignment = Alignment.Center) {
                     Box(
                         modifier = Modifier
-                            .size(220.dp)
+                            .size(200.dp)
                             .background(
                                 Brush.radialGradient(
-                                    0.0f to Color(0xFFF5A524).copy(alpha = 0.24f),
-                                    0.6f to Color(0xFFF5A524).copy(alpha = 0.05f),
+                                    0.0f to Color(0xFFF5A524).copy(alpha = 0.14f),
+                                    0.6f to Color(0xFFF5A524).copy(alpha = 0.03f),
                                     1.0f to Color(0xFFF5A524).copy(alpha = 0f)
                                 ),
                                 CircleShape

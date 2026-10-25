@@ -1,6 +1,6 @@
-Hermes Hub 0.6.311 (archi home ripristinati)
+Hermes Hub 0.6.312 (home come il riferimento)
 
-- Via le bande dritte/magenta: tornano gli archi ellittici originali, potenziati ×1.7 così l'arco alto resta visibile.
-- Solo asset: suite Android verde, python verdi, consistency 28/28.
+- Bolle animate disegnate in Canvas (deriva + respiro, niente PNG finto), composer pill minimale con alone ambra a sx, hero in alto con glow dosati.
+- Solo stile: suite Android verde, python verdi, consistency 28/28, screenshot JVM di verifica.
 
-Asset: HermesHub-0.6.311-android.apk (Android, versionCode 315), NemoclawChat.Windows_0.6.311.0_x64.msix (x64) e HermesHub-0.6.311-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.312-android.apk (Android, versionCode 316), NemoclawChat.Windows_0.6.312.0_x64.msix (x64) e HermesHub-0.6.312-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
