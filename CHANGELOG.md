@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.317 - 2026-10-25
+
+- Riverifica completa: suite verdi e 11 screenshot ricontrollati, nessuna regressione.
+- Solo versione.
+
 ## 0.6.316 - 2026-10-25
 
 - Thread e roster in vetro Apple: bolle, banner card, avatar e azioni bot.

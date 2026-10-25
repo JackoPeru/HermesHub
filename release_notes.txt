@@ -1,6 +1,6 @@
-Hermes Hub 0.6.316 (vetro ovunque)
+Hermes Hub 0.6.317 (riverifica completa)
 
-- Bolle messaggi, banner e card roster in vetro Apple (via blocco marrone, righe nude, avatar blu e icone nude).
-- Solo stile: suite Android verde, python verdi, consistency 28/28.
+- Stesso codice della 0.6.316: ricontrollate suite (Android 583, Python 886) e 11 screenshot, nessuna regressione, audit statico pulito.
+- Solo versione: suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.316-android.apk (Android, versionCode 320), NemoclawChat.Windows_0.6.316.0_x64.msix (x64) e HermesHub-0.6.316-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.317-android.apk (Android, versionCode 321), NemoclawChat.Windows_0.6.317.0_x64.msix (x64) e HermesHub-0.6.317-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
