@@ -20,22 +20,29 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -125,12 +132,74 @@ internal fun BotEmptyState(
     }
 }
 
+/**
+ * Tendina bot del titolo hero: stesse voci del selettore identita, senza
+ * freccia ne chrome (il titolo resta identico, solo cliccabile).
+ */
+@Composable
+private fun HeroBotMenu(picker: ChatIdentityPicker, expanded: Boolean, onDismiss: () -> Unit) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, shape = RoundedCornerShape(20.dp)) {
+        DropdownMenuItem(
+            text = {
+                Column {
+                    Text("Hermes", color = Color.White, fontSize = AppleType.RowTitle)
+                    Text("Profilo predefinito", color = AppColors.Faint, fontSize = AppleType.Footnote)
+                }
+            },
+            trailingIcon = {
+                if (picker.activeKey.isBlank()) {
+                    Icon(Icons.Rounded.Check, contentDescription = "Attivo", tint = AppColors.Accent)
+                }
+            },
+            onClick = { onDismiss(); picker.onPick("") }
+        )
+        if (picker.options.isNotEmpty()) HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
+        picker.options.forEach { option ->
+            DropdownMenuItem(
+                text = {
+                    Column {
+                        Text(option.label, color = Color.White, fontSize = AppleType.RowTitle)
+                        if (option.subtitle.isNotBlank()) {
+                            Text(option.subtitle, color = AppColors.Faint, fontSize = AppleType.Footnote)
+                        }
+                    }
+                },
+                trailingIcon = {
+                    if (option.key == picker.activeKey) {
+                        Icon(Icons.Rounded.Check, contentDescription = "Attivo", tint = AppColors.Accent)
+                    }
+                },
+                onClick = { onDismiss(); picker.onPick(option.key) }
+            )
+        }
+        when {
+            picker.loading -> DropdownMenuItem(
+                text = { Text("Caricamento bot…", color = AppColors.Faint, fontSize = AppleType.Footnote) },
+                enabled = false,
+                onClick = {}
+            )
+            picker.options.isEmpty() && picker.status.isNotBlank() -> DropdownMenuItem(
+                text = { Text(picker.status.take(120), color = AppColors.Faint, fontSize = AppleType.Footnote) },
+                enabled = false,
+                onClick = {}
+            )
+        }
+    }
+}
+
 @Composable
 internal fun EmptyState(
     onPrompt: (String) -> Unit,
     serverOnline: Boolean = true,
     onOpenSidebar: (() -> Unit)? = null,
-    onOpenProfile: (() -> Unit)? = null
+    // Tendina bot sul titolo (null = titolo statico). Nessun chrome visivo.
+    identityPicker: ChatIdentityPicker? = null,
+    // % contesto nell'avatar + menu rapido manager (null = H senza menu).
+    contextUsage: ContextUsage? = null,
+    settings: AppSettings? = null,
+    managerApiKey: String? = null,
+    onNewChat: () -> Unit = {},
+    onOpenComfy: () -> Unit = {}
 ) {
     Box(
         modifier = Modifier
@@ -158,25 +227,61 @@ internal fun EmptyState(
                         .clip(RoundedCornerShape(12.dp))
                         .clickable(enabled = onOpenSidebar != null) { onOpenSidebar?.invoke() }
                 )
+                var botMenuOpen by remember { mutableStateOf(false) }
                 Column(
                     modifier = Modifier
                         .padding(start = 12.dp)
                         .weight(1f)
                 ) {
-                    Text(
-                        text = "Hermes Hub",
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 17.sp,
-                        maxLines = 1
-                    )
+                    // Titolo-bottone invisibile: stesso testo, apre la tendina bot.
+                    val picker = identityPicker
+                    Box {
+                        Text(
+                            text = "Hermes Hub",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 17.sp,
+                            maxLines = 1,
+                            modifier = Modifier.then(
+                                if (picker != null) {
+                                    Modifier.clickable(role = Role.Button, onClick = { picker.onRefresh(); botMenuOpen = true })
+                                } else Modifier
+                            )
+                        )
+                        if (picker != null) {
+                            HeroBotMenu(picker = picker, expanded = botMenuOpen, onDismiss = { botMenuOpen = false })
+                        }
+                    }
                     ServerStatusLine(
                         text = if (serverOnline) "Server online" else "Server offline",
                         online = serverOnline
                     )
                 }
-                if (onOpenProfile != null) {
-                    AvatarRing(initial = "H", onClick = onOpenProfile, size = 40.dp, contentDescription = "Apri profilo")
+                // Avatar = % contesto; tap = menu rapido manager (niente profilo).
+                var avatarMenuOpen by remember { mutableStateOf(false) }
+                val usageLabel = when {
+                    contextUsage == null -> "H"
+                    contextUsage.delegatedToHermes && contextUsage.tokens <= 0 -> "H"
+                    else -> "${contextUsage.percent.coerceIn(0, 100)}%"
+                }
+                Box {
+                    AvatarRing(
+                        initial = "H",
+                        label = usageLabel,
+                        onClick = { avatarMenuOpen = true },
+                        size = 40.dp,
+                        contentDescription = "Menu rapido: contesto $usageLabel e manager"
+                    )
+                    if (settings != null) {
+                        ManagerQuickMenu(
+                            settings = settings,
+                            managerApiKey = managerApiKey,
+                            onNewChat = onNewChat,
+                            onOpenComfy = onOpenComfy,
+                            expanded = avatarMenuOpen,
+                            onDismiss = { avatarMenuOpen = false }
+                        )
+                    }
                 }
             }
             Column(
@@ -190,28 +295,15 @@ internal fun EmptyState(
             ) {
                 // Contenuto in alto come il riferimento (logo ~29%, titolo ~40%).
                 Spacer(modifier = Modifier.height(56.dp))
-                Box(contentAlignment = Alignment.Center) {
-                    Box(
-                        modifier = Modifier
-                            .size(200.dp)
-                            .background(
-                                Brush.radialGradient(
-                                    0.0f to Color(0xFFF5A524).copy(alpha = 0.14f),
-                                    0.6f to Color(0xFFF5A524).copy(alpha = 0.03f),
-                                    1.0f to Color(0xFFF5A524).copy(alpha = 0f)
-                                ),
-                                CircleShape
-                            )
-                    )
-                    Image(
-                        painter = painterResource(id = R.drawable.chatclaw_logo),
-                        contentDescription = "Logo Hermes Hub",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(104.dp)
-                            .clip(RoundedCornerShape(30.dp))
-                    )
-                }
+                Image(
+                    // Logo luminoso dell'utente (asset dedicato, niente boost: e gia luminoso).
+                    painter = painterResource(id = R.drawable.chatclaw_logo_hero),
+                    contentDescription = "Logo Hermes Hub",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(112.dp)
+                        .clip(RoundedCornerShape(30.dp))
+                )
                 Spacer(modifier = Modifier.height(28.dp))
                 Text(
                     text = "Che vuoi fare oggi?",

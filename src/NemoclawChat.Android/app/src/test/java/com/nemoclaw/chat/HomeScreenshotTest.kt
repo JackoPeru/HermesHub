@@ -1,8 +1,13 @@
 package com.nemoclaw.chat
 
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import com.github.takahirom.roborazzi.captureRoboImage
+import com.github.takahirom.roborazzi.captureScreenRoboImage
+import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -13,7 +18,7 @@ import java.io.File
 
 /**
  * Screenshot della home vera su JVM (Robolectric, niente emulatore).
- * Viewport da telefono alto + capture Roborazzi su file esplicito.
+ * Viewport da telefono alto, tema dark reale + capture Roborazzi su file.
  * PNG in C:/Users/matte/AppData/Local/Temp/opencode/robo_*.png
  */
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -26,12 +31,13 @@ class HomeScreenshotTest {
     @Test
     fun homeEmptyState() {
         composeRule.setContent {
-            EmptyState(
-                onPrompt = {},
-                serverOnline = true,
-                onOpenSidebar = {},
-                onOpenProfile = {}
-            )
+            ChatClawTheme {
+                EmptyState(
+                    onPrompt = {},
+                    serverOnline = true,
+                    onOpenSidebar = {}
+                )
+            }
         }
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage(
@@ -42,29 +48,83 @@ class HomeScreenshotTest {
     @Test
     fun composerEmpty() {
         composeRule.setContent {
-            Composer(
-                value = "",
-                attachments = emptyList(),
-                onValueChange = {},
-                onAttachImage = {},
-                onTakePhoto = {},
-                onScanDocument = {},
-                onRemoveAttachment = {},
-                reasoningEffort = "",
-                reasoningOptions = emptyList(),
-                onReasoningChange = {},
-                quickPrompt = null,
-                onQuickPromptConsumed = {},
-                onSend = {},
-                onStop = {},
-                isBusy = false,
-                isRecordingVoiceNote = false,
-                onToggleVoiceNote = {}
-            )
+            ChatClawTheme {
+                Composer(
+                    value = "",
+                    attachments = emptyList(),
+                    onValueChange = {},
+                    onAttachImage = {},
+                    onTakePhoto = {},
+                    onScanDocument = {},
+                    onRemoveAttachment = {},
+                    reasoningEffort = "",
+                    reasoningOptions = emptyList(),
+                    onReasoningChange = {},
+                    quickPrompt = null,
+                    onQuickPromptConsumed = {},
+                    onSend = {},
+                    onStop = {},
+                    isBusy = false,
+                    isRecordingVoiceNote = false,
+                    onToggleVoiceNote = {}
+                )
+            }
         }
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage(
             file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_composer.png")
+        )
+    }
+
+    @Test
+    fun heroBotMenuOpen() {
+        composeRule.setContent {
+            ChatClawTheme {
+                EmptyState(
+                    onPrompt = {},
+                    serverOnline = true,
+                    onOpenSidebar = {},
+                    identityPicker = ChatIdentityPicker(
+                        currentLabel = "Hermes",
+                        activeKey = "",
+                        loading = false,
+                        status = "",
+                        options = listOf(ChatIdentityOption("conn::socrate", "Socrate", "primary")),
+                        onPick = {},
+                        onRefresh = {}
+                    )
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Hermes Hub").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage(
+            file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_botmenu.png")
+        )
+    }
+
+    @Test
+    fun heroAvatarMenuOpen() {
+        composeRule.setContent {
+            ChatClawTheme {
+                EmptyState(
+                    onPrompt = {},
+                    serverOnline = true,
+                    onOpenSidebar = {},
+                    contextUsage = ContextUsage(tokens = 32000, percent = 24),
+                    settings = AppSettings(),
+                    managerApiKey = null,
+                    onNewChat = {},
+                    onOpenComfy = {}
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Menu rapido: contesto 24% e manager").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage(
+            file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_avatarmenu.png")
         )
     }
 }

@@ -309,11 +309,117 @@ internal fun TopBar(
     onOpenArchive: () -> Unit = {},
     onOpenComfy: () -> Unit = {}
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
+
+    Surface(color = AppColors.Background) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .heightIn(min = 60.dp)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.chatclaw_logo),
+                contentDescription = "Apri navigazione",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(role = Role.Button, onClick = onOpenSidebar)
+            )
+            Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
+                val picker = identityPicker
+                if (picker != null) {
+                    ChatIdentityTitle(picker = picker, title = title)
+                } else {
+                    Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { contentDescription = title })
+                }
+                // Testo troncato con ellipsis (niente scroll orizzontale: rubava
+                // lo swipe chat/bot); versione integrale al TalkBack.
+                val statusText = if (probingGateway) {
+                    "Verifica gateway…"
+                } else {
+                    gatewayRuntimeLabel(connected, gatewayRuntime) +
+                        if (!connected && !probeDetail.isNullOrBlank()) " · ${probeDetail?.take(80)}" else ""
+                }
+                val statusTextFull = if (probingGateway) {
+                    "Verifica gateway…"
+                } else {
+                    gatewayRuntimeLabel(connected, gatewayRuntime) +
+                        if (!connected && !probeDetail.isNullOrBlank()) " · $probeDetail" else ""
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier.semantics(mergeDescendants = true) {
+                        contentDescription = if (probingGateway) {
+                            "Gateway in verifica"
+                        } else if (connected) {
+                            "Gateway online. $statusTextFull"
+                        } else {
+                            "Gateway offline. $statusTextFull"
+                        }
+                    }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .background(if (probingGateway) AppColors.Muted else if (connected) AppColors.Success else AppColors.Error, CircleShape)
+                    )
+                    Text(
+                        statusText,
+                        color = AppColors.Faint,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            IconButton(onClick = onOpenArchive, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Rounded.FolderOpen, contentDescription = "Archivio chat", tint = AppColors.Muted, modifier = Modifier.size(19.dp))
+            }
+            Box {
+                IconButton(
+                onClick = { menuOpen = true },
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Icon(Icons.Rounded.MoreVert, contentDescription = "Impostazioni rapide", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+                ManagerQuickMenu(
+                    settings = settings,
+                    managerApiKey = managerApiKey,
+                    onNewChat = onNewChat,
+                    onOpenComfy = onOpenComfy,
+                    expanded = menuOpen,
+                    onDismiss = { menuOpen = false }
+                )
+            }
+            ContextMeter(usage = contextUsage, modifier = Modifier.size(40.dp))
+        }
+    }
+    HorizontalDivider(thickness = 0.5.dp, color = AppColors.Border.copy(alpha = 0.72f))
+}
+
+/**
+ * Menu rapido manager/comfy/laya (ex 3 puntini): stesso stato e stesse
+ * azioni della TopBar, riusabile dall'avatar in hero. Solo spostato, nessuna
+ * logica cambiata: il poll gira dove il menu e composto (un sito alla volta).
+ */
+@Composable
+internal fun ManagerQuickMenu(
+    settings: AppSettings,
+    managerApiKey: String?,
+    onNewChat: () -> Unit,
+    onOpenComfy: () -> Unit,
+    expanded: Boolean,
+    onDismiss: () -> Unit
+) {
     val scope = rememberCoroutineScope()
     val onWifiTransport = isWifiTransport(LocalContext.current)
     val layaContext = LocalContext.current
     val managerBase = remember(settings.gatewayUrl) { gpuManagerBase(settings.gatewayUrl) }
-    var menuOpen by remember { mutableStateOf(false) }
     var llmLoaded by remember { mutableStateOf<Boolean?>(null) }
     var llmModel by remember { mutableStateOf("") }
     var mediaModels by remember { mutableStateOf(listOf<String>()) }
@@ -383,12 +489,12 @@ internal fun TopBar(
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
-    LaunchedEffect(managerBase, settings.localGatewayUrl, menuOpen, lifecycleStarted, onWifiTransport) {
+    LaunchedEffect(managerBase, settings.localGatewayUrl, expanded, lifecycleStarted, onWifiTransport) {
         if (!lifecycleStarted) return@LaunchedEffect
         llmError = runCatching { readManagerStatus() }.exceptionOrNull()?.message ?: ""
         var failures = 0
         while (lifecycleStarted) {
-            delay(if (menuOpen) 3_000 else 15_000)
+            delay(if (expanded) 3_000 else 15_000)
             val err = runCatching { readManagerStatus() }.exceptionOrNull()?.message
             llmError = err ?: ""
             if (err == null) {
@@ -465,221 +571,141 @@ internal fun TopBar(
         }
     }
 
-    Surface(color = AppColors.Background) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .heightIn(min = 60.dp)
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Image(
-                painter = painterResource(id = R.drawable.chatclaw_logo),
-                contentDescription = "Apri navigazione",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable(role = Role.Button, onClick = onOpenSidebar)
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        DropdownMenuItem(
+            text = { Text("Nuova chat", color = Color.White, fontSize = AppleType.RowTitle) },
+            leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null, tint = AppColors.Accent) },
+            onClick = { onDismiss(); onNewChat() }
+        )
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
+        val loaded = llmLoaded
+        val videoName = mediaModels.firstOrNull()
+        val gpuTitle = when {
+            videoName != null -> "Video su GPU"
+            loaded == true -> "LLM su GPU"
+            else -> "GPU"
+        }
+        val subtitle = when {
+            llmError.isNotBlank() && loaded != null -> if (loaded) "Caricato sulle GPU (non aggiornato)" else "Scaricato (non aggiornato)"
+            llmError.isNotBlank() -> "Non raggiungibile"
+            loaded == null -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
+            llmBusy -> "Applicazione in corso..."
+            videoName != null -> videoName + if (mediaModels.size > 1) " +${mediaModels.size - 1}" else ""
+            loaded -> if (llmModel.isNotBlank()) "Caricato: $llmModel" else "Caricato sulle GPU"
+            llmState == "LLM_LOADING" -> "Caricamento in corso..."
+            llmState == "MEDIA_STOPPING" || llmState == "LLM_UNLOADING" -> "Scaricamento in corso..."
+            else -> "Scaricato"
+        }
+        DropdownMenuItem(
+            text = {
+                Column {
+                    Text(gpuTitle, color = Color.White, fontSize = AppleType.RowTitle)
+                    Text(subtitle, color = AppColors.Faint, fontSize = AppleType.Footnote)
+                }
+            },
+            trailingIcon = {
+                Switch(
+                    checked = loaded == true,
+                    onCheckedChange = null,
+                    enabled = !llmBusy
+                )
+            },
+            enabled = !llmBusy && loaded != null && llmError.isBlank(),
+            onClick = { if (!llmBusy && loaded != null) setLlmWanted(!(loaded)) }
+        )
+        val auto = desiredMode == "AUTO"
+        val autoSubtitle = when {
+            llmError.isNotBlank() -> "Non raggiungibile"
+            desiredMode.isBlank() -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
+            llmBusy -> "Applicazione in corso..."
+            auto -> "Il manager cambia da solo" + (if (queueLength > 0) " · coda $queueLength" else "")
+            else -> "Manuale ($desiredMode)" + (if (queueLength > 0) " · coda $queueLength" else "")
+        }
+        DropdownMenuItem(
+            text = {
+                Column {
+                    Text("Gestione automatica GPU", color = Color.White, fontSize = AppleType.RowTitle)
+                    Text(autoSubtitle, color = AppColors.Faint, fontSize = AppleType.Footnote)
+                }
+            },
+            trailingIcon = {
+                Switch(
+                    checked = auto,
+                    onCheckedChange = null,
+                    enabled = !llmBusy
+                )
+            },
+            enabled = !llmBusy && desiredMode.isNotBlank() && llmError.isBlank(),
+            onClick = { if (!llmBusy && desiredMode.isNotBlank()) setAutoWanted(!auto) }
+        )
+        val direct = desiredMode == "DIRECT"
+        val directSubtitle = when {
+            llmError.isNotBlank() -> "Non raggiungibile"
+            desiredMode.isBlank() -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
+            llmBusy -> "Applicazione in corso..."
+            direct && directUrl.isNotBlank() -> "Attivo su $directUrl"
+            direct -> "Attivo: apri Comfy nel browser"
+            else -> "LLM scarico, Comfy pronto in rete."
+        }
+        DropdownMenuItem(
+            text = {
+                Column {
+                    Text("Comfy diretto", color = Color.White, fontSize = AppleType.RowTitle)
+                    Text(directSubtitle, color = AppColors.Faint, fontSize = AppleType.Footnote)
+                }
+            },
+            trailingIcon = {
+                Switch(
+                    checked = direct,
+                    onCheckedChange = null,
+                    enabled = !llmBusy
+                )
+            },
+            enabled = !llmBusy && desiredMode.isNotBlank() && llmError.isBlank(),
+            onClick = { if (!llmBusy && desiredMode.isNotBlank()) setDirectWanted(!direct) }
+        )
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
+        DropdownMenuItem(
+            text = {
+                Column {
+                    Text("Chat laya", color = Color.White, fontSize = AppleType.RowTitle)
+                    Text("Chiedi in linguaggio naturale cosa fare al manager", color = AppColors.Faint, fontSize = AppleType.Footnote)
+                }
+            },
+            leadingIcon = { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, tint = AppColors.Accent) },
+            onClick = { onDismiss(); layaOpen = true }
+        )
+        val comfySubtitle = when {
+            llmError.isNotBlank() -> "Non raggiungibile"
+            llmState.isBlank() -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
+            llmState == "MEDIA_BUSY" -> {
+                val pct = mediaProgress?.let { "${(it * 100).roundToInt()}%" } ?: "…"
+                val what = mediaPreset.takeIf { it.isNotBlank() } ?: "lavoro"
+                "Sta generando · $pct · $what"
+            }
+            llmState == "LLM_READY" -> "LLM attivo · ${desiredMode.ifBlank { "AUTO" }}"
+            else -> llmState + if (queueLength > 0) " · coda $queueLength" else ""
+        }
+        DropdownMenuItem(
+            text = {
+                Column {
+                    Text("Comfy: cosa sta facendo", color = Color.White, fontSize = AppleType.RowTitle)
+                    Text(comfySubtitle, color = AppColors.Faint, fontSize = AppleType.Footnote)
+                }
+            },
+            leadingIcon = { Icon(Icons.Rounded.Image, contentDescription = null, tint = AppColors.Accent) },
+            onClick = { onDismiss(); onOpenComfy() }
+        )
+        if (llmError.isNotBlank()) {
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
+            DropdownMenuItem(
+                text = { Text("Riprova lettura", color = Color.White, fontSize = AppleType.RowTitle) },
+                onClick = { refreshLlm() }
             )
-            Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
-                val picker = identityPicker
-                if (picker != null) {
-                    ChatIdentityTitle(picker = picker, title = title)
-                } else {
-                    Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { contentDescription = title })
-                }
-                // Testo troncato con ellipsis (niente scroll orizzontale: rubava
-                // lo swipe chat/bot); versione integrale al TalkBack.
-                val statusText = if (probingGateway) {
-                    "Verifica gateway…"
-                } else {
-                    gatewayRuntimeLabel(connected, gatewayRuntime) +
-                        if (!connected && !probeDetail.isNullOrBlank()) " · ${probeDetail?.take(80)}" else ""
-                }
-                val statusTextFull = if (probingGateway) {
-                    "Verifica gateway…"
-                } else {
-                    gatewayRuntimeLabel(connected, gatewayRuntime) +
-                        if (!connected && !probeDetail.isNullOrBlank()) " · $probeDetail" else ""
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    modifier = Modifier.semantics(mergeDescendants = true) {
-                        contentDescription = if (probingGateway) {
-                            "Gateway in verifica"
-                        } else if (connected) {
-                            "Gateway online. $statusTextFull"
-                        } else {
-                            "Gateway offline. $statusTextFull"
-                        }
-                    }
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .background(if (probingGateway) AppColors.Muted else if (connected) AppColors.Success else AppColors.Error, CircleShape)
-                    )
-                    Text(
-                        statusText,
-                        color = AppColors.Faint,
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-            IconButton(onClick = onOpenArchive, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Rounded.FolderOpen, contentDescription = "Archivio chat", tint = AppColors.Muted, modifier = Modifier.size(19.dp))
-            }
-            Box {
-                IconButton(
-                    onClick = { menuOpen = true; refreshLlm() },
-                    modifier = Modifier.size(38.dp)
-                ) {
-                    Icon(Icons.Rounded.MoreVert, contentDescription = "Impostazioni rapide", tint = Color.White, modifier = Modifier.size(20.dp))
-                }
-                DropdownMenu(
-                    expanded = menuOpen,
-                    onDismissRequest = { menuOpen = false },
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Nuova chat", color = Color.White, fontSize = AppleType.RowTitle) },
-                        leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null, tint = AppColors.Accent) },
-                        onClick = { menuOpen = false; onNewChat() }
-                    )
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
-                    val loaded = llmLoaded
-                    val videoName = mediaModels.firstOrNull()
-                    val gpuTitle = when {
-                        videoName != null -> "Video su GPU"
-                        loaded == true -> "LLM su GPU"
-                        else -> "GPU"
-                    }
-                    val subtitle = when {
-                        llmError.isNotBlank() && loaded != null -> if (loaded) "Caricato sulle GPU (non aggiornato)" else "Scaricato (non aggiornato)"
-                        llmError.isNotBlank() -> "Non raggiungibile"
-                        loaded == null -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
-                        llmBusy -> "Applicazione in corso..."
-                        videoName != null -> videoName + if (mediaModels.size > 1) " +${mediaModels.size - 1}" else ""
-                        loaded -> if (llmModel.isNotBlank()) "Caricato: $llmModel" else "Caricato sulle GPU"
-                        llmState == "LLM_LOADING" -> "Caricamento in corso..."
-                        llmState == "MEDIA_STOPPING" || llmState == "LLM_UNLOADING" -> "Scaricamento in corso..."
-                        else -> "Scaricato"
-                    }
-                    DropdownMenuItem(
-                        text = {
-                            Column {
-                                Text(gpuTitle, color = Color.White, fontSize = AppleType.RowTitle)
-                                Text(subtitle, color = AppColors.Faint, fontSize = AppleType.Footnote)
-                            }
-                        },
-                        trailingIcon = {
-                            Switch(
-                                checked = loaded == true,
-                                onCheckedChange = null,
-                                enabled = !llmBusy
-                            )
-                        },
-                        enabled = !llmBusy && loaded != null && llmError.isBlank(),
-                        onClick = { if (!llmBusy && loaded != null) setLlmWanted(!(loaded)) }
-                    )
-                    val auto = desiredMode == "AUTO"
-                    val autoSubtitle = when {
-                        llmError.isNotBlank() -> "Non raggiungibile"
-                        desiredMode.isBlank() -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
-                        llmBusy -> "Applicazione in corso..."
-                        auto -> "Il manager cambia da solo" + (if (queueLength > 0) " · coda $queueLength" else "")
-                        else -> "Manuale ($desiredMode)" + (if (queueLength > 0) " · coda $queueLength" else "")
-                    }
-                    DropdownMenuItem(
-                        text = {
-                            Column {
-                                Text("Gestione automatica GPU", color = Color.White, fontSize = AppleType.RowTitle)
-                                Text(autoSubtitle, color = AppColors.Faint, fontSize = AppleType.Footnote)
-                            }
-                        },
-                        trailingIcon = {
-                            Switch(
-                                checked = auto,
-                                onCheckedChange = null,
-                                enabled = !llmBusy
-                            )
-                        },
-                        enabled = !llmBusy && desiredMode.isNotBlank() && llmError.isBlank(),
-                        onClick = { if (!llmBusy && desiredMode.isNotBlank()) setAutoWanted(!auto) }
-                    )
-                    val direct = desiredMode == "DIRECT"
-                    val directSubtitle = when {
-                        llmError.isNotBlank() -> "Non raggiungibile"
-                        desiredMode.isBlank() -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
-                        llmBusy -> "Applicazione in corso..."
-                        direct && directUrl.isNotBlank() -> "Attivo su $directUrl"
-                        direct -> "Attivo: apri Comfy nel browser"
-                        else -> "LLM scarico, Comfy pronto in rete."
-                    }
-                    DropdownMenuItem(
-                        text = {
-                            Column {
-                                Text("Comfy diretto", color = Color.White, fontSize = AppleType.RowTitle)
-                                Text(directSubtitle, color = AppColors.Faint, fontSize = AppleType.Footnote)
-                            }
-                        },
-                        trailingIcon = {
-                            Switch(
-                                checked = direct,
-                                onCheckedChange = null,
-                                enabled = !llmBusy
-                            )
-                        },
-                        enabled = !llmBusy && desiredMode.isNotBlank() && llmError.isBlank(),
-                        onClick = { if (!llmBusy && desiredMode.isNotBlank()) setDirectWanted(!direct) }
-                    )
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
-                    DropdownMenuItem(
-                        text = {
-                            Column {
-                                Text("Chat laya", color = Color.White, fontSize = AppleType.RowTitle)
-                                Text("Chiedi in linguaggio naturale cosa fare al manager", color = AppColors.Faint, fontSize = AppleType.Footnote)
-                            }
-                        },
-                        leadingIcon = { Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, tint = AppColors.Accent) },
-                        onClick = { menuOpen = false; layaOpen = true }
-                    )
-                    val comfySubtitle = when {
-                        llmError.isNotBlank() -> "Non raggiungibile"
-                        llmState.isBlank() -> if (llmBusy) "Lettura..." else "Stato sconosciuto"
-                        llmState == "MEDIA_BUSY" -> {
-                            val pct = mediaProgress?.let { "${(it * 100).roundToInt()}%" } ?: "…"
-                            val what = mediaPreset.takeIf { it.isNotBlank() } ?: "lavoro"
-                            "Sta generando · $pct · $what"
-                        }
-                        llmState == "LLM_READY" -> "LLM attivo · ${desiredMode.ifBlank { "AUTO" }}"
-                        else -> llmState + if (queueLength > 0) " · coda $queueLength" else ""
-                    }
-                    DropdownMenuItem(
-                        text = {
-                            Column {
-                                Text("Comfy: cosa sta facendo", color = Color.White, fontSize = AppleType.RowTitle)
-                                Text(comfySubtitle, color = AppColors.Faint, fontSize = AppleType.Footnote)
-                            }
-                        },
-                        leadingIcon = { Icon(Icons.Rounded.Image, contentDescription = null, tint = AppColors.Accent) },
-                        onClick = { menuOpen = false; onOpenComfy() }
-                    )
-                    if (llmError.isNotBlank()) {
-                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
-                        DropdownMenuItem(
-                            text = { Text("Riprova lettura", color = Color.White, fontSize = AppleType.RowTitle) },
-                            onClick = { refreshLlm() }
-                        )
-                    }
-                }
-            }
-            ContextMeter(usage = contextUsage, modifier = Modifier.size(40.dp))
         }
     }
     if (layaOpen) {
@@ -717,7 +743,6 @@ internal fun TopBar(
             }
         )
     }
-    HorizontalDivider(thickness = 0.5.dp, color = AppColors.Border.copy(alpha = 0.72f))
 }
 
 @Composable

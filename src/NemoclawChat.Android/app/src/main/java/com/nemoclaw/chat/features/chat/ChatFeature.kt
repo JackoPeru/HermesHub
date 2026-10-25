@@ -1375,7 +1375,12 @@ internal fun ChatScreen(
                         onPrompt = { quickPrompt = it },
                         serverOnline = gatewayAvailable,
                         onOpenSidebar = onOpenSidebar,
-                        onOpenProfile = { onSwitchTab(Tab.Profile) }
+                        identityPicker = identityPicker,
+                        contextUsage = contextUsage,
+                        settings = settings,
+                        managerApiKey = managerKey,
+                        onNewChat = onNewChat,
+                        onOpenComfy = onOpenComfy
                     )
                 }
             }

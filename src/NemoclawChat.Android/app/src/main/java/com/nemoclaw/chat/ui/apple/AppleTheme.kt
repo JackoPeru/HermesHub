@@ -158,7 +158,7 @@ fun BubbleBackground(modifier: Modifier = Modifier) {
         val breathe = 0.88f + 0.12f * sin(glowPhase)
         val amber = Color(0xFFF5A524)
         val rimLight = Color(0xFFFFD694)
-        val body = Color(0xFF0E0E11)
+        val body = Color(0xFF111114)
 
         // --- Bolla alta: il bordo entra in alto a 28% ed esce a destra a 24% ---
         // Curva quadratica in frazioni: identica su ogni aspect (niente cerchi).
@@ -190,7 +190,8 @@ fun BubbleBackground(modifier: Modifier = Modifier) {
         val topPath = androidx.compose.ui.graphics.Path().apply {
             moveTo(w * (0.28f + dxTop), -4f)
             quadraticBezierTo(
-                w * (0.76f + dxTop), h * 0.18f,
+                // Bolla un po' distorta: il controllo respira piano.
+                w * (0.76f + dxTop + 0.02f * sin(topPhase * 1.7f + 0.6f)), h * 0.18f,
                 w + 4f, h * (0.24f + dyTop)
             )
         }
@@ -199,6 +200,17 @@ fun BubbleBackground(modifier: Modifier = Modifier) {
         drawPath(path = topPath, color = amber.copy(alpha = 0.08f * breathe), style = Stroke(width = h * 0.0035f))
         drawPath(path = topPath, color = amber.copy(alpha = 0.25f * breathe), style = Stroke(width = h * 0.0016f))
         drawPath(path = topPath, color = rimLight.copy(alpha = 0.85f * breathe), style = Stroke(width = (1.6.dp).toPx()))
+        // bacio di luce sul bordo dal lato del logo: e il logo che illumina la bolla.
+        drawCircle(
+            brush = Brush.radialGradient(
+                0.0f to amber.copy(alpha = 0.10f * breathe),
+                1.0f to Color.Transparent,
+                center = Offset(w * (0.70f + dxTop), h * 0.15f),
+                radius = w * 0.16f
+            ),
+            radius = w * 0.16f,
+            center = Offset(w * (0.70f + dxTop), h * 0.15f)
+        )
         // bacio di luce dove il bordo entra in alto
         drawCircle(
             brush = Brush.radialGradient(
@@ -240,7 +252,8 @@ fun BubbleBackground(modifier: Modifier = Modifier) {
         val botPath = androidx.compose.ui.graphics.Path().apply {
             moveTo(-4f, h * (0.616f + dyBottom))
             quadraticBezierTo(
-                w * (0.20f + dxBottom), h * 0.71f,
+                // Bolla un po' distorta: il controllo respira piano.
+                w * (0.20f + dxBottom + 0.02f * sin(bottomPhase * 1.3f + 2.1f)), h * 0.71f,
                 w + 4f, h * (0.525f + dyBottom)
             )
         }
@@ -248,6 +261,17 @@ fun BubbleBackground(modifier: Modifier = Modifier) {
         drawPath(path = botPath, color = amber.copy(alpha = 0.10f * breathe), style = Stroke(width = h * 0.0035f))
         drawPath(path = botPath, color = amber.copy(alpha = 0.30f * breathe), style = Stroke(width = h * 0.0016f))
         drawPath(path = botPath, color = rimLight.copy(alpha = 0.90f * breathe), style = Stroke(width = (1.6.dp).toPx()))
+        // bacio di luce sul bordo dal lato del logo.
+        drawCircle(
+            brush = Brush.radialGradient(
+                0.0f to amber.copy(alpha = 0.10f * breathe),
+                1.0f to Color.Transparent,
+                center = Offset(w * (0.35f + dxBottom), h * (0.64f + dyBottom)),
+                radius = w * 0.18f
+            ),
+            radius = w * 0.18f,
+            center = Offset(w * (0.35f + dxBottom), h * (0.64f + dyBottom))
+        )
         // alone caldo dove il bordo esce a destra
         drawCircle(
             brush = Brush.radialGradient(
@@ -292,14 +316,16 @@ fun AppleGlass(
     }
 }
 
-/** Avatar circolare con anello ambra (profilo). */
+/** Avatar circolare con anello ambra: etichetta libera (H, 42%, ...). */
 @Composable
 fun AvatarRing(
     initial: String,
     onClick: () -> Unit,
     size: Dp = 40.dp,
-    contentDescription: String? = null
+    contentDescription: String? = null,
+    label: String? = null
 ) {
+    val text = label ?: initial.take(1).uppercase()
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -321,10 +347,11 @@ fun AvatarRing(
             )
     ) {
         Text(
-            text = initial.take(1).uppercase(),
+            text = text,
             color = Color.White,
-            fontSize = (size.value * 0.42f).sp,
-            fontWeight = FontWeight.SemiBold
+            fontSize = if (text.length > 2) (size.value * 0.28f).sp else (size.value * 0.42f).sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1
         )
     }
 }

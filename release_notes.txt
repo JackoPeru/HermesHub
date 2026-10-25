@@ -1,6 +1,6 @@
-Hermes Hub 0.6.312 (home come il riferimento)
+Hermes Hub 0.6.313 (home funzionale)
 
-- Bolle animate disegnate in Canvas (deriva + respiro, niente PNG finto), composer pill minimale con alone ambra a sx, hero in alto con glow dosati.
-- Solo stile: suite Android verde, python verdi, consistency 28/28, screenshot JVM di verifica.
+- Titolo invisibile-bottone con tendina bot, avatar con % contesto + menu manager/comfy/laya, fullscreen senza tagli, logo hero luminoso dedicato, bolle animate con luce dal logo. Textbox invariata.
+- Solo stile+header: suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.312-android.apk (Android, versionCode 316), NemoclawChat.Windows_0.6.312.0_x64.msix (x64) e HermesHub-0.6.312-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.313-android.apk (Android, versionCode 317), NemoclawChat.Windows_0.6.313.0_x64.msix (x64) e HermesHub-0.6.313-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

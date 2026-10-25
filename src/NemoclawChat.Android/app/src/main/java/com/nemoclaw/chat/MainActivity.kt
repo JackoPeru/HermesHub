@@ -56,6 +56,12 @@ class MainActivity : FragmentActivity() {
         requestHermesNotificationPermission()
         scheduleHermesNotificationWorker(this)
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        // Tutto schermo uniforme: niente taglio netto su status/navigation bar.
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
+        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+            .isAppearanceLightStatusBars = false
         setContent {
             ChatClawTheme {
                 ChatApp()
