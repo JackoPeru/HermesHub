@@ -325,8 +325,18 @@ internal fun MessageBubble(message: ChatMessage, settings: AppSettings, onSendTe
             horizontalArrangement = if (message.fromUser) Arrangement.End else Arrangement.Start
         ) {
             Surface(
-                modifier = Modifier.fillMaxWidth(if (message.fromUser) 0.86f else 0.92f),
-                color = if (message.fromUser) AppColors.UserBubble else AppColors.Panel,
+                modifier = Modifier
+                    .fillMaxWidth(if (message.fromUser) 0.86f else 0.92f)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            0.0f to Color.White.copy(alpha = 0.10f),
+                            0.5f to Color.White.copy(alpha = 0.05f),
+                            1.0f to Color.White.copy(alpha = 0.07f)
+                        )
+                    )
+                    .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)), RoundedCornerShape(20.dp)),
+                color = Color.Transparent,
                 shape = RoundedCornerShape(20.dp),
                 shadowElevation = 0.dp,
                 tonalElevation = 0.dp

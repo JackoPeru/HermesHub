@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.316 - 2026-10-25
+
+- Thread e roster in vetro Apple: bolle, banner card, avatar e azioni bot.
+- Solo stile: suite verdi.
+
 ## 0.6.315 - 2026-10-25
 
 - Cambio bot: apre solo chat normali (mai la schermata bot); sezione bot in stile Apple (banda trasparente, toggle tenue, marchio).

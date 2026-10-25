@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,6 +46,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
@@ -211,21 +214,37 @@ internal fun BackgroundWorkBanner(
         title = if (work.goal.isBlank()) "Hermes al lavoro in background" else "Hermes al lavoro: ${work.goal.take(WorkLimits.TRUNC_80)}",
         subtitle = work.statusText
     ) {
-        IconButton(
-            onClick = {
-                onStop()
-                Toast.makeText(ctx, "Interruzione richiesta.", Toast.LENGTH_SHORT).show()
-            },
-            modifier = Modifier.size(36.dp)
-        ) {
-            Icon(Icons.Rounded.Stop, contentDescription = "Ferma lavoro", tint = AppColors.Error, modifier = Modifier.size(18.dp))
+        BannerGlassButton(Icons.Rounded.Stop, "Ferma lavoro", AppColors.Error) {
+            onStop()
+            Toast.makeText(ctx, "Interruzione richiesta.", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
+
+/** X/stop dei banner in vetro (niente IconButton nude). */
+@Composable
+private fun BannerGlassButton(
+    icon: ImageVector,
+    contentDescription: String,
+    tint: Color,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.size(34.dp),
+        shape = CircleShape,
+        color = Color.White.copy(alpha = 0.06f),
+        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f))
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+            Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(16.dp))
         }
     }
 }
 
 /**
- * Riga banner stile Apple: niente card, solo hairline + riga densa.
- * Unico contenitore per tutti i banner chat (coerenza visiva).
+ * Riga banner stile Apple: card vetro con icona frosted. Unico contenitore
+ * per tutti i banner chat (coerenza visiva).
  */
 @Composable
 private fun AppleBannerRow(
@@ -235,36 +254,53 @@ private fun AppleBannerRow(
     subtitle: String,
     actions: @Composable RowScope.() -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        HorizontalDivider(thickness = 0.5.dp, color = AppColors.Border)
-        Row(
-            modifier = Modifier.padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                Text(
-                    text = title,
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                Brush.verticalGradient(
+                    0.0f to Color.White.copy(alpha = 0.10f),
+                    0.5f to Color.White.copy(alpha = 0.05f),
+                    1.0f to Color.White.copy(alpha = 0.07f)
                 )
-                if (subtitle.isNotBlank()) {
-                    Text(
-                        text = subtitle,
-                        color = AppColors.Muted,
-                        fontSize = 12.sp,
-                        maxLines = 3,
-                        overflow = TextOverflow.Clip
-                    )
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically, content = actions)
+            )
+            .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)), RoundedCornerShape(20.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.06f))
+                .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)), CircleShape)
+        ) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
         }
-        HorizontalDivider(thickness = 0.5.dp, color = AppColors.Border)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    color = AppColors.Muted,
+                    fontSize = 12.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Clip
+                )
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically, content = actions)
     }
 }
 
@@ -317,9 +353,7 @@ internal fun DetachedFollowBanner(
                 fontWeight = FontWeight.SemiBold
             )
         }
-        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Rounded.Close, contentDescription = "Ignora", tint = AppColors.Muted, modifier = Modifier.size(16.dp))
-        }
+        BannerGlassButton(Icons.Rounded.Close, "Ignora", AppColors.Muted, onDismiss)
     }
 }
 
@@ -334,9 +368,7 @@ internal fun DetachedResumeNote(
         title = text,
         subtitle = ""
     ) {
-        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Rounded.Close, contentDescription = "Chiudi", tint = AppColors.Muted, modifier = Modifier.size(16.dp))
-        }
+        BannerGlassButton(Icons.Rounded.Close, "Chiudi", AppColors.Muted, onDismiss)
     }
 }
 
@@ -362,9 +394,7 @@ internal fun ServerStagedBanner(
         ) {
             Text("Mostra", color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
         }
-        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Rounded.Close, contentDescription = "Ignora", tint = AppColors.Muted, modifier = Modifier.size(16.dp))
-        }
+        BannerGlassButton(Icons.Rounded.Close, "Ignora", AppColors.Muted, onDismiss)
     }
 }
 

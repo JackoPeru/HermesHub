@@ -5,6 +5,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -77,16 +79,47 @@ internal fun BotAvatar(name: String, profile: String, size: androidx.compose.ui.
             )
         }
         Box(
-            modifier = Modifier.size(size).clip(CircleShape).background(botAvatarColor(profile)),
+            modifier = Modifier
+                .size(size)
+                .clip(CircleShape)
+                .background(Color(0xFF1A1D23))
+                .border(BorderStroke(1.5.dp, AppColors.Accent.copy(alpha = 0.55f)), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 (name.trim().firstOrNull()?.uppercase() ?: "?"),
-                color = Color.White,
+                color = AppColors.Accent,
                 fontSize = (size.value / 2.4f).sp,
                 fontWeight = FontWeight.Bold
             )
         }
+    }
+}
+
+/** Azioni card in vetro (niente IconButton nude). */
+@Composable
+private fun RosterGlassButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    tint: Color,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.06f))
+            .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)), CircleShape)
+            .clickable(enabled = enabled, onClick = onClick)
+    ) {
+        Icon(
+            icon,
+            contentDescription = contentDescription,
+            tint = if (enabled) tint else AppColors.Faint,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }
 
@@ -154,18 +187,20 @@ internal fun BotRosterCard(
                 )
             }
             Box {
-                IconButton(onClick = onMenuRequest) {
-                    Icon(Icons.Rounded.MoreVert, contentDescription = "Opzioni bot", tint = Color.White)
-                }
+                RosterGlassButton(Icons.Rounded.MoreVert, "Opzioni bot", Color.White, onClick = onMenuRequest)
                 // Solo la card con menuFor == key compone il DropdownMenu
                 // (hoist in BotsScreen: le altre passano menu = null).
                 if (menu != null && menu.expanded) {
                     BotCardMenu(bot = bot, host = menu)
                 }
             }
-            IconButton(onClick = onOpenChat, enabled = !busy && chatSupported) {
-                Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = "Apri Bot Chat", tint = Color.White)
-            }
+            RosterGlassButton(
+                Icons.Rounded.ChatBubbleOutline,
+                "Apri Bot Chat",
+                Color.White,
+                enabled = !busy && chatSupported,
+                onClick = onOpenChat
+            )
             Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = AppColors.Faint)
         }
         AnimatedVisibility(
@@ -210,9 +245,9 @@ internal fun BotRosterCard(
                 modifier = Modifier.heightIn(min = 48.dp)
             ) { Text("Apri live", color = if (screenRunning) AppColors.Accent else AppColors.Faint) }
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = onEdit) { Icon(Icons.Rounded.Edit, contentDescription = "Modifica bot", tint = Color.White) }
+            RosterGlassButton(Icons.Rounded.Edit, "Modifica bot", Color.White, onClick = onEdit)
             if (canDelete) {
-                IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina bot", tint = AppColors.Error) }
+                RosterGlassButton(Icons.Rounded.Delete, "Elimina bot", AppColors.Error, onClick = onDelete)
             }
         }
         HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
