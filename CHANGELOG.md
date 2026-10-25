@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.314 - 2026-10-25
+
+- Hero: alone largo dietro il logo e proporzioni riferimento (logo ~29%).
+- Solo stile: suite verdi.
+
 ## 0.6.313 - 2026-10-25
 
 - Titolo hero = bottone invisibile con tendina bot, avatar = % contesto + menu manager/comfy/laya, fullscreen uniforme, logo hero luminoso dedicato, bolle con luce dal logo.

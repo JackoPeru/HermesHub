@@ -38,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -294,16 +295,34 @@ internal fun EmptyState(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Contenuto in alto come il riferimento (logo ~29%, titolo ~40%).
-                Spacer(modifier = Modifier.height(56.dp))
-                Image(
-                    // Logo luminoso dell'utente (asset dedicato, niente boost: e gia luminoso).
-                    painter = painterResource(id = R.drawable.chatclaw_logo_hero),
-                    contentDescription = "Logo Hermes Hub",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(112.dp)
-                        .clip(RoundedCornerShape(30.dp))
-                )
+                Spacer(modifier = Modifier.height(108.dp))
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.size(112.dp)
+                ) {
+                    // Alone largo del riferimento: deborda dal box senza pesare nel layout.
+                    Box(
+                        modifier = Modifier
+                            .size(260.dp)
+                            .background(
+                                Brush.radialGradient(
+                                    0.0f to Color(0xFFF5A524).copy(alpha = 0.10f),
+                                    0.6f to Color(0xFFF5A524).copy(alpha = 0.03f),
+                                    1.0f to Color(0xFFF5A524).copy(alpha = 0f)
+                                ),
+                                CircleShape
+                            )
+                    )
+                    Image(
+                        // Logo luminoso dell'utente (asset dedicato, niente boost: e gia luminoso).
+                        painter = painterResource(id = R.drawable.chatclaw_logo_hero),
+                        contentDescription = "Logo Hermes Hub",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(112.dp)
+                            .clip(RoundedCornerShape(30.dp))
+                    )
+                }
                 Spacer(modifier = Modifier.height(28.dp))
                 Text(
                     text = "Che vuoi fare oggi?",

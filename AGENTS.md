@@ -174,6 +174,6 @@ Prima della pubblicazione:
 
 ## Release corrente
 
-Versione corrente: `0.6.313`.
+Versione corrente: `0.6.314`.
 
 
