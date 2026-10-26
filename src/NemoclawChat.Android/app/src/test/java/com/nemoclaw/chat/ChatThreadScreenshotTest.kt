@@ -2,11 +2,19 @@ package com.nemoclaw.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.SmartToy
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
@@ -125,6 +133,53 @@ class ChatThreadScreenshotTest {
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage(
             file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_rostercard.png")
+        )
+    }
+
+    @Test
+    fun noticeBanners() {
+        composeRule.setContent {
+            ChatClawTheme {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF0A0A0C))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        AppleBannerRow(
+                            icon = Icons.Rounded.SmartToy,
+                            tint = AppColors.Accent,
+                            title = "Chat bot archiviata",
+                            subtitle = "Riaprila da Bot Hermes."
+                        ) {
+                            BannerGlassButton(
+                                Icons.Rounded.SmartToy,
+                                "Apri Bot Hermes",
+                                Color.White,
+                                onClick = {}
+                            )
+                        }
+                    }
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        AppleBannerRow(
+                            icon = Icons.Rounded.Delete,
+                            tint = AppColors.Error,
+                            title = "Conversazione eliminata",
+                            subtitle = "Stai vedendo un contenitore vuoto: i messaggi non torneranno."
+                        ) {
+                            TextButton(onClick = {}) {
+                                Text("Nuova chat", color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage(
+            file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_notices.png")
         )
     }
 }

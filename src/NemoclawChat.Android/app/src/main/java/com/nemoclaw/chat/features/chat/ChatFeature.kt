@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.ButtonDefaults
@@ -1180,39 +1181,40 @@ internal fun ChatScreen(
         )
         }
         if (archivedBotWithoutContext) {
-            Surface(color = Color(0xFF7A3E00), modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Assertive }) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { liveRegion = LiveRegionMode.Assertive }
+            ) {
+                AppleBannerRow(
+                    icon = Icons.Rounded.SmartToy,
+                    tint = AppColors.Accent,
+                    title = "Chat bot archiviata",
+                    subtitle = "Riaprila da Bot Hermes."
                 ) {
-                    Text(
-                        text = "Chat bot archiviata: riaprila da Bot Hermes",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        modifier = Modifier.weight(1f)
+                    BannerGlassButton(
+                        Icons.Rounded.SmartToy,
+                        "Apri Bot Hermes",
+                        Color.White,
+                        onClick = onOpenBotSection
                     )
-                    IconButton(onClick = onOpenBotSection) { Icon(Icons.Rounded.SmartToy, contentDescription = "Apri Bot Hermes", tint = Color.White) }
                 }
             }
         }
         if (conversationDeletedNotice) {
-            Surface(color = Color(0xFF5A1A1A), modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Assertive }) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { liveRegion = LiveRegionMode.Assertive }
+            ) {
+                AppleBannerRow(
+                    icon = Icons.Rounded.Delete,
+                    tint = AppColors.Error,
+                    title = "Conversazione eliminata",
+                    subtitle = "Stai vedendo un contenitore vuoto: i messaggi non torneranno."
                 ) {
-                    Text(
-                        text = "Conversazione eliminata: stai vedendo un contenitore vuoto, i messaggi non torneranno. Creane una nuova.",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        modifier = Modifier.weight(1f)
-                    )
                     TextButton(onClick = { conversationDeletedNotice = false; onNewChat() }) {
-                        Text("Nuova chat", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text("Nuova chat", color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }

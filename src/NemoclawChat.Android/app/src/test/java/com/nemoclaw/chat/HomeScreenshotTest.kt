@@ -159,4 +159,33 @@ class HomeScreenshotTest {
             file = java.io.File("C:/Users/matte/AppData/Local/Temp/opencode/robo_botpick.png")
         )
     }
+
+    @Test
+    fun heroBotMenuEmptyShowsFallback() {
+        composeRule.setContent {
+            ChatClawTheme {
+                EmptyState(
+                    onPrompt = {},
+                    serverOnline = true,
+                    onOpenSidebar = {},
+                    identityPicker = ChatIdentityPicker(
+                        currentLabel = "Hermes",
+                        activeKey = "",
+                        loading = false,
+                        status = "",
+                        options = emptyList(),
+                        onPick = {},
+                        onRefresh = {}
+                    )
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Hermes Hub").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Nessun bot dal gateway: controlla la connessione e riapri.").assertExists()
+        captureScreenRoboImage(
+            file = java.io.File("C:/Users/matte/AppData/Local/Temp/opencode/robo_botmenuempty.png")
+        )
+    }
 }

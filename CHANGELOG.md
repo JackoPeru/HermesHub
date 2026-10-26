@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.319 - 2026-10-26
+
+- Tendina bot onesta a roster vuoto; banner archiviata/eliminata in vetro.
+- Fix + stile: suite verdi.
+
 ## 0.6.318 - 2026-10-25
 
 - Bot sempre puliti all'apertura, niente più veli tra gli strati, bolle in tutta l'app.

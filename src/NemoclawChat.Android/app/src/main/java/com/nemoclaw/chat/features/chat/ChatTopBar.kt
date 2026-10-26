@@ -938,6 +938,11 @@ internal fun ChatIdentityTitle(picker: ChatIdentityPicker, title: String) {
                     enabled = false,
                     onClick = {}
                 )
+                picker.options.isEmpty() -> DropdownMenuItem(
+                    text = { Text("Nessun bot dal gateway: controlla la connessione e riapri.", color = AppColors.Faint, fontSize = AppleType.Footnote) },
+                    enabled = false,
+                    onClick = {}
+                )
             }
         }
     }

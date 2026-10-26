@@ -1,6 +1,6 @@
-Hermes Hub 0.6.318 (bot puliti, niente veli)
+Hermes Hub 0.6.319 (tendina onesta + banner vetro)
 
-- Ogni bot si apre con chat pulita (mai l'ultima); Canvas bolle tagliato (niente più pittura sopra la TopBar); sfondi opachi e wash rimosso; bolle in tutta l'app, via archi vecchi e PNG.
-- Fix strutturali + stile: suite Android verde, python verdi, consistency 28/28.
+- Selettore bot: riga onesta a roster vuoto (con ricarica all'apertura); banner chat archiviata/eliminata in vetro Apple.
+- Fix + stile: suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.318-android.apk (Android, versionCode 322), NemoclawChat.Windows_0.6.318.0_x64.msix (x64) e HermesHub-0.6.318-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.319-android.apk (Android, versionCode 323), NemoclawChat.Windows_0.6.319.0_x64.msix (x64) e HermesHub-0.6.319-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

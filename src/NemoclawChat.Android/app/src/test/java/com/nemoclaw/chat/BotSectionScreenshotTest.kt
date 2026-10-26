@@ -8,8 +8,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import com.github.takahirom.roborazzi.captureRoboImage
+import com.github.takahirom.roborazzi.captureScreenRoboImage
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import org.junit.Rule
 import org.junit.Test
@@ -167,6 +170,43 @@ class BotSectionScreenshotTest {
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage(
             file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_botstack.png")
+        )
+    }
+
+    @Test
+    fun topBarIdentityMenuOpen() {
+        composeRule.setContent {
+            ChatClawTheme {
+                TopBar(
+                    settings = AppSettings(),
+                    contextUsage = ContextUsage(tokens = 8000, percent = 6),
+                    connected = true,
+                    gatewayRuntime = null,
+                    title = "Hermes Hub",
+                    identityPicker = ChatIdentityPicker(
+                        currentLabel = "Hermes",
+                        activeKey = "",
+                        loading = false,
+                        status = "",
+                        options = listOf(
+                            ChatIdentityOption("primary::socrate", "Socrate", "primary"),
+                            ChatIdentityOption("primary::journey", "Journey", "primary")
+                        ),
+                        onPick = {},
+                        onRefresh = {}
+                    ),
+                    onNewChat = {},
+                    onOpenSidebar = {},
+                    onOpenArchive = {},
+                    onOpenComfy = {}
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Hermes Hub").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage(
+            file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_topbarmenu.png")
         )
     }
 }

@@ -223,7 +223,7 @@ internal fun BackgroundWorkBanner(
 
 /** X/stop dei banner in vetro (niente IconButton nude). */
 @Composable
-private fun BannerGlassButton(
+internal fun BannerGlassButton(
     icon: ImageVector,
     contentDescription: String,
     tint: Color,
@@ -247,7 +247,7 @@ private fun BannerGlassButton(
  * per tutti i banner chat (coerenza visiva).
  */
 @Composable
-private fun AppleBannerRow(
+internal fun AppleBannerRow(
     icon: ImageVector,
     tint: Color,
     title: String,
