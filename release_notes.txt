@@ -1,6 +1,6 @@
-Hermes Hub 0.6.320 (immagini navigabili)
+Hermes Hub 0.6.321 (immagini mai incastrate)
 
-- Sezione Immagini: parte da denudate, mostra solo foto (mai file rotti), cartelle sempre navigabili con Home/Su/segmenti, percorso visibile anche nel vuoto.
+- Se un percorso fallisce (403 fuori jail), la sezione tiene liste e parent buoni: Su/indietro restano vivi, niente più vicoli ciechi.
 - Fix: suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.320-android.apk (Android, versionCode 324), NemoclawChat.Windows_0.6.320.0_x64.msix (x64) e HermesHub-0.6.320-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.321-android.apk (Android, versionCode 325), NemoclawChat.Windows_0.6.321.0_x64.msix (x64) e HermesHub-0.6.321-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

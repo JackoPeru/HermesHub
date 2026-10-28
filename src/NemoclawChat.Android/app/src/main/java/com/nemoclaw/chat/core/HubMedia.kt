@@ -34,7 +34,7 @@ internal fun defaultImageStartPath(imageLibraryPath: String, extraPaths: List<St
 
 private val BROWSABLE_IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "avif")
 
-/** Solo immagini nel browser: mime image/* o estensione foto nota. Pura e testabile. */
+/** Solo immagini nel browser: mime image oppure estensione foto nota. Pura e testabile. */
 internal fun isBrowsableImage(filename: String, mimeType: String): Boolean {
     if (mimeType.trim().lowercase(java.util.Locale.ROOT).startsWith("image/")) return true
     val ext = filename.substringAfterLast('.', "").trim().lowercase(java.util.Locale.ROOT)
@@ -52,7 +52,9 @@ internal data class ImageBrowseResult(
     val parent: String?,
     val folders: List<ImageBrowseFolder>,
     val items: List<ImageLibraryItem>,
-    val status: String
+    val status: String,
+    // True solo a risposta 200 parsata: in errore la UI tiene la posizione buona.
+    val ok: Boolean = false
 )
 
 /** Breadcrumb cumulativo: ("nome", pathCompleto) dalla root al corrente. Puro. */
@@ -161,7 +163,7 @@ internal suspend fun loadImageBrowse(
         } else {
             "${items.size} immagini, ${folders.size} cartelle in: ${current.ifBlank { "root server" }}"
         }
-        ImageBrowseResult(current, parent, folders, items, status)
+        ImageBrowseResult(current, parent, folders, items, status, ok = true)
     } catch (ex: Exception) {
         empty("Errore sfoglia immagini: ${ex.message ?: ex.javaClass.simpleName}")
     }

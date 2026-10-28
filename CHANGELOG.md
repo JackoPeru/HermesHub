@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.321 - 2026-10-28
+
+- Immagini fail-soft: in errore tiene la posizione buona, mai più incastrati fuori jail.
+- Fix: suite verdi.
+
 ## 0.6.320 - 2026-10-26
 
 - Immagini: default denudate, solo foto mostrate, percorso visibile nel vuoto.

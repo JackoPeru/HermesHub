@@ -87,14 +87,18 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
     LaunchedEffect(settings.gatewayUrl, currentPath, refreshKey) {
         status = "Sfoglio cartella immagini..."
         val result = loadImageBrowse(settings, managerKey, currentPath)
-        parentPath = result.parent
-        folders = result.folders
-        items = result.items
-        status = result.status
-        // Prima apertura senza radice: adotta il default del server (una sola volta).
-        if (currentPath == null && result.path.isNotBlank()) {
-            currentPath = result.path
+        // Fail-soft: in errore tieni posizione buona (liste + parent), cosi
+        // Su/indietro/breadcrumb restano vivi e non ci si incastra mai.
+        if (result.ok) {
+            parentPath = result.parent
+            folders = result.folders
+            items = result.items
+            // Prima apertura senza radice: adotta il default del server (una sola volta).
+            if (currentPath == null && result.path.isNotBlank()) {
+                currentPath = result.path
+            }
         }
+        status = result.status
     }
     // Cambio cartella: chiudi eventuale viewer (foto di un'altra lista).
     LaunchedEffect(currentPath) {
@@ -267,9 +271,10 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
                             textAlign = TextAlign.Center
                         )
                         // Orientamento: dove sei, cosi puoi sempre tornare indietro.
-                        if (!currentPath.isNullOrBlank()) {
+                        val where = currentPath
+                        if (!where.isNullOrBlank()) {
                             Text(
-                                text = currentPath,
+                                text = where,
                                 color = AppColors.Faint,
                                 fontSize = 11.sp,
                                 textAlign = TextAlign.Center,
