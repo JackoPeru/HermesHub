@@ -148,9 +148,10 @@ class TestBrowseScan(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = self._tree(Path(tmp))
             # Singolo livello: le immagini nelle sottocartelle si vedono entrandoci.
+            # Dotfile inclusi (navigazione libera, anche nascosti).
             folders, items = self.scan(root.resolve(), [root.resolve()])
             self.assertEqual(["setA", "setB"], [f["name"] for f in folders])
-            self.assertEqual(["two.PNG"], [i["filename"] for i in items])
+            self.assertEqual([".hidden.jpg", "two.PNG"], [i["filename"] for i in items])
             self.assertTrue(all(i["root"] == str(root.resolve()) for i in items))
             sub_folders, sub_items = self.scan((root / "setA").resolve(), [root.resolve()])
             self.assertEqual([], sub_folders)

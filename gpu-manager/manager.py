@@ -4197,7 +4197,7 @@ def _browse_scan(current: "Path", roots: list) -> tuple:
             break
         try:
             name = entry.name
-            if not name or name.startswith("."):
+            if not name:
                 continue
             if entry.is_symlink():
                 try:
