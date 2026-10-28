@@ -11,8 +11,6 @@ REPO = Path(__file__).resolve().parent.parent
 
 _PURE_NAMES = {
     "_BROWSE_IMAGE_EXTENSIONS",
-    "_BROWSE_MAX_FOLDERS",
-    "_BROWSE_MAX_ITEMS",
     "_browse_home",
     "_browse_expand",
     "_browse_roots",
@@ -189,6 +187,19 @@ class TestBrowseScan(unittest.TestCase):
         self.assertEqual("image/webp", self.mime("a.webp"))
         self.assertEqual("image/jpeg", self.mime("a.jpg"))
         self.assertEqual("image/jpeg", self.mime("a.jpeg"))
+
+    def test_no_caps_on_folders_or_items(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for i in range(600):
+                (root / f"d{i:03d}").mkdir()
+            for i in range(2000):
+                (root / f"p{i:04d}.jpg").write_bytes(b"x")
+            folders, items = self.scan(root.resolve(), [root.resolve()])
+            self.assertEqual(600, len(folders))
+            self.assertEqual(2000, len(items))
 
 
 class TestBrowseRoots(unittest.TestCase):

@@ -4098,13 +4098,10 @@ async def resubmit_job_api(job_id: str, body: dict | None = None, _: None = Depe
 
 # ------------------------------------------------------- browse (read-only) ---
 # Sfoglia cartelle immagini per la sezione Immagini (1 livello, solo
-# lettura): l'agent gateway e manifest-pinned, il manager e ridistribuibile.
-# Jail su root consentiti + auth manager key; i byte passano dal proxy
-# /v1/media live del gateway (che ri-applica il suo jail a serve-time).
+# lettura): navigazione libera senza tetti ne jail (decisione utente).
+# Auth manager key; i byte passano dal proxy /v1/media live del gateway.
 
 _BROWSE_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"})
-_BROWSE_MAX_FOLDERS = 500
-_BROWSE_MAX_ITEMS = 1500
 
 
 def _browse_home() -> "Path | None":
@@ -4193,8 +4190,6 @@ def _browse_scan(current: "Path", roots: list) -> tuple:
     except Exception:
         return folders, items
     for entry in entries:
-        if len(folders) >= _BROWSE_MAX_FOLDERS and len(items) >= _BROWSE_MAX_ITEMS:
-            break
         try:
             name = entry.name
             if not name:
@@ -4207,8 +4202,6 @@ def _browse_scan(current: "Path", roots: list) -> tuple:
                 if not target.exists():
                     continue
                 if target.is_dir():
-                    if len(folders) >= _BROWSE_MAX_FOLDERS:
-                        continue
                     folders.append({"name": name, "path": str(target)})
                     continue
                 if not target.is_file() or target.suffix.lower() not in _BROWSE_IMAGE_EXTENSIONS:
@@ -4217,26 +4210,20 @@ def _browse_scan(current: "Path", roots: list) -> tuple:
                     rel = target.relative_to(resolved_current).as_posix()
                 except ValueError:
                     continue
-                if len(items) >= _BROWSE_MAX_ITEMS:
-                    continue
                 stat = target.stat()
                 items.append((entry, target, stat, rel))
                 continue
             if entry.is_dir():
-                if len(folders) >= _BROWSE_MAX_FOLDERS:
-                    continue
                 folders.append({"name": name, "path": str(entry.resolve())})
                 continue
             if not entry.is_file() or entry.suffix.lower() not in _BROWSE_IMAGE_EXTENSIONS:
-                continue
-            if len(items) >= _BROWSE_MAX_ITEMS:
                 continue
             items.append((entry, entry, entry.stat(), entry.name))
         except Exception:
             continue
     items.sort(key=lambda quad: quad[2].st_mtime, reverse=True)
     out = []
-    for entry, target, stat, rel in items[:_BROWSE_MAX_ITEMS]:
+    for entry, target, stat, rel in items:
         out.append({
             "id": rel,
             "title": entry.stem.replace("_", " ").replace("-", " ").strip() or entry.name,
