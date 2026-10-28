@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.323 - 2026-10-28
+
+- Browse immagini con tetto 64MB (niente più errore oltre 2MB).
+- Fix app: suite verdi.
+
 ## 0.6.322 - 2026-10-28
 
 - Immagini senza restrizioni: browse e proxy media aperti a qualsiasi cartella (jail rimosso).

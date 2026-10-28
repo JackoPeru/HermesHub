@@ -165,7 +165,11 @@ internal fun executeHttpGet(
     val request = builder.get().build()
 
     return apiHttpClient.newCall(request).execute().use { response ->
-        val limit = if (request.url.encodedPath.endsWith("/v1/hub/conversations")) {
+        // Browse immagini senza tetto utile: migliaia di foto superano i 2 MB.
+        val limit = if (
+            request.url.encodedPath.endsWith("/v1/hub/conversations") ||
+            request.url.encodedPath.endsWith("/browse")
+        ) {
             MAX_ARCHIVE_JSON_RESPONSE_BYTES
         } else {
             MAX_JSON_RESPONSE_BYTES

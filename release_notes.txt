@@ -1,6 +1,6 @@
-Hermes Hub 0.6.322 (immagini senza restrizioni)
+Hermes Hub 0.6.323 (browse senza limite 2MB)
 
-- Browse manager e proxy media aperti a qualsiasi cartella leggibile: niente più 403, parent sempre presente. Jail rimosso per decisione utente (endpoint sempre dietro chiave app).
-- Server: suite Python verde, manager riverificato live.
+- Il browse immagini usa il tetto archive da 64MB: cartelle con migliaia di foto senza più errore.
+- Fix app: suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.322-android.apk (Android, versionCode 326), NemoclawChat.Windows_0.6.322.0_x64.msix (x64) e HermesHub-0.6.322-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.323-android.apk (Android, versionCode 327), NemoclawChat.Windows_0.6.323.0_x64.msix (x64) e HermesHub-0.6.323-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
