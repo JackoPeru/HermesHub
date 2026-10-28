@@ -41,4 +41,26 @@ class ImageBrowseTest {
         assertEquals("5 / 5", galleryCounterLabel(99, 5))
         assertEquals("", galleryCounterLabel(0, 0))
     }
+
+    @Test
+    fun defaultImageStartPathFallsBackToDenudate() {
+        assertEquals("/a/b", defaultImageStartPath("  /a/b  ", listOf("/x")))
+        assertEquals("/x", defaultImageStartPath("   ", listOf("/x", "")))
+        assertEquals("~/.hermes/hub_uploads/denudate", defaultImageStartPath("", emptyList()))
+        assertEquals("~/.hermes/hub_uploads/denudate", defaultImageStartPath("   ", listOf("  ")))
+    }
+
+    @Test
+    fun isBrowsableImageKeepsOnlyPhotos() {
+        assertEquals(true, isBrowsableImage("a.jpg", ""))
+        assertEquals(true, isBrowsableImage("A.PNG", ""))
+        assertEquals(true, isBrowsableImage("19.webp", "image/webp"))
+        assertEquals(true, isBrowsableImage("senza-estensione", "image/jpeg"))
+        assertEquals(true, isBrowsableImage("foto.heic", ""))
+        assertEquals(false, isBrowsableImage("video.mp4", ""))
+        assertEquals(false, isBrowsableImage("doc.pdf", "application/pdf"))
+        assertEquals(false, isBrowsableImage("note.txt", ""))
+        assertEquals(false, isBrowsableImage("senza-estensione", ""))
+        assertEquals(false, isBrowsableImage("senza-estensione", "video/mp4"))
+    }
 }

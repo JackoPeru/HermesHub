@@ -23,6 +23,24 @@ import org.json.JSONObject
 internal fun encodeMediaPathSegment(raw: String): String =
     URLEncoder.encode(raw, "UTF-8").replace("+", "%20")
 
+/** Radice immagini di default (denudate): usata quando le impostazioni non danno un percorso. */
+internal const val DEFAULT_IMAGE_LIBRARY_PATH = "~/.hermes/hub_uploads/denudate"
+
+/** Percorso iniziale del browser: impostazione se presente, senno denudate. Pura e testabile. */
+internal fun defaultImageStartPath(imageLibraryPath: String, extraPaths: List<String>): String =
+    imageLibraryPath.trim().ifBlank {
+        extraPaths.firstOrNull { it.isNotBlank() }.orEmpty()
+    }.trim().ifBlank { DEFAULT_IMAGE_LIBRARY_PATH }
+
+private val BROWSABLE_IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "avif")
+
+/** Solo immagini nel browser: mime image/* o estensione foto nota. Pura e testabile. */
+internal fun isBrowsableImage(filename: String, mimeType: String): Boolean {
+    if (mimeType.trim().lowercase(java.util.Locale.ROOT).startsWith("image/")) return true
+    val ext = filename.substringAfterLast('.', "").trim().lowercase(java.util.Locale.ROOT)
+    return ext in BROWSABLE_IMAGE_EXTENSIONS
+}
+
 /** Cartella del browser immagini (manager /browse, un livello). */
 internal data class ImageBrowseFolder(
     val name: String,
@@ -120,6 +138,9 @@ internal suspend fun loadImageBrowse(
                 val filename = obj.optString("filename")
                 val root = obj.optString("root", current)
                 if (id.isBlank() || filename.isBlank() || root.isBlank()) continue
+                val mime = obj.optString("mime_type", "image/*")
+                // Il browser mostra solo immagini: mai anteprime rotte da altri file.
+                if (!isBrowsableImage(filename, mime)) continue
                 add(
                     ImageLibraryItem(
                         id = id,
@@ -127,7 +148,7 @@ internal suspend fun loadImageBrowse(
                         filename = filename,
                         mediaUrl = "/v1/media/${encodeMediaPathSegment(id)}?root=${encodeMediaPathSegment(root)}",
                         path = obj.optString("path"),
-                        mimeType = obj.optString("mime_type", "image/*"),
+                        mimeType = mime,
                         sizeBytes = obj.optLong("size_bytes", 0L),
                         modifiedAt = (obj.optDouble("modified_at", 0.0) * 1000).toLong(),
                         folder = current

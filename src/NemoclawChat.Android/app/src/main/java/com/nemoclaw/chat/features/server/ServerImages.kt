@@ -62,11 +62,9 @@ import kotlinx.coroutines.launch
 internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatPrompt: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var refreshKey by remember { mutableIntStateOf(0) }
-    // Radice iniziale: impostazione immagini, senno default del manager.
+    // Radice iniziale: impostazione se presente, senno denudate (mai vuota).
     val startPath = remember(settings.imageLibraryPath, settings.extraImageLibraryPaths) {
-        settings.imageLibraryPath.trim().ifBlank {
-            settings.extraImageLibraryPaths.firstOrNull { it.isNotBlank() }.orEmpty()
-        }
+        defaultImageStartPath(settings.imageLibraryPath, settings.extraImageLibraryPaths)
     }
     var currentPath by rememberSaveable(settings.gatewayUrl, startPath) {
         mutableStateOf(startPath.ifBlank { null })
@@ -268,6 +266,17 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
                             fontSize = 13.sp,
                             textAlign = TextAlign.Center
                         )
+                        // Orientamento: dove sei, cosi puoi sempre tornare indietro.
+                        if (!currentPath.isNullOrBlank()) {
+                            Text(
+                                text = currentPath,
+                                color = AppColors.Faint,
+                                fontSize = 11.sp,
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                         Spacer(modifier = Modifier.height(4.dp))
                         Button(
                             onClick = {
