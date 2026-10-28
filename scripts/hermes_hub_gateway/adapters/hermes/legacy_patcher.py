@@ -1761,7 +1761,7 @@ def _hermes_hub_transcribe_file(path, beam_size=None):
     if extra_root:
         try:
             requested = _Path(str(extra_root).strip()).expanduser().resolve()
-            if any(requested == root.resolve() or root.resolve() in requested.parents for root in roots):
+            if requested.is_dir():
                 roots.insert(0, requested)
         except Exception:
             pass
@@ -7261,9 +7261,9 @@ def _hermes_hub_resolve_media_path(media_id: str, extra_root: Optional[str] = No
     roots = _hermes_hub_media_roots()
     if extra_root:
         try:
-            # Consenti solo root uguale o contenuta nei media roots; ignora il resto (fail-closed).
+            # Qualsiasi root esistente e consentita (navigazione libera, decisione utente).
             requested = _Path(str(extra_root).strip()).expanduser().resolve()
-            if any(requested == root.resolve() or root.resolve() in requested.parents for root in roots):
+            if requested.is_dir():
                 roots.insert(0, requested)
         except Exception:
             pass
@@ -7592,9 +7592,9 @@ def _hermes_hub_resolve_media_path(media_id: str, extra_root: Optional[str] = No
     roots = _hermes_hub_media_roots()
     if extra_root:
         try:
-            # Consenti solo root uguale o contenuta nei media roots; ignora il resto (fail-closed).
+            # Qualsiasi root esistente e consentita (navigazione libera, decisione utente).
             requested = _Path(str(extra_root).strip()).expanduser().resolve()
-            if any(requested == root.resolve() or root.resolve() in requested.parents for root in roots):
+            if requested.is_dir():
                 roots.insert(0, requested)
         except Exception:
             pass
@@ -8184,9 +8184,9 @@ def _hermes_hub_number(value: Any, fallback: float = 0.0) -> float:''',
             '    roots = _hermes_hub_media_roots()\n'
             '    if extra_root:\n'
             '        try:\n'
-            '            # Consenti solo root uguale o contenuta nei media roots; ignora il resto (fail-closed).\n'
+            '            # Qualsiasi root esistente e consentita (navigazione libera).\n'
             '            requested = _Path(str(extra_root).strip()).expanduser().resolve()\n'
-            '            if any(requested == root.resolve() or root.resolve() in requested.parents for root in roots):\n'
+            '            if requested.is_dir():\n'
             '                roots.insert(0, requested)\n'
             '        except Exception:\n'
             '            pass\n'

@@ -4168,23 +4168,17 @@ def _browse_roots() -> list:
 
 
 def _browse_jail(path: Path, roots: list, home: "Path | None" = None) -> "Path | None":
-    """Resolve + jail: path risolto se dentro un root consentito, else None."""
+    """Resolve senza restrizioni: qualsiasi cartella leggibile (navigazione
+    libera, decisione utente). I roots restano solo per la radice default."""
     if home is None:
         home = _browse_home()
     expanded = _browse_expand(path, home)
     if expanded is None:
         return None
     try:
-        resolved = expanded.resolve()
+        return expanded.resolve()
     except Exception:
         return None
-    for root in roots:
-        try:
-            if resolved == root or root in resolved.parents:
-                return resolved
-        except Exception:
-            continue
-    return None
 
 
 def _browse_scan(current: "Path", roots: list) -> tuple:
@@ -4211,8 +4205,6 @@ def _browse_scan(current: "Path", roots: list) -> tuple:
                 except Exception:
                     continue
                 if not target.exists():
-                    continue
-                if _browse_jail(target, roots, home) is None:
                     continue
                 if target.is_dir():
                     if len(folders) >= _BROWSE_MAX_FOLDERS:
@@ -4300,7 +4292,7 @@ async def browse_library(request: Request, _: None = Depends(require_key)) -> di
     parent: "str | None" = None
     try:
         candidate_parent = current.parent
-        if _browse_jail(candidate_parent, roots) is not None and candidate_parent != current:
+        if candidate_parent != current:
             parent = str(candidate_parent)
     except OSError:
         parent = None

@@ -59,7 +59,7 @@ class TestBrowseJail(unittest.TestCase):
             got = self.jail(target, [root.resolve()])
             self.assertEqual(target.resolve(), got)
 
-    def test_traversal_outside_denied(self):
+    def test_traversal_outside_allowed(self):
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -67,11 +67,18 @@ class TestBrowseJail(unittest.TestCase):
             root.mkdir()
             outside = Path(tmp) / "secret.txt"
             outside.write_text("x")
-            self.assertIsNone(self.jail(root / ".." / "secret.txt", [root.resolve()]))
-            self.assertIsNone(self.jail(outside, [root.resolve()]))
+            # Navigazione libera: traversal e fuori-root risolvono (niente jail).
+            self.assertEqual(
+                self.jail(root / ".." / "secret.txt", [root.resolve()]),
+                (root / ".." / "secret.txt").resolve(),
+            )
+            self.assertEqual(self.jail(outside, [root.resolve()]), outside.resolve())
 
-    def test_absolute_outside_denied(self):
-        self.assertIsNone(self.jail(Path("/etc/hostname"), [Path("/tmp/xyz-hermes")]))
+    def test_absolute_outside_allowed(self):
+        self.assertEqual(
+            self.jail(Path("/etc/hostname"), [Path("/tmp/xyz-hermes")]),
+            Path("/etc/hostname").resolve(),
+        )
 
     def test_tilde_expands_against_known_home(self):
         import tempfile
@@ -87,10 +94,12 @@ class TestBrowseJail(unittest.TestCase):
                 home=home,
             )
             self.assertEqual(home / ".hermes" / "hub_uploads" / "denudate", got)
-            # Home ignota: fail-closed (None), mai RuntimeError.
+            # Home ignota: expand resta None, mai RuntimeError.
             self.assertIsNone(expand(Path("~/.hermes/x"), None))
-            self.assertIsNone(
-                self.jail(Path("~/.hermes/x"), [home / ".hermes"], home=Path("/nonexistent-home-xyz"))
+            # Navigazione libera: con home esplicita risolve comunque.
+            self.assertEqual(
+                self.jail(Path("~/.hermes/x"), [home / ".hermes"], home=Path("/nonexistent-home-xyz")),
+                Path("/nonexistent-home-xyz/.hermes/x").resolve(),
             )
             # Fallback HOME: env esplicita vince, mai eccezioni.
             old_home = os.environ.get("HOME")
@@ -148,7 +157,7 @@ class TestBrowseScan(unittest.TestCase):
             self.assertEqual(["one.jpg"], [i["filename"] for i in sub_items])
             self.assertEqual("one.jpg", sub_items[0]["id"])
 
-    def test_symlink_escape_excluded(self):
+    def test_symlink_outside_allowed_if_exists(self):
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -167,9 +176,10 @@ class TestBrowseScan(unittest.TestCase):
             folders, items = self.scan(root.resolve(), [root.resolve()])
             names = [i["filename"] for i in items]
             self.assertIn("ok.jpg", names)
-            self.assertNotIn("evil.jpg", names)
+            # Navigazione libera: symlink esistenti ovunque, rotti mai.
+            self.assertIn("evil.jpg", names)
             self.assertNotIn("broken.jpg", names)
-            self.assertNotIn("evildir", [f["name"] for f in folders])
+            self.assertIn("evildir", [f["name"] for f in folders])
 
     def test_mime_mapping(self):
         self.assertEqual("image/png", self.mime("a.PNG"))

@@ -190,16 +190,18 @@ class TestBrowseJail(unittest.TestCase):
                 BROWSE_NS["_browse_jail"](target, [root.resolve()]), target.resolve()
             )
 
-    def test_jail_blocks_parent_traversal(self):
+    def test_jail_resolves_parent_traversal(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "video"
             root.mkdir()
             outside = Path(tmp) / "out.txt"
             outside.write_text("o", encoding="utf-8")
-            self.assertIsNone(
-                BROWSE_NS["_browse_jail"](root / ".." / ".." / "out.txt", [root.resolve()])
+            # Navigazione libera: traversal e fuori-root risolvono.
+            self.assertEqual(
+                BROWSE_NS["_browse_jail"](root / ".." / ".." / "out.txt", [root.resolve()]),
+                (root / ".." / ".." / "out.txt").resolve(),
             )
-            self.assertIsNone(BROWSE_NS["_browse_jail"](outside, [root.resolve()]))
+            self.assertEqual(BROWSE_NS["_browse_jail"](outside, [root.resolve()]), outside.resolve())
 
     def test_valid_output_requires_real_size(self):
         with tempfile.TemporaryDirectory() as tmp:

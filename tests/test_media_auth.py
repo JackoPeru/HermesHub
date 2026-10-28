@@ -341,7 +341,7 @@ class GeneratedMediaGuardrailsTests(unittest.TestCase):
         )
         return namespace
 
-    def test_extra_root_outside_media_roots_is_ignored(self):
+    def test_extra_root_outside_media_roots_is_accepted(self):
         namespace = self._generated_functions(
             {
                 "_hermes_hub_api_keys",
@@ -369,10 +369,10 @@ class GeneratedMediaGuardrailsTests(unittest.TestCase):
                 },
             ):
                 resolver = namespace["_hermes_hub_resolve_media_path"]
-                # Root esterna ignorata: i file sotto i roots restano raggiungibili.
+                # Root esterna accettata: i file sotto i roots restano raggiungibili...
                 self.assertEqual(inner, resolver("inner.txt", extra_root=str(outside)))
-                # ...ma nulla fuori dai roots diventa raggiungibile.
-                self.assertIsNone(resolver("secret.txt", extra_root=str(outside)))
+                # ...e la root esterna esistente apre i suoi file (navigazione libera).
+                self.assertEqual(outside / "secret.txt", resolver("secret.txt", extra_root=str(outside)))
                 # Root uguale a un media root resta accettata.
                 self.assertEqual(inner, resolver("inner.txt", extra_root=str(root)))
 
@@ -385,7 +385,8 @@ class GeneratedMediaGuardrailsTests(unittest.TestCase):
         for pos in positions:
             with self.subTest(offset=pos):
                 window = self.patcher_source[max(0, pos - 600) : pos]
-                self.assertIn("in requested.parents", window)
+                # Navigazione libera: extra_root accettata se directory esistente.
+                self.assertIn("is_dir()", window)
 
     def test_generated_save_upload_rejects_over_cap_and_invalid_base64(self):
         namespace = self._generated_functions(

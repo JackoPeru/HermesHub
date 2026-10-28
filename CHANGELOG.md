@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.322 - 2026-10-28
+
+- Immagini senza restrizioni: browse e proxy media aperti a qualsiasi cartella (jail rimosso).
+- Server: suite verdi.
+
 ## 0.6.321 - 2026-10-28
 
 - Immagini fail-soft: in errore tiene la posizione buona, mai più incastrati fuori jail.
