@@ -34,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +56,8 @@ import com.nemoclaw.chat.ui.apple.BubbleBackground
 import com.nemoclaw.chat.resolveHermesUrl
 import java.io.File
 import java.net.URL
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun ArtifactLibraryScreen(
@@ -70,8 +73,13 @@ internal fun ArtifactLibraryScreen(
     var rename by rememberSaveable { mutableStateOf("") }
     var tags by rememberSaveable { mutableStateOf("") }
     var status by remember { mutableStateOf("Pronto.") }
-    val artifacts = remember(refresh, query, projectFilter) {
-        loadConversations(context).filter { item ->
+    // Archivio MAI sul main (nemmeno a ogni tasto di ricerca): va in IO.
+    var artifactSource by remember(refresh) { mutableStateOf(emptyList<LocalConversation>()) }
+    LaunchedEffect(refresh) {
+        artifactSource = withContext(Dispatchers.IO) { loadConversations(context) }
+    }
+    val artifacts = remember(artifactSource, query, projectFilter) {
+        artifactSource.filter { item ->
             item.kind == "Artifact" &&
                 (projectFilter.isBlank() || item.projectId.contains(projectFilter, true)) &&
                 (query.isBlank() || item.title.contains(query, true) || item.artifactFileName.contains(query, true) || item.tags.any { it.contains(query, true) })

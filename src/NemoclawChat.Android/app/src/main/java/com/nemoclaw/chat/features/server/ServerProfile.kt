@@ -54,7 +54,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun ProfileScreen(
@@ -63,7 +65,11 @@ internal fun ProfileScreen(
     onOpenTab: (Tab) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
-    val conversations = remember { loadConversations(context) }
+    // Archivio MAI sul main: parse disco lento, va in IO e riempie dopo.
+    var conversations by remember { mutableStateOf(emptyList<LocalConversation>()) }
+    LaunchedEffect(Unit) {
+        conversations = withContext(Dispatchers.IO) { loadConversations(context) }
+    }
     val version = remember { appVersion(context) }
     var updateState by remember { mutableStateOf(UpdateDownloadState()) }
     var memory by remember { mutableStateOf(HubMemoryState()) }

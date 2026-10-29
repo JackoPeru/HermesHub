@@ -1,6 +1,6 @@
-Hermes Hub 0.6.323 (browse senza limite 2MB)
+Hermes Hub 0.6.324 (veloce + pulita)
 
-- Il browse immagini usa il tetto archive da 64MB: cartelle con migliaia di foto senza più errore.
-- Fix app: suite Android verde, python verdi, consistency 28/28.
+- Performance: disco, KeyStore e rete fuori dal main thread (sidebar, impostazioni, profilo, archivio, automation); alone voce tagliato; rimossi botAvatarColor, UserBubble, Card/PremiumPanel.
+- Fix + pulizia: suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.323-android.apk (Android, versionCode 327), NemoclawChat.Windows_0.6.323.0_x64.msix (x64) e HermesHub-0.6.323-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.324-android.apk (Android, versionCode 328), NemoclawChat.Windows_0.6.324.0_x64.msix (x64) e HermesHub-0.6.324-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

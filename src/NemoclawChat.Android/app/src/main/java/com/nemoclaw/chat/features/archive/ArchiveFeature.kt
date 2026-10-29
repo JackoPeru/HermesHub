@@ -304,7 +304,11 @@ internal fun ArchiveScreen(
     var confirmCopyArchive by rememberSaveable { mutableStateOf(false) }
     var managingConversationId by rememberSaveable { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val savedConversations = remember(refreshKey) { loadConversations(context) }
+    // Archivio MAI sul main: parse disco lento, va in IO e riempie dopo.
+    var savedConversations by remember(refreshKey) { mutableStateOf(emptyList<LocalConversation>()) }
+    LaunchedEffect(refreshKey) {
+        savedConversations = withContext(Dispatchers.IO) { loadConversations(context) }
+    }
     val savedProjects = savedConversations.count { it.kind == "Progetto" }
     val savedChats = savedConversations.count { it.kind == "Chat" || it.kind == "Task" }
     LaunchedEffect(Unit) {

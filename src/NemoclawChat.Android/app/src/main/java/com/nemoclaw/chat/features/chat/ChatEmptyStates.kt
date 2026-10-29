@@ -54,7 +54,6 @@ import com.nemoclaw.chat.ui.apple.AppleType
 import com.nemoclaw.chat.ui.apple.AvatarRing
 import com.nemoclaw.chat.ui.apple.BubbleBackground
 import com.nemoclaw.chat.ui.apple.ServerStatusLine
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -360,26 +359,5 @@ internal fun EmptyState(
             }
         }
     }
-}
-
-@Composable
-internal fun PremiumPanel(
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    Column(modifier = modifier.fillMaxWidth()) {
-        Column(content = content)
-        HorizontalDivider(color = AppColors.Border.copy(alpha = 0.78f), thickness = 1.dp)
-    }
-}
-
-@Composable
-internal fun Card(
-    modifier: Modifier = Modifier,
-    colors: Any? = null,
-    shape: Shape = RoundedCornerShape(8.dp),
-    content: @Composable ColumnScope.() -> Unit
-) {
-    PremiumPanel(modifier = modifier, content = content)
 }
 

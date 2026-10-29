@@ -384,7 +384,12 @@ internal fun VoiceModeScreen(settings: AppSettings, apiKey: String?, autoStartTo
         )
 
         // Alone ambra centrale premium (radial gradient statico, costo zero, niente blur/RenderEffect).
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        // Tagliato ai bordi: senza clip velerebbe i fratelli (stessa lezione delle bolle).
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(androidx.compose.ui.graphics.RectangleShape)
+        ) {
             drawCircle(
                 brush = Brush.radialGradient(
                     0.0f to Color(0xFFF5A524).copy(alpha = 0.12f),

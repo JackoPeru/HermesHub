@@ -442,18 +442,21 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
         status = if (duplicate) "Copia pronta: modifica e salva." else "Modifica ${job.name}."
     }
 
+    // Rete MAI sul main: tutto in IO, la UI si apre subito.
     LaunchedEffect(settings.gatewayUrl, refreshNonce) {
-        botRoster = loadHermesBotRoster(settings, loadGatewaySecret(context))
+        botRoster = withContext(Dispatchers.IO) { loadHermesBotRoster(settings, loadGatewaySecret(context)) }
     }
 
     LaunchedEffect(settings.gatewayUrl, refreshNonce, selectedBotProfile, botRoster?.multiplexEnabled) {
-        val secret = loadGatewaySecret(context)
-        val result = loadCronJobs(
-            settings,
-            secret,
-            selectedBotProfile.takeIf { it.isNotBlank() },
-            botRoster?.multiplexEnabled == true
-        )
+        val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+        val result = withContext(Dispatchers.IO) {
+            loadCronJobs(
+                settings,
+                secret,
+                selectedBotProfile.takeIf { it.isNotBlank() },
+                botRoster?.multiplexEnabled == true
+            )
+        }
         jobs = result.first
         status = result.second
     }

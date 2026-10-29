@@ -54,12 +54,6 @@ import com.nemoclaw.chat.AppColors
 import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.apple.AppleType
 
-/** Colore avatar deterministico dal profilo. Puro, testabile. */
-internal fun botAvatarColor(profile: String): androidx.compose.ui.graphics.Color {
-    val hue = kotlin.math.abs(profile.hashCode() % 360).toFloat()
-    return androidx.compose.ui.graphics.Color.hsl(hue, 0.45f, 0.42f)
-}
-
 @Composable
 internal fun BotAvatar(name: String, profile: String, size: androidx.compose.ui.unit.Dp = 52.dp) {
     // Alone ambra tenue dietro l'avatar (radial gradient, niente blur/RenderEffect).

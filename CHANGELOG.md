@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.324 - 2026-10-28
+
+- Performance: niente più IO sul main (sidebar, impostazioni, profilo, archivio, automation); alone voce tagliato; morti rimossi.
+- Fix + pulizia: suite verdi.
+
 ## 0.6.323 - 2026-10-28
 
 - Browse immagini con tetto 64MB (niente più errore oltre 2MB).

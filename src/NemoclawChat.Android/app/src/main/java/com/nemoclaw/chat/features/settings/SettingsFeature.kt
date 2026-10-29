@@ -398,7 +398,11 @@ internal fun SettingsScreen(
     var imageLibraryPath by remember(settings.imageLibraryPath) { mutableStateOf(settings.imageLibraryPath) }
     var extraImagePaths by remember(settings.extraImageLibraryPaths) { mutableStateOf(settings.extraImageLibraryPaths.joinToString("\n")) }
     var apiKey by remember(gatewaySecret) { mutableStateOf(gatewaySecret.orEmpty()) }
-    var gpuAppKey by remember { mutableStateOf(loadGpuAppSecret(context).orEmpty()) }
+    // KeyStore MAI sul main: lettura lenta, va in IO e riempie dopo.
+    var gpuAppKey by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        gpuAppKey = withContext(Dispatchers.IO) { loadGpuAppSecret(context).orEmpty() }
+    }
     var fontScale by remember(settings.fontScale) { mutableFloatStateOf(settings.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)) }
     var showToolCalls by remember(settings.showToolCalls) { mutableStateOf(settings.showToolCalls) }
     var backgroundWork by remember(settings.backgroundWork) { mutableStateOf(settings.backgroundWork) }
