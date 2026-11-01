@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.326 - 2026-11-01
+
+- Dashboard home: griglia widget verso tutte le sezioni, senza sidebar.
+- Suite verdi.
+
 ## 0.6.325 - 2026-10-31
 
 - Rebrand operativo: home Server, chat nascoste (codice intatto), bot solo gestione.

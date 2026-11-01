@@ -70,7 +70,7 @@ import com.google.firebase.FirebaseOptions
 import com.google.firebase.messaging.FirebaseMessaging
 
 @Composable
-internal fun ServerScreen(context: Context, settings: AppSettings) {
+internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (Tab) -> Unit = {}) {
     val scope = rememberCoroutineScope()
     var wsProbe by remember(settings) {
         mutableStateOf(
@@ -237,6 +237,9 @@ internal fun ServerScreen(context: Context, settings: AppSettings) {
                         Text("Dashboard Hermes Agent API: health, detailed health, models e capabilities.", color = AppColors.Faint, fontSize = AppleType.Footnote)
                 }
             }
+        }
+        item {
+            ServerDashboardGrid(onOpenTab = onOpenTab)
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

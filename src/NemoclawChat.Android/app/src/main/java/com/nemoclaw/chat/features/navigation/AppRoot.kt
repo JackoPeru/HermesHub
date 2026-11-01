@@ -1168,7 +1168,7 @@ internal fun ChatApp() {
                 } }
                 composable(Tab.Continuity.navRoute) { ContinuityScreen(context, settings) { id -> openChatConversation(id) } }
                 composable(Tab.Audit.navRoute) { AuditScreen(context, settings) }
-                composable(Tab.Server.navRoute) { ServerScreen(context, settings) }
+                composable(Tab.Server.navRoute) { ServerScreen(context, settings) { setSelectedTab(it) } }
                 composable(Tab.Hardware.navRoute) { HardwareScreen(context, settings) }
                 composable(Tab.Health.navRoute) { HealthDashboardScreen(context, settings) { setSelectedTab(Tab.Settings) } }
                 composable(Tab.Video.navRoute) { VideoScreen(context, settings) { prompt ->
