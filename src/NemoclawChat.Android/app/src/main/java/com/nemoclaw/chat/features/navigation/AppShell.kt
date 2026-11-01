@@ -485,22 +485,9 @@ internal fun HermesSidebar(
                 }
             }
             item {
-                SidebarRow(
-                    icon = Icons.Rounded.Edit,
-                    title = "Nuova chat",
-                    subtitle = "Pulisci contesto corrente",
-                    selected = false,
-                    primary = true,
-                    onClick = onNewChat
-                )
-            }
-            item {
                 SidebarSectionLabel("OPERATIVITÀ", settings.sidebarOperativita) { onToggleSidebarSection("operativita") }
             }
             if (settings.sidebarOperativita) {
-                item {
-                    SidebarTabRow(Tab.Chat, selectedTab == Tab.Chat, onOpenTab)
-                }
                 item {
                     SidebarTabRow(Tab.Voice, selectedTab == Tab.Voice, onOpenTab)
                 }
@@ -510,10 +497,9 @@ internal fun HermesSidebar(
                 item {
                     SidebarTabRow(Tab.Projects, selectedTab == Tab.Projects, onOpenTab)
                 }
-                // Niente riga Bot: i bot vivono nel selettore [Chat | Bot]
-                // in alto alla chat, non come sezione sidebar.
-                // Niente righe Bot/Schermo: vivono nel selettore [Chat | Bot]
-                // in alto alla chat, sezione Bot con schermo integrato.
+                item {
+                    SidebarTabRow(Tab.Bots, false, onOpenTab)
+                }
                 item {
                     SidebarTabRow(Tab.Artifacts, selectedTab == Tab.Artifacts, onOpenTab)
                 }
@@ -556,7 +542,8 @@ internal fun HermesSidebar(
                 )
                 SidebarSectionLabel("RECENTI", settings.sidebarRecenti) { onToggleSidebarSection("recenti") }
             }
-            if (settings.sidebarRecenti) {
+            // Rebrand: chat nascoste (codice intatto, UI non raggiungibile).
+            if (false && settings.sidebarRecenti) {
                 if (identityConversations.isEmpty()) {
                     item {
                         Column(
@@ -792,7 +779,7 @@ internal fun HermesBotSidebar(
                         .clip(RoundedCornerShape(12.dp))
                         .background(if (selected) AppColors.NavIndicator else Color.Transparent)
                         .combinedClickable(
-                            onClick = { onOpenBotItem(bot) },
+                            onClick = { onClose(); onOpenBotItem(bot) },
                             onLongClick = { menuForKey = bot.identityKey; menuPage = 0 },
                             role = Role.Button,
                             interactionSource = rowInteraction,
@@ -872,7 +859,7 @@ internal fun HermesBotSidebar(
                         canDelete = !bot.isDefault && !bot.profile.equals("default", true),
                         onDismiss = { menuForKey = null; menuPage = 0 },
                         onPage = { menuPage = it },
-                        onOpenChat = { menuForKey = null; onOpenBotItem(bot) },
+                        onOpenChat = { menuForKey = null; onClose(); onOpenBotItem(bot) },
                         onOpenScreen = {
                             menuForKey = null
                             onBotAction(bot, com.nemoclaw.chat.features.bots.BotSidebarAction.OpenScreen(bot.identityKey))
@@ -918,7 +905,8 @@ internal fun HermesBotSidebar(
                         },
                         onNewChat = {
                             menuForKey = null
-                            onNewBotChat(bot)
+                            onClose()
+                            onOpenBotItem(bot)
                         },
                         onRecentSessions = {
                             menuForKey = null
@@ -974,9 +962,10 @@ internal fun HermesBotSidebar(
             bot = bot,
             sessions = recentSessions,
             onDismiss = { recentFor = null },
-            onOpenSession = { session ->
+                onOpenSession = { session ->
                 recentFor = null
-                onOpenBotSession(bot, session)
+                onClose()
+                onOpenBotItem(bot)
             }
         )
     }

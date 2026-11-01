@@ -22,31 +22,32 @@ class TabNavigationTest {
     }
 
     @Test
-    fun `unknown or null nav route falls back to Chat`() {
-        assertEquals(Tab.Chat, tabForNavRoute(null))
-        assertEquals(Tab.Chat, tabForNavRoute(""))
-        assertEquals(Tab.Chat, tabForNavRoute("NoSuchTab"))
+    fun `unknown or null nav route falls back to Server`() {
+        assertEquals(Tab.Server, tabForNavRoute(null))
+        assertEquals(Tab.Server, tabForNavRoute(""))
+        assertEquals(Tab.Server, tabForNavRoute("NoSuchTab"))
     }
 
     @Test
     fun `incoming deep-link routes still map to same tabs`() {
         assertEquals(Tab.Voice, tabForIncomingRoute("voice"))
         assertEquals(Tab.Jarvis, tabForIncomingRoute("jarvis"))
-        assertEquals(Tab.Chat, tabForIncomingRoute("chat"))
-        assertEquals(Tab.Chat, tabForIncomingRoute("unknown"))
-        assertEquals(Tab.Chat, tabForIncomingRoute(""))
+        assertEquals(Tab.Server, tabForIncomingRoute("chat"))
+        assertEquals(Tab.Bots, tabForIncomingRoute("bots"))
+        assertEquals(Tab.Server, tabForIncomingRoute("unknown"))
+        assertEquals(Tab.Server, tabForIncomingRoute(""))
     }
 
     @Test
     fun `same-tab navigation is detected including null default`() {
-        assertTrue(isSameTabNavigation("Chat", Tab.Chat))
-        assertTrue(isSameTabNavigation(null, Tab.Chat))
-        assertFalse(isSameTabNavigation("Chat", Tab.Voice))
-        assertFalse(isSameTabNavigation("Voice", Tab.Chat))
+        assertTrue(isSameTabNavigation("Server", Tab.Server))
+        assertTrue(isSameTabNavigation(null, Tab.Server))
+        assertFalse(isSameTabNavigation("Server", Tab.Voice))
+        assertFalse(isSameTabNavigation("Voice", Tab.Server))
     }
 
     @Test
-    fun `start destination stays Chat`() {
-        assertEquals(Tab.Chat.name, tabNavStartDestination)
+    fun `start destination stays Server`() {
+        assertEquals(Tab.Server.name, tabNavStartDestination)
     }
 }

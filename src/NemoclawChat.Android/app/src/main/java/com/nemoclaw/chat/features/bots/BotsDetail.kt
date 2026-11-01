@@ -52,7 +52,7 @@ import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.apple.AppleType
 import com.nemoclaw.chat.ui.apple.BubbleBackground
 
-private enum class BotDetailTab(val label: String) { Chat("Chat"), Screen("Screen"), Info("Info") }
+private enum class BotDetailTab(val label: String) { General("Generale"), Screen("Screen"), Info("Info") }
 
 @Composable
 internal fun BotDetailScreen(
@@ -62,7 +62,6 @@ internal fun BotDetailScreen(
     screenStatus: ScreenStatusInfo?,
     screenPreview: Bitmap?,
     onBack: () -> Unit,
-    onOpenChat: (HermesBotItem) -> Unit,
     onOpenScreen: () -> Unit,
     onOpenCron: () -> Unit,
     // Disabilita "Apri" mentre l'open esterno e in corso (anti doppio tap).
@@ -70,7 +69,7 @@ internal fun BotDetailScreen(
 ) {
     // applicationContext: remember/static non trattengono mai l'Activity.
     val appContext = context.applicationContext
-    var tab by remember(bot.identityKey) { mutableStateOf(BotDetailTab.Chat) }
+    var tab by remember(bot.identityKey) { mutableStateOf(BotDetailTab.General) }
     var autoMode by remember(bot.identityKey) {
         mutableStateOf(loadBotAutoApproveMap(appContext)[bot.profile] ?: "off")
     }
@@ -125,18 +124,10 @@ internal fun BotDetailScreen(
             HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
         }
         when (tab) {
-            BotDetailTab.Chat -> {
+            BotDetailTab.General -> {
                 AnimatedVisibility(visible = true, enter = AppleMotion.enter(), exit = AppleMotion.exit()) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (bot.description.isNotBlank()) Text(bot.description, color = AppColors.Muted, fontSize = AppleType.HeroSubtitle)
-                    Button(
-                        // Delega all'handler esterno (singola POST persistente):
-                        // prima faceva POST qui + POST fuori (doppia sessione).
-                        onClick = { onOpenChat(bot) },
-                        enabled = !busy,
-                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                    ) { Text("Apri Bot Chat", color = Color(0xFF171009)) }
                     Text("Auto-approvazione run di ${bot.displayName}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         for ((label, value) in listOf("Chiedi" to WorkLimits.AUTO_APPROVE_OFF, "Sessione" to WorkLimits.AUTO_APPROVE_SESSION, "Sempre" to WorkLimits.AUTO_APPROVE_ALWAYS)) {

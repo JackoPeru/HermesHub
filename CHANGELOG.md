@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.325 - 2026-10-31
+
+- Rebrand operativo: home Server, chat nascoste (codice intatto), bot solo gestione.
+- Rientro post-kill: ricarica conversazione + persist immediata id.
+- Rebrand: suite verdi.
+
 ## 0.6.324 - 2026-10-28
 
 - Performance: niente più IO sul main (sidebar, impostazioni, profilo, archivio, automation); alone voce tagliato; morti rimossi.

@@ -81,4 +81,42 @@ class ChatViewModelRestoreTest {
         }
         assertTrue("draft e conversation devono propagarsi nello SavedStateHandle dopo debounce", ok)
     }
+
+    @Test
+    fun `id conversazione persiste subito senza debounce`() {
+        val handle = SavedStateHandle()
+        val vm = ChatViewModel(handle)
+        vm.chatState.activeConversationId = "conv-urgent"
+        val start = System.currentTimeMillis()
+        var ok = false
+        var elapsed = 0L
+        while (System.currentTimeMillis() - start < 5000) {
+            if (handle.get<String>(CHAT_ACTIVE_CONVERSATION_SAVED_KEY) == "conv-urgent") {
+                ok = true
+                elapsed = System.currentTimeMillis() - start
+                break
+            }
+            Thread.sleep(25)
+        }
+        assertTrue("id deve propagarsi nello SavedStateHandle", ok)
+        // Senza debounce da 500ms: ben sotto la vecchia attesa.
+        assertTrue("id deve essere immediato (<400ms), misurato $elapsed ms", elapsed < 400)
+    }
+
+    @Test
+    fun bootRestoreConversationIdRicaricaSoloAlRientro() {
+        // Rientro post-kill: param null, id superstite, lista vuota, no bot.
+        assertEquals("conv-x", bootRestoreConversationId(null, "conv-x", true, null, null))
+        assertEquals("conv-x", bootRestoreConversationId("", "conv-x", true, null, null))
+        // Param presente: nessuna restore (flusso normale).
+        assertNull(bootRestoreConversationId("conv-y", "conv-x", true, null, null))
+        // Lista gia piena: nessuna restore (niente loop/flicker).
+        assertNull(bootRestoreConversationId(null, "conv-x", false, null, null))
+        // Niente da ripristinare.
+        assertNull(bootRestoreConversationId(null, null, true, null, null))
+        assertNull(bootRestoreConversationId(null, "  ", true, null, null))
+        // Contesto bot esplicito: ha il suo caricamento, mai restore qui.
+        assertNull(bootRestoreConversationId(null, "conv-x", true, "socrate", null))
+        assertNull(bootRestoreConversationId(null, "conv-x", true, null, "sess-1"))
+    }
 }

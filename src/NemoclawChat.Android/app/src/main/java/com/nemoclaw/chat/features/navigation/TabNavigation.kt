@@ -9,7 +9,7 @@ import androidx.navigation.NavHostController
 internal val Tab.navRoute: String get() = name
 
 internal fun tabForNavRoute(route: String?): Tab =
-    runCatching { Tab.valueOf(route ?: Tab.Chat.name) }.getOrDefault(Tab.Chat)
+    runCatching { Tab.valueOf(route ?: Tab.Server.name) }.getOrDefault(Tab.Server)
 
 /**
  * Navigazione tra tab con back stack reale di sistema:
@@ -36,7 +36,7 @@ internal fun NavHostController.navigateToTab(tab: Tab) {
 
 /** Helper testabile: calcola se una navigazione sarebbe no-op (stesso tab). */
 internal fun isSameTabNavigation(currentRoute: String?, tab: Tab): Boolean =
-    (currentRoute ?: Tab.Chat.name) == tab.navRoute
+    (currentRoute ?: Tab.Server.name) == tab.navRoute
 
-/** Start destination unica: Chat, come prima del refactor. */
-internal val tabNavStartDestination: String get() = Tab.Chat.name
+/** Start destination unica: Server (dashboard operativo, niente chat). */
+internal val tabNavStartDestination: String get() = Tab.Server.name

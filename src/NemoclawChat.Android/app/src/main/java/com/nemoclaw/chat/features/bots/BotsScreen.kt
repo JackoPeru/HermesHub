@@ -332,9 +332,6 @@ internal fun BotsScreen(
             screenStatus = screenStatus,
             screenPreview = screenPreview,
             onBack = { detailKey = null },
-            // Singola POST via funnel (guard + finally): il dettaglio non
-            // posta mai da solo, delega sempre qui.
-            onOpenChat = { bot -> openPersistent(bot) },
             // Schermo sempre interno alla sezione (il tab Screen non esiste
             // piu): "Apri schermo live" torna al roster con schermo aperto.
             onOpenScreen = { showSectionScreen = true; detailKey = null },
@@ -494,7 +491,7 @@ internal fun BotsScreen(
             currentSection = currentSection,
                 onDismiss = { menuFor = null; menuPage = 0 },
                 onPage = { menuPage = it },
-                onOpenChat = { if (openPersistent(bot)) menuFor = null },
+                onOpenChat = { detailKey = bot.identityKey; menuFor = null },
                 onOpenScreen = { menuFor = null; showSectionScreen = true },
                 onToggleAutoScreen = {
                     // Checkable: il menu resta aperto (come desktop).
@@ -554,7 +551,7 @@ internal fun BotsScreen(
             previewTime = preview?.let { relativeTimeLabel(System.currentTimeMillis(), it.lastActiveMs) }?.takeIf { it.isNotBlank() },
             menu = menuHost,
             onOpenDetail = { detailKey = bot.identityKey },
-            onOpenChat = { openPersistent(bot) },
+            onOpenChat = { detailKey = bot.identityKey },
             onOpenScreen = { showSectionScreen = true },
             onEdit = { openEditor(bot) },
             onDelete = {

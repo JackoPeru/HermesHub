@@ -1,6 +1,7 @@
-Hermes Hub 0.6.324 (veloce + pulita)
+Hermes Hub 0.6.325 (console operativa)
 
-- Performance: disco, KeyStore e rete fuori dal main thread (sidebar, impostazioni, profilo, archivio, automation); alone voce tagliato; rimossi botAvatarColor, UserBubble, Card/PremiumPanel.
-- Fix + pulizia: suite Android verde, python verdi, consistency 28/28.
+- Home sul Server, chat agente nascoste ma intatte, bot solo gestione (niente 1:1), voce e Jarvis invariati.
+- Rientro post-kill: la chat si ricarica dall'id superstite, id persistito subito all'invio.
+- Rebrand: suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.324-android.apk (Android, versionCode 328), NemoclawChat.Windows_0.6.324.0_x64.msix (x64) e HermesHub-0.6.324-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.325-android.apk (Android, versionCode 329), NemoclawChat.Windows_0.6.325.0_x64.msix (x64) e HermesHub-0.6.325-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

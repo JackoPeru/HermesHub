@@ -83,6 +83,26 @@ import java.io.File
 import java.net.URL
 import org.json.JSONObject
 
+/**
+ * Rientro post-kill: il param e null ma l'id sopravvive nell'holder
+ * (persistito subito all'invio). Ritorna l'id da ricaricare solo se niente
+ * e ancora caricato (lista vuota) e non e contesto bot esplicito
+ * (quello ha il suo caricamento canonico). Pura e testabile.
+ */
+internal fun bootRestoreConversationId(
+    conversationId: String?,
+    activeConversationId: String?,
+    messagesEmpty: Boolean,
+    botProfile: String?,
+    botSessionId: String?
+): String? {
+    if (!conversationId.isNullOrBlank()) return null
+    val restored = activeConversationId?.takeIf { it.isNotBlank() } ?: return null
+    if (!messagesEmpty) return null
+    if (!botProfile.isNullOrBlank() || !botSessionId.isNullOrBlank()) return null
+    return restored
+}
+
 @Composable
 internal fun ChatScreen(
     context: Context,
@@ -278,8 +298,18 @@ internal fun ChatScreen(
         // l'effect rigira con (null, "") e NON deve azzerarlo, altrimenti il
         // gate reattach DONE sopprimerebbe output background legittimi.
         conversationId?.takeIf { it.isNotBlank() }?.let { historyLoadedCid = it }
-        if (!conversationId.isNullOrBlank()) {
-            val saved = withContext(Dispatchers.IO) { loadConversation(context, conversationId) }
+        // Rientro post-kill con id superstite ma senza param: ricarica una
+        // sola volta (lista vuota). Mai loop: dopo il load i messaggi ci sono.
+        val loadId = conversationId?.takeIf { it.isNotBlank() }
+            ?: bootRestoreConversationId(
+                conversationId,
+                state.activeConversationId,
+                state.messages.isEmpty(),
+                botProfile,
+                botSessionId
+            )
+        if (loadId != null) {
+            val saved = withContext(Dispatchers.IO) { loadConversation(context, loadId) }
             if (saved != null) {
                 state.activeConversationId = saved.id
                 val expectedServerConversationId = hermesHubServerConversationId(HERMES_HUB_ANDROID_SURFACE, saved.id)
@@ -317,7 +347,7 @@ internal fun ChatScreen(
             } else {
                 // Id noto ma file assente: mostra avviso solo se esiste tombstone
                 // (eliminata); le chat nuove non ancora salvate restano silenti.
-                val cid = conversationId
+                val cid = loadId
                 val tombstoned = withContext(Dispatchers.IO) {
                     loadConversations(context, includeDeleted = true)
                         .firstOrNull { it.id == cid }?.deletedAt != null

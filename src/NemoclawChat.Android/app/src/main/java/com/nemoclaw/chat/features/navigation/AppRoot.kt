@@ -449,7 +449,7 @@ internal fun ChatApp() {
     val tabNavBackStackEntry by tabNavController.currentBackStackEntryAsState()
     // Mai null-transient: durante la navigate la route puo mancare per un
     // frame e il fallback a Chat flashe rebbe la chrome. Resta sull'ultimo tab.
-    var selectedTab by rememberSaveable { mutableStateOf(Tab.Chat) }
+    var selectedTab by rememberSaveable { mutableStateOf(Tab.Server) }
     val currentRoute = tabNavBackStackEntry?.destination?.route
     LaunchedEffect(currentRoute) {
         currentRoute?.let { selectedTab = tabForNavRoute(it) }
@@ -465,10 +465,17 @@ internal fun ChatApp() {
     // a processo morto non deve restare true senza coroutine viva.
     var sidebarBotOpening by remember { mutableStateOf(false) }
     val setSelectedTab: (Tab) -> Unit = { tab ->
-        // Bot e schermo vivono nella sezione interna alla Chat: navigare
-        // pulisce sempre il flag (coerce anche da vecchi stati salvati).
-        botSectionVisible = false
-        tabNavController.navigateToTab(if (tab == Tab.Bots || tab == Tab.Screen) Tab.Chat else tab)
+        if (tab == Tab.Bots) {
+            // Sezione Bot (solo gestione): host dentro Chat, mai chat 1:1.
+            // Ordine obbligato: prima naviga, poi alza il flag.
+            tabNavController.navigateToTab(Tab.Chat)
+            botSectionVisible = true
+        } else {
+            // Bot e schermo vivono nella sezione interna: navigare pulisce
+            // sempre il flag (coerce anche da vecchi stati salvati).
+            botSectionVisible = false
+            tabNavController.navigateToTab(if (tab == Tab.Screen) Tab.Server else tab)
+        }
     }
     val voiceProfileRevision = VoiceProfileEvents.revision
     // Il profilo voce non blocca piu l'avvio: parte dal valore precaricato
@@ -512,6 +519,7 @@ internal fun ChatApp() {
     // sezione roster torni alla chat sottostante senza resettarla.
     // Il reset scarta la bozza: avvisa invece di perderla in silenzio.
     // Mai durante apertura in corso (la coroutine sovrascriverebbe).
+    // Rebrand: la chat normale e nascosta, si torna alla home Server.
     val selectChatSegment: () -> Unit = selectChat@{
         if (chatState.sending || chatState.streamingState != null) {
             Toast.makeText(context, "Finisci o interrompi il turno prima di cambiare.", Toast.LENGTH_SHORT).show()
@@ -530,6 +538,7 @@ internal fun ChatApp() {
                 chatState.resetForNewChat()
             }
             botSectionVisible = false
+            setSelectedTab(Tab.Server)
         }
     }
     // Apertura bot: mai sopra un turno attivo (reset ammazzerebbe stream,
@@ -632,7 +641,7 @@ internal fun ChatApp() {
             }
             withContext(Dispatchers.Main) {
                 pendingConversationId = target
-                setSelectedTab(Tab.Chat)
+                setSelectedTab(Tab.Server)
                 sidebarOpen = false
             }
         }
@@ -864,8 +873,9 @@ internal fun ChatApp() {
         }
         return true
     }
+    // Sezione Bot (solo gestione roster): mai chat 1:1, mai ultima chat.
     val selectBotSegment: () -> Unit = selectBot@{
-        // Main page della sezione = chat dell'ultimo bot usato (non roster).
+        // Main page della sezione = roster.
         // Da bot chat aperta: vai al roster tenendo il contesto.
         // Mai durante apertura in corso.
         if (chatState.sending || chatState.streamingState != null) {
@@ -874,12 +884,8 @@ internal fun ChatApp() {
         }
         if (sidebarBotOpening) {
             Toast.makeText(context, "Apertura in corso.", Toast.LENGTH_SHORT).show()
-        } else if (!botSectionVisible) {
-            if (pendingBot != null) {
-                botSectionVisible = true
-            } else if (!openLastBot()) {
-                botSectionVisible = true
-            }
+        } else {
+            setSelectedTab(Tab.Bots)
         }
     }
     val baseDensity = LocalDensity.current
@@ -922,7 +928,7 @@ internal fun ChatApp() {
                 SectionTopBar(
                     tab = selectedTab,
                     onOpenSidebar = { openSidebar() },
-                    onBackToChat = { setSelectedTab(Tab.Chat) }
+                    onBackToChat = { setSelectedTab(Tab.Server) },
                 )
             },
             sidebar = {
@@ -945,8 +951,8 @@ internal fun ChatApp() {
                 chatIdentityKey = activeChatBotKey,
                 chatRoster = chatRoster,
                 refreshToken = sidebarGeneration,
-                onOpenBotItem = { openSidebarBot(it) },
-                onManageBots = { sidebarOpen = false; botSectionVisible = true },
+                onOpenBotItem = { sidebarOpen = false; setSelectedTab(Tab.Bots) },
+                onManageBots = { sidebarOpen = false; setSelectedTab(Tab.Bots) },
                 onBotAction = { bot, action ->
                     pendingBotAction = action
                     sidebarOpen = false
@@ -992,7 +998,10 @@ internal fun ChatApp() {
                     popExitTransition = { AppleMotion.exit() }
                 ) {
                 composable(Tab.Chat.navRoute) { Column(modifier = Modifier.fillMaxSize()) {
-                if (showComfy) {
+                // Rebrand: niente chat normale (solo sezione Bot qui dentro).
+                if (!botSectionVisible && !showComfy) {
+                    androidx.compose.runtime.LaunchedEffect(Unit) { setSelectedTab(Tab.Server) }
+                } else if (showComfy) {
                 com.nemoclaw.chat.features.comfy.ComfyScreen(
                 context = context,
                 settings = settings,
@@ -1017,22 +1026,7 @@ internal fun ChatApp() {
                 BotsScreen(
                     context = context,
                     settings = settings,
-                onOpenBot = { bot ->
-                        if (sidebarBotOpening) {
-                            Toast.makeText(context, "Apertura gia in corso.", Toast.LENGTH_SHORT).show()
-                            return@BotsScreen
-                        }
-                        // bot e gia BotChatContext canonico dal funnel BotsScreen:
-                        // niente re-resolve (la scan e fail-closed, non si ripete).
-                        // Never carry normal-chat messages, attachments or
-                        // previous-response state into a bot archive.
-                        chatState.resetForNewChat()
-                        pendingBot = bot
-                        pendingConversationId = bot.localConversationId
-                        pendingPrompt = ""
-                        saveLastBot(context.applicationContext, bot.connectionId, bot.profile, bot.displayName)
-                        setSelectedTab(Tab.Chat)
-                    },
+                onOpenBot = { setSelectedTab(Tab.Bots) },
                     onOpenScreen = { setSelectedTab(Tab.Screen) },
                     onOpenCron = { setSelectedTab(Tab.Cron) },
                     onOpenSidebar = { openSidebar() },
@@ -1124,36 +1118,31 @@ internal fun ChatApp() {
                 pendingBot = null
                 pendingConversationId = null
                 pendingPrompt = ""
-                setSelectedTab(Tab.Chat)
+                setSelectedTab(Tab.Server)
                 },
                 onOpenConversation = { id ->
                 openChatConversation(id)
                 }
                 ) }
                 // Rotta legacy: i bot non sono piu un tab. Tenuta per vecchi
-                // backstack salvati: redirect a Chat con sezione Bot attiva.
+                // backstack salvati: apre la sezione Bot (solo gestione).
                 composable(Tab.Bots.navRoute) {
                 androidx.compose.runtime.LaunchedEffect(Unit) {
-                // setSelectedTab azzera il flag: ordine obbligato.
-                setSelectedTab(Tab.Chat)
-                botSectionVisible = true
+                setSelectedTab(Tab.Bots)
                 }
                 }
                 // Rotta legacy: lo schermo non e piu un tab. Tenuta per vecchi
-                // backstack salvati: redirect a Chat con sezione Bot attiva
-                // (lo schermo si apre da li col pulsante dedicato).
+                // backstack salvati: va alla home Server.
                 composable(Tab.Screen.navRoute) {
                 androidx.compose.runtime.LaunchedEffect(Unit) {
-                // setSelectedTab azzera il flag: ordine obbligato.
-                setSelectedTab(Tab.Chat)
-                botSectionVisible = true
+                setSelectedTab(Tab.Server)
                 }
                 }
                 composable(Tab.Artifacts.navRoute) { ArtifactLibraryScreen(
                 context = context,
                 settings = settings,
                 onOpenConversation = { id -> openChatConversation(id) },
-                onRegenerate = { prompt -> pendingBot = null; pendingConversationId = null; pendingPrompt = prompt; setSelectedTab(Tab.Chat) }
+                onRegenerate = { prompt -> pendingBot = null; pendingConversationId = null; pendingPrompt = prompt; setSelectedTab(Tab.Server) }
                 ) }
                 composable(Tab.Search.navRoute) {                 UniversalSearchScreen(context, settings) { kind, id ->
                 when (kind) {
@@ -1175,7 +1164,7 @@ internal fun ChatApp() {
                 composable(Tab.Notifications.navRoute) { NotificationsScreen(context, settings) { prompt ->
                 pendingBot = null
                 pendingPrompt = prompt
-                setSelectedTab(Tab.Chat)
+                setSelectedTab(Tab.Server)
                 } }
                 composable(Tab.Continuity.navRoute) { ContinuityScreen(context, settings) { id -> openChatConversation(id) } }
                 composable(Tab.Audit.navRoute) { AuditScreen(context, settings) }
@@ -1185,17 +1174,17 @@ internal fun ChatApp() {
                 composable(Tab.Video.navRoute) { VideoScreen(context, settings) { prompt ->
                 pendingBot = null
                 pendingPrompt = prompt
-                setSelectedTab(Tab.Chat)
+                setSelectedTab(Tab.Server)
                 } }
                 composable(Tab.Images.navRoute) { ImageScreen(context, settings) { prompt ->
                 pendingBot = null
                 pendingPrompt = prompt
-                setSelectedTab(Tab.Chat)
+                setSelectedTab(Tab.Server)
                 } }
                 composable(Tab.News.navRoute) { NewsScreen(context, settings) { prompt ->
                 pendingBot = null
                 pendingPrompt = prompt
-                setSelectedTab(Tab.Chat)
+                setSelectedTab(Tab.Server)
                 } }
                 composable(Tab.Characters.navRoute) { com.nemoclaw.chat.features.characters.CharactersScreen(context, settings) { setSelectedTab(Tab.Video) } }
                 composable(Tab.Settings.navRoute) { SettingsScreen(

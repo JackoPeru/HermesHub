@@ -1,5 +1,6 @@
 package com.nemoclaw.chat
 
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -186,6 +187,22 @@ class HomeScreenshotTest {
         composeRule.onNodeWithText("Nessun bot dal gateway: controlla la connessione e riapri.").assertExists()
         captureScreenRoboImage(
             file = java.io.File("C:/Users/matte/AppData/Local/Temp/opencode/robo_botmenuempty.png")
+        )
+    }
+
+    @Test
+    fun serverHome() {
+        composeRule.setContent {
+            ChatClawTheme {
+                ServerScreen(
+                    context = LocalContext.current,
+                    settings = AppSettings()
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage(
+            file = java.io.File("C:/Users/matte/AppData/Local/Temp/opencode/robo_serverhome.png")
         )
     }
 }

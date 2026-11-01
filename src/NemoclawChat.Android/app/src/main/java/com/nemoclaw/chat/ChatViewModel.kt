@@ -56,11 +56,19 @@ internal class ChatViewModel(private val savedState: SavedStateHandle) : ViewMod
 
     init {
         restoreChatStateIfEmpty(chatState, savedState)
+        // L'id conversazione si salva SUBITO (niente debounce): se l'utente
+        // esce entro 500ms dall'invio, al rientro la chat si ritrova lo stesso.
         persistScope.launch {
-            snapshotFlow { chatState.draft to chatState.activeConversationId }
+            snapshotFlow { chatState.activeConversationId }
+                .distinctUntilChanged()
+                .collect { savedState[CHAT_ACTIVE_CONVERSATION_SAVED_KEY] = it.orEmpty() }
+        }
+        // La bozza resta debounced (keystroke continui, niente spam di write).
+        persistScope.launch {
+            snapshotFlow { chatState.draft }
                 .debounce(CHAT_SAVED_STATE_DEBOUNCE_MS)
                 .distinctUntilChanged()
-                .collect { saveChatSnapshotToHandle(chatState, savedState) }
+                .collect { savedState[CHAT_DRAFT_SAVED_KEY] = it }
         }
     }
 

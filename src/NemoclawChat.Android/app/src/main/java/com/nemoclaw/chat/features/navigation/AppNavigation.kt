@@ -58,15 +58,15 @@ internal fun tabForIncomingRoute(value: String): Tab = when {
     value.equals("voice", ignoreCase = true) -> Tab.Voice
     value.equals("jarvis", ignoreCase = true) -> Tab.Jarvis
     value.equals("projects", ignoreCase = true) -> Tab.Projects
-    // I bot non sono piu un tab: "bots" apre la Chat con sezione Bot attiva
-    // (AppRoot imposta botSectionVisible; vedi onSelectBot).
-    value.equals("bots", ignoreCase = true) -> Tab.Chat
+    // I bot non sono un tab: "bots" apre la sezione Bot (roster gestione).
+    // "chat" e il resto ignoto vanno alla home Server (niente chat).
+    value.equals("bots", ignoreCase = true) -> Tab.Bots
     value.equals("screen", ignoreCase = true) -> Tab.Screen
     value.equals("artifacts", ignoreCase = true) -> Tab.Artifacts
     value.equals("archive", ignoreCase = true) -> Tab.Archive
     value.equals("characters", ignoreCase = true) -> Tab.Characters
     value.equals("settings", ignoreCase = true) -> Tab.Settings
-    else -> Tab.Chat
+    else -> Tab.Server
 }
 
 @Composable
