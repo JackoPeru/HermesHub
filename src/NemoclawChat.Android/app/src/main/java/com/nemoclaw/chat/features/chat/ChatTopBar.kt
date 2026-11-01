@@ -572,7 +572,7 @@ internal fun ManagerQuickMenu(
             layaBusy = true
             layaReply = runCatching {
                 val bridge = gpuBridgeBase(settings.gatewayUrl)
-                val key = loadGpuAppSecret(layaContext)
+                val key = withContext(Dispatchers.IO) { loadGpuAppSecret(layaContext) }
                 val (code, respBody) = postJson("$bridge/laya", JSONObject().put("text", text), key, allowCompatAuth = false)
                 if (code !in 200..299) {
                     "Bridge HTTP $code"

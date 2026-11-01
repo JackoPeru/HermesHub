@@ -114,11 +114,9 @@ import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Language
-import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PhotoCamera
@@ -372,8 +370,6 @@ internal fun HermesSidebar(
     selectedTab: Tab,
     settings: AppSettings,
     onClose: () -> Unit,
-    onNewChat: () -> Unit,
-    onOpenConversation: (String) -> Unit,
     onOpenTab: (Tab) -> Unit,
     onToggleSidebarSection: (String) -> Unit,
     // Modalita bot stile Hermes desktop: niente tab/chat normali, solo
@@ -384,28 +380,10 @@ internal fun HermesSidebar(
     onManageBots: () -> Unit = {},
     onBotAction: (com.nemoclaw.chat.features.bots.HermesBotItem, com.nemoclaw.chat.features.bots.BotSidebarAction) -> Unit = { _, _ -> },
     onNewBotChat: (com.nemoclaw.chat.features.bots.HermesBotItem) -> Unit = {},
-    onOpenBotSession: (com.nemoclaw.chat.features.bots.HermesBotItem, com.nemoclaw.chat.HermesSession) -> Unit = { _, _ -> },
-    // Identita attiva della chat normale ("conn::profilo", "" = default):
-    // i RECENTI mostrano solo le sue chat. In botMode la lista bot resta.
-    chatIdentityKey: String = "",
-    chatRoster: com.nemoclaw.chat.features.bots.HermesBotRoster? = null,
-    // Contatore incrementato a ogni apertura drawer (AppRoot): forza il
-    // ricaricamento delle conversazioni, niente fantasmi dopo delete in archivio.
-    refreshToken: Int = 0
+    onOpenBotSession: (com.nemoclaw.chat.features.bots.HermesBotItem, com.nemoclaw.chat.HermesSession) -> Unit = { _, _ -> }
 ) {
     // Apertura istantanea: la lista precedente si mostra subito, il reload
     // (disco+parse) gira in IO e aggiorna all'arrivo. Mai parse sul main.
-    var conversations by remember { mutableStateOf<List<LocalConversation>>(emptyList()) }
-    LaunchedEffect(refreshToken) {
-        conversations = withContext(Dispatchers.IO) {
-            runCatching { loadConversations(context).sortedByDescending { it.updatedAt } }
-                .getOrElse { conversations }
-        }
-    }
-    // Filtro per identita (stamp o legacy via roster): ogni bot ha le sue.
-    val identityConversations = remember(conversations, chatIdentityKey, chatRoster) {
-        conversationsForIdentity(conversations, chatIdentityKey, chatRoster)
-    }
     Surface(
         modifier = Modifier
             .fillMaxSize()
@@ -532,97 +510,6 @@ internal fun HermesSidebar(
             if (settings.sidebarAccount) {
                 items(listOf(Tab.Settings, Tab.Profile), key = { "account-${it.name}" }) { tab ->
                     SidebarTabRow(tab, selectedTab == tab, onOpenTab)
-                }
-            }
-            item {
-                HorizontalDivider(
-                    color = Color.White.copy(alpha = 0.08f),
-                    thickness = 0.5.dp,
-                    modifier = Modifier.padding(top = 10.dp, bottom = 6.dp)
-                )
-                SidebarSectionLabel("RECENTI", settings.sidebarRecenti) { onToggleSidebarSection("recenti") }
-            }
-            // Rebrand: chat nascoste (codice intatto, UI non raggiungibile).
-            if (false && settings.sidebarRecenti) {
-                if (identityConversations.isEmpty()) {
-                    item {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Text("Nessuna chat ancora.", color = Color.White, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.SemiBold)
-                            Text("Tocca + per iniziarne una.", color = AppColors.Muted, fontSize = AppleType.Footnote)
-                        }
-                    }
-                } else {
-                    items(identityConversations.take(15), key = { it.id }) { conversation ->
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable { onOpenConversation(conversation.id) }
-                                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(AppColors.Elevated),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        Icons.Rounded.ChatBubbleOutline,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(1.dp)
-                                ) {
-                                    Text(
-                                        conversation.title,
-                                        color = Color.White,
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        conversation.description.ifBlank { conversation.prompt },
-                                        color = AppColors.Muted,
-                                        fontSize = AppleType.Footnote,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Icon(
-                                    Icons.Rounded.ChevronRight,
-                                    contentDescription = null,
-                                    tint = AppColors.Faint,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                            HorizontalDivider(
-                                color = AppColors.Border,
-                                thickness = 0.5.dp,
-                                modifier = Modifier.padding(start = 58.dp, end = 8.dp)
-                            )
-                        }
-                    }
-                    item {
-                        SidebarRow(
-                            icon = Icons.Rounded.FolderOpen,
-                            title = "Tutte le conversazioni",
-                            subtitle = "Apri l'archivio completo",
-                            selected = false,
-                            onClick = { onOpenTab(Tab.Archive) }
-                        )
-                    }
                 }
             }
         }

@@ -43,8 +43,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -70,13 +72,18 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 @androidx.annotation.OptIn(UnstableApi::class)
 internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: VideoLibraryItem, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val apiKey = remember { loadGatewaySecret(context) }
+    // Chiave MAI sul main: KeyStore bloccante (il player dipende gia' da apiKey).
+    val apiKey by produceState<String?>(initialValue = null, settings.gatewayUrl) {
+        value = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+    }
     var useCompatPlayback by rememberSaveable(item.id) { mutableStateOf(false) }
     val primaryVideoUrl = remember(settings.gatewayUrl, item.mediaUrl, item.playbackUrl) { resolveVideoPlaybackUrl(settings, item) }
     val compatVideoUrl = remember(settings.gatewayUrl, item.mediaUrl, item.playbackUrl, item.compatUrl) { resolveVideoCompatUrl(settings, item) }
@@ -95,8 +102,13 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                 playWhenReady = true
             }
     }
-    var feedback by remember(item.id) { mutableStateOf(loadVideoFeedback(context, item.id)) }
-    var reaction by remember(item.id) { mutableStateOf(loadVideoReaction(context, item.id)) }
+    var feedback by remember(item.id) { mutableStateOf("") }
+    var reaction by remember(item.id) { mutableStateOf("") }
+    // Feedback MAI sul main: prefs disco, arrivano in IO.
+    LaunchedEffect(item.id) {
+        feedback = withContext(Dispatchers.IO) { loadVideoFeedback(context, item.id) }
+        reaction = withContext(Dispatchers.IO) { loadVideoReaction(context, item.id) }
+    }
     var status by remember(item.id) { mutableStateOf("Lascia feedback: Hermes lo usera' come memoria editoriale per i prossimi video.") }
     var fullScreen by remember(item.id) { mutableStateOf(false) }
     var fullScreenControlsVisible by remember(item.id) { mutableStateOf(true) }
@@ -200,8 +212,9 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                             reaction = "like"
                             status = "Invio like a Hermes..."
                             scope.launch {
-                                val result = sendVideoLibraryFeedback(settings, item, feedback, reaction, loadGatewaySecret(context))
-                                saveVideoFeedback(context, item.id, feedback, reaction, result)
+                                val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                                val result = sendVideoLibraryFeedback(settings, item, feedback, reaction, secret)
+                                withContext(Dispatchers.IO) { saveVideoFeedback(context, item.id, feedback, reaction, result) }
                                 status = result
                             }
                         }
@@ -213,8 +226,9 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                             reaction = "dislike"
                             status = "Invio dislike a Hermes..."
                             scope.launch {
-                                val result = sendVideoLibraryFeedback(settings, item, feedback, reaction, loadGatewaySecret(context))
-                                saveVideoFeedback(context, item.id, feedback, reaction, result)
+                                val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                                val result = sendVideoLibraryFeedback(settings, item, feedback, reaction, secret)
+                                withContext(Dispatchers.IO) { saveVideoFeedback(context, item.id, feedback, reaction, result) }
                                 status = result
                             }
                         }
@@ -235,8 +249,9 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                             }
                             status = "Invio feedback a Hermes..."
                             scope.launch {
-                                val result = sendVideoLibraryFeedback(settings, item, feedback, reaction, loadGatewaySecret(context))
-                                saveVideoFeedback(context, item.id, feedback, reaction, result)
+                                val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                                val result = sendVideoLibraryFeedback(settings, item, feedback, reaction, secret)
+                                withContext(Dispatchers.IO) { saveVideoFeedback(context, item.id, feedback, reaction, result) }
                                 status = result
                             }
                         },

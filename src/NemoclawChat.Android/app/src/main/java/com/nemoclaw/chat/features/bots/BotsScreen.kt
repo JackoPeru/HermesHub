@@ -174,10 +174,10 @@ internal fun BotsScreen(
     var fleetGpu by remember(settings.gatewayUrl) { mutableStateOf("GPU: …") }
     fun refreshFleet() {
         scope.launch {
-            turnHistory = loadGroupTurnHistory(appContext)
+            turnHistory = withContext(Dispatchers.IO) { loadGroupTurnHistory(appContext) }
             fleetGpu = runCatching {
                 val base = gpuManagerBase(settings.gatewayUrl)
-                val key = loadGpuAppSecret(appContext)
+                val key = withContext(Dispatchers.IO) { loadGpuAppSecret(appContext) }
                 val (code, body) = httpGetResponseQuick("$base/status", key)
                 if (code !in 200..299) {
                     "GPU: non raggiungibile (HTTP $code)"
@@ -932,7 +932,7 @@ internal fun BotsScreen(
 
     openGroup?.let { group ->
         LaunchedEffect(group.name) {
-            turnHistory = loadGroupTurnHistory(context)
+            turnHistory = withContext(Dispatchers.IO) { loadGroupTurnHistory(context) }
         }
         AlertDialog(
             onDismissRequest = { if (!groupRunning) openGroup = null },
@@ -1037,8 +1037,11 @@ internal fun BotsScreen(
     if (showEditor) {
         val editing = editorBot
         val selectedConnection = connections.items.firstOrNull { it.id.equals(selectedConnectionId, true) }
-        // remember map: niente I/O SharedPreferences a ogni ricomposizione.
-        val autoApproveMap = remember(editing?.profile, showEditor) { loadBotAutoApproveMap(appContext) }
+        // remember map: niente I/O SharedPreferences in composizione, arriva in IO.
+        var autoApproveMap by remember(editing?.profile, showEditor) { mutableStateOf(emptyMap<String, String>()) }
+        LaunchedEffect(editing?.profile, showEditor) {
+            autoApproveMap = withContext(Dispatchers.IO) { loadBotAutoApproveMap(appContext) }
+        }
         AlertDialog(
             onDismissRequest = { if (!mutating) showEditor = false },
             shape = RoundedCornerShape(20.dp),
@@ -1063,10 +1066,12 @@ internal fun BotsScreen(
                                 ?: (value == WorkLimits.AUTO_APPROVE_OFF)
                             TextButton(
                                 onClick = {
-                                    val profile = (if (editing == null) profileInput else editing?.profile).orEmpty()
+                                    val profile = (if (editing == null) profileInput else editing.profile).orEmpty()
                                     if (profile.isNotBlank()) {
-                                        saveBotAutoApprove(context, profile, value)
-                                        refreshNonce++
+                                        scope.launch {
+                                            withContext(Dispatchers.IO) { saveBotAutoApprove(context, profile, value) }
+                                            refreshNonce++
+                                        }
                                     }
                                 }
                             ) {
@@ -1100,13 +1105,13 @@ internal fun BotsScreen(
                     onClick = {
                         mutating = true
                         editorError = ""
-                        scope.launch {
-                            val connection = if (editing == null) {
-                                selectedConnection ?: error("Connessione Hermes non disponibile.")
-                            } else {
-                                connectionForBot(context, settings, editing)
-                            }
-                            val secret = secretForBotConnection(context, connection)
+                            scope.launch {
+                                val connection = withContext(Dispatchers.IO) { if (editing == null) {
+                                    selectedConnection ?: error("Connessione Hermes non disponibile.")
+                                } else {
+                                    connectionForBot(context, settings, editing)
+                                } }
+                                val secret = withContext(Dispatchers.IO) { secretForBotConnection(context, connection) }
                             val result = if (editing == null) {
                                 createHermesBot(settings, secret, profileInput, displayNameInput, descriptionInput, soulInput, connection)
                             } else {
@@ -1150,7 +1155,9 @@ internal fun BotsScreen(
                     onClick = {
                         mutating = true
                         scope.launch {
-                            deleteHermesBot(context, settings, secretForBotConnection(context, connectionForBot(context, settings, bot)), bot, deleteConfirmation)
+                            val connection = withContext(Dispatchers.IO) { connectionForBot(context, settings, bot) }
+                            val secret = withContext(Dispatchers.IO) { secretForBotConnection(context, connection) }
+                            deleteHermesBot(context, settings, secret, bot, deleteConfirmation)
                                 .onSuccess {
                                     status = "Bot eliminato."
                                     deleteBot = null

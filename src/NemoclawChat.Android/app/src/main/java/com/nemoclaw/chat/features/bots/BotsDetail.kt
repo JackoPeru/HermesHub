@@ -30,6 +30,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +52,8 @@ import com.nemoclaw.chat.saveBotAutoApprove
 import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.apple.AppleType
 import com.nemoclaw.chat.ui.apple.BubbleBackground
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private enum class BotDetailTab(val label: String) { General("Generale"), Screen("Screen"), Info("Info") }
 
@@ -70,8 +73,10 @@ internal fun BotDetailScreen(
     // applicationContext: remember/static non trattengono mai l'Activity.
     val appContext = context.applicationContext
     var tab by remember(bot.identityKey) { mutableStateOf(BotDetailTab.General) }
-    var autoMode by remember(bot.identityKey) {
-        mutableStateOf(loadBotAutoApproveMap(appContext)[bot.profile] ?: "off")
+    // Mappa auto-approve MAI sul main: SharedPrefs, arriva in IO.
+    var autoMode by remember(bot.identityKey) { mutableStateOf("off") }
+    LaunchedEffect(bot.identityKey) {
+        autoMode = withContext(Dispatchers.IO) { loadBotAutoApproveMap(appContext)[bot.profile] } ?: "off"
     }
     Box(modifier = Modifier.fillMaxSize().background(AppColors.Background)) {
         BubbleBackground()

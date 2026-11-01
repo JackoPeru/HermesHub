@@ -60,6 +60,8 @@ import androidx.core.net.toUri
 import com.nemoclaw.chat.ui.apple.AppleGlass
 import com.nemoclaw.chat.ui.apple.AppleType
 import java.net.URL
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPrompt: (String) -> Unit) {
@@ -70,7 +72,8 @@ internal fun NewsScreen(context: Context, settings: AppSettings, onOpenChatPromp
     val selectedHtml = remember(htmlItems, selectedHtmlId) { htmlItems.firstOrNull { it.id == selectedHtmlId } }
 
     LaunchedEffect(settings.gatewayUrl, refreshKey) {
-        val result = loadNewsLibrary(settings, loadGatewaySecret(context))
+        val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+        val result = loadNewsLibrary(settings, secret)
         htmlItems = result.first
         status = result.second
     }

@@ -16,7 +16,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,7 +43,6 @@ internal fun dashboardEntries(): List<DashboardEntry> = listOf(
     DashboardEntry(Tab.Artifacts, "File generati"),
     DashboardEntry(Tab.Projects, "Spazi di lavoro"),
     DashboardEntry(Tab.Characters, "Voci e identità"),
-    DashboardEntry(Tab.Screen, "Desktop remoto"),
     DashboardEntry(Tab.Search, "Cerca ovunque"),
     DashboardEntry(Tab.Notifications, "Avvisi"),
     DashboardEntry(Tab.Continuity, "Riprendi il filo"),

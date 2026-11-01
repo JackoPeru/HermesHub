@@ -935,13 +935,14 @@ internal fun DocumentSlimRow(
                 opening = true
                 scope.launch {
                     val result = try {
+                        val openSecret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
                         Result.success(openHermesMediaExternally(
                             context,
                             settings,
                             mediaUrl,
                             block.filename.ifBlank { block.title.ifBlank { "hermes-file" } },
                             block.mimeType,
-                            loadGatewaySecret(context)
+                            openSecret
                         ))
                     } catch (cancelled: CancellationException) {
                         throw cancelled
@@ -996,7 +997,10 @@ internal fun MediaFileBlock(block: VisualBlock) {
     }
     val clipboard = remember(context) { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
     val scope = rememberCoroutineScope()
-    val gatewaySecret = remember(settings.gatewayUrl) { loadGatewaySecret(context) }
+    // Secret MAI sul main: KeyStore bloccante, arriva in IO.
+    val gatewaySecret by produceState<String?>(initialValue = null, settings.gatewayUrl) {
+        value = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+    }
     var isDownloading by remember(block.mediaUrl) { mutableStateOf(false) }
     var isOpening by remember(block.mediaUrl) { mutableStateOf(false) }
     var pendingLegacyDownload by remember(block.id) { mutableStateOf<Pair<String, String>?>(null) }

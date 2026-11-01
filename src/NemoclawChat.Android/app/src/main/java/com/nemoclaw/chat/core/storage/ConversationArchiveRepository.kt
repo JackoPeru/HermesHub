@@ -14,17 +14,6 @@ internal const val STREAMING_CHECKPOINT_MAX_CHARS = 50_000
 internal const val UNTITLED_CHAT_TITLE = "Nuova chat"
 internal const val DELETED_CONVERSATION_RETENTION_MS = 30L * 24L * 60L * 60L * 1000L
 internal const val VISUAL_BLOCKS_MAX_BLOCKS = 20
-internal fun loadArchiveItems(context: Context): List<ArchiveItem> {
-    return loadConversations(context).map {
-        ArchiveItem(
-            id = it.id,
-            title = it.title,
-            kind = it.kind,
-            description = it.description.ifBlank { "Ultimo aggiornamento locale." },
-            prompt = it.prompt
-        )
-    }
-}
 
 internal fun loadConversation(context: Context, id: String): LocalConversation? {
     return loadConversations(context).firstOrNull { it.id == id }

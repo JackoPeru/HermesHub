@@ -44,8 +44,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -104,7 +106,7 @@ internal fun PulseCard(context: Context, settings: AppSettings) {
         scope.launch {
             busy = true
             try {
-                val key = loadGpuAppSecret(context)
+                val key = withContext(Dispatchers.IO) { loadGpuAppSecret(context) }
                 val (code, body) = httpGetResponse("$base/jobs?limit=300", key)
                 if (code !in 200..299) {
                     line = "Job non leggibili (HTTP $code)."
@@ -202,7 +204,7 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
         busy = true
         try {
             error = runCatching {
-                val key = loadGpuAppSecret(context)
+                val key = withContext(Dispatchers.IO) { loadGpuAppSecret(context) }
                 val (statusCode, statusBody) = httpGetResponse("$base/status", key)
                 if (statusCode !in 200..299) {
                     throw IllegalStateException(managerStatusErrorMessage(statusCode, statusBody))
@@ -232,7 +234,8 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
         scope.launch {
             layaBusy = true
             layaReply = runCatching {
-                postLayaCommand(bridge, text, loadGpuAppSecret(context))
+                val key = withContext(Dispatchers.IO) { loadGpuAppSecret(context) }
+                postLayaCommand(bridge, text, key)
             }.getOrElse { it.message ?: "Errore" }
             layaBusy = false
             refresh()
@@ -269,7 +272,8 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                                     else -> "metti in auto"
                                 }
                                 layaReply = runCatching {
-                                    postLayaCommand(bridge, layaText, loadGpuAppSecret(context))
+                                    val key = withContext(Dispatchers.IO) { loadGpuAppSecret(context) }
+                                    postLayaCommand(bridge, layaText, key)
                                 }.getOrElse { it.message ?: "Errore" }
                                 refresh()
                             }

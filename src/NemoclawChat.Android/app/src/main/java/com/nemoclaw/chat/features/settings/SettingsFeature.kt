@@ -1181,14 +1181,22 @@ internal fun SettingsScreen(
                 SettingsSectionHeader(title = "Controllo telefono", subtitle = "L'agente opera il telefono solo se armato.")
             }
             item {
-                val phoneArmedState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(isPhoneArmed(context)) }
-                val phoneAccessState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(isPhoneAccessibilityEnabled(context)) }
-                val phoneLogState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(loadPhoneLog(context)) }
+                val phoneArmedState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+                val phoneAccessState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+                val phoneLogState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(emptyList<String>()) }
+                val phoneScope = androidx.compose.runtime.rememberCoroutineScope()
+                // Letture telefono MAI sul main: settings system + disco, in IO.
                 fun refreshPhone() {
-                    phoneArmedState.value = isPhoneArmed(context)
-                    phoneAccessState.value = isPhoneAccessibilityEnabled(context)
-                    phoneLogState.value = loadPhoneLog(context)
+                    phoneScope.launch {
+                        val armed = withContext(Dispatchers.IO) { isPhoneArmed(context) }
+                        val access = withContext(Dispatchers.IO) { isPhoneAccessibilityEnabled(context) }
+                        val log = withContext(Dispatchers.IO) { loadPhoneLog(context) }
+                        phoneArmedState.value = armed
+                        phoneAccessState.value = access
+                        phoneLogState.value = log
+                    }
                 }
+                androidx.compose.runtime.LaunchedEffect(Unit) { refreshPhone() }
                 Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0xFF14171C)).border(0.5.dp, AppColors.Border, RoundedCornerShape(20.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Arma controllo remoto", color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))

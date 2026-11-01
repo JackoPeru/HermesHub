@@ -231,8 +231,15 @@ internal fun ArtifactLibraryScreen(
                     }
                     Text("VERSIONI", color = AppColors.Muted, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     val key = selected.artifactFileName.ifBlank { selected.title }
-                    loadConversations(context).filter { it.kind == "Artifact" && it.artifactFileName.ifBlank { it.title }.equals(key, true) }
-                        .sortedByDescending { it.version }.forEach { version ->
+                    // Versioni MAI sul main: disco + JSON, arrivano in IO.
+                    var versions by remember(selected.id) { mutableStateOf(emptyList<LocalConversation>()) }
+                    LaunchedEffect(selected.id) {
+                        versions = withContext(Dispatchers.IO) {
+                            loadConversations(context).filter { it.kind == "Artifact" && it.artifactFileName.ifBlank { it.title }.equals(key, true) }
+                                .sortedByDescending { it.version }
+                        }
+                    }
+                    versions.forEach { version ->
                             Text("v${version.version} · ${formatDateTime(version.updatedAt)} · ${version.description}", color = AppColors.Muted, fontSize = AppleType.Footnote)
                         }
                     Text(status, color = AppColors.Muted, fontSize = AppleType.Footnote)

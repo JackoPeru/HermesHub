@@ -47,6 +47,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -146,10 +147,16 @@ internal fun ChatScreen(
     } else {
         settings
     }
-    val botApiKey = if (remoteBot) {
-        loadGatewayConnectionSecret(context, botConnectionId.orEmpty())
-    } else {
-        loadGatewaySecret(context)
+    // Chiave bot MAI sul main: KeyStore bloccante, arriva in IO (nullable: i
+    // turni la usano con takeIf/?: come prima).
+    val botApiKey by produceState<String?>(initialValue = null, botConnectionId, settings.gatewayUrl) {
+        value = withContext(Dispatchers.IO) {
+            if (remoteBot) {
+                loadGatewayConnectionSecret(context, botConnectionId.orEmpty())
+            } else {
+                loadGatewaySecret(context)
+            }
+        }
     }
     val botAllowCompatAuth = !remoteBot
     // Identita proprietaria dei salvataggi locali (sidebar filtrata per
@@ -647,7 +654,10 @@ internal fun ChatScreen(
     // chat con LLM scarico, anche mentre l'utente lavorava in Comfy manuale:
     // il toggle manuale in TopBar resta l'unico modo di cambiare modo.
     // Il manager in AUTO ricarica l'LLM da solo quando serve.
-    val managerKey = remember { loadGpuAppSecret(context) }
+    // Chiave manager MAI sul main: KeyStore bloccante, arriva in IO.
+    val managerKey by produceState<String?>(initialValue = null, settings.gatewayUrl) {
+        value = withContext(Dispatchers.IO) { loadGpuAppSecret(context) }
+    }
     // Allegati pending persistenti: rientrando in app (o nella conversazione)
     // la foto allegata al prompt e' ancora li'.
     var restoredPendingFor by remember { mutableStateOf<String?>(null) }
@@ -659,23 +669,30 @@ internal fun ChatScreen(
         val cid = state.activeConversationId
         if (restoredPendingFor != cid) {
             if (state.pendingAttachments.isEmpty()) {
-                loadPendingAttachments(context, cid).forEach { state.pendingAttachments.add(it) }
+                val restored = withContext(Dispatchers.IO) { loadPendingAttachments(context, cid) }
+                restored.forEach { state.pendingAttachments.add(it) }
             }
             if (state.draft.isBlank()) {
-                state.draft = loadDraft(context, cid)
+                state.draft = withContext(Dispatchers.IO) { loadDraft(context, cid) }
             }
             restoredPendingFor = cid
         }
     }
     LaunchedEffect(state.pendingAttachments.size, state.activeConversationId, state.draft) {
         if (restoredPendingFor == state.activeConversationId) {
-            savePendingAttachments(context, state.activeConversationId, state.pendingAttachments.toList())
-            saveDraft(context, state.activeConversationId, state.draft)
+            val cid = state.activeConversationId
+            val atts = state.pendingAttachments.toList()
+            val draft = state.draft
+            withContext(Dispatchers.IO) {
+                savePendingAttachments(context, cid, atts)
+                saveDraft(context, cid, draft)
+            }
         }
     }
     LaunchedEffect(state.queuedPrompts.size) {
         // La coda sopravvive al kill dell'app: ripartenza automatica al rientro.
-        saveQueuedPrompts(context, state.queuedPrompts.toList())
+        val queued = state.queuedPrompts.toList()
+        withContext(Dispatchers.IO) { saveQueuedPrompts(context, queued) }
     }
     LaunchedEffect(Unit) {
         val loaded = withContext(Dispatchers.IO) { loadQueuedPrompts(context) }
@@ -1975,7 +1992,7 @@ internal fun ChatScreen(
                         }
 
                         try {
-                            val smartKey = loadGpuAppSecret(context)?.takeIf { it.isNotBlank() }
+                            val smartKey = withContext(Dispatchers.IO) { loadGpuAppSecret(context) }?.takeIf { it.isNotBlank() }
                             if (smartJob != null && smartKey == null) {
                                 // Chiave sparita a meta strada: torna al flusso normale
                                 // (lo snapshot attachments e intatto, niente hang).
@@ -2095,7 +2112,7 @@ internal fun ChatScreen(
                                 )
                                 val sJob = smartJob
                                 if (sJob != null) {
-                                        val sKey = loadGpuAppSecret(context)?.takeIf { it.isNotBlank() }
+                                        val sKey = withContext(Dispatchers.IO) { loadGpuAppSecret(context) }?.takeIf { it.isNotBlank() }
                                     if (sKey != null) {
                                         cancelSmartJob(
                                             gpuManagerBase(settings.gatewayUrl), sKey, sJob.jobId
@@ -2203,7 +2220,8 @@ internal fun ChatScreen(
                             }
                             val workspaceKind = if (!interrupted && mode == "Agente") detectWorkspaceIntent(text) else null
                             if (workspaceKind != null) {
-                                val workspaceResult = sendWorkspaceRunRequest(settings, workspaceKind, text, loadGatewaySecret(context))
+                                val workspaceSecret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                                val workspaceResult = sendWorkspaceRunRequest(settings, workspaceKind, text, workspaceSecret)
                                 withContext(Dispatchers.IO) {
                                     saveWorkspaceRequest(
                                         context = context,
@@ -2328,11 +2346,12 @@ internal fun ChatScreen(
                             val abnormalSilentEnd = !interrupted &&
                                 (transportDetached || (finalState.error == null && finalState.text.isBlank()))
                             if (shouldGenerateTitle && !interrupted && !abnormalSilentEnd && finalState.error == null && finalText.isNotBlank()) {
+                                    val titleSecret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
                                     val generatedTitle = generateConversationTitle(
                                         settings = settings,
                                         firstPrompt = displayText,
                                         firstAnswer = finalText,
-                                        apiKey = loadGatewaySecret(context)
+                                        apiKey = titleSecret
                                     )
                                     withContext(NonCancellable + Dispatchers.IO) {
                                         // Propaga rename alla sessione server quando disponibile.
@@ -2476,7 +2495,7 @@ internal fun ChatScreen(
                         if (file != null && file.exists()) {
                             scope.launch {
                                 try {
-                                    val secret = loadGatewaySecret(context) ?: ""
+                                    val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) } ?: ""
 
                                     val requestBody = okhttp3.MultipartBody.Builder()
                                         .setType(okhttp3.MultipartBody.FORM)

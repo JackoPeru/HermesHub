@@ -41,6 +41,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -251,7 +252,10 @@ internal fun ScreenScreen(
         return withContext(Dispatchers.IO) { getScreenStatus(settings, key) }
     }
 
-    val screenApiKeyHash = remember(settings.gatewayUrl) { (loadGpuAppSecret(appContext) ?: "").hashCode() }
+    // Hash chiave MAI sul main: KeyStore bloccante, arriva in IO.
+    val screenApiKeyHash by produceState(initialValue = 0, settings.gatewayUrl) {
+        value = withContext(Dispatchers.IO) { (loadGpuAppSecret(appContext) ?: "").hashCode() }
+    }
     PollWhileStarted(settings.gatewayUrl, reloadNonce, screenApiKeyHash, baseIntervalMs = 5_000L) {
         val next = runCatching { refreshStatus() }.getOrNull()
         if (next != null) {

@@ -101,7 +101,11 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
     var logFilter by rememberSaveable { mutableStateOf("") }
     var pendingControlAction by remember { mutableStateOf<Pair<String, String>?>(null) }
     var pendingMaintenanceAction by remember { mutableStateOf<String?>(null) }
-    var deviceIdState by remember { mutableStateOf(loadDeviceId(context)) }
+    // Device ID MAI sul main: prefs disco, arriva in IO (stato gia' nullable ovunque).
+    var deviceIdState by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        deviceIdState = withContext(Dispatchers.IO) { loadDeviceId(context) }
+    }
     var deviceStatus by remember { mutableStateOf("Telefono non registrato: le azioni server usano solo la chiave.") }
     var deviceBusy by remember { mutableStateOf(false) }
     var registeredDevices by remember { mutableStateOf<List<RegisteredDevice>>(emptyList()) }
@@ -121,8 +125,9 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
     ) {
         val devId = deviceIdState
         if (devId == null) {
+            val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
             val result = runCatching {
-                postJson(url, payload, loadGatewaySecret(context), allowCompatAuth = false).second
+                postJson(url, payload, secret, allowCompatAuth = false).second
             }.getOrElse { it.message ?: "Errore" }
             onDone(result)
             return
@@ -146,8 +151,9 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
             onDone(denied.message ?: "Autenticazione annullata.")
             return
         }
+        val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
         val result = runCatching {
-            postDeviceSignedJson(url, payload, devId, loadGatewaySecret(context)).let { (code, body) ->
+            postDeviceSignedJson(url, payload, devId, secret).let { (code, body) ->
                 if (code in 200..299) body.ifBlank { "Eseguito (firmato)." } else "Server HTTP $code: ${body.take(200)}"
             }
         }.getOrElse { it.message ?: "Errore" }
@@ -158,7 +164,8 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
         scope.launch {
             devicesMsg = "Leggo…"
             try {
-                val body = httpGet(resolveHermesUrl(settings, "/v1/hub/devices"), loadGatewaySecret(context))
+                val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                val body = httpGet(resolveHermesUrl(settings, "/v1/hub/devices"), secret)
                 val arr = JSONObject(body).optJSONArray("devices") ?: JSONArray()
                 registeredDevices = (0 until arr.length()).mapNotNull { i ->
                     val o = arr.optJSONObject(i) ?: return@mapNotNull null
@@ -180,15 +187,16 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
     fun revokeDevice(id: String) {
         scope.launch {
             devicesMsg = runCatching {
+                val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
                 val (code, _) = postJson(
                     resolveHermesUrl(settings, "/v1/hub/devices/$id"),
-                    JSONObject(), loadGatewaySecret(context), method = "DELETE", allowCompatAuth = false
+                    JSONObject(), secret, method = "DELETE", allowCompatAuth = false
                 )
                 if (code !in 200..299) "Revoca HTTP $code" else ""
             }.getOrElse { it.message ?: "Errore revoca." }
             if (devicesMsg.isBlank()) {
                 if (deviceIdState == id) {
-                    clearDeviceId(context)
+                    withContext(Dispatchers.IO) { clearDeviceId(context) }
                     deviceIdState = null
                     deviceStatus = "Telefono non registrato: le azioni server usano solo la chiave."
                 }
@@ -204,9 +212,12 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
         "diagnostic" to "Diagnostica"
     )
 
-    LaunchedEffect(settings) {
-        snapshot = loadServerSnapshot(context, settings, loadGatewaySecret(context))
-        diagnostics = runDiagnostics(settings, loadGatewaySecret(context))
+    // Chiave stretta: ricarica solo al cambio URL (non a ogni font/metrica).
+    // Secret MAI sul main: KeyStore bloccante, prima chiamata in IO.
+    LaunchedEffect(settings.gatewayUrl) {
+        val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+        snapshot = loadServerSnapshot(context, settings, secret)
+        diagnostics = runDiagnostics(settings, secret)
     }
 
     Box(
@@ -276,7 +287,8 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
                                 val healthUrl = "${hermesRoot(settings)}/health"
                                 snapshot = snapshot.copy(statusMessage = "Test: $healthUrl")
                                 scope.launch {
-                                    snapshot = snapshot.copy(statusMessage = testGateway(healthUrl, loadGatewaySecret(context)))
+                                    val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                                    snapshot = snapshot.copy(statusMessage = testGateway(healthUrl, secret))
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
@@ -287,8 +299,9 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
                         TextButton(
                             onClick = {
                                 scope.launch {
-                                    snapshot = loadServerSnapshot(context, settings, loadGatewaySecret(context))
-                                    diagnostics = runDiagnostics(settings, loadGatewaySecret(context))
+                                    val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                                    snapshot = loadServerSnapshot(context, settings, secret)
+                                    diagnostics = runDiagnostics(settings, secret)
                                 }
                             },
                             colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
@@ -329,7 +342,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
                         TextButton(onClick = { pendingControlAction = controlService to "start" }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Avvia") }
                         TextButton(onClick = { pendingControlAction = controlService to "stop" }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Ferma") }
                         TextButton(onClick = { pendingControlAction = controlService to "restart" }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Error)) { Text("Riavvia") }
-                        TextButton(onClick = { scope.launch { controlOutput = runCatching { httpGet(resolveHermesUrl(settings, "/v1/hub/server/control") + "?filter=${java.net.URLEncoder.encode(logFilter, "UTF-8")}", loadGatewaySecret(context)) }.getOrElse { it.message ?: "Errore" } } }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Aggiorna output") }
+                        TextButton(onClick = { scope.launch { val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }; controlOutput = runCatching { httpGet(resolveHermesUrl(settings, "/v1/hub/server/control") + "?filter=${java.net.URLEncoder.encode(logFilter, "UTF-8")}", secret) }.getOrElse { it.message ?: "Errore" } } }, colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)) { Text("Aggiorna output") }
                     }
                     SettingsField("Filtro log", logFilter, { logFilter = it })
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -351,8 +364,9 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
                             Button(
                                 onClick = {
                                     scope.launch {
-                                        snapshot = loadServerSnapshot(context, settings, loadGatewaySecret(context))
-                                        diagnostics = runDiagnostics(settings, loadGatewaySecret(context))
+                                        val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                                        snapshot = loadServerSnapshot(context, settings, secret)
+                                        diagnostics = runDiagnostics(settings, secret)
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
@@ -382,8 +396,9 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
                         onClick = {
                             wsProbe = wsProbe.copy(status = "Lettura capabilities...", detail = "Chiamata a /v1/capabilities e /v1/models.")
                             scope.launch {
-                                val capabilities = runCatching { httpGet(resolveHermesUrl(settings, "/v1/capabilities"), loadGatewaySecret(context)) }.getOrElse { it.message ?: it.javaClass.simpleName }
-                                val models = runCatching { httpGet(resolveHermesUrl(settings, "/v1/models"), loadGatewaySecret(context)) }.getOrElse { it.message ?: it.javaClass.simpleName }
+                                val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                                val capabilities = runCatching { httpGet(resolveHermesUrl(settings, "/v1/capabilities"), secret) }.getOrElse { it.message ?: it.javaClass.simpleName }
+                                val models = runCatching { httpGet(resolveHermesUrl(settings, "/v1/models"), secret) }.getOrElse { it.message ?: it.javaClass.simpleName }
                                 wsProbe = GatewayWsProbe(
                                     wsUrl = resolveHermesUrl(settings, "/v1/capabilities"),
                                     connected = true,
@@ -440,14 +455,15 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
                                     }
                                     val pem = withContext(Dispatchers.IO) { devicePublicKeyPem() }
                                     val label = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".take(80)
+                                    val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
                                     val (code, body) = postJson(
                                         resolveHermesUrl(settings, "/v1/hub/devices/register"),
                                         JSONObject().put("device_id", id).put("public_key", pem).put("label", label),
-                                        loadGatewaySecret(context),
+                                        secret,
                                         allowCompatAuth = false
                                     )
                                     if (code in 200..299) {
-                                        saveDeviceId(context, id)
+                                        withContext(Dispatchers.IO) { saveDeviceId(context, id) }
                                         deviceIdState = id
                                         val fingerprint = runCatching {
                                             JSONObject(body).optString("fingerprint")
@@ -472,14 +488,15 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
                                 try {
                                     val id = deviceIdState
                                     if (id != null) {
+                                        val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
                                         postJson(
                                             resolveHermesUrl(settings, "/v1/hub/devices/$id"),
                                             JSONObject(),
-                                            loadGatewaySecret(context),
+                                            secret,
                                             method = "DELETE",
                                             allowCompatAuth = false
                                         )
-                                        clearDeviceId(context)
+                                        withContext(Dispatchers.IO) { clearDeviceId(context) }
                                         deviceIdState = null
                                     }
                                     deviceStatus = "Telefono non registrato: le azioni server usano solo la chiave."
@@ -576,7 +593,8 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
                                     return@launch
                                 }
                                 val configBody = runCatching {
-                                    httpGet(resolveHermesUrl(settings, "/v1/hub/push-config"), loadGatewaySecret(context))
+                                    val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                                    httpGet(resolveHermesUrl(settings, "/v1/hub/push-config"), secret)
                                 }.getOrElse {
                                     pushStatus = "Config non letta: ${it.message}"
                                     return@launch
@@ -624,11 +642,12 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
                                     pushStatus = "Token FCM non ottenuto: riprova."
                                     return@launch
                                 }
-                                savePendingFcmToken(context, token)
+                                withContext(Dispatchers.IO) { savePendingFcmToken(context, token) }
+                                val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
                                 val (code, _) = postJson(
                                     resolveHermesUrl(settings, "/v1/hub/devices/$devId/token"),
                                     JSONObject().put("fcm_token", token),
-                                    loadGatewaySecret(context),
+                                    secret,
                                     allowCompatAuth = false
                                 )
                                 pushStatus = if (code in 200..299) "Notifiche attive su questo telefono."
@@ -644,6 +663,13 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
                 ) { Text("Attiva notifiche") }
             }
         }
+        }
+        item {
+            AppleGlass(shape = RoundedCornerShape(20.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    AppUpdateCard(context)
+                }
+            }
         }
     }
     }

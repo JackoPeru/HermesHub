@@ -26,7 +26,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Button
@@ -49,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -158,13 +159,15 @@ internal fun CharactersScreen(context: Context, settings: AppSettings, onOpenVid
     val scope = rememberCoroutineScope()
     fun reload() {
         scope.launch {
-            val (list, message) = loadCharacters(settings, managerKeyOf(context))
+            val key = withContext(Dispatchers.IO) { managerKeyOf(context) }
+            val (list, message) = loadCharacters(settings, key)
             items = list
             status = message
         }
     }
     PollWhileStarted("list", refresh, listBump, settings.gatewayUrl, baseIntervalMs = 15000) {
-        val (list, message) = loadCharacters(settings, managerKeyOf(context))
+        val key = withContext(Dispatchers.IO) { managerKeyOf(context) }
+        val (list, message) = loadCharacters(settings, key)
         items = list
         status = message
         true
@@ -282,7 +285,10 @@ private fun CreateCharacterWizard(context: Context, settings: AppSettings, onDon
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val managerKey = remember { managerKeyOf(context) }
+    // Chiave MAI sul main: KeyStore bloccante, arriva in IO.
+    val managerKey by produceState<String?>(initialValue = null) {
+        value = withContext(Dispatchers.IO) { managerKeyOf(context) }
+    }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris: List<Uri> ->
         val id = characterId ?: return@rememberLauncherForActivityResult
@@ -319,7 +325,7 @@ private fun CreateCharacterWizard(context: Context, settings: AppSettings, onDon
     ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                IconButton(onClick = onCancel) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Indietro", tint = AppColors.Accent) }
+                IconButton(onClick = onCancel) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = AppColors.Accent) }
                 HeaderTile(Icons.Rounded.Add, "Crea personaggio")
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Crea personaggio", color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold)
@@ -378,7 +384,10 @@ private fun CreateCharacterWizard(context: Context, settings: AppSettings, onDon
 @Composable
 private fun AnalyzeStep(context: Context, settings: AppSettings, characterId: String?, onReady: () -> Unit, message: String, onMessage: (String) -> Unit, onPickPhotos: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val managerKey = remember { managerKeyOf(context) }
+    // Chiave MAI sul main: KeyStore bloccante, arriva in IO.
+    val managerKey by produceState<String?>(initialValue = null) {
+        value = withContext(Dispatchers.IO) { managerKeyOf(context) }
+    }
     var state by remember { mutableStateOf("draft") }
     var job by remember { mutableStateOf<CharacterJob?>(null) }
     var counts by remember { mutableStateOf("") }
@@ -427,7 +436,10 @@ private fun AnalyzeStep(context: Context, settings: AppSettings, characterId: St
 @Composable
 private fun ReadyStep(context: Context, settings: AppSettings, characterId: String?, name: String, onDone: (String) -> Unit, message: String, onMessage: (String) -> Unit, onPickPhotos: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val managerKey = remember { managerKeyOf(context) }
+    // Chiave MAI sul main: KeyStore bloccante, arriva in IO.
+    val managerKey by produceState<String?>(initialValue = null) {
+        value = withContext(Dispatchers.IO) { managerKeyOf(context) }
+    }
     var manifest by remember { mutableStateOf<JSONObject?>(null) }
     var busy by remember { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(characterId) {
@@ -480,7 +492,10 @@ private fun DatasetQualityView(manifest: JSONObject?) {
 @Composable
 private fun CharacterDetail(context: Context, settings: AppSettings, id: String, onBack: () -> Unit, onOpenVideo: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val managerKey = remember { managerKeyOf(context) }
+    // Chiave MAI sul main: KeyStore bloccante, arriva in IO.
+    val managerKey by produceState<String?>(initialValue = null) {
+        value = withContext(Dispatchers.IO) { managerKeyOf(context) }
+    }
     var manifest by remember { mutableStateOf<JSONObject?>(null) }
     var state by remember { mutableStateOf("draft") }
     var job by remember { mutableStateOf<CharacterJob?>(null) }
@@ -506,7 +521,7 @@ private fun CharacterDetail(context: Context, settings: AppSettings, id: String,
     ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Indietro", tint = AppColors.Accent) }
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Indietro", tint = AppColors.Accent) }
                 HeaderTile(Icons.Rounded.Person, null)
                 Column(modifier = Modifier.weight(1f)) {
                     Text(name, color = Color.White, fontSize = AppleType.ScreenTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -630,7 +645,10 @@ private fun CharacterDetail(context: Context, settings: AppSettings, id: String,
 @Composable
 private fun GenerateSheet(context: Context, settings: AppSettings, id: String, name: String, strength: String, onClose: () -> Unit, onOpenVideo: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val managerKey = remember { managerKeyOf(context) }
+    // Chiave MAI sul main: KeyStore bloccante, arriva in IO.
+    val managerKey by produceState<String?>(initialValue = null) {
+        value = withContext(Dispatchers.IO) { managerKeyOf(context) }
+    }
     var prompt by rememberSaveable(id) { mutableStateOf("") }
     var identityMode by rememberSaveable(id) { mutableStateOf("auto") }
     var duration by rememberSaveable(id) { mutableIntStateOf(5) }

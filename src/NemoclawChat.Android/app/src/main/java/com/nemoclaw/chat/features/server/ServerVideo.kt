@@ -38,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -52,6 +53,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.ui.apple.AppleGlass
 import com.nemoclaw.chat.ui.apple.AppleType
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.net.URL
 
 @Composable
@@ -68,16 +71,30 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
         if (manualVideoItem == null) items else listOf(manualVideoItem) + items
     }
     val selectedVideo = remember(allItems, selectedVideoId) { allItems.firstOrNull { it.id == selectedVideoId } }
-    val displayedItems = remember(allItems, videoFilter) {
+    // Chiave MAI sul main: KeyStore bloccante (passata alle card).
+    val apiKey by produceState<String?>(initialValue = null, settings.gatewayUrl) {
+        value = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+    }
+    // Flag feedback MAI sul main: N letture prefs, calcolate in IO.
+    // Chiave anche su selectedVideoId: al rientro dal watch i flag si
+    // ricalcolano (feedback appena salvato) senza ricaricare la libreria.
+    var feedbackIds by remember { mutableStateOf(emptySet<String>()) }
+    LaunchedEffect(allItems, selectedVideoId) {
+        feedbackIds = withContext(Dispatchers.IO) {
+            allItems.filter { loadVideoFeedback(context, it.id).isNotBlank() || loadVideoReaction(context, it.id).isNotBlank() }.map { it.id }.toSet()
+        }
+    }
+    val displayedItems = remember(allItems, videoFilter, feedbackIds) {
         when (videoFilter) {
             "Recenti" -> allItems.sortedByDescending { it.modifiedAt }
-            "Feedback" -> allItems.filter { loadVideoFeedback(context, it.id).isNotBlank() || loadVideoReaction(context, it.id).isNotBlank() }
+            "Feedback" -> allItems.filter { it.id in feedbackIds }
             else -> allItems
         }
     }
 
     LaunchedEffect(settings.gatewayUrl, settings.videoLibraryPath, refreshKey) {
-        val result = loadVideoLibrary(settings, loadGatewaySecret(context))
+        val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+        val result = loadVideoLibrary(settings, secret)
         items = result.first
         status = result.second
         if (selectedVideoId != null && selectedVideoId?.startsWith("manual:") != true && result.first.none { it.id == selectedVideoId }) {
@@ -228,7 +245,7 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
             VideoFeedCard(
                 settings = settings,
                 item = video,
-                apiKey = loadGatewaySecret(context),
+                apiKey = apiKey,
                 onClick = { selectedVideoId = video.id }
             )
         }

@@ -335,9 +335,10 @@ internal object ConversationArchiveAutoSync {
             return
         }
         try {
-            val settings = loadSettings(context)
+            val settings = withContext(Dispatchers.IO) { loadSettings(context) }
             if (hasConfiguredHermesEndpoint(settings)) {
-                syncConversationsToHub(context, settings, loadGatewaySecret(context))
+                val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                syncConversationsToHub(context, settings, secret)
             }
         } finally {
             syncActive.set(false)

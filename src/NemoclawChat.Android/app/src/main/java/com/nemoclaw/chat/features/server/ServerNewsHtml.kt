@@ -31,6 +31,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -40,6 +41,8 @@ import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import com.nemoclaw.chat.ui.apple.AppleType
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,7 +53,10 @@ import androidx.core.view.WindowInsetsControllerCompat
 
 @Composable
 internal fun NewsHtmlScreen(context: Context, settings: AppSettings, item: NewsHtmlItem, onBack: () -> Unit) {
-    val apiKey = remember { loadGatewaySecret(context) }
+    // Chiave MAI sul main: KeyStore bloccante (l'effect dipende gia' da apiKey).
+    val apiKey by produceState<String?>(initialValue = null, settings.gatewayUrl) {
+        value = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+    }
     val pageUrl = remember(settings.gatewayUrl, item.url) { resolveWorkspaceUrl(settings, item.url) }
     var status by remember(item.id) { mutableStateOf("Carico pagina HTML...") }
     var html by remember(item.id) { mutableStateOf("") }

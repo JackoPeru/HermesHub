@@ -125,7 +125,6 @@ import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Language
-import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PhotoCamera
@@ -293,7 +292,23 @@ internal fun ArchiveScreen(
     onOpenConversation: (String?, String) -> Unit
 ) {
     var refreshKey by rememberSaveable { mutableIntStateOf(0) }
-    val archive = remember(refreshKey) { loadArchiveItems(context) }
+    // Archivio MAI sul main: UN solo parse disco in IO, liste derivate
+    // (niente doppio parse archive+conversazioni per refresh).
+    var savedConversations by remember(refreshKey) { mutableStateOf(emptyList<LocalConversation>()) }
+    LaunchedEffect(refreshKey) {
+        savedConversations = withContext(Dispatchers.IO) { loadConversations(context) }
+    }
+    val archive = remember(savedConversations) {
+        savedConversations.map {
+            ArchiveItem(
+                id = it.id,
+                title = it.title,
+                kind = it.kind,
+                description = it.description.ifBlank { "Ultimo aggiornamento locale." },
+                prompt = it.prompt
+            )
+        }
+    }
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf("Tutto") }
     var status by rememberSaveable { mutableStateOf("Pronto.") }
@@ -304,11 +319,6 @@ internal fun ArchiveScreen(
     var confirmCopyArchive by rememberSaveable { mutableStateOf(false) }
     var managingConversationId by rememberSaveable { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    // Archivio MAI sul main: parse disco lento, va in IO e riempie dopo.
-    var savedConversations by remember(refreshKey) { mutableStateOf(emptyList<LocalConversation>()) }
-    LaunchedEffect(refreshKey) {
-        savedConversations = withContext(Dispatchers.IO) { loadConversations(context) }
-    }
     val savedProjects = savedConversations.count { it.kind == "Progetto" }
     val savedChats = savedConversations.count { it.kind == "Chat" || it.kind == "Task" }
     LaunchedEffect(Unit) {
@@ -384,7 +394,9 @@ internal fun ArchiveScreen(
                         IconButton(onClick = {
                             status = "Carico archivio sul gateway..."
                             scope.launch {
-                                status = syncConversationsToHub(context, loadSettings(context), loadGatewaySecret(context))
+                                val ioSettings = withContext(Dispatchers.IO) { loadSettings(context) }
+                                val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                                status = syncConversationsToHub(context, ioSettings, secret)
                             }
                         }) {
                             Icon(Icons.Rounded.CloudUpload, contentDescription = "Carica archivio sul server", tint = AppColors.Accent)
@@ -392,7 +404,9 @@ internal fun ArchiveScreen(
                         IconButton(onClick = {
                             status = "Scarico archivio dal gateway..."
                             scope.launch {
-                                status = restoreConversationsFromHub(context, loadSettings(context), loadGatewaySecret(context))
+                                val ioSettings = withContext(Dispatchers.IO) { loadSettings(context) }
+                                val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                                status = restoreConversationsFromHub(context, ioSettings, secret)
                                 refreshKey++
                             }
                         }) {
@@ -477,7 +491,7 @@ internal fun ArchiveScreen(
                                 .background(Color(0xFF302517)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Rounded.ManageSearch, contentDescription = "Nessun risultato", tint = AppColors.Faint)
+                            Icon(Icons.AutoMirrored.Rounded.ManageSearch, contentDescription = "Nessun risultato", tint = AppColors.Faint)
                         }
                         Text("Nessun risultato.", color = Color.White, fontWeight = FontWeight.SemiBold)
                         Text(
@@ -787,16 +801,37 @@ internal fun ConversationManagerDialog(
     onContinue: (String?, String) -> Unit
 ) {
     var refresh by remember { mutableIntStateOf(0) }
-    val conversation = remember(conversationId, refresh) { loadConversation(context, conversationId) }
+    // Conversazione MAI sul main: disco + JSON, arriva in IO (loaded distingue
+    // "carico" da "inesistente": solo la seconda chiude il dialogo).
+    var loadedConversation by remember(conversationId, refresh) { mutableStateOf<LocalConversation?>(null) }
+    var conversationLoaded by remember(conversationId, refresh) { mutableStateOf(false) }
+    LaunchedEffect(conversationId, refresh) {
+        loadedConversation = withContext(Dispatchers.IO) { loadConversation(context, conversationId) }
+        conversationLoaded = true
+    }
+    if (!conversationLoaded) return
+    val conversation = loadedConversation
     if (conversation == null) { onClose(); return }
-    var folder by remember(conversationId, refresh) { mutableStateOf(conversation.folder) }
-    var tags by remember(conversationId, refresh) { mutableStateOf(conversation.tags.joinToString(", ")) }
-    var project by remember(conversationId, refresh) { mutableStateOf(conversation.projectId) }
-    var links by remember(conversationId, refresh) { mutableStateOf(conversation.linkedConversationIds.joinToString(", ")) }
-    var summary by remember(conversationId, refresh) { mutableStateOf(conversation.summary) }
+    // Campi chiaveati sulla conversazione caricata (non su id/refresh):
+    // al primo frame e' null, all'arrivo del load si popolano da soli.
+    var folder by remember(conversation) { mutableStateOf(conversation.folder) }
+    var tags by remember(conversation) { mutableStateOf(conversation.tags.joinToString(", ")) }
+    var project by remember(conversation) { mutableStateOf(conversation.projectId) }
+    var links by remember(conversation) { mutableStateOf(conversation.linkedConversationIds.joinToString(", ")) }
+    var summary by remember(conversation) { mutableStateOf(conversation.summary) }
     val selected = remember(conversationId) { mutableStateListOf<String>() }
     var status by remember { mutableStateOf("Modifica, ramifica o esporta la chat.") }
     var confirmBulkDelete by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    // Rami MAI sul main: disco + JSON, arrivano in IO.
+    var branches by remember { mutableStateOf(emptyList<LocalConversation>()) }
+    LaunchedEffect(conversation, refresh) {
+        val cid = conversation.id
+        val linked = conversation.linkedConversationIds
+        branches = withContext(Dispatchers.IO) {
+            loadConversations(context).filter { it.parentConversationId == cid || linked.contains(it.id) }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onClose,
@@ -814,8 +849,10 @@ internal fun ConversationManagerDialog(
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick = {
-                                updateLocalConversation(context, conversationId) { item -> item.copy(folder = folder.trim(), tags = splitMetadata(tags), projectId = project.trim(), linkedConversationIds = splitMetadata(links).filter { it != conversationId }, summary = summary.trim(), updatedAt = System.currentTimeMillis()) }
-                                status = "Metadata salvati."; refresh++
+                                scope.launch {
+                                    withContext(Dispatchers.IO) { updateLocalConversation(context, conversationId) { item -> item.copy(folder = folder.trim(), tags = splitMetadata(tags), projectId = project.trim(), linkedConversationIds = splitMetadata(links).filter { it != conversationId }, summary = summary.trim(), updatedAt = System.currentTimeMillis()) } }
+                                    status = "Metadata salvati."; refresh++
+                                }
                                 },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = AppColors.Accent,
@@ -841,19 +878,18 @@ internal fun ConversationManagerDialog(
                             Text("Seleziona", color = AppColors.Muted)
                         }
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                            IconButton(onClick = { updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.map { if (it.id == message.id) it.copy(text = text) else it }, updatedAt = System.currentTimeMillis()) }; refresh++ }) { Icon(Icons.Rounded.Edit, contentDescription = "Modifica messaggio", tint = AppColors.Accent) }
-                            IconButton(onClick = { updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.map { if (it.id == message.id) it.copy(isBookmarked = !it.isBookmarked) else it }, updatedAt = System.currentTimeMillis()) }; refresh++ }) { Icon(Icons.Rounded.Bookmark, contentDescription = "Segnalibro messaggio", tint = AppColors.Accent) }
-                            IconButton(onClick = { val branch = createLocalBranch(context, conversation, message.id); status = "Ramo ${branch.title} creato."; refresh++ }) { Icon(Icons.AutoMirrored.Rounded.CallSplit, contentDescription = "Crea ramo", tint = AppColors.Accent) }
-                            IconButton(onClick = { val branch = createLocalBranch(context, conversation, message.id, "${conversation.title} · alternativa"); onContinue(branch.id, "Rigenera una risposta alternativa all'ultimo messaggio.") }) { Icon(Icons.Rounded.Refresh, contentDescription = "Crea risposta alternativa", tint = AppColors.Accent) }
+                            IconButton(onClick = { val newText = text; scope.launch { withContext(Dispatchers.IO) { updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.map { if (it.id == message.id) it.copy(text = newText) else it }, updatedAt = System.currentTimeMillis()) } }; refresh++ } }) { Icon(Icons.Rounded.Edit, contentDescription = "Modifica messaggio", tint = AppColors.Accent) }
+                            IconButton(onClick = { scope.launch { withContext(Dispatchers.IO) { updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.map { if (it.id == message.id) it.copy(isBookmarked = !it.isBookmarked) else it }, updatedAt = System.currentTimeMillis()) } }; refresh++ } }) { Icon(Icons.Rounded.Bookmark, contentDescription = "Segnalibro messaggio", tint = AppColors.Accent) }
+                            IconButton(onClick = { scope.launch { val branch = withContext(Dispatchers.IO) { createLocalBranch(context, conversation, message.id) }; status = "Ramo ${branch.title} creato."; refresh++ } }) { Icon(Icons.AutoMirrored.Rounded.CallSplit, contentDescription = "Crea ramo", tint = AppColors.Accent) }
+                            IconButton(onClick = { scope.launch { val branch = withContext(Dispatchers.IO) { createLocalBranch(context, conversation, message.id, "${conversation.title} · alternativa") }; onContinue(branch.id, "Rigenera una risposta alternativa all'ultimo messaggio.") } }) { Icon(Icons.Rounded.Refresh, contentDescription = "Crea risposta alternativa", tint = AppColors.Accent) }
                             IconButton(onClick = { onContinue(null, "Continua da questo messaggio:\n\n${message.text}") }) { Icon(Icons.Rounded.Add, contentDescription = "Nuova chat da qui", tint = AppColors.Accent) }
-                            IconButton(onClick = { saveProjectConversation(context, "Progetto da ${conversation.title}", message.text, message.text); status = "Nuovo progetto creato." }) { Icon(Icons.Rounded.CreateNewFolder, contentDescription = "Crea progetto", tint = AppColors.Accent) }
+                            IconButton(onClick = { scope.launch { withContext(Dispatchers.IO) { saveProjectConversation(context, "Progetto da ${conversation.title}", message.text, message.text) }; status = "Nuovo progetto creato." } }) { Icon(Icons.Rounded.CreateNewFolder, contentDescription = "Crea progetto", tint = AppColors.Accent) }
                         }
                         HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
                     }
                 }
                 item {
                     IconButton(onClick = { confirmBulkDelete = true }, enabled = selected.isNotEmpty()) { Icon(Icons.Rounded.Delete, contentDescription = "Elimina messaggi selezionati", tint = AppColors.Error) }
-                    val branches = loadConversations(context).filter { it.parentConversationId == conversation.id || conversation.linkedConversationIds.contains(it.id) }
                     branches.forEach { branch -> Text("Ramo: ${branch.title} · ${branch.messages.size} messaggi", color = AppColors.Muted, modifier = Modifier.clickable { onContinue(branch.id, "") }.padding(6.dp)) }
                 }
             }
@@ -870,8 +906,11 @@ internal fun ConversationManagerDialog(
             confirmButton = {
                 IconButton(onClick = {
                     confirmBulkDelete = false
-                    updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.filterNot { selected.contains(it.id) }, updatedAt = System.currentTimeMillis()) }
-                    selected.clear(); status = "Porzione eliminata."; refresh++
+                    val condemned = selected.toList()
+                    scope.launch {
+                        withContext(Dispatchers.IO) { updateLocalConversation(context, conversationId) { item -> item.copy(messages = item.messages.filterNot { condemned.contains(it.id) }, updatedAt = System.currentTimeMillis()) } }
+                        selected.clear(); status = "Porzione eliminata."; refresh++
+                    }
                 }) { Icon(Icons.Rounded.Delete, contentDescription = "Conferma eliminazione", tint = AppColors.Error) }
             },
             dismissButton = { IconButton(onClick = { confirmBulkDelete = false }) { Icon(Icons.Rounded.Close, contentDescription = "Annulla eliminazione", tint = AppColors.Accent) } }

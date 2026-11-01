@@ -36,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -53,7 +54,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 internal data class RegisteredDevice(
@@ -101,7 +104,11 @@ internal fun HardwareScreen(context: Context, settings: AppSettings) {
     var previous by remember(settings) { mutableStateOf<HardwareSnapshot?>(null) }
     var selectedComponentId by rememberSaveable { mutableStateOf("cpu") }
     var history by remember { mutableStateOf<Map<String, List<HardwareHistoryPoint>>>(emptyMap()) }
-    val apiKey = remember(settings.gatewayUrl) { loadGatewaySecret(context) }
+    // Chiave MAI sul main: KeyStore bloccante, arriva in IO (l'effect
+    // dipende gia' da apiKey e riparte all'arrivo).
+    val apiKey by produceState<String?>(initialValue = null, settings.gatewayUrl) {
+        value = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+    }
 
     LaunchedEffect(settings.gatewayUrl, apiKey) {
         var failures = 0

@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,7 +61,9 @@ import com.nemoclaw.chat.features.git.mergePr
 import com.nemoclaw.chat.features.git.parseGitHubRepo
 import com.nemoclaw.chat.loadGithubToken
 import com.nemoclaw.chat.saveGithubToken
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun ProjectsScreen(
@@ -71,16 +74,36 @@ internal fun ProjectsScreen(
     @Suppress("UNUSED_PARAMETER") onOpenConversation: (String) -> Unit
 ) {
     var refreshKey by remember { mutableIntStateOf(0) }
-    val projects = remember(refreshKey) {
-        loadConversations(context).filter { it.kind == "Progetto" }.sortedByDescending { it.updatedAt }
+    // Lista MAI sul main: disco + JSON + sort, arriva in IO.
+    var projects by remember { mutableStateOf(emptyList<LocalConversation>()) }
+    LaunchedEffect(refreshKey) {
+        projects = withContext(Dispatchers.IO) {
+            loadConversations(context).filter { it.kind == "Progetto" }.sortedByDescending { it.updatedAt }
+        }
     }
     var selectedId by rememberSaveable { mutableStateOf(settings.activeProjectId.takeIf { id -> projects.any { it.id == id } } ?: projects.firstOrNull()?.id.orEmpty()) }
     val selected = projects.firstOrNull { it.id == selectedId }
     var title by rememberSaveable { mutableStateOf(selected?.title.orEmpty()) }
     var instructions by rememberSaveable { mutableStateOf(selected?.projectInstructions.orEmpty()) }
+    // Adozione all'arrivo lista (solo se selezione vuota/stale): preferisce
+    // il progetto attivo, senno il piu recente.
+    LaunchedEffect(projects) {
+        if (projects.none { it.id == selectedId }) {
+            val adopted = settings.activeProjectId.takeIf { id -> projects.any { it.id == id } }
+                ?.let { id -> projects.first { it.id == id } } ?: projects.firstOrNull()
+            selectedId = adopted?.id.orEmpty()
+            if (title.isBlank()) title = adopted?.title.orEmpty()
+            if (instructions.isBlank()) instructions = adopted?.projectInstructions.orEmpty()
+        }
+    }
     var status by remember { mutableStateOf("Pronto.") }
     val prScope = rememberCoroutineScope()
-    var ghToken by remember { mutableStateOf(loadGithubToken(context).orEmpty()) }
+    var ghToken by remember { mutableStateOf("") }
+    // Token MAI sul main: KeyStore bloccante (riempie solo se ancora vuoto).
+    LaunchedEffect(Unit) {
+        val loaded = withContext(Dispatchers.IO) { loadGithubToken(context).orEmpty() }
+        if (ghToken.isBlank()) ghToken = loaded
+    }
     var prList by remember { mutableStateOf(emptyList<GitHubPr>()) }
     var prMsg by remember { mutableStateOf("") }
     var prOpen by remember { mutableStateOf<Int?>(null) }
@@ -222,24 +245,36 @@ internal fun ProjectsScreen(
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
-                            runCatching {
-                                saveProjectWorkspace(
-                                    context = context,
-                                    projectId = selectedId.ifBlank { null },
-                                    title = title,
-                                    description = selected?.description.orEmpty(),
-                                    workspacePath = selected?.workspacePath.orEmpty(),
-                                    repositoryUrl = selected?.repositoryUrl.orEmpty(),
-                                    instructions = instructions,
-                                    memory = selected?.projectMemory.orEmpty(),
-                                    authorizedTools = selected?.authorizedTools.orEmpty()
-                                )
-                            }.onSuccess { saved ->
-                                selectedId = saved.id
-                                refreshKey++
-                                onSettingsChanged(settings.withActiveProject(saved))
-                                status = "Progetto salvato e attivato."
-                            }.onFailure { status = it.message ?: "Salvataggio progetto fallito." }
+                            val pid = selectedId.ifBlank { null }
+                            val t = title
+                            val d = selected?.description.orEmpty()
+                            val w = selected?.workspacePath.orEmpty()
+                            val r = selected?.repositoryUrl.orEmpty()
+                            val ins = instructions
+                            val m = selected?.projectMemory.orEmpty()
+                            val tools = selected?.authorizedTools.orEmpty()
+                            prScope.launch {
+                                runCatching {
+                                    withContext(Dispatchers.IO) {
+                                        saveProjectWorkspace(
+                                            context = context,
+                                            projectId = pid,
+                                            title = t,
+                                            description = d,
+                                            workspacePath = w,
+                                            repositoryUrl = r,
+                                            instructions = ins,
+                                            memory = m,
+                                            authorizedTools = tools
+                                        )
+                                    }
+                                }.onSuccess { saved ->
+                                    selectedId = saved.id
+                                    refreshKey++
+                                    onSettingsChanged(settings.withActiveProject(saved))
+                                    status = "Progetto salvato e attivato."
+                                }.onFailure { status = it.message ?: "Salvataggio progetto fallito." }
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
                     ) {

@@ -71,7 +71,6 @@ internal fun ProfileScreen(
         conversations = withContext(Dispatchers.IO) { loadConversations(context) }
     }
     val version = remember { appVersion(context) }
-    var updateState by remember { mutableStateOf(UpdateDownloadState()) }
     var memory by remember { mutableStateOf(HubMemoryState()) }
     var memoryStatus by remember { mutableStateOf("Memoria gateway non ancora letta.") }
     val managerBase = remember(settings.gatewayUrl) { gpuManagerBase(settings.gatewayUrl) }
@@ -86,7 +85,8 @@ internal fun ProfileScreen(
             rebootBusy = true
             rebootStatus = try {
                 val bridge = gpuBridgeBase(settings.gatewayUrl)
-                postLayaCommand(bridge, "riavvia il manager", loadGpuAppSecret(context))
+                val key = withContext(Dispatchers.IO) { loadGpuAppSecret(context) }
+                postLayaCommand(bridge, "riavvia il manager", key)
             } catch (ex: Exception) {
                 "Errore invio riavvio: ${ex.message ?: ex.javaClass.simpleName}"
             }
@@ -95,7 +95,8 @@ internal fun ProfileScreen(
     }
 
     LaunchedEffect(settings.gatewayUrl) {
-        val loaded = loadHubMemory(settings, loadGatewaySecret(context))
+        val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+        val loaded = loadHubMemory(settings, secret)
         memory = loaded.first
         memoryStatus = loaded.second
     }
@@ -242,7 +243,8 @@ internal fun ProfileScreen(
                         onClick = {
                             memoryStatus = "Salvo memoria gateway..."
                             scope.launch {
-                                memoryStatus = saveHubMemory(settings, memory, loadGatewaySecret(context))
+                                val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                                memoryStatus = saveHubMemory(settings, memory, secret)
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
@@ -260,144 +262,7 @@ internal fun ProfileScreen(
             }
         }
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("AGGIORNAMENTI", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                Text("Installata: $version", color = AppColors.Muted, fontSize = AppleType.Footnote)
-                updateState.latestVersion?.let { Text("Latest: $it", color = AppColors.Muted, fontSize = AppleType.Footnote) }
-                updateState.releaseAssetUrl?.let { Text("Asset: ${it.substringAfterLast('/')}", color = AppColors.Muted, fontSize = AppleType.Footnote) }
-                updateState.downloadedApkPath?.let { Text("APK pronto: $it", color = AppColors.Muted, fontSize = AppleType.Footnote) }
-                Text(updateState.status, color = AppColors.Faint)
-                if (updateState.releaseSummary.isNotBlank()) {
-                    Text(
-                        "Changelog:\n${updateState.releaseSummary}",
-                        color = Color.White,
-                        fontSize = AppleType.RowTitleSmall
-                    )
-                }
-                AnimatedVisibility(
-                    visible = updateState.progress != null,
-                    enter = AppleMotion.enter(),
-                    exit = AppleMotion.exit()
-                ) {
-                    LinearProgressIndicator(
-                        progress = { updateState.progress ?: 0f },
-                        modifier = Modifier.fillMaxWidth(),
-                        color = AppColors.Accent,
-                        trackColor = AppColors.Border
-                    )
-                        Text(
-                            downloadProgressLabel(updateState.progress, updateState.downloadLabel),
-                            color = AppColors.Faint,
-                            fontSize = AppleType.Footnote
-                        )
-                    }
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        TextButton(
-                            onClick = {
-                                updateState = updateState.copy(
-                                    status = "Controllo GitHub Releases...",
-                                    progress = null,
-                                    downloadLabel = "",
-                                    downloadedApkPath = null,
-                                    isDownloading = false,
-                                    releaseSummary = ""
-                                )
-                                scope.launch {
-                                    val result = checkGithubUpdate(version)
-                                    val downloadedApk = if (result.hasUpdate) {
-                                        result.latestVersion?.let { findDownloadedUpdateApk(context, it) }
-                                    } else {
-                                        null
-                                    }
-                                    updateState = updateState.copy(
-                                        status = if (downloadedApk != null) {
-                                            "Aggiornamento gia' scaricato. Premi Aggiorna per installarlo."
-                                        } else if (result.hasUpdate && result.assetUrl != null) {
-                                            "${result.message} Scarica l'APK dentro l'app e poi premi Aggiorna."
-                                        } else {
-                                            result.message
-                                        },
-                                        releaseAssetUrl = result.assetUrl,
-                                        latestVersion = result.latestVersion,
-                                        hasUpdate = result.hasUpdate,
-                                        progress = if (downloadedApk != null) 1f else null,
-                                        downloadLabel = downloadedApk?.length()?.toReadableFileSize() ?: "",
-                                        downloadedApkPath = downloadedApk?.absolutePath,
-                                        releaseSummary = result.releaseSummary
-                                    )
-                                }
-                            },
-                            colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
-                        ) {
-                            Text("Controlla aggiornamenti")
-                        }
-                        if (updateState.hasUpdate && updateState.releaseAssetUrl != null && updateState.downloadedApkPath == null && !updateState.isDownloading) {
-                            Button(
-                                onClick = {
-                                    val assetUrl = updateState.releaseAssetUrl ?: return@Button
-                                    scope.launch {
-                                        updateState = updateState.copy(
-                                            status = "Scaricamento APK in corso...",
-                                            isDownloading = true,
-                                            progress = 0f,
-                                            downloadLabel = ""
-                                        )
-                                        val downloaded = downloadUpdateApk(
-                                            context = context,
-                                            assetUrl = assetUrl,
-                                            version = updateState.latestVersion ?: version
-                                        ) { fraction, status, label ->
-                                            updateState = updateState.copy(
-                                                progress = fraction,
-                                                status = status,
-                                                downloadLabel = label,
-                                                isDownloading = true
-                                            )
-                                        }
-
-                                        updateState = if (downloaded != null) {
-                                            updateState.copy(
-                                                status = "APK pronto. Premi Aggiorna per avviare l'installazione Android.",
-                                                downloadedApkPath = downloaded.absolutePath,
-                                                isDownloading = false,
-                                                progress = 1f,
-                                                downloadLabel = downloaded.length().toReadableFileSize()
-                                            )
-                                        } else {
-                                            updateState.copy(
-                                                status = "Download non riuscito. Premi Controlla e riprova.",
-                                                downloadedApkPath = null,
-                                                isDownloading = false,
-                                                progress = null,
-                                                downloadLabel = ""
-                                            )
-                                        }
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009)),
-                                shape = RoundedCornerShape(14.dp)
-                            ) {
-                                Text("Scarica APK", fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                        if (updateState.downloadedApkPath != null && !updateState.isDownloading) {
-                            TextButton(
-                                onClick = {
-                                    val apkPath = updateState.downloadedApkPath ?: return@TextButton
-                                    val status = installDownloadedApk(context, apkPath)
-                                    updateState = updateState.copy(status = status)
-                                },
-                                colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
-                            ) {
-                                Text("Installa aggiornamento")
-                            }
-                        }
-                    }
-                    HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
-                }
+            AppUpdateCard(context)
         }
     }
     }

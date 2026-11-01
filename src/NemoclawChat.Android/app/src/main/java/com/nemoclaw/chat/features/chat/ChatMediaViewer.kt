@@ -949,13 +949,15 @@ internal fun RemoteGalleryImage(settings: AppSettings, image: VisualGalleryImage
         Text("${image.alt}: media non proxy rifiutato.", color = AppColors.Muted, fontSize = 13.sp)
         return
     }
-    // Secret ricaricato al cambio gateway (le settings arrivano fresche dal chiamante).
-    val apiKey = remember(settings.gatewayUrl) { loadGatewaySecret(context) }
+    // Secret MAI sul main: KeyStore bloccante (l'effect ricarica all'arrivo).
+    val apiKey by produceState<String?>(initialValue = null, settings.gatewayUrl) {
+        value = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+    }
 
     // Stessa macchina a stati di RemoteStreamImage: loading/errore con Riprova.
     var loadState by remember(resolved) { mutableStateOf(remoteImageLoadInitial()) }
     var bitmap by remember(resolved) { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(resolved, loadState) {
+    LaunchedEffect(resolved, loadState, apiKey) {
         if (loadState.phase != RemoteImageLoadPhase.Loading) return@LaunchedEffect
         loadState = try {
             val loaded = withTimeout(REMOTE_IMAGE_LOAD_TIMEOUT_MS) {

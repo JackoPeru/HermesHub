@@ -1,6 +1,8 @@
-Hermes Hub 0.6.326 (dashboard widget)
+Hermes Hub 0.6.327 (audit totale 2)
 
-- Home ridisegnata: griglia di widget verso tutte le sezioni principali, tap diretto senza sidebar; parte tecnica invariata sotto.
+- Pulizia: codice morto rimosso (aperture bot, Recenti, widget Schermo, import, dir vuota).
+- Performance: niente piu IO sul main (chiavi KeyStore, bozze, archivio, video, bot, progetti, automation); doppio parse archivio unificato.
+- Icone sezioni distinte + deprecation sistemati.
 - Suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.326-android.apk (Android, versionCode 330), NemoclawChat.Windows_0.6.326.0_x64.msix (x64) e HermesHub-0.6.326-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.327-android.apk (Android, versionCode 331), NemoclawChat.Windows_0.6.327.0_x64.msix (x64) e HermesHub-0.6.327-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

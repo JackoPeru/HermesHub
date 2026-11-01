@@ -411,7 +411,8 @@ internal fun MessageFooter(text: String, stats: ChatStreamStats?, settings: AppS
                 }
                 scope.launch {
                     speaking = true
-                    runCatching { speakChatMessage(context, settings, text, loadGatewaySecret(context)) }
+                    val ttsSecret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                    runCatching { speakChatMessage(context, settings, text, ttsSecret) }
                         .onFailure { Toast.makeText(context, "TTS Kokoro non disponibile: ${it.message}", Toast.LENGTH_SHORT).show() }
                     speaking = false
                 }

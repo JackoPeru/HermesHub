@@ -8,9 +8,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.automirrored.rounded.ManageSearch
+import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DesktopWindows
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Face
@@ -36,13 +39,13 @@ internal enum class Tab(val label: String, val icon: ImageVector) {
     Projects("Progetti", Icons.Rounded.FolderOpen),
     Bots("Bot Hermes", Icons.Rounded.SmartToy),
     Screen("Schermo", Icons.Rounded.DesktopWindows),
-    Artifacts("Artifact", Icons.Rounded.FolderOpen),
+    Artifacts("Artifact", Icons.Rounded.Description),
     Search("Ricerca", Icons.AutoMirrored.Rounded.ManageSearch),
-    Archive("Archivio", Icons.Rounded.FolderOpen),
+    Archive("Archivio", Icons.Rounded.Archive),
     Cron("Cron", Icons.Rounded.TaskAlt),
     Notifications("Notifiche", Icons.Rounded.Notifications),
     Continuity("Continuità", Icons.Rounded.ContentCopy),
-    Audit("Audit", Icons.Rounded.TaskAlt),
+    Audit("Audit", Icons.AutoMirrored.Rounded.ReceiptLong),
     Server("Server", Icons.Rounded.Dns),
     Hardware("Hardware", Icons.Rounded.Memory),
     Health("Salute", Icons.Rounded.FavoriteBorder),

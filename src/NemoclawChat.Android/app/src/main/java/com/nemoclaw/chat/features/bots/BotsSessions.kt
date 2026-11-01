@@ -46,7 +46,7 @@ private suspend fun botSessionClient(
 ): HermesSessionClient {
     val connection = withContext(Dispatchers.IO) { connectionForBot(context.applicationContext, settings, bot) }
     val effective = settingsForBotConnection(settings, connection)
-    val secret = secretForBotConnection(context, connection)
+    val secret = withContext(Dispatchers.IO) { secretForBotConnection(context, connection) }
     return HermesSessionClient(effective, secret, bot.profile, rosterMultiplex, null)
 }
 

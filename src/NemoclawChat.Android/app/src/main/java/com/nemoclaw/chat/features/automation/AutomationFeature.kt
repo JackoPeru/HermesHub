@@ -130,7 +130,6 @@ import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Language
-import androidx.compose.material.icons.rounded.ManageSearch
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PhotoCamera
@@ -543,19 +542,20 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                             val cron = schedule()
                             if (name.isBlank() || taskPrompt.isBlank() || cron.isBlank()) {
                                 status = "Nome, attività e programmazione obbligatori."
-                            } else scope.launch {
-                                if (selectedBotProfile.isNotBlank() && botRoster?.multiplexEnabled != true) {
-                                    status = "Routine bot non salvata: multiplexing profili non pronto."
-                                    return@launch
-                                }
-                                status = saveCronJob(
-                                    settings,
-                                    editingId.ifBlank { null },
-                                    name,
-                                    cron,
-                                    encodeAutomationPrompt(definition()),
-                                    deliver,
-                                    loadGatewaySecret(context),
+                                } else scope.launch {
+                                    if (selectedBotProfile.isNotBlank() && botRoster?.multiplexEnabled != true) {
+                                        status = "Routine bot non salvata: multiplexing profili non pronto."
+                                        return@launch
+                                    }
+                                    val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                                    status = saveCronJob(
+                                        settings,
+                                        editingId.ifBlank { null },
+                                        name,
+                                        cron,
+                                        encodeAutomationPrompt(definition()),
+                                        deliver,
+                                        secret,
                                     selectedBotProfile.takeIf { it.isNotBlank() },
                                     botRoster?.multiplexEnabled == true,
                                     cronSkills
@@ -576,7 +576,8 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                         onClick = {
                             if (taskPrompt.isBlank()) status = "Attività obbligatoria per prova." else scope.launch {
                                 status = "Prova in corso, job non salvato..."
-                                val result = sendWorkspaceRunRequest(settings, "Automation", encodeAutomationPrompt(definition()), loadGatewaySecret(context))
+                                val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                                val result = sendWorkspaceRunRequest(settings, "Automation", encodeAutomationPrompt(definition()), secret)
                                 status = "${result.status} ${result.result}".trim()
                             }
                         },
@@ -640,13 +641,15 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                 onDuplicate = { edit(job, duplicate = true) },
                 onRun = {
                     scope.launch {
-                        status = cronAction(settings, job.id, "run", loadGatewaySecret(context), selectedBotProfile.takeIf { it.isNotBlank() }, botRoster?.multiplexEnabled == true)
+                        val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                        status = cronAction(settings, job.id, "run", secret, selectedBotProfile.takeIf { it.isNotBlank() }, botRoster?.multiplexEnabled == true)
                         refreshNonce++
                     }
                 },
                 onPauseResume = {
                     scope.launch {
-                        status = cronAction(settings, job.id, if (job.enabled) "pause" else "resume", loadGatewaySecret(context), selectedBotProfile.takeIf { it.isNotBlank() }, botRoster?.multiplexEnabled == true)
+                        val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                        status = cronAction(settings, job.id, if (job.enabled) "pause" else "resume", secret, selectedBotProfile.takeIf { it.isNotBlank() }, botRoster?.multiplexEnabled == true)
                         refreshNonce++
                     }
                 },
@@ -669,7 +672,8 @@ internal fun CronScreen(context: Context, settings: AppSettings) {
                     onClick = {
                         pendingDeleteJob = null
                         scope.launch {
-                            status = cronAction(settings, target.id, "delete", loadGatewaySecret(context), selectedBotProfile.takeIf { it.isNotBlank() }, botRoster?.multiplexEnabled == true)
+                            val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                            status = cronAction(settings, target.id, "delete", secret, selectedBotProfile.takeIf { it.isNotBlank() }, botRoster?.multiplexEnabled == true)
                             refreshNonce++
                         }
                     },
@@ -764,10 +768,15 @@ internal fun NotificationsScreen(context: Context, settings: AppSettings, onOpen
     var priorityFilter by rememberSaveable { mutableStateOf("Tutte") }
     var unreadOnly by rememberSaveable { mutableStateOf(false) }
     var showArchived by rememberSaveable { mutableStateOf(false) }
-    var dnd by rememberSaveable { mutableStateOf(context.getSharedPreferences("notification_settings", Context.MODE_PRIVATE).getBoolean("dnd", false)) }
+    // DND MAI sul main: prefs disco, in IO (lettura e scrittura).
+    var dnd by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        dnd = withContext(Dispatchers.IO) { context.getSharedPreferences("notification_settings", Context.MODE_PRIVATE).getBoolean("dnd", false) }
+    }
 
     LaunchedEffect(settings.gatewayUrl, refreshNonce) {
-        val result = loadHubNotifications(settings, loadGatewaySecret(context), unreadOnly = false)
+        val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+        val result = loadHubNotifications(settings, secret, unreadOnly = false)
         items = result.first
         status = result.second
     }
@@ -797,7 +806,7 @@ internal fun NotificationsScreen(context: Context, settings: AppSettings, onOpen
                                 val unread = items.filter { it.readAt <= 0L }
                                 if (unread.isNotEmpty()) {
                                     status = "Segnando ${unread.size} notifiche..."
-                                    val secret = loadGatewaySecret(context)
+                                    val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
                                     unread.forEach { markHubNotificationRead(settings, it.id, secret) }
                                     refreshNonce++
                                 }
@@ -822,7 +831,7 @@ internal fun NotificationsScreen(context: Context, settings: AppSettings, onOpen
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Switch(unreadOnly, { unreadOnly = it }); Text("Solo non lette", color = AppColors.Muted)
                     Switch(showArchived, { showArchived = it }); Text("Archiviate", color = AppColors.Muted)
-                    Switch(dnd, { dnd = it; context.getSharedPreferences("notification_settings", Context.MODE_PRIVATE).edit { putBoolean("dnd", it) } }); Text("Non disturbare", color = AppColors.Muted)
+                    Switch(dnd, { dnd = it; scope.launch(Dispatchers.IO) { context.getSharedPreferences("notification_settings", Context.MODE_PRIVATE).edit { putBoolean("dnd", it) } } }); Text("Non disturbare", color = AppColors.Muted)
                 }
                 Text("Badge: ${items.count { it.readAt <= 0 && !it.archived }} non lette · ${items.count { it.priority.equals("Critica", true) && !it.archived }} critiche", color = AppColors.Muted, fontSize = 12.sp)
                 HorizontalDivider(color = AppColors.Border.copy(alpha = 0.6f), thickness = 0.5.dp)
@@ -854,16 +863,17 @@ internal fun NotificationsScreen(context: Context, settings: AppSettings, onOpen
                 item = item,
                 onRead = {
                     scope.launch {
-                        status = markHubNotificationRead(settings, item.id, loadGatewaySecret(context))
+                        val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+                        status = markHubNotificationRead(settings, item.id, secret)
                         refreshNonce++
                     }
                 },
                 onOpenChat = {
-                    scope.launch { markHubNotificationRead(settings, item.id, loadGatewaySecret(context)) }
+                    scope.launch { val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }; markHubNotificationRead(settings, item.id, secret) }
                     onOpenChatPrompt(notificationChatPrompt(item))
                 },
-                onSnooze = { scope.launch { status = patchHubNotification(settings, item.id, JSONObject().put("snoozed_until", (System.currentTimeMillis() + 3_600_000L) / 1000.0), loadGatewaySecret(context)); refreshNonce++ } },
-                onArchive = { scope.launch { status = patchHubNotification(settings, item.id, JSONObject().put("archived", !item.archived), loadGatewaySecret(context)); refreshNonce++ } },
+                onSnooze = { scope.launch { val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }; status = patchHubNotification(settings, item.id, JSONObject().put("snoozed_until", (System.currentTimeMillis() + 3_600_000L) / 1000.0), secret); refreshNonce++ } },
+                onArchive = { scope.launch { val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }; status = patchHubNotification(settings, item.id, JSONObject().put("archived", !item.archived), secret); refreshNonce++ } },
                 onReference = {
                     when {
                         item.fileUrl.isNotBlank() -> context.startActivity(Intent(Intent.ACTION_VIEW, item.fileUrl.toUri()))
@@ -918,9 +928,9 @@ internal fun ContinuityScreen(context: Context, settings: AppSettings, onOpenCon
     var refresh by remember { mutableIntStateOf(0) }
     val deviceId = remember { "android-${Build.MODEL}-${Build.ID}".lowercase().replace(' ', '-') }
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch { status = uploadContinuityFile(context, settings, uri, deviceId, loadGatewaySecret(context)); refresh++ }
+        if (uri != null) scope.launch { val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }; status = uploadContinuityFile(context, settings, uri, deviceId, secret); refresh++ }
     }
-    LaunchedEffect(settings.gatewayUrl, refresh) { val loaded = loadContinuityItems(settings, loadGatewaySecret(context)); items = loaded.first; status = loaded.second }
+    LaunchedEffect(settings.gatewayUrl, refresh) { val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }; val loaded = loadContinuityItems(settings, secret); items = loaded.first; status = loaded.second }
     Box(modifier = Modifier.fillMaxSize()) {
         BubbleBackground()
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -940,19 +950,19 @@ internal fun ContinuityScreen(context: Context, settings: AppSettings, onOpenCon
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(
-                        onClick = { scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.presence", statusValue = "online", apiKey = loadGatewaySecret(context)); refresh++ } },
+                        onClick = { scope.launch { val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }; status = publishContinuity(context, settings, deviceId, "continuity.presence", statusValue = "online", apiKey = secret); refresh++ } },
                         colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
                     ) { Text("Online") }
                     TextButton(
-                        onClick = { val latest = loadConversations(context).firstOrNull { it.kind in setOf("Chat", "Task") }; if (latest != null) { scope.launch { publishContinuity(context, settings, deviceId, "continuity.chat", latest.title, latest.id, latest.projectId, apiKey = loadGatewaySecret(context)); onOpenConversation(latest.id) } } },
+                        onClick = { scope.launch { val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }; val latest = withContext(Dispatchers.IO) { loadConversations(context) }.firstOrNull { it.kind in setOf("Chat", "Task") }; if (latest != null) { publishContinuity(context, settings, deviceId, "continuity.chat", latest.title, latest.id, latest.projectId, apiKey = secret); onOpenConversation(latest.id) } } },
                         colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
                     ) { Text("Riprendi chat") }
                     TextButton(
-                        onClick = { scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.voice", "handoff_requested", statusValue = "ringing", apiKey = loadGatewaySecret(context)); refresh++ } },
+                        onClick = { scope.launch { val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }; status = publishContinuity(context, settings, deviceId, "continuity.voice", "handoff_requested", statusValue = "ringing", apiKey = secret); refresh++ } },
                         colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
                     ) { Text("Handoff voce") }
                     TextButton(
-                        onClick = { scope.launch { status = flushContinuityQueue(context, settings, loadGatewaySecret(context)); refresh++ } },
+                        onClick = { scope.launch { val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }; status = flushContinuityQueue(context, settings, secret); refresh++ } },
                         colors = ButtonDefaults.textButtonColors(contentColor = AppColors.Accent)
                     ) { Text("Sincronizza") }
                 }
@@ -960,7 +970,7 @@ internal fun ContinuityScreen(context: Context, settings: AppSettings, onOpenCon
                 SettingsField("Clipboard condivisa", clipboardText, { clipboardText = it })
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Button(
-                        onClick = { val clipboard = context.getSystemService(ClipboardManager::class.java); val value = clipboardText.ifBlank { clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty() }; scope.launch { status = publishContinuity(context, settings, deviceId, "continuity.clipboard", value, apiKey = loadGatewaySecret(context)); refresh++ } },
+                        onClick = { val clipboard = context.getSystemService(ClipboardManager::class.java); val value = clipboardText.ifBlank { clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty() }; scope.launch { val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }; status = publishContinuity(context, settings, deviceId, "continuity.clipboard", value, apiKey = secret); refresh++ } },
                         colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent, contentColor = Color(0xFF171009))
                     ) { Text("Invia", fontWeight = FontWeight.SemiBold) }
                     TextButton(
@@ -983,7 +993,7 @@ internal fun ContinuityScreen(context: Context, settings: AppSettings, onOpenCon
                     title = "Nessuna attività.",
                     subtitle = "Pubblica presenza o invia clipboard per iniziare.",
                     ctaLabel = "Sincronizza",
-                    onCta = { scope.launch { status = flushContinuityQueue(context, settings, loadGatewaySecret(context)); refresh++ } }
+                    onCta = { scope.launch { val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }; status = flushContinuityQueue(context, settings, secret); refresh++ } }
                 )
             }
         } else {
@@ -1163,13 +1173,13 @@ internal data class AuditItem(val id: String, val timestamp: Long, val event: St
 @Composable
 internal fun AuditScreen(context: Context, settings: AppSettings) {
     var project by rememberSaveable { mutableStateOf("") }; var run by rememberSaveable { mutableStateOf("") }; var tool by rememberSaveable { mutableStateOf("") }; var device by rememberSaveable { mutableStateOf("") }; var risk by rememberSaveable { mutableStateOf("") }; var refresh by remember { mutableIntStateOf(0) }; var items by remember { mutableStateOf<List<AuditItem>>(emptyList()) }; var status by remember { mutableStateOf("Carico audit...") }
-    LaunchedEffect(settings.gatewayUrl, refresh) { val loaded = loadAuditItems(settings, project, run, tool, device, risk, loadGatewaySecret(context)); items = loaded.first; status = loaded.second }
+    LaunchedEffect(settings.gatewayUrl, refresh) { val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }; val loaded = loadAuditItems(settings, project, run, tool, device, risk, secret); items = loaded.first; status = loaded.second }
     Box(modifier = Modifier.fillMaxSize()) {
         BubbleBackground()
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         item {
             AutomationHeader(
-                icon = Icons.Rounded.ManageSearch,
+                icon = Icons.AutoMirrored.Rounded.ManageSearch,
                 title = "Timeline audit",
                 subtitle = "Chat, run, tool, automazioni, dispositivi e operazioni server in una cronologia filtrabile."
             )
@@ -1196,7 +1206,7 @@ internal fun AuditScreen(context: Context, settings: AppSettings) {
         if (items.isEmpty()) {
             item {
                 AutomationEmptyState(
-                    icon = Icons.Rounded.ManageSearch,
+                    icon = Icons.AutoMirrored.Rounded.ManageSearch,
                     title = "Nessun evento.",
                     subtitle = status,
                     ctaLabel = "Aggiorna",
@@ -1212,7 +1222,7 @@ internal fun AuditScreen(context: Context, settings: AppSettings) {
             val isHighRisk = item.risk in setOf("high", "critical")
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AutomationRowTile(Icons.Rounded.ManageSearch)
+                    AutomationRowTile(Icons.AutoMirrored.Rounded.ManageSearch)
                     Column(modifier = Modifier.weight(1f)) {
                         Text("${formatDateTime(item.timestamp)} · ${item.event}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text("rischio ${item.risk}".uppercase(), color = if (isHighRisk) AppColors.Error else AppColors.Accent, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)

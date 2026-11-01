@@ -71,7 +71,8 @@ internal suspend fun trySmartMediaSend(
     if (attachments.isEmpty()) return null
     if (!settings.smartFastPath) return null
     // Chiave app, mai gateway: il manager non accetta piu' la chiave hub.
-    val managerKey = loadGpuAppSecret(context)?.takeIf { it.isNotBlank() } ?: return null
+    // KeyStore MAI sul main: prima lettura in IO (funzione suspendibile).
+    val managerKey = withContext(Dispatchers.IO) { loadGpuAppSecret(context) }?.takeIf { it.isNotBlank() } ?: return null
     val managerBase = gpuManagerBase(settings.gatewayUrl)
     // Fase 0: verdetto senza file. Se non e media (o caso disattivato), il
     // flusso normale carica una volta sola dentro streamChatRequest.
@@ -377,12 +378,13 @@ private suspend fun renameSmartConversation(
     // Mai rinominare la chat condivisa col desktop (titolo altrui + bump
     // updatedAt che vincerebbe LWW a sproposito).
     if (isLinkedArchiveId(context, activeStreamCid)) return
+    val titleSecret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
     val title = runCatching {
         generateConversationTitle(
             settings = settings,
             firstPrompt = displayText,
             firstAnswer = resultText,
-            apiKey = loadGatewaySecret(context)
+            apiKey = titleSecret
         )
     }.getOrNull()?.takeIf { it.isNotBlank() } ?: return
     withContext(Dispatchers.IO) {

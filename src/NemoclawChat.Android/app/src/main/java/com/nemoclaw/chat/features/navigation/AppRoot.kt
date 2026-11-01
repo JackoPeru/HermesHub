@@ -111,12 +111,10 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AttachFile
-import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Language
@@ -248,9 +246,7 @@ import com.nemoclaw.chat.features.bots.clearHermesBotConnections
 import com.nemoclaw.chat.features.bots.connectionForBot
 import com.nemoclaw.chat.features.bots.createBotChatSession
 import com.nemoclaw.chat.features.bots.loadAllHermesBotRosters
-import com.nemoclaw.chat.features.bots.loadLastBot
 import com.nemoclaw.chat.features.bots.saveLastBot
-import com.nemoclaw.chat.features.screen.ScreenScreen
 import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.theme.ChatClawTheme
 import kotlinx.coroutines.CoroutineScope
@@ -502,11 +498,7 @@ internal fun ChatApp() {
     // BotSidebarAction non e Parcelable: niente rememberSaveable (solo sessione).
     var pendingBotAction by remember { mutableStateOf<BotSidebarAction?>(null) }
     var sidebarOpen by rememberSaveable { mutableStateOf(false) }
-    // Contatore aperture drawer: passato come refreshToken alla sidebar per
-    // ricaricare le conversazioni a ogni apertura (niente voci fantasma).
-    var sidebarGeneration by rememberSaveable { mutableIntStateOf(0) }
     fun openSidebar() {
-        sidebarGeneration++
         sidebarOpen = true
     }
     var savedDraft by rememberSaveable { mutableStateOf("") }
@@ -754,37 +746,6 @@ internal fun ChatApp() {
     // porta l'id stabile locale (cache/snapshot). ChatScreen carica la
     // cache e poi la storia autorevole dal server; lo stream usa S.
 
-    fun openSidebarBot(bot: HermesBotItem) {
-        if (sidebarBotOpening) {
-            Toast.makeText(context, "Apertura gia in corso.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (!canOpenBot()) return
-        sidebarBotOpening = true
-        chatScope.launch {
-            try {
-                // Sempre pulita: nuova sessione, mai l'ultima (niente schermata bot vecchia).
-                createBotChatSession(context.applicationContext, settings, bot, rosterMultiplex = true)
-                    .mapCatching { created ->
-                        botSessionContext(context.applicationContext, settings, bot, rosterMultiplex = true, created).getOrThrow()
-                    }
-                    .onSuccess {
-                        chatState.resetForNewChat()
-                        pendingBot = it
-                        pendingConversationId = it.localConversationId
-                        pendingPrompt = ""
-                        saveLastBot(context.applicationContext, it.connectionId, it.profile, it.displayName)
-                        botSectionVisible = false
-                        sidebarOpen = false
-                    }
-                    .onFailure {
-                        Toast.makeText(context, it.message ?: "Nuova chat non creata.", Toast.LENGTH_LONG).show()
-                    }
-            } finally {
-                sidebarBotOpening = false
-            }
-        }
-    }
     // Coda comune di ingresso in una chat bot (canonica o sessione dedicata).
     fun enterBotChat(ctx: BotChatContext) {
         chatState.resetForNewChat()
@@ -838,40 +799,6 @@ internal fun ChatApp() {
                 sidebarBotOpening = false
             }
         }
-    }
-    // Riapre l'ultimo bot usato con chat PULITA (main page della sezione):
-    // nuova sessione, mai l'ultima. Ritorna false se nessun ultimo bot
-    // (chiamante: mostra il roster).
-    fun openLastBot(): Boolean {
-        val ref = loadLastBot(context.applicationContext) ?: return false
-        if (sidebarBotOpening) {
-            Toast.makeText(context, "Apertura gia in corso.", Toast.LENGTH_SHORT).show()
-            return true
-        }
-        sidebarBotOpening = true
-        chatScope.launch {
-            try {
-                // Sempre pulita come ogni altra apertura bot.
-                createBotChatSession(context.applicationContext, settings, ref.toItem(), rosterMultiplex = true)
-                    .mapCatching { created ->
-                        botSessionContext(context.applicationContext, settings, ref.toItem(), rosterMultiplex = true, created).getOrThrow()
-                    }
-                    .onSuccess {
-                        chatState.resetForNewChat()
-                        pendingBot = it
-                        pendingConversationId = it.localConversationId
-                        pendingPrompt = ""
-                        botSectionVisible = false
-                    }
-                    .onFailure {
-                        botSectionVisible = true
-                        Toast.makeText(context, it.message ?: "Bot non disponibile, apro il roster.", Toast.LENGTH_LONG).show()
-                    }
-            } finally {
-                sidebarBotOpening = false
-            }
-        }
-        return true
     }
     // Sezione Bot (solo gestione roster): mai chat 1:1, mai ultima chat.
     val selectBotSegment: () -> Unit = selectBot@{
@@ -946,11 +873,6 @@ internal fun ChatApp() {
                 onClose = { sidebarOpen = false },
                 botMode = selectedTab == Tab.Chat && botSideActive,
                 activeBotKey = pendingBot?.let { "${it.connectionId}::${it.profile}" },
-                // Filtro RECENTI per identita (chat normale): ogni bot ha
-                // le sue chat; null pendingBot = identita selezionata.
-                chatIdentityKey = activeChatBotKey,
-                chatRoster = chatRoster,
-                refreshToken = sidebarGeneration,
                 onOpenBotItem = { sidebarOpen = false; setSelectedTab(Tab.Bots) },
                 onManageBots = { sidebarOpen = false; setSelectedTab(Tab.Bots) },
                 onBotAction = { bot, action ->
@@ -960,15 +882,6 @@ internal fun ChatApp() {
                 },
                 onNewBotChat = { openNewBotChat(it) },
                 onOpenBotSession = { bot, session -> openBotSession(bot, session) },
-                onNewChat = {
-                chatState.resetForNewChat()
-                pendingBot = null
-                setSelectedTab(Tab.Chat)
-                sidebarOpen = false
-                },
-                onOpenConversation = { id ->
-                openChatConversation(id)
-                },
                 onOpenTab = { tab ->
                 setSelectedTab(tab)
                 sidebarOpen = false

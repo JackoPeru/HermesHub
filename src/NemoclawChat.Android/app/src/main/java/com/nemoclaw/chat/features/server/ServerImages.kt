@@ -41,6 +41,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -56,7 +57,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.ui.apple.AppleGlass
 import com.nemoclaw.chat.ui.apple.AppleType
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatPrompt: (String) -> Unit) {
@@ -78,13 +81,19 @@ internal fun ImageScreen(context: Context, settings: AppSettings, onOpenChatProm
     // cartella il viewer si chiude (l'id non apparterra piu alla lista).
     var viewerId by remember { mutableStateOf<String?>(null) }
     var isDownloading by remember { mutableStateOf(false) }
-    val apiKey = remember { loadGatewaySecret(context) }
+    // Chiavi MAI sul main: KeyStore bloccante, arrivano in IO e la lista
+    // si ricarica all'arrivo (managerKey nelle chiavi dell'effect).
+    val apiKey by produceState<String?>(initialValue = null, settings.gatewayUrl) {
+        value = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+    }
     // Browse manager (:8643/browse, ruolo app dal lockdown): mai la chiave gateway.
-    val managerKey = remember { loadGpuAppSecret(context) }
+    val managerKey by produceState<String?>(initialValue = null, settings.gatewayUrl) {
+        value = withContext(Dispatchers.IO) { loadGpuAppSecret(context) }
+    }
     // Scroll issato: sopravvive ad apertura/chiusura viewer.
     val listState = rememberLazyListState()
 
-    LaunchedEffect(settings.gatewayUrl, currentPath, refreshKey) {
+    LaunchedEffect(settings.gatewayUrl, currentPath, refreshKey, managerKey) {
         status = "Sfoglio cartella immagini..."
         val result = loadImageBrowse(settings, managerKey, currentPath)
         // Fail-soft: in errore tieni posizione buona (liste + parent), cosi
