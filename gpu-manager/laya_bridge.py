@@ -9,7 +9,7 @@ problema — quindi questo servizio e' un processo SEPARATO, sempre attivo, che:
   1. riceve un testo in linguaggio naturale dall'app (POST /laya);
   2. lo interpreta con laya (modello di decisione locale, risposta a scelta),
      con fallback deterministico a parole chiave se laya non risponde;
-  3. FORZA il modo richiesto sul manager via POST /force (LLM|MEDIA|AUTO|DIRECT);
+   3. FORZA il modo richiesto sul manager via POST /force (LLM|MEDIA|AUTO|DIRECT|GAMING);
   4. se il manager non risponde, lo RIAVVIA via systemd e riprova; per l'LLM,
      come ultima spiaggia, riavvia direttamente il servizio tabby.
 
@@ -81,7 +81,9 @@ LAYA_QUESTIONS = {
             "Se vuole ComfyUI per generare immagini o video (attiva, passa a, "
             "usa comfy, metti comfy) scegli activate_comfy. "
             "Solo se nomina esplicitamente diretto/direct/diretto scegli "
-            "direct_mode. Se vuole la modalita automatica scegli auto_mode. "
+            "direct_mode. Se vuole giocare o la modalita gioco (gioca, gioco, "
+            "gaming, mario) scegli gaming_mode. Se vuole la modalita automatica "
+            "scegli auto_mode. "
             "Se chiede solo lo stato o cosa succede scegli status. Altrimenti none."
         ),
         "criteria": {
@@ -89,6 +91,7 @@ LAYA_QUESTIONS = {
             "activate_comfy": "attivare o usare ComfyUI per generare immagini o video",
             "auto_mode": "tornare alla modalita automatica",
             "direct_mode": "usare ComfyUI diretto, solo se dice diretto o direct",
+            "gaming_mode": "giocare, avviare il gioco o la modalita gaming",
             "status": "chiedere lo stato del sistema, cosa succede",
             "none": "altro: nessun comando riconosciuto",
         },
@@ -101,16 +104,20 @@ CHOICE_TO_INTENT = {
     "activate_comfy": ("mode", "MEDIA"),
     "auto_mode": ("mode", "AUTO"),
     "direct_mode": ("mode", "DIRECT"),
+    "gaming_mode": ("mode", "GAMING"),
     "status": ("status", None),
     "none": (None, None),
 }
 
 # Fallback deterministico: (modo, parole chiave). Ordine = priorita': DIRECT
-# prima di MEDIA ("comfy diretto" contiene "comfy"). Le chiavi sono radici per
+# prima di MEDIA ("comfy diretto" contiene "comfy"), GAMING dopo MEDIA
+# ("genera video del gioco" resta MEDIA) ma prima di LLM ("carica il gioco"
+# e' il gioco, non il modello). Le chiavi sono radici per
 # tollerare le flessioni ("genera", "immagini", "immagina").
 _MODE_KEYWORDS = (
     ("DIRECT", ("direct", "diretto", "comfy diretto", "comfy-direct")),
     ("MEDIA", ("comfy", "comfyui", "media", "video", "immagin", "genera", "render")),
+    ("GAMING", ("gaming", "gioc", "mario", "eglantine", "sunshine", "moonlight")),
     ("LLM", ("llm", "ready", "tabby", "qwen", "modello", "carica", "pronto")),
     ("AUTO", ("auto", "automatico", "automatic")),
 )

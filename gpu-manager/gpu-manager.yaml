@@ -8,9 +8,9 @@ api_key: ""
 # Chiavi secondarie fidate (stessa trust-zone, es. master key hub sullo
 # stesso host): accettate oltre alla primaria. Mai committare valori veri.
 trusted_keys: []
-# False = /mode/media e /mode/direct rifiutati con 409 (i video vanno in coda
-# in AUTO). /mode/llm e /mode/auto restano liberi. Mettere false sul server
-# se non si vuole mai uscire da AUTO.
+# False = /mode/media, /mode/direct e /mode/gaming rifiutati con 409 (i video
+# vanno in coda in AUTO). /mode/llm e /mode/auto restano liberi. Mettere false
+# sul server se non si vuole mai uscire da AUTO.
 allow_manual_modes: true
 db_path: /var/lib/hermes-gpu-manager/state.db
 output_dir: /opt/hermes/gpu-manager/outputs
@@ -64,6 +64,22 @@ direct:
   base_url: http://127.0.0.1:8188
   public_url: http://100.94.223.14:8188
   startup_timeout: 600
+
+# Gaming (fase 1): LLM scaricato, stack gioco di Hermes avviato per l'utente,
+# worker parcheggiato. NON h24: solo su richiesta (/mode/gaming o laya
+# "gioca"), uscita = stop unit (l'utente chiude il gioco) o AUTO/LLM
+# (l'LLM torna su). La unit la crea Hermes (Requires trascina Xvfb).
+gaming:
+  backend: gamestream
+  service: gamestream-mkw.service
+  # Stack completa: audio + Sunshine partono con il gioco, si spengono al ritorno.
+  extra_services:
+    - gamestream-pulse.service
+    - gamestream-sunshine.service
+  startup_timeout: 300
+  # TCP di salute opzionali [[host, porta]] (es. Sunshine [[127.0.0.1, 47984]]):
+  # vuoti = basta unit attiva.
+  health_tcp: []
 
 switching:
   media_idle_timeout: 10

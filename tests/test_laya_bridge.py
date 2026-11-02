@@ -76,6 +76,11 @@ class TestClassifyText(unittest.TestCase):
             "modalita automatica": "AUTO",
             "comfy diretto": "DIRECT",
             "passa in direct": "DIRECT",
+            "avvia il gioco": "GAMING",
+            "voglio giocare": "GAMING",
+            "modalita gaming": "GAMING",
+            "mario kart": "GAMING",
+            "carica il gioco": "GAMING",
         }
         for text, expected in cases.items():
             with self.subTest(text=text):
@@ -85,6 +90,10 @@ class TestClassifyText(unittest.TestCase):
 
     def test_direct_ha_priorita_su_media(self):
         self.assertEqual("DIRECT", lb.classify_text("comfy diretto")["mode"])
+
+    def test_gaming_non_ruba_media_e_non_perde_contro_llm(self):
+        self.assertEqual("MEDIA", lb.classify_text("genera video del gioco")["mode"])
+        self.assertEqual("GAMING", lb.classify_text("carica il gioco")["mode"])
 
     def test_stato(self):
         for text in ("che succede?", "come sta il sistema", "dammi lo stato",
@@ -123,6 +132,7 @@ class TestParseAndIntent(unittest.TestCase):
         self.assertEqual(("mode", "MEDIA"), lb.intent_from_choice("activate_comfy"))
         self.assertEqual(("mode", "AUTO"), lb.intent_from_choice("auto_mode"))
         self.assertEqual(("mode", "DIRECT"), lb.intent_from_choice("direct_mode"))
+        self.assertEqual(("mode", "GAMING"), lb.intent_from_choice("gaming_mode"))
         self.assertEqual(("status", None), lb.intent_from_choice("status"))
         self.assertEqual((None, None), lb.intent_from_choice("none"))
         self.assertEqual((None, None), lb.intent_from_choice("boh"))

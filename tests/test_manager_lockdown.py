@@ -37,9 +37,10 @@ class ManagerRolesTests(unittest.TestCase):
     def test_control_routes_require_laya(self) -> None:
         src = text(MANAGER)
         for fn in ("mode_llm", "mode_media", "mode_auto", "mode_direct",
-                   "force_mode", "system_reboot", "supervisor_ask"):
+                   "mode_gaming", "force_mode", "system_reboot",
+                   "supervisor_ask"):
             self.assertIn(f"async def {fn}", src)
-        self.assertEqual(7, src.count("Depends(require_laya)"))
+        self.assertEqual(8, src.count("Depends(require_laya)"))
 
     def test_reads_and_queue_stay_app_role(self) -> None:
         src = text(MANAGER)

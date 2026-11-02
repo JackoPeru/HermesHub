@@ -1,6 +1,6 @@
 """Hermes GPU Manager — CPU-only daemon to share 2x GPU between TabbyAPI/Qwen and ComfyUI.
 
-Modes: LLM (Qwen online) | MEDIA (ComfyUI online) | AUTO (switch on demand).
+Modes: LLM (Qwen online) | MEDIA (ComfyUI online) | AUTO (switch on demand) | DIRECT (user ComfyUI) | GAMING (user game stack).
 LLM mode is the safe default: AUTO + idle == LLM_READY.
 """
 
@@ -279,10 +279,11 @@ STATES = (
     "MEDIA_STOPPING",
     "LLM_LOADING",
     "DIRECT",
+    "GAMING",
     "ERROR",
 )
 
-MODES = ("LLM", "MEDIA", "AUTO", "DIRECT")
+MODES = ("LLM", "MEDIA", "AUTO", "DIRECT", "GAMING")
 
 _state = {
     "current_state": "BOOT",
@@ -2138,6 +2139,9 @@ async def transition_to_llm() -> bool:
     set_state("MEDIA_STOPPING")
     await systemctl("stop", str(CONFIG["media"]["service"]))
     await systemctl("stop", direct_service_name())
+    await systemctl("stop", gaming_service_name())
+    for extra in gaming_extra_services():
+        await systemctl("stop", extra)
     await asyncio.sleep(3)
     await asyncio.to_thread(cleanup_stale_shm)
     if not await vram_free(float(CONFIG["switching"].get("vram_free_mb", 2500))):
@@ -2399,6 +2403,170 @@ async def watch_direct() -> None:
     # Probe inconcludente (sudo/systemd hiccup): tieni la posizione,
     # mai contare un miss su "unknown".
     log.warning("direct Comfy unit state unknown; holding DIRECT (no miss counted)")
+
+
+# ------------------------------------------------- gaming mode ---
+# Fase 1: LLM scaricato, stack gioco di Hermes avviato per l'utente
+# (`gaming.service` + `gaming.extra_services`, Requires trascina Xvfb),
+# worker parcheggiato.
+# NON h24: solo su richiesta, uscita = stop unit (auto-ritorno AUTO) o
+# AUTO/LLM (l'LLM torna su, gioco spento da transition_to_llm).
+def gaming_service_name() -> str:
+    return str(CONFIG.get("gaming", {}).get("service", "gamestream-mkw.service"))
+
+
+def gaming_extra_services() -> list:
+    raw = CONFIG.get("gaming", {}).get("extra_services", [])
+    return [str(s) for s in raw if isinstance(s, str) and s.strip()]
+
+
+def gaming_health_tcp() -> list:
+    raw = CONFIG.get("gaming", {}).get("health_tcp", [])
+    probes = []
+    if isinstance(raw, list):
+        for entry in raw:
+            try:
+                host, port = entry
+                probes.append((str(host), int(port)))
+            except (TypeError, ValueError):
+                continue
+    return probes
+
+
+async def gaming_online() -> bool:
+    """True quando la unit gioco e' attiva (e gli eventuali TCP di salute
+    rispondono, es. Sunshine in fase 2). Mai solleva."""
+    try:
+        if not await service_active(gaming_service_name()):
+            return False
+    except Exception:
+        return False
+    for host, port in gaming_health_tcp():
+        try:
+            _reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=5)
+            try:
+                writer.close()
+                try:
+                    await asyncio.wait_for(writer.wait_closed(), timeout=5)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        except Exception:
+            return False
+    return True
+
+
+async def transition_to_gaming() -> bool:
+    """Enter gaming mode: LLM unloaded, game stack unit started for the user,
+    worker parked. Returns True when the game backend serves."""
+    gaming = CONFIG.get("gaming", {})
+    service = gaming_service_name()
+    set_state("LLM_UNLOADING")
+    # Never run both backends: agent media + direct go first, then voice
+    # (every GB counts for the emulator + NVENC too).
+    await systemctl("stop", str(CONFIG["media"]["service"]))
+    await systemctl("stop", direct_service_name())
+    await stop_voice()
+    current = _state.get("current_job")
+    if current:
+        update_job(str(current), status="failed",
+                   error="superseded by gaming mode")
+        _state["current_job"] = None
+        _state["current_prompt_id"] = None
+        log.info("job %s failed: superseded by gaming mode", current)
+    if not await unload_llm():
+        log.warning("gaming: Tabby unload refused, continuing if VRAM is free")
+    await asyncio.sleep(float(CONFIG["switching"].get("post_unload_settle", 5)))
+    threshold = float(CONFIG["switching"].get("vram_free_mb", 2500))
+    for _ in range(12):
+        if await vram_free(threshold):
+            break
+        await asyncio.sleep(5)
+    if not await vram_free(threshold):
+        await cleanup_stray_cuda()
+        await asyncio.sleep(5)
+    if not await vram_free(threshold):
+        # Backend LLM incastrato (post-crash/VRAM leak: l'unload non basta
+        # perche' il runtime trattiene tutto). Stoppare il service libera
+        # tutto; il ritorno (transition_to_llm) lo riavvia con restart.
+        # Mai h24 spento: solo per la sessione gaming.
+        log.warning("gaming: VRAM ancora occupata, stop %s",
+                    str(CONFIG["llm"]["service"]))
+        await systemctl("stop", str(CONFIG["llm"]["service"]))
+        await asyncio.sleep(5)
+    if not await vram_free(threshold):
+        set_state("ERROR", "GPU not freed for gaming")
+        return False
+    set_state("GPU_FREE")
+    if not await systemctl("start", service):
+        set_state("ERROR", "game stack start failed")
+        return False
+    for extra in gaming_extra_services():
+        if not await systemctl("start", extra):
+            set_state("ERROR", f"game stack extra start failed: {extra}")
+            await systemctl("stop", service)
+            return False
+    timeout = int(gaming.get("startup_timeout", 300))
+    for _ in range(max(1, timeout // 5)):
+        if await gaming_online():
+            break
+        await asyncio.sleep(5)
+    if not await gaming_online():
+        set_state("ERROR", "game stack health timeout")
+        await systemctl("stop", service)
+        for extra in gaming_extra_services():
+            await systemctl("stop", extra)
+        return False
+    log.info("game stack ready (%s)", service)
+    set_state("GAMING")
+    return True
+
+
+async def watch_gaming() -> None:
+    """Parked while the user drives the game: the manager touches nothing.
+    Auto-return to AUTO only when the unit is really gone (closed/crashed,
+    3 consecutive misses): a live unit with a silent backend means the game
+    is (re)starting, so wait — never pull the rug during a restart. The user
+    closing it lands on inactive -> fast path. Probe errors ("unknown") never
+    count as misses: only explicit inactive/failed/dead do."""
+    try:
+        code, out = await _run_async(
+            ["systemctl", "show", "-p", "ActiveState", "--value",
+             gaming_service_name()], timeout=15)
+        unit = out.strip() if code == 0 else "unknown"
+    except Exception:  # noqa: BLE001 - never break the worker
+        unit = "unknown"
+    if unit in ("active", "activating", "reloading"):
+        if await gaming_online():
+            _state["gaming_miss"] = 0
+            _state.pop("gaming_silent_since", None)
+            return
+        # Unit alive but backend silent: restart in progress (wait) or hung
+        # game (deadline below). Never pull the rug on a live unit fast.
+        since = float(_state.get("gaming_silent_since") or time.monotonic())
+        if "gaming_silent_since" not in _state:
+            _state["gaming_silent_since"] = since
+        if time.monotonic() - since > 900:
+            log.error("game stack silent for 15min with live unit; forcing AUTO")
+            _state.pop("gaming_silent_since", None)
+            _state["gaming_miss"] = 0
+            _set_desired("AUTO")
+        else:
+            log.warning("game stack unit %s but backend silent; waiting (restart?)", unit)
+        return
+    if unit in ("inactive", "failed", "dead"):
+        misses = int(_state.get("gaming_miss") or 0) + 1
+        _state["gaming_miss"] = misses
+        if misses >= 3:
+            log.info("game stack gone; returning to AUTO")
+            _state["gaming_miss"] = 0
+            _set_desired("AUTO")
+        return
+    # Probe inconcludente (sudo/systemd hiccup): tieni la posizione,
+    # mai contare un miss su "unknown".
+    log.warning("game stack unit state unknown; holding GAMING (no miss counted)")
 
 
 # MiniMax H3 patchify_video (patch 2x2) richiede che il latente del VAE (16x
@@ -2879,6 +3047,8 @@ async def _drive() -> None:
                             await drain_media_queue()
                 elif desired == "DIRECT":
                     await transition_to_direct()
+                elif desired == "GAMING":
+                    await transition_to_gaming()
                 elif desired == "LLM" or desired == "AUTO":
                     await restore_llm_with_retries("stray-gpu-free")
                 return
@@ -2930,6 +3100,12 @@ async def _drive() -> None:
             else:
                 await watch_direct()
             return
+        if desired == "GAMING":
+            if state != "GAMING":
+                await transition_to_gaming()
+            else:
+                await watch_gaming()
+            return
         if desired == "LLM":
             if state != "LLM_READY":
                 await restore_llm_with_retries("mode-llm")
@@ -2972,7 +3148,7 @@ async def _drive() -> None:
         elif state == "GPU_FREE":
             await restore_llm_with_retries("stray-gpu-free")
         else:
-            # e.g. DIRECT after auto-return: stop any media backend, reload LLM.
+            # e.g. DIRECT/GAMING after auto-return: stop any media backend, reload LLM.
             await restore_llm_with_retries("auto-return")
 
 
@@ -3120,6 +3296,15 @@ async def reconcile_boot() -> None:
             set_state("DIRECT", "boot-adopt")
             return
         log.info("boot: DIRECT desired but backend gone, falling back to AUTO")
+        desired = "AUTO"
+        _state["desired_mode"] = desired
+        _persist_desired()
+    if desired == "GAMING":
+        # Process restart with a live game backend: adopt it, no churn.
+        if await service_active(gaming_service_name()):
+            set_state("GAMING", "boot-adopt")
+            return
+        log.info("boot: GAMING desired but backend gone, falling back to AUTO")
         desired = "AUTO"
         _state["desired_mode"] = desired
         _persist_desired()
@@ -3401,6 +3586,10 @@ async def status(_: None = Depends(require_key)) -> dict:
         hint = f"direct ComfyUI for you at {direct_public_url()} (manager parked, chat idle)"
     elif desired == "DIRECT":
         hint = f"switching to direct ComfyUI ({state}): wait, do not resubmit"
+    elif desired == "GAMING" and state == "GAMING":
+        hint = f"game stack for you ({gaming_service_name()}, manager parked, chat idle)"
+    elif desired == "GAMING":
+        hint = f"switching to gaming ({state}): wait, do not resubmit"
     elif state in ("MEDIA_READY", "MEDIA_BUSY"):
         hint = "media up: submit jobs directly"
     elif state in ("LLM_UNLOADING", "GPU_FREE", "MEDIA_STARTING", "MEDIA_STOPPING", "LLM_LOADING", "BOOT"):
@@ -3433,6 +3622,8 @@ async def status(_: None = Depends(require_key)) -> dict:
         ),
         "direct_url": direct_public_url(),
         "direct_active": desired == "DIRECT" and state == "DIRECT",
+        "gaming_service": gaming_service_name(),
+        "gaming_active": desired == "GAMING" and state == "GAMING",
         "media_progress": (current or {}).get("progress", 0.0),
         "active_preset": _state["active_preset"],
         "active_media_model": _state["active_media_model"],
@@ -3517,6 +3708,14 @@ async def mode_direct(request: Request, _: None = Depends(require_laya)) -> dict
     return _set_desired("DIRECT")
 
 
+@app.post("/mode/gaming")
+async def mode_gaming(request: Request, _: None = Depends(require_laya)) -> dict:
+    _require_user_control(request)
+    _log_mode_request(request, "GAMING")
+    _require_manual_allowed("GAMING")
+    return _set_desired("GAMING")
+
+
 # ---------------------------------------------------------------- force ---
 # Canale diretto di emergenza (bridge laya / app): fora il modo richiesto
 # scavalando le guardie che possono lasciare il manager bloccato (cooldown
@@ -3574,8 +3773,8 @@ async def _force_kick() -> None:
 class ForceRequest(BaseModel):
     """Corpo di POST /force: modo target deciso fuori dal manager.
 
-    `mode` accetta LLM|MEDIA|AUTO|DIRECT (case-insensitive) piu' alias comodi
-    ("llm", "ready", "comfy", "auto", "direct"). `reason` finisce solo nell'evento.
+    `mode` accetta LLM|MEDIA|AUTO|DIRECT|GAMING (case-insensitive) piu' alias comodi
+    ("llm", "ready", "comfy", "auto", "direct", "gaming", "gioco"). `reason` finisce solo nell'evento.
     """
 
     mode: str = ""
@@ -3596,7 +3795,7 @@ async def force_mode(req: ForceRequest, _: None = Depends(require_laya)) -> dict
     mode = _force_normalize_mode(req.mode)
     if mode is None:
         raise HTTPException(
-            422, f"mode non valida: {req.mode!r} (attese LLM|MEDIA|AUTO|DIRECT)"
+            422, f"mode non valida: {req.mode!r} (attese LLM|MEDIA|AUTO|DIRECT|GAMING)"
         )
     reason = req.reason if isinstance(req.reason, str) else ""
     state_before = _state["current_state"]
@@ -3784,7 +3983,7 @@ async def submit_smart(request: Request, _: None = Depends(require_key)) -> JSON
                                            (), backend)
     if not decision.media or not decision.preset:
         return JSONResponse({"media": False, "reason": decision.reason})
-    if _state["desired_mode"] in ("LLM", "DIRECT"):
+    if _state["desired_mode"] in ("LLM", "DIRECT", "GAMING"):
         # Nessuno drenerebbe la coda: vale anche per triage_only (niente
         # upload sprecati prima del fallback chat).
         return JSONResponse({"media": False, "reason": "manual-mode"})

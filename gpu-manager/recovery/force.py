@@ -25,7 +25,7 @@ from __future__ import annotations
 from typing import Any
 
 # Modi che il manager accetta (stesso vocabolario di manager.MODES).
-FORCE_MODES = ("LLM", "MEDIA", "AUTO", "DIRECT")
+FORCE_MODES = ("LLM", "MEDIA", "AUTO", "DIRECT", "GAMING")
 
 # Alias comodi in minuscolo -> modo canonico. Le chiavi sono normalizzate con
 # strip/lower; la mode canonica (es. "llm") vince comunque via .upper().
@@ -46,6 +46,10 @@ MODE_ALIASES = {
     "direct": "DIRECT",
     "diretto": "DIRECT",
     "comfy-direct": "DIRECT",
+    "gaming": "GAMING",
+    "game": "GAMING",
+    "gioco": "GAMING",
+    "giocare": "GAMING",
 }
 
 # Stati transitori: se il manager vi resta con il lock libero, la transizione
@@ -74,10 +78,11 @@ _BLOCKER_FIELDS = (
     "llm_notloaded_fails",
     "llm_watch_ts",
     "direct_miss",
+    "gaming_miss",
 )
 
 # Campi transitori da RIMUOVERE (presenza = timer attivo).
-_BLOCKER_POP = ("direct_silent_since",)
+_BLOCKER_POP = ("direct_silent_since", "gaming_silent_since")
 
 
 def blocker_defaults() -> dict:
@@ -91,6 +96,7 @@ def blocker_defaults() -> dict:
         "llm_notloaded_fails": 0,
         "llm_watch_ts": 0.0,
         "direct_miss": 0,
+        "gaming_miss": 0,
         "supervisor_cooldown": {},
     }
 

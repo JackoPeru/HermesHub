@@ -54,6 +54,10 @@ class TestNormalizeMode(unittest.TestCase):
             "automatico": "AUTO",
             "direct": "DIRECT",
             "diretto": "DIRECT",
+            "gaming": "GAMING",
+            "game": "GAMING",
+            "gioco": "GAMING",
+            "giocare": "GAMING",
         }
         for raw, expected in cases.items():
             with self.subTest(raw=raw):
@@ -80,6 +84,8 @@ class TestApplyForceState(unittest.TestCase):
             "llm_watch_ts": 77.0,
             "direct_miss": 2,
             "direct_silent_since": 88.0,
+            "gaming_miss": 2,
+            "gaming_silent_since": 88.0,
             "supervisor_cooldown": {"restore_llm": 123.0},
         }
 
@@ -94,12 +100,15 @@ class TestApplyForceState(unittest.TestCase):
         self.assertEqual(0, state["llm_notloaded_fails"])
         self.assertEqual(0.0, state["llm_watch_ts"])
         self.assertEqual(0, state["direct_miss"])
+        self.assertEqual(0, state["gaming_miss"])
         self.assertEqual({}, state["supervisor_cooldown"])
         self.assertNotIn("direct_silent_since", state)
+        self.assertNotIn("gaming_silent_since", state)
         # Ogni campo azzerato e' segnalato.
         for name in ("last_error", "media_consec_failures", "media_cooldown_until",
                      "cooldown_log_ts", "error_retry_ts", "llm_notloaded_fails",
                      "llm_watch_ts", "direct_miss", "direct_silent_since",
+                     "gaming_miss", "gaming_silent_since",
                      "supervisor_cooldown"):
             self.assertIn(name, cleared)
 
@@ -111,7 +120,7 @@ class TestApplyForceState(unittest.TestCase):
                 self.assertAlmostEqual(280.0, state["force_llm_until"])
 
     def test_finestra_rimossa_per_media_e_direct(self):
-        for mode in ("MEDIA", "DIRECT"):
+        for mode in ("MEDIA", "DIRECT", "GAMING"):
             with self.subTest(mode=mode):
                 state = {"force_llm_until": 999.0}
                 cleared = apply_force_state(state, mode, now=100.0)
