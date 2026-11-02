@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.328 - 2026-11-01
+
+- Voce: STT UniNote locale primario (niente VRAM duplicata), fallback modello locale.
+- Suite verdi.
+
 ## 0.6.327 - 2026-11-01
 
 - Audit totale 2: morti rimossi, niente piu IO sul main (chiavi, draft, archivio, video, bot), icone distinte.

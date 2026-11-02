@@ -1376,7 +1376,51 @@ def _hermes_hub_warmup_whisper():
             _Path(warmup_path).unlink(missing_ok=True)
 
 
+def _hermes_hub_transcribe_uninnote(path, timeout=None):
+    """Trascrive via UniNote STT locale (OpenAI-compatibile, large-v3-turbo).
+
+    Primario per volonta' utente: niente VRAM duplicata nel gateway, modello
+    migliore, gia' caldo. Fallisce rumoroso: il chiamante decide il fallback.
+    """
+    import json as _json
+    import urllib.request as _urlrequest
+    import uuid as _uuid
+
+    base = os.environ.get("HERMES_STT_UNINOTE_URL", "http://100.94.223.14:8010").rstrip("/")
+    language = os.environ.get("HERMES_WHISPER_LANGUAGE", "it")
+    if timeout is None:
+        timeout = _hermes_hub_env_int("HERMES_STT_UNINOTE_TIMEOUT_SECONDS", 120, 10, 1800)
+    with open(path, "rb") as handle:
+        audio = handle.read()
+    if not audio:
+        raise ValueError("empty audio file")
+    boundary = "----HermesSTT%s" % _uuid.uuid4().hex
+    body = bytearray()
+    body += ("--%s\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nlarge-v3-turbo\r\n" % boundary).encode("utf-8")
+    body += ("--%s\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n%s\r\n" % (boundary, language)).encode("utf-8")
+    body += ("--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n" % boundary).encode("utf-8")
+    body += audio
+    body += ("\r\n--%s--\r\n" % boundary).encode("utf-8")
+    request = _urlrequest.Request(
+        base + "/v1/audio/transcriptions",
+        data=bytes(body),
+        headers={"Content-Type": "multipart/form-data; boundary=%s" % boundary},
+        method="POST",
+    )
+    with _urlrequest.urlopen(request, timeout=timeout) as response:
+        payload = _json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("bad STT response")
+    return (payload.get("text") or "").strip()
+
+
 def _hermes_hub_transcribe_file(path, beam_size=None):
+    prefer = os.environ.get("HERMES_STT_PREFER", "uninote").strip().lower()
+    if prefer == "uninote":
+        try:
+            return _hermes_hub_transcribe_uninnote(path)
+        except Exception:
+            pass  # fallback al modello locale sotto
     model = _hermes_hub_ensure_whisper_model()
     language = os.environ.get("HERMES_WHISPER_LANGUAGE", "it")
     beam_size = (
@@ -1571,7 +1615,51 @@ def _hermes_hub_warmup_whisper():
             _Path(warmup_path).unlink(missing_ok=True)
 
 
+def _hermes_hub_transcribe_uninnote(path, timeout=None):
+    """Trascrive via UniNote STT locale (OpenAI-compatibile, large-v3-turbo).
+
+    Primario per volonta' utente: niente VRAM duplicata nel gateway, modello
+    migliore, gia' caldo. Fallisce rumoroso: il chiamante decide il fallback.
+    """
+    import json as _json
+    import urllib.request as _urlrequest
+    import uuid as _uuid
+
+    base = os.environ.get("HERMES_STT_UNINOTE_URL", "http://100.94.223.14:8010").rstrip("/")
+    language = os.environ.get("HERMES_WHISPER_LANGUAGE", "it")
+    if timeout is None:
+        timeout = _hermes_hub_env_int("HERMES_STT_UNINOTE_TIMEOUT_SECONDS", 120, 10, 1800)
+    with open(path, "rb") as handle:
+        audio = handle.read()
+    if not audio:
+        raise ValueError("empty audio file")
+    boundary = "----HermesSTT%s" % _uuid.uuid4().hex
+    body = bytearray()
+    body += ("--%s\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nlarge-v3-turbo\r\n" % boundary).encode("utf-8")
+    body += ("--%s\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n%s\r\n" % (boundary, language)).encode("utf-8")
+    body += ("--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n" % boundary).encode("utf-8")
+    body += audio
+    body += ("\r\n--%s--\r\n" % boundary).encode("utf-8")
+    request = _urlrequest.Request(
+        base + "/v1/audio/transcriptions",
+        data=bytes(body),
+        headers={"Content-Type": "multipart/form-data; boundary=%s" % boundary},
+        method="POST",
+    )
+    with _urlrequest.urlopen(request, timeout=timeout) as response:
+        payload = _json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("bad STT response")
+    return (payload.get("text") or "").strip()
+
+
 def _hermes_hub_transcribe_file(path, beam_size=None):
+    prefer = os.environ.get("HERMES_STT_PREFER", "uninote").strip().lower()
+    if prefer == "uninote":
+        try:
+            return _hermes_hub_transcribe_uninnote(path)
+        except Exception:
+            pass  # fallback al modello locale sotto
     model = _hermes_hub_ensure_whisper_model()
     language = os.environ.get("HERMES_WHISPER_LANGUAGE", "it")
     beam_size = (
