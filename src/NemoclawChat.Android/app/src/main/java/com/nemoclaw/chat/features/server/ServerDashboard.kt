@@ -261,14 +261,20 @@ internal fun ServerStatusBoard(
     context: Context,
     settings: AppSettings,
     snapshot: ServerSnapshot,
-    gatewayOnline: Boolean,
     failedChecks: Int,
     onOpenTab: (Tab) -> Unit,
     onSettingsChanged: (AppSettings) -> Unit = {}
 ) {
     var live by remember { mutableStateOf(BoardLive()) }
+    // Probe reale all'apertura (tri-stato: null = controllo in corso).
+    // Niente piu wsProbe manuale: prima diceva offline finche' non premevi.
+    var online by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(settings.gatewayUrl) {
         val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+        online = runCatching {
+            val (code, _) = httpGetResponse(resolveHermesUrl(settings, "/v1/capabilities"), secret)
+            code in 200..299
+        }.getOrDefault(false)
         val appKey = withContext(Dispatchers.IO) { loadGpuAppSecret(context) }
         coroutineScope {
             val botsDef = async {
@@ -373,7 +379,7 @@ internal fun ServerStatusBoard(
                         is DashboardItem.Builtin -> when (item.id) {
                             "status" -> DashboardHero(
                                 snapshot = snapshot,
-                                gatewayOnline = gatewayOnline,
+                                online = online,
                                 failedChecks = failedChecks,
                                 modifier = Modifier.weight(1f)
                             )
@@ -422,10 +428,16 @@ internal fun ServerStatusBoard(
 @Composable
 private fun DashboardHero(
     snapshot: ServerSnapshot,
-    gatewayOnline: Boolean,
+    online: Boolean?,
     failedChecks: Int,
     modifier: Modifier = Modifier
 ) {
+    val status = when {
+        online == null -> "checking"
+        !online -> "offline"
+        failedChecks > 0 -> "degraded"
+        else -> "ok"
+    }
     AppleGlass(shape = RoundedCornerShape(20.dp)) {
         Row(
             modifier = modifier
@@ -439,18 +451,20 @@ private fun DashboardHero(
                     .size(12.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(
-                        when (boardOverallStatus(gatewayOnline, failedChecks)) {
+                        when (status) {
                             "ok" -> AppColors.Success
                             "degraded" -> AppColors.Warning
+                            "checking" -> AppColors.Faint
                             else -> AppColors.Error
                         }
                     )
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    when (boardOverallStatus(gatewayOnline, failedChecks)) {
+                    when (status) {
                         "ok" -> "Tutto operativo"
                         "degraded" -> "Da guardare ($failedChecks)"
+                        "checking" -> "Controllo stato…"
                         else -> "Server offline"
                     },
                     color = Color.White,

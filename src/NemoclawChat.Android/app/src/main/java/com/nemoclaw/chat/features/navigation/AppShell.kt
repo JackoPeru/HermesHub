@@ -106,7 +106,6 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AttachFile
-import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.Delete
@@ -115,6 +114,7 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Memory
@@ -350,8 +350,8 @@ internal fun SectionTopBar(tab: Tab, onOpenSidebar: () -> Unit, onBackToChat: ()
             }
             IconButton(onClick = onBackToChat, modifier = Modifier.size(38.dp)) {
                 Icon(
-                    Icons.Rounded.ChatBubbleOutline,
-                    contentDescription = "Torna alla chat",
+                    Icons.Rounded.Home,
+                    contentDescription = "Torna alla dashboard",
                     tint = AppColors.Muted,
                     modifier = Modifier.size(20.dp)
                 )
@@ -979,7 +979,7 @@ internal fun SidebarTabRow(tab: Tab, selected: Boolean, onOpenTab: (Tab) -> Unit
         Tab.Archive -> "Chat e progetti salvati"
         Tab.Continuity -> "Handoff, clipboard e file"
         Tab.Audit -> "Timeline operazioni e rischio"
-        Tab.Server -> "Gateway e diagnostica"
+        Tab.Server -> "Dashboard, gateway e stato"
         Tab.Hardware -> "Metriche del server"
         Tab.Health -> "Dati Galaxy Watch e trend"
         Tab.Cron -> "Automazioni programmate"

@@ -254,7 +254,6 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
                 context = context,
                 settings = settings,
                 snapshot = snapshot,
-                gatewayOnline = wsProbe.connected,
                 failedChecks = diagnostics.count { !it.ok },
                 onOpenTab = onOpenTab,
                 onSettingsChanged = onSettingsChanged
