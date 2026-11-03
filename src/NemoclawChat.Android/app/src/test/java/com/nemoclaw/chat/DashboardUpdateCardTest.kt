@@ -4,6 +4,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -51,6 +52,47 @@ class DashboardUpdateCardTest {
         composeRule.onNodeWithText("AGGIORNAMENTI").assertExists()
         composeRule.onRoot().captureRoboImage(
             file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_dashboard_update.png")
+        )
+    }
+
+    @Test
+    fun customizeDialogOpensWithWidgets() {
+        composeRule.setContent {
+            ChatClawTheme {
+                CustomizePanel(
+                    order = listOf("status", "bots", "quick"),
+                    hidden = emptySet(),
+                    custom = emptyList(),
+                    onChange = { _, _, _ -> },
+                    onDismiss = {}
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("PERSONALIZZA").assertExists()
+        composeRule.onNodeWithText("AGGIUNGI WIDGET").assertExists()
+        composeRule.onNodeWithText("Stato generale").assertExists()
+    }
+
+    @Test
+    fun customizeDialogOpensInServerScreen() {
+        composeRule.setContent {
+            ChatClawTheme {
+                ServerScreen(
+                    context = LocalContext.current,
+                    settings = AppSettings(),
+                    onOpenTab = {}
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Personalizza").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("PERSONALIZZA").assertExists()
+        composeRule.onNodeWithText("AGGIUNGI WIDGET").assertExists()
+        composeRule.onNodeWithText("Stato generale").assertExists()
+        composeRule.onRoot().captureRoboImage(
+            file = File("C:/Users/matte/AppData/Local/Temp/opencode/robo_dashboard_customize.png")
         )
     }
 }

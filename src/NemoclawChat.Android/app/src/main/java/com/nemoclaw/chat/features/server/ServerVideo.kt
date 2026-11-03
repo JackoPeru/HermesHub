@@ -58,7 +58,7 @@ import kotlinx.coroutines.withContext
 import java.net.URL
 
 @Composable
-internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatPrompt: (String) -> Unit) {
+internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatPrompt: (String) -> Unit, spotlightItem: VideoLibraryItem? = null, onSpotlightConsumed: () -> Unit = {}) {
     var refreshKey by remember { mutableIntStateOf(0) }
     var status by remember { mutableStateOf("Sincronizzo cartella video Hermes...") }
     var items by remember { mutableStateOf<List<VideoLibraryItem>>(emptyList()) }
@@ -70,7 +70,8 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
     val allItems = remember(items, manualVideoItem) {
         if (manualVideoItem == null) items else listOf(manualVideoItem) + items
     }
-    val selectedVideo = remember(allItems, selectedVideoId) { allItems.firstOrNull { it.id == selectedVideoId } }
+    // Spotlight da job manager: ha precedenza, si consuma col back.
+    val selectedVideo = spotlightItem ?: allItems.firstOrNull { it.id == selectedVideoId }
     // Chiave MAI sul main: KeyStore bloccante (passata alle card).
     val apiKey by produceState<String?>(initialValue = null, settings.gatewayUrl) {
         value = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
@@ -103,12 +104,12 @@ internal fun VideoScreen(context: Context, settings: AppSettings, onOpenChatProm
     }
 
     if (selectedVideo != null) {
-        BackHandler { selectedVideoId = null }
+        BackHandler { if (spotlightItem != null) onSpotlightConsumed() else selectedVideoId = null }
         VideoWatchScreen(
             context = context,
             settings = settings,
             item = selectedVideo,
-            onBack = { selectedVideoId = null }
+            onBack = { if (spotlightItem != null) onSpotlightConsumed() else selectedVideoId = null }
         )
         return
     }

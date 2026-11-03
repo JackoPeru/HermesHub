@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.329 - 2026-11-03
+
+- Dashboard componibile: ordine, visibilita e widget miei (collegamento, sonda, nota).
+- Job manager: tap per aprire immagini/video generati.
+- Suite verdi.
+
 ## 0.6.328 - 2026-11-01
 
 - Voce: STT UniNote locale primario (niente VRAM duplicata), fallback modello locale.

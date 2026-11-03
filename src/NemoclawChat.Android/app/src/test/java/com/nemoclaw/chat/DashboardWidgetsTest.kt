@@ -34,4 +34,89 @@ class DashboardWidgetsTest {
         }
         assertTrue(dashboardEntries().none { isSameTabNavigation(Tab.Server.navRoute, it.tab) })
     }
+
+    @Test
+    fun `board overall status mapping`() {
+        assertEquals("offline", boardOverallStatus(false, 0))
+        assertEquals("offline", boardOverallStatus(false, 3))
+        assertEquals("degraded", boardOverallStatus(true, 2))
+        assertEquals("ok", boardOverallStatus(true, 0))
+    }
+
+    @Test
+    fun `resolve uses default order when blank`() {
+        val items = resolveDashboardItems("", "", emptyList())
+        assertEquals(
+            listOf("status", "bots", "cron", "chats", "gpu", "quick"),
+            items.map {
+                when (it) {
+                    is DashboardItem.Builtin -> it.id
+                    is DashboardItem.Custom -> it.widget.id
+                }
+            }
+        )
+    }
+
+    @Test
+    fun `resolve drops unknown and hidden, appends missing`() {
+        val items = resolveDashboardItems("gpu,boh,quick", "quick", emptyList())
+        val ids = items.map {
+            when (it) {
+                is DashboardItem.Builtin -> it.id
+                is DashboardItem.Custom -> it.widget.id
+            }
+        }
+        assertTrue(ids.none { it == "boh" })
+        assertTrue(ids.none { it == "quick" })
+        assertEquals("gpu", ids.first())
+        assertTrue(ids.containsAll(listOf("status", "bots", "cron", "chats")))
+    }
+
+    @Test
+    fun `custom widgets roundtrip and interleave`() {
+        val custom = listOf(CustomWidget("c:1", "note", "Cose", "", "ricordami"))
+        assertEquals(custom, parseCustomWidgets(encodeCustomWidgets(custom)))
+        assertTrue(parseCustomWidgets("nope").isEmpty())
+        assertTrue(parseCustomWidgets(encodeCustomWidgets(custom).replace("note", "bogus")).isEmpty())
+        val items = resolveDashboardItems("c:1,status", "", custom)
+        assertEquals(2 + 5, items.size)
+        assertTrue(items.first() is DashboardItem.Custom)
+        val hidden = resolveDashboardItems("", "c:1", custom)
+        assertTrue(hidden.none { it is DashboardItem.Custom })
+    }
+
+    @Test
+    fun `job video file detection`() {
+        assertTrue(isJobVideoFile("clip.mp4"))
+        assertTrue(isJobVideoFile("CLIP.WEBM"))
+        assertTrue(isJobVideoFile("a.mov"))
+        assertTrue(isJobVideoFile("a.mkv"))
+        assertTrue(!isJobVideoFile("frame.png"))
+        assertTrue(!isJobVideoFile("thumb.jpg"))
+        assertTrue(!isJobVideoFile("noext"))
+    }
+
+    @Test
+    fun `probe returns code or null`() {
+        val server = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { exchange ->
+            val body = "ok".toByteArray()
+            exchange.sendResponseHeaders(200, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        server.start()
+        try {
+            val port = server.address.port
+            val result = kotlinx.coroutines.runBlocking {
+                probeUrl("http://127.0.0.1:$port/", 5000)
+            }
+            assertEquals(200, result)
+        } finally {
+            server.stop(0)
+        }
+        val down = kotlinx.coroutines.runBlocking {
+            probeUrl("http://127.0.0.1:9/", 1000)
+        }
+        assertEquals(null, down)
+    }
 }

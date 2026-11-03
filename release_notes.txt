@@ -1,7 +1,7 @@
-Hermes Hub 0.6.328 (STT locale primario)
+Hermes Hub 0.6.329 (dashboard componibile + job apribili)
 
-- L'endpoint /v1/audio/transcriptions trascrive via UniNote STT locale (large-v3-turbo, gia caldo); fallback al modello in-process.
-- Risolve "No module named 'faster_whisper'": la modalita vocale torna su desktop e mobile.
+- Dashboard: riordina/nascondi blocchi e crea widget miei (collegamento, sonda URL, promemoria), tutto persistito.
+- Manager: tap sul job media per aprire immagini in galleria e video nel player.
 - Suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.328-android.apk (Android, versionCode 332), NemoclawChat.Windows_0.6.328.0_x64.msix (x64) e HermesHub-0.6.328-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.329-android.apk (Android, versionCode 333), NemoclawChat.Windows_0.6.329.0_x64.msix (x64) e HermesHub-0.6.329-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

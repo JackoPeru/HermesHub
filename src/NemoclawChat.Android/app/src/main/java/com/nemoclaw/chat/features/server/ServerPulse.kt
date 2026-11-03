@@ -8,6 +8,7 @@ import com.nemoclaw.chat.ui.apple.AppleGlass
 import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.apple.AppleType
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,8 +49,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.nemoclaw.chat.ChatImageGalleryDialog
 import org.json.JSONArray
 import org.json.JSONObject
+
+/** Estensioni video apribili dal player (stesso formato dei result_paths). Puro. */
+internal fun isJobVideoFile(filename: String): Boolean {
+    val ext = filename.substringAfterLast('.', "").lowercase()
+    return ext in setOf("mp4", "webm", "mov", "mkv")
+}
 
 internal fun gpuManagerBase(gatewayUrl: String): String {    val trimmed = gatewayUrl.trim().trimEnd('/')
     val noPath = trimmed.substringBefore("/v1").substringBefore("/api")
@@ -188,7 +196,7 @@ internal fun PulseCard(context: Context, settings: AppSettings) {
 }
 
 @Composable
-internal fun GpuComputeCard(context: Context, settings: AppSettings) {
+internal fun GpuComputeCard(context: Context, settings: AppSettings, onPlayVideo: (VideoLibraryItem) -> Unit = {}) {
     val scope = rememberCoroutineScope()
     val base = remember(settings.gatewayUrl) { gpuManagerBase(settings.gatewayUrl) }
     val bridge = remember(settings.gatewayUrl) { gpuBridgeBase(settings.gatewayUrl) }
@@ -239,6 +247,66 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
             }.getOrElse { it.message ?: "Errore" }
             layaBusy = false
             refresh()
+        }
+    }
+
+    var galleryItems by remember(base) { mutableStateOf<List<ImageLibraryItem>?>(null) }
+    var gallerySecret by remember(base) { mutableStateOf<String?>(null) }
+    var openStatus by remember(base) { mutableStateOf("") }
+
+    // Tap sul job: apre l'output (galleria o video) senza passare dal server
+    // a mano. Risolve i file veri via browse come la sezione Immagini.
+    fun openJobOutputs(job: JSONObject) {
+        scope.launch {
+            openStatus = ""
+            galleryItems = null
+            val paths = buildList {
+                val arr = job.optJSONArray("result_paths") ?: JSONArray()
+                for (i in 0 until arr.length()) {
+                    arr.optString(i).takeIf { it.isNotBlank() }?.let { add(it) }
+                }
+            }
+            if (paths.isEmpty()) {
+                openStatus = "Nessun output ancora per questo job."
+                return@launch
+            }
+            val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
+            val managerKey = withContext(Dispatchers.IO) { loadGpuAppSecret(context) }
+            val parent = paths.first().substringBeforeLast('/', "").ifBlank { return@launch }
+            val browse = loadImageBrowse(settings, managerKey, parent)
+            val byName = browse.items.associateBy { it.filename.substringAfterLast('/') }
+            val matched = paths.mapNotNull { byName[it.substringAfterLast('/')] }
+            if (matched.isEmpty()) {
+                openStatus = "File non trovati sul server."
+                return@launch
+            }
+            val mp4 = matched.firstOrNull { isJobVideoFile(it.filename) && it.filename.endsWith(".mp4", ignoreCase = true) }
+                ?: matched.firstOrNull { isJobVideoFile(it.filename) }
+            if (mp4 != null) {
+                onPlayVideo(
+                    VideoLibraryItem(
+                        id = "job:${job.optString("job_id", "?")}:${mp4.filename}",
+                        title = mp4.title.ifBlank { mp4.filename },
+                        filename = mp4.filename,
+                        mediaUrl = mp4.mediaUrl,
+                        playbackUrl = mp4.mediaUrl,
+                        thumbnailUrl = "",
+                        path = mp4.path,
+                        mimeType = "video/mp4",
+                        sizeBytes = mp4.sizeBytes,
+                        durationMs = 0L,
+                        modifiedAt = mp4.modifiedAt
+                    )
+                )
+                return@launch
+            }
+            val images = matched.filter { isBrowsableImage(it.filename, it.mimeType) }
+            if (images.isEmpty()) {
+                openStatus = "Nessun media apribile in questo job."
+                return@launch
+            }
+            gallerySecret = secret
+            galleryItems = images.sortedByDescending { it.filename.endsWith(".png", ignoreCase = true) }
         }
     }
 
@@ -327,7 +395,10 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
             for (i in 0 until minOf(recentJobs.length(), 5)) {
                 val job = recentJobs.optJSONObject(i) ?: continue
                 val results = job.optJSONArray("result_paths")?.length() ?: 0
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier.clickable { openJobOutputs(job) }
+                ) {
                     Text(
                         "${job.optString("job_id", "?")} · ${job.optString("preset", job.optString("kind", "?"))} · ${job.optString("status", "?")}",
                         color = Color.White,
@@ -338,12 +409,27 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings) {
                         "Progresso ${(job.optDouble("progress", 0.0) * 100).toInt()}% · output $results" +
                             (job.optString("phase", "").takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") +
                             (job.optString("error", "").takeIf { it.isNotBlank() }?.let { " · Errore: $it" } ?: "") +
-                            (job.optString("model", "").takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                            (job.optString("model", "").takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") +
+                            (if (results > 0) " · tocca per aprire" else ""),
                         color = AppColors.Faint,
                         fontSize = AppleType.Caption
                     )
                 }
                 HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
+            }
+            if (openStatus.isNotBlank()) {
+                Text(openStatus, color = AppColors.Warning, fontSize = AppleType.Footnote)
+            }
+            galleryItems?.let { items ->
+                ChatImageGalleryDialog(
+                    items = items,
+                    initialIndex = 0,
+                    settings = settings,
+                    apiKey = gallerySecret,
+                    isDownloading = false,
+                    onClose = { galleryItems = null },
+                    onDownload = null
+                )
             }
             status.optString("last_error", "").takeIf { it.isNotBlank() }?.let {
                 Text("Ultimo errore: $it", color = AppColors.Error, fontSize = AppleType.Footnote)

@@ -70,7 +70,7 @@ import com.google.firebase.FirebaseOptions
 import com.google.firebase.messaging.FirebaseMessaging
 
 @Composable
-internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (Tab) -> Unit = {}) {
+internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (Tab) -> Unit = {}, onSettingsChanged: (AppSettings) -> Unit = {}, onPlayVideo: (VideoLibraryItem) -> Unit = {}) {
     val scope = rememberCoroutineScope()
     var wsProbe by remember(settings) {
         mutableStateOf(
@@ -250,7 +250,15 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
             }
         }
         item {
-            ServerDashboardGrid(onOpenTab = onOpenTab)
+            ServerStatusBoard(
+                context = context,
+                settings = settings,
+                snapshot = snapshot,
+                gatewayOnline = wsProbe.connected,
+                failedChecks = diagnostics.count { !it.ok },
+                onOpenTab = onOpenTab,
+                onSettingsChanged = onSettingsChanged
+            )
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -266,7 +274,7 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
             PulseCard(context = context, settings = settings)
         }
         item {
-            GpuComputeCard(context = context, settings = settings)
+            GpuComputeCard(context = context, settings = settings, onPlayVideo = onPlayVideo)
         }
         item {
             AppleGlass(shape = RoundedCornerShape(20.dp)) {

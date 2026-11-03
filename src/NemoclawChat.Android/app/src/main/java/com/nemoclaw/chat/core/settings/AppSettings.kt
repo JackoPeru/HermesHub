@@ -69,7 +69,12 @@ data class AppSettings(
     /** Foto senza istruzioni: "chat" (normale) oppure "video" (forza preview). */
     val smartBlankPhoto: String = AppDefaults.smartBlankPhoto,
     /** Auto-approvazione run: "off" (chiedi sempre), "session", "always". Mai "deny" automatico. */
-    val autoApprove: String = AppDefaults.autoApprove
+    val autoApprove: String = AppDefaults.autoApprove,
+    /** Dashboard home: ordine blocchi (csv id, vuoto = default), nascosti (csv id),
+     *  widget miei (JSON array, vedi CustomWidget). */
+    val dashboardOrder: String = AppDefaults.dashboardOrder,
+    val dashboardHidden: String = AppDefaults.dashboardHidden,
+    val dashboardCustom: String = AppDefaults.dashboardCustom
 )
 
 internal fun AppSettings.metricFilter(): MetricDisplayFilter = MetricDisplayFilter(
@@ -157,7 +162,10 @@ internal fun loadSettings(context: Context): AppSettings {
         smartVideo = prefs.getBoolean("smartVideo", AppDefaults.smartVideo),
         smartVideoPrompt = prefs.getString("smartVideoPrompt", AppDefaults.smartVideoPrompt) ?: AppDefaults.smartVideoPrompt,
         smartBlankPhoto = prefs.getString("smartBlankPhoto", AppDefaults.smartBlankPhoto)?.takeIf { it == "video" } ?: "chat",
-        autoApprove = prefs.getString("autoApprove", AppDefaults.autoApprove)?.takeIf { it in WorkLimits.AUTO_APPROVE_MODES } ?: AppDefaults.autoApprove
+        autoApprove = prefs.getString("autoApprove", AppDefaults.autoApprove)?.takeIf { it in WorkLimits.AUTO_APPROVE_MODES } ?: AppDefaults.autoApprove,
+        dashboardOrder = prefs.getString("dashboardOrder", "") ?: "",
+        dashboardHidden = prefs.getString("dashboardHidden", "") ?: "",
+        dashboardCustom = prefs.getString("dashboardCustom", "[]") ?: "[]"
     )
     return normalizePlugAndPlaySettings(context, settings)
 }
@@ -275,6 +283,9 @@ internal fun saveSettings(context: Context, settings: AppSettings) {
         putString("smartVideoPrompt", settings.smartVideoPrompt)
         putString("smartBlankPhoto", settings.smartBlankPhoto.takeIf { it == "video" } ?: "chat")
         putString("autoApprove", settings.autoApprove.takeIf { it in WorkLimits.AUTO_APPROVE_MODES } ?: AppDefaults.autoApprove)
+        putString("dashboardOrder", settings.dashboardOrder.trim())
+        putString("dashboardHidden", settings.dashboardHidden.trim())
+        putString("dashboardCustom", settings.dashboardCustom.trim().ifBlank { "[]" })
     }
 }
 
@@ -338,6 +349,9 @@ internal object AppDefaults {
     const val smartVideoPrompt = ""
     const val smartBlankPhoto = "chat"
     const val autoApprove = "off"
+    const val dashboardOrder = ""
+    const val dashboardHidden = ""
+    const val dashboardCustom = "[]"
     const val releasesPage = "https://github.com/JackoPeru/HermesHub/releases"
     const val latestReleaseApi = "https://api.github.com/repos/JackoPeru/HermesHub/releases/latest"
 }

@@ -497,6 +497,8 @@ internal fun ChatApp() {
     // Azione sidebar (long-press) da consumare nella sezione Bot.
     // BotSidebarAction non e Parcelable: niente rememberSaveable (solo sessione).
     var pendingBotAction by remember { mutableStateOf<BotSidebarAction?>(null) }
+    // Video spotlight da job manager: VideoLibraryItem non e Parcelable (solo sessione).
+    var pendingVideoItem by remember { mutableStateOf<VideoLibraryItem?>(null) }
     var sidebarOpen by rememberSaveable { mutableStateOf(false) }
     fun openSidebar() {
         sidebarOpen = true
@@ -1081,14 +1083,15 @@ internal fun ChatApp() {
                 } }
                 composable(Tab.Continuity.navRoute) { ContinuityScreen(context, settings) { id -> openChatConversation(id) } }
                 composable(Tab.Audit.navRoute) { AuditScreen(context, settings) }
-                composable(Tab.Server.navRoute) { ServerScreen(context, settings) { setSelectedTab(it) } }
+                composable(Tab.Server.navRoute) { ServerScreen(context = context, settings = settings, onOpenTab = { setSelectedTab(it) }, onSettingsChanged = { updated -> settings = updated; chatScope.launch(Dispatchers.IO) { saveSettings(context, updated) } }, onPlayVideo = { item -> pendingVideoItem = item; setSelectedTab(Tab.Video) }) }
                 composable(Tab.Hardware.navRoute) { HardwareScreen(context, settings) }
                 composable(Tab.Health.navRoute) { HealthDashboardScreen(context, settings) { setSelectedTab(Tab.Settings) } }
-                composable(Tab.Video.navRoute) { VideoScreen(context, settings) { prompt ->
+                composable(Tab.Video.navRoute) { VideoScreen(context, settings, spotlightItem = pendingVideoItem, onSpotlightConsumed = { pendingVideoItem = null }, onOpenChatPrompt = { prompt ->
                 pendingBot = null
                 pendingPrompt = prompt
                 setSelectedTab(Tab.Server)
-                } }
+                pendingVideoItem = null
+                }) }
                 composable(Tab.Images.navRoute) { ImageScreen(context, settings) { prompt ->
                 pendingBot = null
                 pendingPrompt = prompt
