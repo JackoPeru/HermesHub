@@ -29,6 +29,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.List
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.List
 import androidx.compose.material.icons.rounded.NetworkCheck
 import androidx.compose.material.icons.rounded.Dns
@@ -68,6 +70,54 @@ import com.google.android.gms.common.GoogleApiAvailability
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.messaging.FirebaseMessaging
+
+/** Solo host:porta ("tutto ok?"), l'URL intero resta dietro il tap. Puro/testabile. */
+internal fun shortHost(url: String): String = runCatching {
+    val u = java.net.URL(url)
+    if (u.port > 0) "${u.host}:${u.port}" else u.host
+}.getOrDefault(url.take(24))
+
+/** Ultimo segmento del path ("media"), il path intero resta dietro il tap. Puro/testabile. */
+internal fun shortPath(path: String): String =
+    path.substringAfterLast('/').ifBlank { path }.take(24)
+
+/** Scheda tecnica a disclosure: titolo + stato corto sempre, URL e dettagli
+ *  solo dopo il tap (niente piu muraglia di endpoint a ogni apertura). */
+@Composable
+private fun ServerDetailCard(
+    title: String,
+    status: String,
+    details: List<String>,
+    valueColor: Color = Color.White
+) {
+    var open by rememberSaveable(title) { mutableStateOf(false) }
+    AppleGlass(shape = RoundedCornerShape(20.dp), onClick = { open = !open }) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(title.uppercase(), color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.weight(1f), maxLines = 1)
+                Text(status, color = valueColor, fontSize = AppleType.RowTitleSmall, fontWeight = FontWeight.SemiBold, textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.weight(1f), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                Icon(
+                    if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                    contentDescription = if (open) "Nascondi dettagli" else "Mostra dettagli",
+                    tint = AppColors.Faint
+                )
+            }
+            AnimatedVisibility(visible = open, enter = AppleMotion.enter(), exit = AppleMotion.exit()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    details.forEach { line ->
+                        SelectionContainer { Text(line, color = AppColors.Faint, fontSize = AppleType.Footnote) }
+                    }
+                    HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
+                }
+            }
+        }
+    }
+}
 
 @Composable
 internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (Tab) -> Unit = {}, onSettingsChanged: (AppSettings) -> Unit = {}, onPlayVideo: (VideoLibraryItem) -> Unit = {}) {
@@ -261,12 +311,39 @@ internal fun ServerScreen(context: Context, settings: AppSettings, onOpenTab: (T
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ServerMetric("Hermes API", snapshot.gateway, "Health endpoint: ${hermesRoot(settings)}/health", valueColor = AppColors.Success)
-                ServerMetric("Capabilities", wsProbe.wsUrl, wsProbe.status, valueColor = if (wsProbe.status.contains("lette", ignoreCase = true)) AppColors.Success else AppColors.Warning)
-                ServerMetric("Modello", snapshot.model, snapshot.providerDetail)
-                ServerMetric("API lato server", snapshot.inferenceEndpoint, "Il client parla a Hermes API, non direttamente al runtime modello.")
-                ServerMetric("Sicurezza", snapshot.policy, "Client usa solo la API key Bearer salvata dall'utente.")
-                ServerMetric("Cartella video Hermes", snapshot.videoLibraryPath.ifBlank { "In attesa di sync server" }, "Hermes decide path e app lo recepisce da /health/detailed.", valueColor = if (snapshot.videoLibraryPath.isBlank()) AppColors.Warning else Color.White)
+                ServerDetailCard(
+                    "Hermes API",
+                    shortHost(snapshot.gateway),
+                    listOf("Gateway: ${snapshot.gateway}", "Health endpoint: ${hermesRoot(settings)}/health"),
+                    valueColor = AppColors.Success
+                )
+                ServerDetailCard(
+                    "Capabilities",
+                    if (wsProbe.status.contains("lette", ignoreCase = true)) "lette" else "da leggere",
+                    listOf("Endpoint: ${wsProbe.wsUrl}", wsProbe.status),
+                    valueColor = if (wsProbe.status.contains("lette", ignoreCase = true)) AppColors.Success else AppColors.Warning
+                )
+                ServerDetailCard(
+                    "Modello",
+                    snapshot.model.ifBlank { "—" },
+                    listOf(snapshot.providerDetail)
+                )
+                ServerDetailCard(
+                    "API lato server",
+                    shortHost(snapshot.inferenceEndpoint),
+                    listOf(snapshot.inferenceEndpoint, "Il client parla a Hermes API, non direttamente al runtime modello.")
+                )
+                ServerDetailCard(
+                    "Sicurezza",
+                    snapshot.policy,
+                    listOf("Client usa solo la API key Bearer salvata dall'utente.")
+                )
+                ServerDetailCard(
+                    "Cartella video Hermes",
+                    if (snapshot.videoLibraryPath.isBlank()) "non sincronizzata" else shortPath(snapshot.videoLibraryPath),
+                    listOf(snapshot.videoLibraryPath.ifBlank { "In attesa di sync server" }, "Hermes decide path e app lo recepisce da /health/detailed."),
+                    valueColor = if (snapshot.videoLibraryPath.isBlank()) AppColors.Warning else Color.White
+                )
             }
         }
         item {

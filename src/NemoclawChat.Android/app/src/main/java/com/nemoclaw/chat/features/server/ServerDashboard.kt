@@ -1,16 +1,25 @@
 package com.nemoclaw.chat
 
 import android.content.Context
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +31,7 @@ import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,9 +43,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,8 +98,14 @@ internal data class BoardLive(
     val chats: Int? = null,
     val gpuMode: String? = null,
     val gpuJobs: Int? = null,
-    val loaded: Boolean = false
+    val loaded: Boolean = false,
+    val loadedAt: Long? = null
 )
+
+/** "aggiornato 21:14": fresco, corto, locale. Puro/testabile. */
+internal fun formatBoardTime(millis: Long): String =
+    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        .format(java.util.Date(millis))
 
 /** Widget creato dall'utente: link (target = Tab.name), probe (target = URL),
  *  note (detail = testo). Id stabile "c:<millis>" per ordine/nascondi. */
@@ -214,6 +233,27 @@ private suspend fun loadGpuBoard(settings: AppSettings, appKey: String?): Pair<S
     return mode to running
 }
 
+/** Segnaposto pulsante mentre i numeri arrivano: la struttura c'e',
+ *  il contenuto no (niente piu "…" criptici). */
+@Composable
+private fun LoadingBar(modifier: Modifier = Modifier) {
+    val wave = rememberInfiniteTransition(label = "boardSkeleton")
+    val alpha by wave.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Reverse),
+        label = "boardSkeletonAlpha"
+    )
+    Box(
+        modifier = modifier
+            .height(26.dp)
+            .width(64.dp)
+            .alpha(alpha)
+            .clip(RoundedCornerShape(8.dp))
+            .background(AppColors.Faint.copy(alpha = 0.5f))
+    )
+}
+
 @Composable
 private fun LiveNumberCard(
     label: String,
@@ -228,14 +268,18 @@ private fun LiveNumberCard(
             modifier = modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            Text(
-                value ?: if (loaded) "—" else "…",
-                color = Color.White,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            if (!loaded && value == null) {
+                LoadingBar()
+            } else {
+                Text(
+                    value ?: "—",
+                    color = Color.White,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
             Text(
                 label,
                 color = AppColors.Accent,
@@ -269,7 +313,9 @@ internal fun ServerStatusBoard(
     // Probe reale all'apertura (tri-stato: null = controllo in corso).
     // Niente piu wsProbe manuale: prima diceva offline finche' non premevi.
     var online by remember { mutableStateOf<Boolean?>(null) }
-    LaunchedEffect(settings.gatewayUrl) {
+    // Ricarica manuale numeri: alza il nonce, la chiave lo rifa partire.
+    var reloadNonce by remember { mutableStateOf(0) }
+    LaunchedEffect(settings.gatewayUrl, reloadNonce) {
         val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
         online = runCatching {
             val (code, _) = httpGetResponse(resolveHermesUrl(settings, "/v1/capabilities"), secret)
@@ -297,7 +343,8 @@ internal fun ServerStatusBoard(
                 chats = chatsDef.await(),
                 gpuMode = gpuDef.await()?.first,
                 gpuJobs = gpuDef.await()?.second,
-                loaded = true
+                loaded = true,
+                loadedAt = System.currentTimeMillis()
             )
         }
     }
@@ -351,6 +398,27 @@ internal fun ServerStatusBoard(
             )
             TextButton(onClick = { showCustomize = !showCustomize }) {
                 Text(if (showCustomize) "Fine" else "Personalizza", color = AppColors.Accent)
+            }
+        }
+        // Freschezza dati sotto il titolo (riga sua: niente piu titolo
+        // schiacciato) + ricarica manuale dei numeri.
+        if (live.loaded && live.loadedAt != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "aggiornato ${formatBoardTime(live.loadedAt!!)}",
+                    color = AppColors.Faint,
+                    fontSize = AppleType.Footnote,
+                    maxLines = 1
+                )
+                TextButton(onClick = { reloadNonce++ }) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Ricarica", color = AppColors.Accent, fontSize = AppleType.Footnote)
+                }
             }
         }
         if (showCustomize) {
@@ -438,10 +506,20 @@ private fun DashboardHero(
         failedChecks > 0 -> "degraded"
         else -> "ok"
     }
+    // Tinta semantica su tutta la card (non solo il puntino): ok/degraded/
+    // checking/offline si distinguono a colpo d'occhio, rosso solo se grave.
+    val wash = when (status) {
+        "ok" -> AppColors.Success
+        "degraded" -> AppColors.Warning
+        "checking" -> AppColors.Faint
+        else -> AppColors.Error
+    }
     AppleGlass(shape = RoundedCornerShape(20.dp)) {
         Row(
             modifier = modifier
                 .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(wash.copy(alpha = 0.08f))
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -450,14 +528,7 @@ private fun DashboardHero(
                 modifier = Modifier
                     .size(12.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(
-                        when (status) {
-                            "ok" -> AppColors.Success
-                            "degraded" -> AppColors.Warning
-                            "checking" -> AppColors.Faint
-                            else -> AppColors.Error
-                        }
-                    )
+                    .background(wash)
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -501,11 +572,13 @@ private fun QuickChips(onOpenTab: (Tab) -> Unit, modifier: Modifier = Modifier) 
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
+                .horizontalScroll(rememberScrollState())
+                .padding(end = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             dashboardEntries().forEach { entry ->
-                AppleGlass(shape = RoundedCornerShape(14.dp)) {
+                // Altezza minima 48dp: il target tocco e' la chip intera.
+                AppleGlass(shape = RoundedCornerShape(14.dp), modifier = Modifier.heightIn(min = 48.dp)) {
                     Row(
                         modifier = Modifier
                             .clickable { onOpenTab(entry.tab) }
@@ -515,7 +588,7 @@ private fun QuickChips(onOpenTab: (Tab) -> Unit, modifier: Modifier = Modifier) 
                     ) {
                         Icon(
                             entry.tab.icon,
-                            contentDescription = null,
+                            contentDescription = entry.tab.label,
                             tint = AppColors.Accent,
                             modifier = Modifier.size(18.dp)
                         )
@@ -708,8 +781,19 @@ internal fun CustomizePanel(
                 Text("AGGIUNGI WIDGET", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("link" to "Collegamento", "probe" to "Sonda", "note" to "Promemoria").forEach { (kind, label) ->
-                        TextButton(onClick = { newKind = kind }) {
-                            Text(label, color = if (newKind == kind) AppColors.Accent else AppColors.Faint, fontWeight = FontWeight.SemiBold)
+                        val selected = newKind == kind
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            TextButton(onClick = { newKind = kind }) {
+                                Text(label, color = if (selected) AppColors.Accent else AppColors.Faint, fontWeight = FontWeight.SemiBold)
+                            }
+                            // Indicatore tab: il selezionato si vede, non si indovina.
+                            Box(
+                                modifier = Modifier
+                                    .width(24.dp)
+                                    .height(2.dp)
+                                    .clip(RoundedCornerShape(1.dp))
+                                    .background(if (selected) AppColors.Accent else Color.Transparent)
+                            )
                         }
                     }
                 }
@@ -719,8 +803,22 @@ internal fun CustomizePanel(
                         Text("Sezione", color = AppColors.Muted, fontSize = 13.sp)
                         androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Tab.entries.filter { it != Tab.Chat }.forEach { tab ->
-                                TextButton(onClick = { newTab = tab }) {
-                                    Text(tab.label, color = if (newTab == tab) AppColors.Accent else AppColors.Faint)
+                                val selected = newTab == tab
+                                // Pill selezionabile: sembra un bottone perche' lo e'.
+                                Box(
+                                    modifier = Modifier
+                                        .heightIn(min = 48.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (selected) AppColors.Accent.copy(alpha = 0.18f) else Color.Transparent)
+                                        .border(
+                                            BorderStroke(0.5.dp, if (selected) AppColors.Accent else AppColors.Border),
+                                            RoundedCornerShape(12.dp)
+                                        )
+                                        .clickable { newTab = tab }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(tab.label, color = if (selected) AppColors.Accent else AppColors.Faint, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                                 }
                             }
                         }
@@ -758,7 +856,8 @@ internal fun CustomizePanel(
                     Text(urlError, color = AppColors.Error, fontSize = AppleType.Footnote)
                 }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onDismiss) { Text("Chiudi", color = AppColors.Accent) }
+                // Una sola uscita (la X in alto + "Fine" nel titolo): il
+                // secondo "Chiudi" confondeva, "Ripristina" resta.
                 TextButton(onClick = {
                     orderState.clear()
                     orderState.addAll(defaultDashboardOrder())

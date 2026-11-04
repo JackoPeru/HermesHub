@@ -97,6 +97,36 @@ class DashboardWidgetsTest {
     }
 
     @Test
+    fun `board time formats HHmm`() {
+        val millis = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 21)
+            set(java.util.Calendar.MINUTE, 14)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        assertEquals("21:14", formatBoardTime(millis))
+    }
+
+    @Test
+    fun `short host and path collapse technical strings`() {
+        assertEquals("100.94.223.14:8642", shortHost("http://100.94.223.14:8642"))
+        assertEquals("hermes.local", shortHost("https://hermes.local/v1/x"))
+        assertEquals("media", shortPath("/data/hermes/media"))
+        assertEquals("", shortPath(""))
+    }
+
+    @Test
+    fun `home suggestions are actionable starters`() {
+        val suggestions = homeSuggestions()
+        assertEquals(3, suggestions.size)
+        suggestions.forEach {
+            assertTrue(it.label.isNotBlank())
+            assertTrue(it.prompt.isNotBlank())
+        }
+        assertTrue(suggestions.map { it.label }.toSet().size == 3)
+    }
+
+    @Test
     fun `probe returns code or null`() {
         val server = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/") { exchange ->

@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +24,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -50,6 +55,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import com.nemoclaw.chat.ui.apple.AppleGlass
 import com.nemoclaw.chat.ui.apple.AppleType
 import com.nemoclaw.chat.ui.apple.AvatarRing
 import com.nemoclaw.chat.ui.apple.BubbleBackground
@@ -202,6 +208,29 @@ private fun HeroBotMenu(picker: ChatIdentityPicker, expanded: Boolean, onDismiss
     }
 }
 
+/** Starter della home (etichetta, icona, prompt): niente piu vuoto sotto il
+ *  titolo, un tap e si parte. Puro/testabile. */
+internal data class HomeSuggestion(val label: String, val icon: String, val prompt: String)
+
+internal fun homeSuggestions(): List<HomeSuggestion> = listOf(
+    HomeSuggestion(
+        "Controlla il server",
+        "refresh",
+        "Dammi lo stato del server: salute, GPU, job attivi e cosa guardare."
+    ),
+    HomeSuggestion(
+        "Cosa sai fare?",
+        "info",
+        "Cosa sai fare? Rispondi in breve con esempi."
+    ),
+    HomeSuggestion(
+        "Riprendi il filo",
+        "search",
+        "Riassumi le ultime conversazioni e dimmi da dove riprendere."
+    )
+)
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun EmptyState(
     onPrompt: (String) -> Unit,
@@ -243,14 +272,16 @@ internal fun EmptyState(
                         .clickable(enabled = onOpenSidebar != null) { onOpenSidebar?.invoke() }
                 )
                 var botMenuOpen by remember { mutableStateOf(false) }
-                Column(
+                val picker = identityPicker
+                // Tendina ancorata a titolo + stato: si apre sotto entrambi,
+                // non piu sopra la riga "Server online".
+                Box(
                     modifier = Modifier
                         .padding(start = 12.dp)
                         .weight(1f)
                 ) {
-                    // Titolo-bottone invisibile: stesso testo, apre la tendina bot.
-                    val picker = identityPicker
-                    Box {
+                    Column {
+                        // Titolo-bottone invisibile: stesso testo, apre la tendina bot.
                         Text(
                             text = "Hermes Hub",
                             color = Color.White,
@@ -263,14 +294,14 @@ internal fun EmptyState(
                                 } else Modifier
                             )
                         )
-                        if (picker != null) {
-                            HeroBotMenu(picker = picker, expanded = botMenuOpen, onDismiss = { botMenuOpen = false })
-                        }
+                        ServerStatusLine(
+                            text = if (serverOnline) "Server online" else "Server offline",
+                            online = serverOnline
+                        )
                     }
-                    ServerStatusLine(
-                        text = if (serverOnline) "Server online" else "Server offline",
-                        online = serverOnline
-                    )
+                    if (picker != null) {
+                        HeroBotMenu(picker = picker, expanded = botMenuOpen, onDismiss = { botMenuOpen = false })
+                    }
                 }
                 // Avatar = % contesto; tap = menu rapido manager (niente profilo).
                 var avatarMenuOpen by remember { mutableStateOf(false) }
@@ -356,6 +387,54 @@ internal fun EmptyState(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth()
                 )
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = "INIZIA DA QUI",
+                    color = AppColors.Accent,
+                    fontSize = AppleType.Footnote,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    homeSuggestions().forEach { suggestion ->
+                        // Altezza minima 48dp: il target tocco e' la chip intera.
+                        AppleGlass(
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            onClick = { onPrompt(suggestion.prompt) }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    when (suggestion.icon) {
+                                        "info" -> Icons.Rounded.Info
+                                        "search" -> Icons.Rounded.Search
+                                        else -> Icons.Rounded.Refresh
+                                    },
+                                    contentDescription = null,
+                                    tint = AppColors.Accent,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    suggestion.label,
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }

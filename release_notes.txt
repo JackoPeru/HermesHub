@@ -1,7 +1,8 @@
-Hermes Hub 0.6.330 (dashboard onesta + home)
+Hermes Hub 0.6.331 (UI glanceable + starter + feedback)
 
-- L'hero della dashboard verifica davvero il server all'apertura (niente piu falso offline).
-- Topbar con tasto home "Torna alla dashboard" al posto del rimando alla chat.
+- Dashboard a colpo d'occhio: numeri grandi, skeleton in caricamento, tinta semantica di stato, "aggiornato + Ricarica", schede tecniche collassate dietro tap.
+- Home con starter "Inizia da qui" (3 azioni in un tap), sfondo che non taglia piu i testi, ripple al tocco.
+- Personalizza con tab indicati e pill selezionabili, chip e controlli a 48dp.
 - Suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.330-android.apk (Android, versionCode 334), NemoclawChat.Windows_0.6.330.0_x64.msix (x64) e HermesHub-0.6.330-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.331-android.apk (Android, versionCode 335), NemoclawChat.Windows_0.6.331.0_x64.msix (x64) e HermesHub-0.6.331-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

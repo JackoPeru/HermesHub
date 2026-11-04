@@ -20,7 +20,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,7 +31,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -123,6 +121,14 @@ fun BubbleBackground(modifier: Modifier = Modifier) {
         val amber = Color(0xFFF5A524)
         val rimLight = Color(0xFFFFD694)
         val body = Color(0xFF111114)
+        // Le curve restano vive in alto e in basso ma svaniscono nella fascia
+        // centrale (dove scorre il testo): stesso fascino, zero collisioni.
+        fun bandBrush(color: Color): Brush = Brush.verticalGradient(
+            0.0f to color,
+            0.34f to color.copy(alpha = 0f),
+            0.66f to color.copy(alpha = 0f),
+            1.0f to color
+        )
 
         // --- Bolla alta: il bordo entra in alto a 28% ed esce a destra a 24% ---
         // Curva quadratica in frazioni: identica su ogni aspect (niente cerchi).
@@ -160,10 +166,10 @@ fun BubbleBackground(modifier: Modifier = Modifier) {
             )
         }
         // alone a strati (finto blur), poi anima luminosa
-        drawPath(path = topPath, color = amber.copy(alpha = 0.03f * breathe), style = Stroke(width = h * 0.008f))
-        drawPath(path = topPath, color = amber.copy(alpha = 0.08f * breathe), style = Stroke(width = h * 0.0035f))
-        drawPath(path = topPath, color = amber.copy(alpha = 0.25f * breathe), style = Stroke(width = h * 0.0016f))
-        drawPath(path = topPath, color = rimLight.copy(alpha = 0.85f * breathe), style = Stroke(width = (1.6.dp).toPx()))
+        drawPath(path = topPath, brush = bandBrush(amber.copy(alpha = 0.03f * breathe)), style = Stroke(width = h * 0.008f))
+        drawPath(path = topPath, brush = bandBrush(amber.copy(alpha = 0.08f * breathe)), style = Stroke(width = h * 0.0035f))
+        drawPath(path = topPath, brush = bandBrush(amber.copy(alpha = 0.25f * breathe)), style = Stroke(width = h * 0.0016f))
+        drawPath(path = topPath, brush = bandBrush(rimLight.copy(alpha = 0.85f * breathe)), style = Stroke(width = (1.6.dp).toPx()))
         // bacio di luce sul bordo dal lato del logo: e il logo che illumina la bolla.
         drawCircle(
             brush = Brush.radialGradient(
@@ -221,10 +227,10 @@ fun BubbleBackground(modifier: Modifier = Modifier) {
                 w + 4f, h * (0.525f + dyBottom)
             )
         }
-        drawPath(path = botPath, color = amber.copy(alpha = 0.04f * breathe), style = Stroke(width = h * 0.008f))
-        drawPath(path = botPath, color = amber.copy(alpha = 0.10f * breathe), style = Stroke(width = h * 0.0035f))
-        drawPath(path = botPath, color = amber.copy(alpha = 0.30f * breathe), style = Stroke(width = h * 0.0016f))
-        drawPath(path = botPath, color = rimLight.copy(alpha = 0.90f * breathe), style = Stroke(width = (1.6.dp).toPx()))
+        drawPath(path = botPath, brush = bandBrush(amber.copy(alpha = 0.04f * breathe)), style = Stroke(width = h * 0.008f))
+        drawPath(path = botPath, brush = bandBrush(amber.copy(alpha = 0.10f * breathe)), style = Stroke(width = h * 0.0035f))
+        drawPath(path = botPath, brush = bandBrush(amber.copy(alpha = 0.30f * breathe)), style = Stroke(width = h * 0.0016f))
+        drawPath(path = botPath, brush = bandBrush(rimLight.copy(alpha = 0.90f * breathe)), style = Stroke(width = (1.6.dp).toPx()))
         // bacio di luce sul bordo dal lato del logo.
         drawCircle(
             brush = Brush.radialGradient(
@@ -270,11 +276,8 @@ fun AppleGlass(
         .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f)), shape)
         .then(modifier)
     if (onClick != null) {
-        Box(modifier = base.clickable(
-            interactionSource = remember { MutableInteractionSource() },
-            indication = null,
-            onClick = onClick
-        )) { content() }
+        // Ripple di sistema: il tap deve "rispondere" (niente piu tocchi morti).
+        Box(modifier = base.clickable(onClick = onClick)) { content() }
     } else {
         Box(modifier = base) { content() }
     }
@@ -297,11 +300,7 @@ fun AvatarRing(
             .clip(CircleShape)
             .background(Color(0xFF1A1D23))
             .border(BorderStroke(1.5.dp, AppColors.Accent.copy(alpha = 0.75f)), CircleShape)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
+            .clickable(onClick = onClick)
             .then(
                 if (contentDescription != null) {
                     Modifier.semantics(mergeDescendants = true) {

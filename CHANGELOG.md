@@ -2,9 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
-## 0.6.330 - 2026-11-03
+## 0.6.331 - 2026-11-04
 
-- Dashboard: stato reale con probe automatica, tasto home in topbar.
+- Dashboard glanceable: numeri grandi, skeleton, tinta semantica, timestamp+ricarica, schede tecniche dietro tap.
+- Home con starter "Inizia da qui", sfondo disciplinato, ripple, tab/chip veri, target 48dp.
 - Suite verdi.
 
 ## 0.6.329 - 2026-11-03
