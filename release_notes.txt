@@ -1,8 +1,8 @@
-Hermes Hub 0.6.331 (UI glanceable + starter + feedback)
+Hermes Hub 0.6.332 (Windows allineato, chat invariata)
 
-- Dashboard a colpo d'occhio: numeri grandi, skeleton in caricamento, tinta semantica di stato, "aggiornato + Ricarica", schede tecniche collassate dietro tap.
-- Home con starter "Inizia da qui" (3 azioni in un tap), sfondo che non taglia piu i testi, ripple al tocco.
-- Personalizza con tab indicati e pill selezionabili, chip e controlli a 48dp.
-- Suite Android verde, python verdi, consistency 28/28.
+- Pagina Server Windows come la dashboard Android: hero tri-stato con tinta semantica, numeri live BOT/CRON/CHAT/GPU, aggiornato+Ricarica, URL tecnici dietro Expander.
+- Sezione Immagini Windows come Android: browse cartelle con breadcrumb, fail-soft, stato vuoto guidato, Nuova immagine (apre la chat) e Scarica in Download.
+- La chat Windows resta dov'e e come'era.
+- Suite Android verde, python verdi, consistency 28/28, build Windows x64 a zero warning.
 
-Asset: HermesHub-0.6.331-android.apk (Android, versionCode 335), NemoclawChat.Windows_0.6.331.0_x64.msix (x64) e HermesHub-0.6.331-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.332-android.apk (Android, versionCode 336), NemoclawChat.Windows_0.6.332.0_x64.msix (x64) e HermesHub-0.6.332-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

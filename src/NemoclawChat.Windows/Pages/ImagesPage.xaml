@@ -6,6 +6,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:local="using:NemoclawChat_Windows.Pages"
+    xmlns:services="using:NemoclawChat_Windows.Services"
     mc:Ignorable="d">
 
     <Grid Background="{StaticResource AppBackgroundBrush}">
@@ -36,6 +37,9 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <StackPanel Spacing="6">
@@ -44,6 +48,7 @@
                         </StackPanel>
 
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                            <Button Click="NewImage_Click" Content="Nuova immagine" Style="{StaticResource PrimaryButtonStyle}" />
                             <Button Click="Refresh_Click" Content="Aggiorna feed" Style="{StaticResource TextButtonStyle}" />
                         </StackPanel>
 
@@ -70,6 +75,68 @@
                             Grid.ColumnSpan="2"
                             Foreground="{StaticResource MutedTextBrush}"
                             Text="Pronto." />
+
+                        <StackPanel
+                            Grid.Row="3"
+                            Grid.ColumnSpan="2"
+                            Spacing="8">
+                            <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="PERCORSO" />
+                            <StackPanel x:Name="BreadcrumbPanel" Orientation="Horizontal" Spacing="4" />
+                        </StackPanel>
+
+                        <StackPanel
+                            Grid.Row="4"
+                            Grid.ColumnSpan="2"
+                            Spacing="8">
+                            <TextBlock Style="{StaticResource FormSectionHeaderStyle}" Text="CARTELLE" />
+                            <ListView
+                                x:Name="FolderListView"
+                                IsItemClickEnabled="True"
+                                ItemClick="FolderListView_ItemClick"
+                                SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="services:ImageBrowseFolder">
+                                        <Grid ColumnSpacing="12" Padding="0,10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border
+                                                Width="40"
+                                                Height="40"
+                                                Background="{StaticResource AccentSubtleBrush}"
+                                                BorderBrush="#44F5A524"
+                                                BorderThickness="1"
+                                                CornerRadius="12">
+                                                <FontIcon FontSize="18" Glyph="&#xE8B7;" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                VerticalAlignment="Center"
+                                                Foreground="White"
+                                                FontWeight="SemiBold"
+                                                MaxLines="1"
+                                                Text="{x:Bind Name}"
+                                                TextTrimming="CharacterEllipsis" />
+                                            <FontIcon Grid.Column="2" FontSize="14" Glyph="&#xE76C;" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
+
+                        <StackPanel
+                            x:Name="EmptyHintPanel"
+                            Grid.Row="5"
+                            Grid.ColumnSpan="2"
+                            Spacing="8"
+                            Visibility="Collapsed">
+                            <TextBlock Foreground="White" FontSize="17" FontWeight="SemiBold" Text="Niente qui" />
+                            <TextBlock Foreground="{StaticResource MutedTextBrush}" Text="Entra in una cartella o genera immagini con Hermes." TextWrapping="Wrap" />
+                            <TextBlock x:Name="EmptyPathText" Style="{StaticResource CaptionStyle}" TextWrapping="Wrap" />
+                            <Button Click="NewImage_Click" Content="Genera con Hermes" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left" />
+                        </StackPanel>
                     </Grid>
 
                 <Grid Grid.Row="2" ColumnSpacing="20" RowSpacing="20">
@@ -172,13 +239,15 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Button
                                     HorizontalAlignment="Stretch"
                                     Click="FullScreen_Click"
                                     Content="Schermo intero"
                                     Style="{StaticResource GhostButtonStyle}" />
-                                <Button Grid.Column="1" Click="CopyPath_Click" Content="Copia path" Style="{StaticResource TextButtonStyle}" />
+                                <Button Grid.Column="1" Click="Download_Click" Content="Scarica" Style="{StaticResource TextButtonStyle}" />
+                                <Button Grid.Column="2" Click="CopyPath_Click" Content="Copia path" Style="{StaticResource TextButtonStyle}" />
                             </Grid>
                     </StackPanel>
                 </Grid>

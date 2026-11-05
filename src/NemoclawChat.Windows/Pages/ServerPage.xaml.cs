@@ -18,11 +18,18 @@ public sealed partial class ServerPage : Page
         InitializeComponent();
         Unloaded += (_, _) => { _logFilterDebounce?.Cancel(); _logFilterDebounce?.Dispose(); _logFilterDebounce = null; };
         _ = LoadServerSnapshotAsync();
+        _ = LoadBoardAsync();
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e)
     {
         await LoadServerSnapshotAsync();
+        await LoadBoardAsync();
+    }
+
+    private async void ReloadBoard_Click(object sender, RoutedEventArgs e)
+    {
+        await LoadBoardAsync();
     }
 
     private async void TestGateway_Click(object sender, RoutedEventArgs e)
@@ -144,15 +151,179 @@ public sealed partial class ServerPage : Page
     {
         _settings = AppSettingsStore.Load();
         var snapshot = await GatewayService.GetServerSnapshotAsync(_settings);
-        GatewayText.Text = snapshot.Gateway;
+        // Valori corti sempre visibili, URL interi dietro gli Expander (come Android).
+        GatewayText.Text = ShortHost(snapshot.Gateway);
+        GatewayFullText.Text = $"Gateway: {snapshot.Gateway}";
         GatewayDetailText.Text = $"Health: {GatewayService.HermesRoot(_settings)}/health";
         GatewayWsText.Text = $"{_settings.GatewayUrl.TrimEnd('/')}/capabilities";
         ModelText.Text = snapshot.Model;
         ProviderText.Text = snapshot.ProviderDetail;
-        InferenceText.Text = $"{snapshot.InferenceEndpoint}\nCartella video Hermes: {(string.IsNullOrWhiteSpace(snapshot.VideoLibraryPath) ? "in attesa di sync server" : snapshot.VideoLibraryPath)}";
+        InferenceText.Text = ShortHost(snapshot.InferenceEndpoint);
+        InferenceFullText.Text = snapshot.InferenceEndpoint;
+        VideoPathText.Text = $"Cartella video Hermes: {(string.IsNullOrWhiteSpace(snapshot.VideoLibraryPath) ? "in attesa di sync server" : snapshot.VideoLibraryPath)}";
         PolicyText.Text = snapshot.Policy;
         StatusText.Text = snapshot.StatusMessage;
         await RefreshControlAsync();
+    }
+
+    /// <summary>
+    /// Solo host:porta ("tutto ok?"), l'URL intero resta dietro il tap.
+    /// </summary>
+    private static string ShortHost(string url)
+    {
+        try
+        {
+            var uri = new Uri(url);
+            var host = uri.Host;
+            if (!uri.IsDefaultPort) host += $":{uri.Port}";
+            return host;
+        }
+        catch (UriFormatException)
+        {
+            return url.Length <= 24 ? url : url[..24];
+        }
+    }
+
+    /// <summary>
+    /// Hero + numeri live come Android: probe tri-stato, tinta semantica,
+    /// timestamp e ricarica manuale. La chat (HomePage) non si tocca.
+    /// </summary>
+    private async Task LoadBoardAsync()
+    {
+        PaintHero(null, 0, null);
+        var settings = AppSettingsStore.Load();
+        bool? online = null;
+        int? bots = null;
+        int? cronActive = null;
+        int? chats = null;
+        string? gpuMode = null;
+        int? gpuJobs = null;
+        var failedChecks = 0;
+        try
+        {
+            var probeTask = Task.Run(async () =>
+            {
+                try
+                {
+                    var result = await GatewayService.SendHermesRequestAsync(settings, HttpMethod.Get, "/v1/capabilities");
+                    if (result.StartsWith("HTTP ", StringComparison.Ordinal))
+                    {
+                        var codeText = result.Length >= 8 ? result.Substring(5, 3) : string.Empty;
+                        return int.TryParse(codeText, out var code) && code is >= 200 and <= 399;
+                    }
+                    return true;
+                }
+                catch (Exception)
+                {
+                    return false;
+                }
+            });
+            var botsTask = Task.Run(async () =>
+            {
+                try { return (int?)((await HermesBotConnectionService.LoadAllRostersAsync(settings)).Items.Count); }
+                catch (Exception) { return null; }
+            });
+            var cronTask = Task.Run(async () =>
+            {
+                try { return (int?)((await GatewayService.LoadCronJobsAsync(settings)).Jobs.Count(job => job.Enabled)); }
+                catch (Exception) { return null; }
+            });
+            var chatsTask = Task.Run<int?>(() =>
+            {
+                try { return ChatArchiveStore.Load().Count; }
+                catch (Exception) { return null; }
+            });
+            var gpuTask = Task.Run(async () =>
+            {
+                try
+                {
+                    var (statusCode, statusBody) = await GatewayService.SendManagerRequestAsync(settings, HttpMethod.Get, "/status");
+                    string? mode = null;
+                    if (statusCode is >= 200 and <= 299)
+                    {
+                        using var statusDoc = JsonDocument.Parse(statusBody);
+                        if (statusDoc.RootElement.TryGetProperty("desired_mode", out var modeProp))
+                        {
+                            var raw = modeProp.GetString();
+                            if (!string.IsNullOrWhiteSpace(raw)) mode = raw;
+                        }
+                    }
+                    int? running = null;
+                    var (jobCode, jobBody) = await GatewayService.SendManagerRequestAsync(settings, HttpMethod.Get, "jobs?limit=300");
+                    if (jobCode is >= 200 and <= 299)
+                    {
+                        using var jobsDoc = JsonDocument.Parse(jobBody);
+                        if (jobsDoc.RootElement.TryGetProperty("jobs", out var jobs) && jobs.ValueKind == JsonValueKind.Array)
+                        {
+                            running = jobs.EnumerateArray().Count(job =>
+                                job.ValueKind == JsonValueKind.Object &&
+                                job.TryGetProperty("status", out var state) &&
+                                state.GetString() == "running");
+                        }
+                    }
+                    return (mode, running);
+                }
+                catch (Exception)
+                {
+                    return (null, (int?)null);
+                }
+            });
+            var diagnosticsTask = Task.Run(async () =>
+            {
+                try { return (await GatewayService.RunDiagnosticsAsync(settings)).Count(item => !item.Ok); }
+                catch (Exception) { return 0; }
+            });
+            await Task.WhenAll(probeTask, botsTask, cronTask, chatsTask, gpuTask, diagnosticsTask);
+            online = probeTask.Result;
+            bots = botsTask.Result;
+            cronActive = cronTask.Result;
+            chats = chatsTask.Result;
+            gpuMode = gpuTask.Result.mode;
+            gpuJobs = gpuTask.Result.running;
+            failedChecks = diagnosticsTask.Result;
+        }
+        catch (Exception)
+        {
+            online = false;
+        }
+        BotValueText.Text = bots?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "—";
+        CronValueText.Text = cronActive?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "—";
+        ChatValueText.Text = chats?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "—";
+        GpuValueText.Text = gpuMode ?? "—";
+        GpuDetailText.Text = gpuJobs.HasValue ? $"{gpuJobs} job" : "manager";
+        BoardTimeText.Text = $"aggiornato {DateTime.Now:HH:mm}";
+        PaintHero(online, failedChecks, string.IsNullOrWhiteSpace(_settings.Model) ? _settings.GatewayUrl : _settings.Model);
+    }
+
+    private void PaintHero(bool? online, int failedChecks, string? subtitle)
+    {
+        string title;
+        Windows.UI.Color tint;
+        if (online is null)
+        {
+            title = "Controllo stato…";
+            tint = Microsoft.UI.Colors.Gray;
+        }
+        else if (online == false)
+        {
+            title = "Server offline";
+            tint = Microsoft.UI.Colors.Red;
+        }
+        else if (failedChecks > 0)
+        {
+            title = $"Da guardare ({failedChecks})";
+            tint = Microsoft.UI.Colors.Orange;
+        }
+        else
+        {
+            title = "Tutto operativo";
+            tint = Microsoft.UI.Colors.LimeGreen;
+        }
+        HeroTitle.Text = title;
+        HeroSubtitle.Text = subtitle ?? string.Empty;
+        HeroDot.Fill = new SolidColorBrush(tint);
+        HeroCard.BorderBrush = new SolidColorBrush(tint);
+        HeroCard.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x14, tint.R, tint.G, tint.B));
     }
 
     private string SelectedService() => (ServiceBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "gateway";

@@ -2,10 +2,9 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
-## 0.6.331 - 2026-11-04
+## 0.6.332 - 2026-11-04
 
-- Dashboard glanceable: numeri grandi, skeleton, tinta semantica, timestamp+ricarica, schede tecniche dietro tap.
-- Home con starter "Inizia da qui", sfondo disciplinato, ripple, tab/chip veri, target 48dp.
+- Windows allineato ad Android: Server con hero tri-stato, numeri live e dettagli dietro tap; Immagini con browse cartelle, breadcrumb, stato vuoto guidato, Nuova immagine e Scarica. Chat invariata.
 - Suite verdi.
 
 ## 0.6.329 - 2026-11-03
