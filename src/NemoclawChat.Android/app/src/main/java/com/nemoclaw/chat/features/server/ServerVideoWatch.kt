@@ -45,6 +45,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -90,17 +91,35 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
     val videoUrl = remember(primaryVideoUrl, compatVideoUrl, useCompatPlayback) {
         if (useCompatPlayback && compatVideoUrl.isNotBlank()) compatVideoUrl else primaryVideoUrl
     }
-    val player = remember(videoUrl, apiKey) {
-        val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setDefaultRequestProperties(if (shouldAuthenticateHermesUrl(settings, videoUrl)) authHeaders(apiKey) else emptyMap())
-        ExoPlayer.Builder(context)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
-            .build()
-            .apply {
-                setMediaItem(MediaItem.fromUri(videoUrl.toUri()))
-                prepare()
-                playWhenReady = true
-            }
+    // Sondaggio sorgente prima del player: su 401/403 ExoPlayer gira a vuoto
+    // per sempre senza dirlo (era il "caricamento continuo" dei video).
+    var probeNonce by remember(item.id) { mutableIntStateOf(0) }
+    var sourceChecking by remember(item.id) { mutableStateOf(true) }
+    var sourceCode by remember(item.id) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(videoUrl, apiKey, probeNonce) {
+        sourceChecking = true
+        sourceCode = probeVideoSource(
+            videoUrl,
+            if (shouldAuthenticateHermesUrl(settings, videoUrl)) authHeaders(apiKey) else emptyMap()
+        )
+        sourceChecking = false
+    }
+    val authBlocked = !sourceChecking && isAuthPlaybackFailure(sourceCode)
+    val player = remember(videoUrl, apiKey, authBlocked) {
+        if (authBlocked) {
+            null
+        } else {
+            val dataSourceFactory = DefaultHttpDataSource.Factory()
+                .setDefaultRequestProperties(if (shouldAuthenticateHermesUrl(settings, videoUrl)) authHeaders(apiKey) else emptyMap())
+            ExoPlayer.Builder(context)
+                .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+                .build()
+                .apply {
+                    setMediaItem(MediaItem.fromUri(videoUrl.toUri()))
+                    prepare()
+                    playWhenReady = true
+                }
+        }
     }
     var feedback by remember(item.id) { mutableStateOf("") }
     var reaction by remember(item.id) { mutableStateOf("") }
@@ -115,8 +134,16 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
     val activity = remember(context) { context.findActivity() }
     FullscreenVideoOrientationEffect(enabled = fullScreen, activity = activity)
     DisposableEffect(player) {
+        val current = player ?: return@DisposableEffect onDispose {}
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
+                // 401/403 = chiave, non codec: niente fallback (fallirebbe uguale),
+                // messaggio subito invece del caricamento infinito.
+                val code = playbackHttpStatus(error)
+                if (isAuthPlaybackFailure(code)) {
+                    status = "Video non autorizzato (HTTP $code): aggiorna la chiave gateway nelle Impostazioni e riapri."
+                    return
+                }
                 if (!useCompatPlayback && compatVideoUrl.isNotBlank() && compatVideoUrl != primaryVideoUrl) {
                     useCompatPlayback = true
                     status = "Player video: ${error.errorCodeName}. Passo al proxy MP4 compatibile Hermes."
@@ -125,10 +152,10 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                 }
             }
         }
-        player.addListener(listener)
+        current.addListener(listener)
         onDispose {
-            player.removeListener(listener)
-            player.release()
+            current.removeListener(listener)
+            current.release()
         }
     }
     Box(modifier = Modifier.fillMaxSize()) {
@@ -150,27 +177,58 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
                         .background(Color.Black),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (!fullScreen) {
-                        AndroidView(
-                            modifier = Modifier.fillMaxSize(),
-                            factory = { viewContext -> createVideoPlayerView(viewContext, player) },
-                            update = { view ->
-                                view.player = player
+                    val activePlayer = player
+                    when {
+                        // Chiave rifiutata: messaggio operativo, mai spinner infinito.
+                        activePlayer == null && authBlocked -> {
+                            Column(
+                                modifier = Modifier.padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    "Video non autorizzato (HTTP ${sourceCode ?: "?"}).",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 16.sp
+                                )
+                                Text(
+                                    "La chiave gateway sul telefono non e' valida: aggiornala in Impostazioni e riprova.",
+                                    color = AppColors.Faint,
+                                    fontSize = 13.sp
+                                )
+                                TextButton(onClick = { probeNonce++ }) {
+                                    Text("Riprova", color = AppColors.Accent, fontWeight = FontWeight.SemiBold)
+                                }
                             }
-                        )
-                    }
-                    IconButton(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .background(Color.White.copy(alpha = 0.14f), CircleShape)
-                            .border(0.5.dp, Color.White.copy(alpha = 0.14f), CircleShape),
-                        onClick = {
-                            fullScreenControlsVisible = true
-                            fullScreen = true
                         }
-                    ) {
-                        Icon(Icons.Rounded.CropFree, contentDescription = "Schermo intero", tint = Color.White)
+                        activePlayer == null -> {
+                            Text("Verifico accesso al video…", color = AppColors.Faint, fontSize = 13.sp)
+                        }
+                        !fullScreen -> {
+                            AndroidView(
+                                modifier = Modifier.fillMaxSize(),
+                                factory = { viewContext -> createVideoPlayerView(viewContext, activePlayer) },
+                                update = { view ->
+                                    view.player = activePlayer
+                                }
+                            )
+                        }
+                    }
+                    if (activePlayer != null) {
+                        IconButton(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(8.dp)
+                                .background(Color.White.copy(alpha = 0.14f), CircleShape)
+                                .border(0.5.dp, Color.White.copy(alpha = 0.14f), CircleShape),
+                            onClick = {
+                                fullScreenControlsVisible = true
+                                fullScreen = true
+                            }
+                        ) {
+                            Icon(Icons.Rounded.CropFree, contentDescription = "Schermo intero", tint = Color.White)
+                        }
                     }
                 }
             }
@@ -266,7 +324,7 @@ internal fun VideoWatchScreen(context: Context, settings: AppSettings, item: Vid
             }
         }
 
-        if (fullScreen) {
+        if (fullScreen && player != null) {
             Dialog(
                 onDismissRequest = { fullScreen = false },
                 properties = DialogProperties(

@@ -2,9 +2,10 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
-## 0.6.333 - 2026-11-04
+## 0.6.334 - 2026-11-06
 
-- Prestazioni ridisegnate su Android e Windows: card con fatti (VRAM/temp GPU, clock/temp CPU...), tap per vista espansa con grafici, via la muraglia sempre visibile.
+- Job video GPU/Comfy: apertura diretta dal player (prima passavano dal browse immagini e non si aprivano mai).
+- Player video: su 401/403 messaggio chiaro invece di caricamento infinito.
 - Suite verdi.
 
 ## 0.6.329 - 2026-11-03

@@ -127,6 +127,28 @@ class DashboardWidgetsTest {
     }
 
     @Test
+    fun `job video resolves without image browse`() {
+        val parent = "/opt/hermes/media-output/videos/f020c037c4d0"
+        val mp4 = jobVideoItem(
+            "f020c037c4d0",
+            "$parent/7_f020c037c4d0_00001_.h264.mp4",
+            parent
+        )!!
+        assertEquals("job:f020c037c4d0:7_f020c037c4d0_00001_.h264.mp4", mp4.id)
+        assertTrue(mp4.mediaUrl.startsWith("/v1/media/7_f020c037c4d0_00001_.h264.mp4?root="))
+        assertTrue(mp4.mediaUrl.contains("root=%2Fopt%2Fhermes%2Fmedia-output%2Fvideos%2Ff020c037c4d0"))
+        assertEquals(mp4.mediaUrl, mp4.playbackUrl)
+        assertEquals("video/mp4", mp4.mimeType)
+        assertEquals(null, jobVideoItem("j", "$parent/poster.jpg", parent))
+        assertEquals(null, jobVideoItem("j", "", parent))
+        val webm = jobVideoItem("j", "$parent/clip.webm", parent)!!
+        assertEquals("video/webm", webm.mimeType)
+        val preferred = preferJobVideo(listOf(webm, mp4))
+        assertEquals(mp4.id, preferred!!.id)
+        assertEquals(null, preferJobVideo(emptyList()))
+    }
+
+    @Test
     fun `probe returns code or null`() {
         val server = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/") { exchange ->

@@ -59,6 +59,35 @@ internal fun isJobVideoFile(filename: String): Boolean {
     return ext in setOf("mp4", "webm", "mov", "mkv")
 }
 
+/**
+ * Item video diretto da un result_path del job: il browse immagini non
+ * restituisce mai gli mp4, quindi l'URL proxy si costruisce come fa il
+ * browser (id = nome file, root = cartella parent). Puro/testabile.
+ */
+internal fun jobVideoItem(jobId: String, fullPath: String, parent: String): VideoLibraryItem? {
+    val name = fullPath.substringAfterLast('/').substringAfterLast('\\')
+    if (name.isBlank() || !isJobVideoFile(name)) return null
+    val mediaUrl = "/v1/media/${encodeMediaPathSegment(name)}?root=${encodeMediaPathSegment(parent)}"
+    val ext = name.substringAfterLast('.', "").lowercase()
+    return VideoLibraryItem(
+        id = "job:$jobId:$name",
+        title = name.substringBeforeLast('.'),
+        filename = name,
+        mediaUrl = mediaUrl,
+        playbackUrl = mediaUrl,
+        thumbnailUrl = "",
+        path = fullPath,
+        mimeType = if (ext == "webm") "video/webm" else "video/mp4",
+        sizeBytes = 0L,
+        durationMs = 0L,
+        modifiedAt = System.currentTimeMillis()
+    )
+}
+
+/** Preferenza mp4 su webm/mov/mkv (nativo ovunque). Puro/testabile. */
+internal fun preferJobVideo(items: List<VideoLibraryItem>): VideoLibraryItem? =
+    items.firstOrNull { it.filename.endsWith(".mp4", ignoreCase = true) } ?: items.firstOrNull()
+
 internal fun gpuManagerBase(gatewayUrl: String): String {    val trimmed = gatewayUrl.trim().trimEnd('/')
     val noPath = trimmed.substringBefore("/v1").substringBefore("/api")
     return if (Regex(":[0-9]+$").containsMatchIn(noPath)) {
@@ -270,9 +299,17 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings, onPlayVideo
                 openStatus = "Nessun output ancora per questo job."
                 return@launch
             }
+            val parent = paths.first().substringBeforeLast('/', "").ifBlank { return@launch }
+            // Video PRIMA delle immagini: il browse sotto restituisce solo
+            // foto, gli mp4 non li vedrebbe mai (era il bug: i job video non
+            // si aprivano). URL diretto come il browser, il player verifica.
+            val jobVideos = paths.mapNotNull { jobVideoItem(job.optString("job_id", "?"), it, parent) }
+            preferJobVideo(jobVideos)?.let {
+                onPlayVideo(it)
+                return@launch
+            }
             val secret = withContext(Dispatchers.IO) { loadGatewaySecret(context) }
             val managerKey = withContext(Dispatchers.IO) { loadGpuAppSecret(context) }
-            val parent = paths.first().substringBeforeLast('/', "").ifBlank { return@launch }
             val browse = loadImageBrowse(settings, managerKey, parent)
             val byName = browse.items.associateBy { it.filename.substringAfterLast('/') }
             val matched = paths.mapNotNull { byName[it.substringAfterLast('/')] }

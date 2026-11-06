@@ -60,11 +60,14 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.AspectRatioFrameLayout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 
@@ -173,6 +176,43 @@ internal fun resolveVideoCompatUrl(settings: AppSettings, item: VideoLibraryItem
     }
     return resolveWorkspaceUrl(settings, raw)
 }
+
+/**
+ * Sondaggio leggero della sorgente video (primi byte, mai il file intero):
+ * il player da solo gira a vuoto su 401/403 senza dirlo. Ritorna il codice
+ * HTTP o null se il transport e' irraggiungibile. Puro/testabile (IO).
+ */
+internal suspend fun probeVideoSource(url: String, headers: Map<String, String>, timeoutMs: Int = 10000): Int? =
+    withContext(Dispatchers.IO) {
+        try {
+            val conn = URL(url).openConnection() as HttpURLConnection
+            try {
+                conn.connectTimeout = timeoutMs
+                conn.readTimeout = timeoutMs
+                conn.instanceFollowRedirects = true
+                conn.setRequestProperty("Range", "bytes=0-0")
+                headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }
+                conn.connect()
+                conn.responseCode.takeIf { it > 0 }
+            } finally {
+                conn.disconnect()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+/** Codice HTTP dentro un errore ExoPlayer (401/403 = chiave, non codec). Puro/testabile. */
+internal fun playbackHttpStatus(error: PlaybackException): Int? {
+    var cause: Throwable? = error.cause
+    while (cause != null) {
+        if (cause is HttpDataSource.InvalidResponseCodeException) return cause.responseCode
+        cause = cause.cause
+    }
+    return null
+}
+
+internal fun isAuthPlaybackFailure(code: Int?): Boolean = code == 401 || code == 403
 
 @Composable
 internal fun VideoFeedChip(label: String, selected: Boolean = false, onClick: () -> Unit) {

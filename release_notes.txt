@@ -1,8 +1,7 @@
-Hermes Hub 0.6.333 (prestazioni: lettura rapida + espansione)
+Hermes Hub 0.6.334 (video job + player onesto)
 
-- Ogni card prestazioni porta i suoi dati: GPU con VRAM e temperatura, CPU con clock e temperatura, rete con down/up, dischi con spazio e temp.
-- Tap sulla card = vista espansa con grafici e stat complete; secondo tap richiude. Niente piu muraglia di grafici sempre visibile.
-- Stesso comportamento su Android e Windows.
-- Suite Android verde, python verdi, consistency 28/28, build Windows x64 a zero warning.
+- Tap su job video finito: apre direttamente il video nel player (preferenza mp4), senza passare dal browse immagini che li escludeva.
+- Player: sonda la sorgente prima di partire; su 401/403 mostra "Video non autorizzato: aggiorna la chiave" con Riprova, mai piu spinner infinito.
+- Suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.333-android.apk (Android, versionCode 337), NemoclawChat.Windows_0.6.333.0_x64.msix (x64) e HermesHub-0.6.333-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.334-android.apk (Android, versionCode 338), NemoclawChat.Windows_0.6.334.0_x64.msix (x64) e HermesHub-0.6.334-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
