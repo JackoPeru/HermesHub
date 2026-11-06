@@ -1,8 +1,8 @@
-Hermes Hub 0.6.332 (Windows allineato, chat invariata)
+Hermes Hub 0.6.333 (prestazioni: lettura rapida + espansione)
 
-- Pagina Server Windows come la dashboard Android: hero tri-stato con tinta semantica, numeri live BOT/CRON/CHAT/GPU, aggiornato+Ricarica, URL tecnici dietro Expander.
-- Sezione Immagini Windows come Android: browse cartelle con breadcrumb, fail-soft, stato vuoto guidato, Nuova immagine (apre la chat) e Scarica in Download.
-- La chat Windows resta dov'e e come'era.
+- Ogni card prestazioni porta i suoi dati: GPU con VRAM e temperatura, CPU con clock e temperatura, rete con down/up, dischi con spazio e temp.
+- Tap sulla card = vista espansa con grafici e stat complete; secondo tap richiude. Niente piu muraglia di grafici sempre visibile.
+- Stesso comportamento su Android e Windows.
 - Suite Android verde, python verdi, consistency 28/28, build Windows x64 a zero warning.
 
-Asset: HermesHub-0.6.332-android.apk (Android, versionCode 336), NemoclawChat.Windows_0.6.332.0_x64.msix (x64) e HermesHub-0.6.332-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.333-android.apk (Android, versionCode 337), NemoclawChat.Windows_0.6.333.0_x64.msix (x64) e HermesHub-0.6.333-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

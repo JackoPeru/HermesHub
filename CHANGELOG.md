@@ -2,9 +2,9 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
-## 0.6.332 - 2026-11-04
+## 0.6.333 - 2026-11-04
 
-- Windows allineato ad Android: Server con hero tri-stato, numeri live e dettagli dietro tap; Immagini con browse cartelle, breadcrumb, stato vuoto guidato, Nuova immagine e Scarica. Chat invariata.
+- Prestazioni ridisegnate su Android e Windows: card con fatti (VRAM/temp GPU, clock/temp CPU...), tap per vista espansa con grafici, via la muraglia sempre visibile.
 - Suite verdi.
 
 ## 0.6.329 - 2026-11-03

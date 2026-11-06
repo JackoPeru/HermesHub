@@ -737,7 +737,9 @@ internal data class HardwareComponentView(
     val primaryValue: String,
     val utilizationPercent: Double,
     val temperatureC: Double?,
-    val stats: List<HardwareStatView>
+    val stats: List<HardwareStatView>,
+    // Fatti in evidenza sulla card (lettura rapida: VRAM, temp, clock...).
+    val facts: List<String> = emptyList()
 )
 
 internal data class HardwareStatView(

@@ -17,6 +17,7 @@ public sealed partial class HardwarePage : Page
     private HardwareSnapshot? _previous;
     private List<HardwareComponent> _components = [];
     private string _selectedComponentId = "cpu";
+    private string? _expandedComponentId;
     private bool _loading;
 
     public HardwarePage()
@@ -75,6 +76,10 @@ public sealed partial class HardwarePage : Page
         {
             _selectedComponentId = _components[0].Id;
         }
+        if (!_components.Any(item => item.Id == _expandedComponentId))
+        {
+            _expandedComponentId = null;
+        }
 
         foreach (var component in _components)
         {
@@ -104,12 +109,22 @@ public sealed partial class HardwarePage : Page
                 BorderThickness = new Thickness(1),
                 Background = selected ? AccentBrush(0.18) : PanelBrush(),
                 BorderBrush = selected ? AccentBrush() : UiBorderBrush(),
-                Content = ComponentCard(component)
+                Content = ComponentCard(component, _expandedComponentId == component.Id)
             };
             var componentId = component.Id;
             button.Click += (_, _) =>
             {
-                _selectedComponentId = componentId;
+                // Tap sulla card: seleziona + apre i dettagli con i grafici;
+                // secondo tap sulla stessa richiude (lettura rapida di base).
+                if (_selectedComponentId == componentId)
+                {
+                    _expandedComponentId = _expandedComponentId == componentId ? null : componentId;
+                }
+                else
+                {
+                    _selectedComponentId = componentId;
+                    _expandedComponentId = componentId;
+                }
                 RenderComponentList();
                 RenderDetail();
             };
@@ -117,13 +132,15 @@ public sealed partial class HardwarePage : Page
         }
     }
 
-    private static Grid ComponentCard(HardwareComponent component)
+    private static Grid ComponentCard(HardwareComponent component, bool expanded)
     {
         var root = new Grid { RowSpacing = 6 };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var title = new TextBlock
@@ -139,6 +156,15 @@ public sealed partial class HardwarePage : Page
             Foreground = AccentBrush(),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
         };
+        var chevron = new TextBlock
+        {
+            Text = expanded ? "\uE70D" : "\uE76C",
+            FontFamily = new FontFamily("Segoe MDL2 Assets"),
+            Foreground = MutedBrush(),
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 0, 0)
+        };
         var subtitle = new TextBlock
         {
             Text = component.Subtitle,
@@ -146,16 +172,30 @@ public sealed partial class HardwarePage : Page
             FontSize = 12,
             TextTrimming = Microsoft.UI.Xaml.TextTrimming.CharacterEllipsis
         };
+        // Fatti in evidenza (VRAM, temp, clock...): lettura rapida senza aprire.
+        var facts = new TextBlock
+        {
+            Text = component.Facts,
+            Foreground = MutedBrush(),
+            FontSize = 12,
+            TextTrimming = Microsoft.UI.Xaml.TextTrimming.CharacterEllipsis,
+            MaxLines = 1
+        };
         var bar = UsageBar(component.UtilizationPercent);
 
         Grid.SetColumn(value, 1);
+        Grid.SetColumn(chevron, 2);
         Grid.SetRow(subtitle, 1);
-        Grid.SetColumnSpan(subtitle, 2);
-        Grid.SetRow(bar, 2);
-        Grid.SetColumnSpan(bar, 2);
+        Grid.SetColumnSpan(subtitle, 3);
+        Grid.SetRow(facts, 2);
+        Grid.SetColumnSpan(facts, 3);
+        Grid.SetRow(bar, 3);
+        Grid.SetColumnSpan(bar, 3);
         root.Children.Add(title);
         root.Children.Add(value);
+        root.Children.Add(chevron);
         root.Children.Add(subtitle);
+        root.Children.Add(facts);
         root.Children.Add(bar);
         return root;
     }
@@ -186,9 +226,10 @@ public sealed partial class HardwarePage : Page
     {
         DetailPanel.Children.Clear();
         var component = _components.FirstOrDefault(item => item.Id == _selectedComponentId);
-        if (component is null)
+        // Dettagli + grafici solo a card espansa (tap): lettura rapida di base.
+        if (component is null || _expandedComponentId != component.Id)
         {
-            DetailPanel.Children.Add(MutedText("Nessun componente disponibile."));
+            DetailPanel.Children.Add(MutedText("Tocca una card per aprire dettagli e grafici."));
             return;
         }
 
@@ -344,7 +385,8 @@ public sealed partial class HardwarePage : Page
                 new("Frequenza", $"{FormatMhz(snapshot.CurrentMhz)} / max {FormatMhz(snapshot.MaxMhz)}"),
                 new("Processi", $"{snapshot.ProcessCount}"),
                 new("Uptime", FormatDuration(snapshot.UptimeSeconds))
-            ]));
+            ],
+            Facts: $"{FormatMhz(snapshot.CurrentMhz)} · {FormatTemp(cpuTemp)}"));
 
         components.Add(new HardwareComponent(
             "memory",
@@ -358,7 +400,8 @@ public sealed partial class HardwarePage : Page
                 new("Usata", FormatBytes(snapshot.MemoryUsedBytes)),
                 new("Totale", FormatBytes(snapshot.MemoryTotalBytes)),
                 new("Disponibile", FormatBytes(snapshot.MemoryAvailableBytes))
-            ]));
+            ],
+            Facts: $"{FormatBytes(snapshot.MemoryUsedBytes)} / {FormatBytes(snapshot.MemoryTotalBytes)}"));
 
         if (snapshot.SwapTotalBytes > 0)
         {
@@ -373,7 +416,8 @@ public sealed partial class HardwarePage : Page
                     new("Uso swap", $"{snapshot.SwapPercent:0}%"),
                     new("Usata", FormatBytes(snapshot.SwapUsedBytes)),
                     new("Totale", FormatBytes(snapshot.SwapTotalBytes))
-                ]));
+                ],
+                Facts: $"{FormatBytes(snapshot.SwapUsedBytes)} / {FormatBytes(snapshot.SwapTotalBytes)}"));
         }
 
         var seconds = previous is null ? 0 : Math.Max(0.1, (snapshot.Timestamp - previous.Timestamp).TotalSeconds);
@@ -392,7 +436,8 @@ public sealed partial class HardwarePage : Page
                 new("Invio", FormatBytesPerSecond(upRate)),
                 new("Totale ricevuto", FormatBytes(snapshot.NetworkBytesReceived)),
                 new("Totale inviato", FormatBytes(snapshot.NetworkBytesSent))
-            ]));
+            ],
+            Facts: $"↓ {FormatBytesPerSecond(downRate)} ↑ {FormatBytesPerSecond(upRate)}"));
 
         foreach (var gpu in snapshot.Gpus.OrderBy(item => item.Index))
         {
@@ -412,7 +457,8 @@ public sealed partial class HardwarePage : Page
                     new("VRAM", $"{FormatBytes(gpu.MemoryUsedBytes)} / {FormatBytes(gpu.MemoryTotalBytes)} ({memoryPercent:0}%)"),
                     new("Power", gpu.PowerDrawWatts is null || gpu.PowerLimitWatts is null ? "n/d" : $"{gpu.PowerDrawWatts:0} W / {gpu.PowerLimitWatts:0} W"),
                     new("Driver", gpu.DriverVersion)
-                ]));
+                ],
+                Facts: $"{FormatBytes(gpu.MemoryUsedBytes)} / {FormatBytes(gpu.MemoryTotalBytes)} · {FormatTemp(gpu.TemperatureC)}"));
         }
 
         var diskIndex = 0;
@@ -436,14 +482,15 @@ public sealed partial class HardwarePage : Page
                     new("Temperatura", FormatTemp(diskTemp)),
                     new("Partizioni", disk.PartitionsText),
                     new("Device", disk.DevicesText)
-                ]));
+                ],
+                Facts: $"{FormatBytes(disk.UsedBytes)} / {FormatBytes(disk.TotalBytes)} · {FormatTemp(diskTemp)}"));
             diskIndex++;
         }
 
         return components;
     }
 
-    private sealed record HardwareComponent(string Id, string Title, string Subtitle, string PrimaryValue, double UtilizationPercent, double? TemperatureC, IReadOnlyList<HardwareStat> Stats);
+    private sealed record HardwareComponent(string Id, string Title, string Subtitle, string PrimaryValue, double UtilizationPercent, double? TemperatureC, IReadOnlyList<HardwareStat> Stats, string Facts = "");
     private sealed record HardwareStat(string Label, string Value);
     private sealed record HardwareSample(double UtilizationPercent, double? TemperatureC);
     private sealed record DiskGroup(string Key, bool IsSsd, string Subtitle, long TotalBytes, long UsedBytes, long FreeBytes, double Percent, string PartitionsText, string DevicesText);

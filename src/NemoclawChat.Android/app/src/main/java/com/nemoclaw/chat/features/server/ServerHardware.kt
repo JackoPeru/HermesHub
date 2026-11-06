@@ -1,11 +1,13 @@
 package com.nemoclaw.chat
 
 import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import com.nemoclaw.chat.ui.apple.AppleMotion
 import com.nemoclaw.chat.ui.apple.AppleType
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +28,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.List
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.List
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.HorizontalDivider
@@ -103,6 +107,8 @@ internal fun HardwareScreen(context: Context, settings: AppSettings) {
     var snapshot by remember(settings) { mutableStateOf(HardwareSnapshot()) }
     var previous by remember(settings) { mutableStateOf<HardwareSnapshot?>(null) }
     var selectedComponentId by rememberSaveable { mutableStateOf("cpu") }
+    // Vista espansa: tap sulla card -> dettagli + grafici; secondo tap la richiude.
+    var expandedComponentId by rememberSaveable { mutableStateOf<String?>(null) }
     var history by remember { mutableStateOf<Map<String, List<HardwareHistoryPoint>>>(emptyMap()) }
     // Chiave MAI sul main: KeyStore bloccante, arriva in IO (l'effect
     // dipende gia' da apiKey e riparte all'arrivo).
@@ -147,11 +153,8 @@ internal fun HardwareScreen(context: Context, settings: AppSettings) {
 
     // Solo stile mock: sfondo nero puro, niente aurora, card scure 20dp + hairline 0.5dp.
     // Logica/dati/stati/stringhe/firme invariati sopra.
-    val tempView = temperatureViews.firstOrNull()
-    val tempSourceComponent = components.firstOrNull { it.temperatureC != null }
-    val tempHistoryValues = (tempSourceComponent?.let { history[it.id].orEmpty() }.orEmpty()).mapNotNull { it.temperatureC }
-    val tempCurrent = tempView?.currentC ?: tempSourceComponent?.temperatureC
     val online = snapshot.status != "unavailable"
+    val expandedComponent = components.firstOrNull { it.id == expandedComponentId }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -220,13 +223,15 @@ internal fun HardwareScreen(context: Context, settings: AppSettings) {
             }
         }
         item {
-            // Griglia 2 colonne di card scure 20dp dagli stessi components esistenti.
-            // Selezione invariata: tap -> selectedComponentId (stessa logica di HardwareComponentList).
+            // Griglia 2 colonne: ogni card porta i suoi fatti (VRAM, temp,
+            // clock...) per la lettura rapida. Tap = seleziona + espande i
+            // dettagli con i grafici; secondo tap richiude.
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 components.chunked(2).forEach { rowItems ->
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         rowItems.forEach { component ->
                             val selected = component.id == selectedComponent?.id
+                            val expanded = component.id == expandedComponentId
                             val points = history[component.id].orEmpty().map { it.utilizationPercent }
                             Column(
                                 modifier = Modifier
@@ -237,22 +242,45 @@ internal fun HardwareScreen(context: Context, settings: AppSettings) {
                                         BorderStroke(0.5.dp, if (selected) AppColors.Accent else AppColors.Border),
                                         RoundedCornerShape(20.dp)
                                     )
-                                    .clickable { selectedComponentId = component.id }
+                                    .clickable {
+                                        selectedComponentId = component.id
+                                        expandedComponentId = if (expanded) null else component.id
+                                    }
                                     .padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(RoundedCornerShape(11.dp))
-                                        .background(AppColors.Elevated),
-                                    contentAlignment = Alignment.Center
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Icon(hwIconForComponent(component.id, component.title), contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(20.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(RoundedCornerShape(11.dp))
+                                            .background(AppColors.Elevated),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(hwIconForComponent(component.id, component.title), contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(20.dp))
+                                    }
+                                    Text(component.title, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    Icon(
+                                        if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                        contentDescription = if (expanded) "Chiudi dettagli" else "Apri dettagli",
+                                        tint = AppColors.Faint,
+                                        modifier = Modifier.size(20.dp)
+                                    )
                                 }
-                                Text(component.title, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(component.primaryValue, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(component.subtitle, color = AppColors.Faint, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (component.facts.isNotEmpty()) {
+                                    Text(
+                                        component.facts.joinToString(" · "),
+                                        color = AppColors.Faint,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                                 if (component.id == "network") {
                                     HwMiniSparkline(values = points)
                                 } else {
@@ -273,66 +301,21 @@ internal fun HardwareScreen(context: Context, settings: AppSettings) {
             }
         }
         item {
-            // Card larga Temperatura: stessi dati esistenti (temperatureViews/history), valore ambra + area chart.
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(AppColors.Panel)
-                    .border(BorderStroke(0.5.dp, AppColors.Border), RoundedCornerShape(20.dp))
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+            // Vista espansa: dettagli + grafici del componente toccato, niente
+            // piu muraglia sempre visibile (la card Temperatura separata e
+            // sparita: i suoi dati vivono nei fatti e qui dentro).
+            AnimatedVisibility(
+                visible = expandedComponent != null,
+                enter = AppleMotion.enter(),
+                exit = AppleMotion.exit()
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(AppColors.Elevated),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Rounded.Speed, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(22.dp))
-                    }
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(tempView?.title ?: tempSourceComponent?.title ?: "Temperatura", color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(formatTemperature(tempCurrent), color = AppColors.Accent, fontSize = 28.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
+                if (expandedComponent != null) {
+                    HardwareComponentDetail(
+                        component = expandedComponent,
+                        history = history[expandedComponent.id].orEmpty(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
-                HwTempAreaChart(values = tempHistoryValues)
-            }
-        }
-        item {
-            // Riga "Dettagli": testi esistenti (DETTAGLI + subtitle componente), poi dettaglio esistente rivestito.
-            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(AppColors.Panel)
-                        .border(BorderStroke(0.5.dp, AppColors.Border), RoundedCornerShape(20.dp))
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(AppColors.Elevated),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Rounded.List, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(22.dp))
-                    }
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("DETTAGLI", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(selectedComponent?.subtitle ?: snapshot.message, color = AppColors.Faint, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-                HardwareComponentDetail(
-                    component = selectedComponent,
-                    history = selectedComponent?.let { history[it.id].orEmpty() }.orEmpty(),
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
         }
     }
@@ -500,47 +483,6 @@ private fun HwMiniSparkline(values: List<Double>) {
     }
 }
 
-@Composable
-private fun HwTempAreaChart(values: List<Double>) {
-    // Area chart: stessi valori history, griglia sobria. Niente assi numerate:
-    // il polling e variabile, le ore assolute sarebbero false.
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(modifier = Modifier.fillMaxWidth()) {
-            val chartH = 160.dp
-            Canvas(modifier = Modifier.fillMaxWidth().height(chartH)) {
-                    val w = size.width
-                    val h = size.height
-                    repeat(4) { index ->
-                        val y = h * index / 3f
-                        drawLine(color = AppColors.Border, start = Offset(0f, y), end = Offset(w, y), strokeWidth = 1f)
-                    }
-                    if (values.size >= 2) {
-                        val clamped = values.takeLast(120).map { it.coerceIn(0.0, 100.0) }
-                        val step = w / (clamped.size - 1).coerceAtLeast(1)
-                        val fill = Path().apply {
-                            moveTo(0f, h)
-                            clamped.forEachIndexed { i, v ->
-                                lineTo(step * i, h - (v / 100.0 * h).toFloat())
-                            }
-                            lineTo(w, h)
-                            close()
-                        }
-                        drawPath(path = fill, brush = Brush.verticalGradient(0f to AppColors.Accent.copy(alpha = 0.32f), 1f to AppColors.Accent.copy(alpha = 0.02f)))
-                        for (i in 1 until clamped.size) {
-                            val x1 = step * (i - 1)
-                            val x2 = step * i
-                            val y1 = h - (clamped[i - 1] / 100.0 * h).toFloat()
-                            val y2 = h - (clamped[i] / 100.0 * h).toFloat()
-                            drawLine(color = AppColors.Accent, start = Offset(x1, y1), end = Offset(x2, y2), strokeWidth = 3f, cap = StrokeCap.Round)
-                        }
-                    } else {
-                        drawLine(color = AppColors.Accent.copy(alpha = 0.7f), start = Offset(0f, h / 2f), end = Offset(w, h / 2f), strokeWidth = 3f, cap = StrokeCap.Round)
-                    }
-                }
-            }
-        }
-}
-
 internal fun buildHardwareComponents(
     snapshot: HardwareSnapshot,
     temperatures: List<HardwareTemperatureView>,
@@ -557,6 +499,7 @@ internal fun buildHardwareComponents(
         primaryValue = "${snapshot.cpuPercent.roundToInt().coerceIn(0, 100)}%",
         utilizationPercent = snapshot.cpuPercent,
         temperatureC = cpuTemp,
+        facts = listOf(formatMhz(snapshot.currentMhz), formatTemperature(cpuTemp)),
         stats = listOf(
             HardwareStatView("Utilizzo", "${snapshot.cpuPercent.roundToInt().coerceIn(0, 100)}%"),
             HardwareStatView("Temperatura", formatTemperature(cpuTemp)),
@@ -573,6 +516,7 @@ internal fun buildHardwareComponents(
         primaryValue = "${snapshot.memoryPercent.roundToInt().coerceIn(0, 100)}%",
         utilizationPercent = snapshot.memoryPercent,
         temperatureC = null,
+        facts = listOf("${snapshot.memoryUsedBytes.toReadableFileSize()} / ${snapshot.memoryTotalBytes.toReadableFileSize()}"),
         stats = listOf(
             HardwareStatView("Uso RAM", "${snapshot.memoryPercent.roundToInt().coerceIn(0, 100)}%"),
             HardwareStatView("Usata", snapshot.memoryUsedBytes.toReadableFileSize()),
@@ -588,6 +532,7 @@ internal fun buildHardwareComponents(
             primaryValue = "${snapshot.swapPercent.roundToInt().coerceIn(0, 100)}%",
             utilizationPercent = snapshot.swapPercent,
             temperatureC = null,
+            facts = listOf("${snapshot.swapUsedBytes.toReadableFileSize()} / ${snapshot.swapTotalBytes.toReadableFileSize()}"),
             stats = listOf(
                 HardwareStatView("Uso swap", "${snapshot.swapPercent.roundToInt().coerceIn(0, 100)}%"),
                 HardwareStatView("Usata", snapshot.swapUsedBytes.toReadableFileSize()),
@@ -603,6 +548,7 @@ internal fun buildHardwareComponents(
         primaryValue = "${(downRate + upRate).toReadableFileSize()}/s",
         utilizationPercent = networkPercent,
         temperatureC = temperatures.firstOrNull { it.title.startsWith("Ethernet") }?.currentC,
+        facts = listOf("↓ ${downRate.toReadableFileSize()}/s", "↑ ${upRate.toReadableFileSize()}/s"),
         stats = listOf(
             HardwareStatView("Ricezione", "${downRate.toReadableFileSize()}/s"),
             HardwareStatView("Invio", "${upRate.toReadableFileSize()}/s"),
@@ -623,6 +569,10 @@ internal fun buildHardwareComponents(
             primaryValue = "${gpu.utilizationPercent.roundToInt().coerceIn(0, 100)}%",
             utilizationPercent = gpu.utilizationPercent,
             temperatureC = gpu.temperatureC,
+            facts = listOf(
+                "${gpu.memoryUsedBytes.toReadableFileSize()} / ${gpu.memoryTotalBytes.toReadableFileSize()}",
+                formatTemperature(gpu.temperatureC)
+            ),
             stats = listOf(
                 HardwareStatView("Utilizzo GPU", "${gpu.utilizationPercent.roundToInt().coerceIn(0, 100)}%"),
                 HardwareStatView("Temperatura", formatTemperature(gpu.temperatureC)),
@@ -641,6 +591,10 @@ internal fun buildHardwareComponents(
             primaryValue = "${disk.percent.roundToInt().coerceIn(0, 100)}%",
             utilizationPercent = disk.percent,
             temperatureC = diskTemp,
+            facts = listOf(
+                "${disk.usedBytes.toReadableFileSize()} / ${disk.totalBytes.toReadableFileSize()}",
+                formatTemperature(diskTemp)
+            ),
             stats = listOf(
                 HardwareStatView("Spazio usato", "${disk.percent.roundToInt().coerceIn(0, 100)}%"),
                 HardwareStatView("Usato", disk.usedBytes.toReadableFileSize()),
