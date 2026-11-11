@@ -317,26 +317,8 @@ internal fun GpuComputeCard(context: Context, settings: AppSettings, onPlayVideo
                 openStatus = "File non trovati sul server."
                 return@launch
             }
-            val mp4 = matched.firstOrNull { isJobVideoFile(it.filename) && it.filename.endsWith(".mp4", ignoreCase = true) }
-                ?: matched.firstOrNull { isJobVideoFile(it.filename) }
-            if (mp4 != null) {
-                onPlayVideo(
-                    VideoLibraryItem(
-                        id = "job:${job.optString("job_id", "?")}:${mp4.filename}",
-                        title = mp4.title.ifBlank { mp4.filename },
-                        filename = mp4.filename,
-                        mediaUrl = mp4.mediaUrl,
-                        playbackUrl = mp4.mediaUrl,
-                        thumbnailUrl = "",
-                        path = mp4.path,
-                        mimeType = "video/mp4",
-                        sizeBytes = mp4.sizeBytes,
-                        durationMs = 0L,
-                        modifiedAt = mp4.modifiedAt
-                    )
-                )
-                return@launch
-            }
+            // I video sono gia gestiti sopra (jobVideoItem): qui arrivano
+            // solo immagini, il vecchio ramo mp4 non scattava mai.
             val images = matched.filter { isBrowsableImage(it.filename, it.mimeType) }
             if (images.isEmpty()) {
                 openStatus = "Nessun media apribile in questo job."

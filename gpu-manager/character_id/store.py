@@ -27,7 +27,7 @@ from . import (
     DEFAULT_LORA_STRENGTH,
     SCHEMA_VERSION,
 )
-from .validation import is_uuid, validate_default_mode, validate_lora_strength, validate_name
+from .validation import MAX_IMAGES, is_uuid, validate_default_mode, validate_lora_strength, validate_name
 
 DEFAULT_ROOT = "/opt/hermes/character-id"
 
@@ -494,6 +494,14 @@ class CharacterStore:
         asset_id = str(info.get("id") or uuid.uuid4())
         if "accepted" not in info:
             info = {**info, "accepted": "pending"}
+        # Cap anti-race: il check pre-upload in api.py non e atomico, due
+        # upload concorrenti sforerebbero. Qui dentro il lock e la verita.
+        with self._lock:
+            full = self._db.execute(
+                "SELECT COUNT(*) AS n FROM character_assets WHERE character_id=?", (character_id,)
+            ).fetchone()
+            if full and int(full["n"]) >= MAX_IMAGES:
+                raise ValueError(f"massimo {MAX_IMAGES} foto per personaggio")
         text_fields = {
             "original_path", "normalized_path", "sha256", "phash", "embedding_path",
             "accepted", "rejection_reason", "dataset_split",
@@ -583,7 +591,9 @@ class CharacterStore:
     def create_job(self, character_id: str, kind: str, version: int = 0) -> dict:
         if self.get_row(character_id) is None:
             raise KeyError(character_id)
-        if kind not in ("analyze", "train", "evaluate", "benchmark", "retrain"):
+        # "retrain" rimosso: la rotta /retrain riusa kind "train" (crearlo
+        # qui generava righe che nessun reaper/hold riconosceva).
+        if kind not in ("analyze", "train", "evaluate", "benchmark"):
             raise ValueError(f"job kind non valido: {kind}")
         jid = str(uuid.uuid4())
         now = _utcnow()

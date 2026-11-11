@@ -58,6 +58,7 @@ from character_id.training import (  # noqa: E402 (sys.path setup sopra)
     EVAL_SUITE,
     ckpt_path,
     ckpt_steps_in,
+    clear_own_lock,
     dataset_toml,
     default_eval_steps,
     pid_alive,
@@ -931,6 +932,156 @@ class TestBountyHardening(unittest.TestCase):
         node = workflow[sampler["model"][0]]
         self.assertEqual(node["class_type"], "LoraLoaderModelOnly")
         self.assertEqual(node["inputs"]["lora_name"], "sofia_v1.safetensors")
+
+
+class TestClearOwnLock(unittest.TestCase):
+    def test_clears_own_job_lock(self):
+        import tempfile
+        from character_id.training import write_lock
+        with tempfile.TemporaryDirectory() as tmp:
+            write_lock(tmp, {"job_id": "j1", "character_id": "c1", "pid": 1})
+            self.assertTrue(clear_own_lock(tmp, "j1", "c1"))
+            self.assertFalse((Path(tmp) / "training.lock").exists())
+
+    def test_keeps_foreign_lock(self):
+        import tempfile
+        from character_id.training import read_lock, write_lock
+        with tempfile.TemporaryDirectory() as tmp:
+            write_lock(tmp, {"job_id": "jA", "character_id": "cA", "pid": 1})
+            # Altro job, altro character: mai toccare.
+            self.assertFalse(clear_own_lock(tmp, "jB", "cB"))
+            self.assertEqual(read_lock(tmp)["job_id"], "jA")
+            # Stesso character (catena train->eval): si puo chiudere.
+            self.assertTrue(clear_own_lock(tmp, "jEval", "cA"))
+            self.assertIsNone(read_lock(tmp))
+            # Stesso job = proprietario anche con altra label character.
+            write_lock(tmp, {"job_id": "jA", "character_id": "cA", "pid": 1})
+            self.assertTrue(clear_own_lock(tmp, "jA", "cB"))
+
+    def test_missing_lock_is_false(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(clear_own_lock(tmp, "j1", "c1"))
+
+
+class TestPickGpuGeneralized(unittest.TestCase):
+    def test_prefers_beyond_first_two_gpus(self):
+        from character_id import training as t
+        real_free, real_count = t.gpu_free_mb, t.gpu_count
+        try:
+            t.gpu_count = lambda: 4
+            t.gpu_free_mb = lambda i: 20000.0 if i == 2 else 100.0
+            from character_id.training import pick_gpu
+            self.assertEqual(pick_gpu(), 2)
+        finally:
+            t.gpu_free_mb, t.gpu_count = real_free, real_count
+
+    def test_raises_when_no_margin(self):
+        from character_id import training as t
+        real_free, real_count = t.gpu_free_mb, t.gpu_count
+        try:
+            t.gpu_count = lambda: 2
+            t.gpu_free_mb = lambda i: 10.0
+            from character_id.training import pick_gpu
+            with self.assertRaises(RuntimeError):
+                pick_gpu()
+        finally:
+            t.gpu_free_mb, t.gpu_count = real_free, real_count
+
+
+class TestGenerateRouteGuards(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.src = (REPO / "gpu-manager" / "character_id" / "api.py").read_text(encoding="utf-8")
+
+    def _segment(self, name):
+        start = self.src.index(f"async def {name}")
+        tail = self.src[start:]
+        nxt = tail.find("\n    @app.", 1)
+        return tail[:nxt] if nxt > 0 else tail
+
+    def test_generate_requires_user_control(self):
+        seg = self._segment("characters_generate")
+        self.assertIn("user_dep(request)", seg)
+
+    def test_generate_refuses_model_missing(self):
+        seg = self._segment("characters_generate")
+        self.assertIn("personaggio senza modello", seg)
+
+    def test_cancel_clears_only_own_lock(self):
+        seg = self._segment("characters_cancel")
+        self.assertIn("clear_own_lock", seg)
+        self.assertNotIn("clear_lock(store.root)", seg)
+
+    def test_train_gate_admits_ready_for_retrain(self):
+        seg = self._segment("characters_train")
+        self.assertIn('"ready"', seg)
+        self.assertNotIn("usa /retrain per una nuova versione", seg)
+
+    def test_analyze_restores_previous_status_on_spawn_failure(self):
+        seg = self._segment("characters_analyze")
+        self.assertIn("previous_status", seg)
+
+    def test_cancel_keeps_reference_only_ready(self):
+        seg = self._segment("characters_cancel")
+        self.assertIn("ref2va", seg)
+
+    def test_retrain_kind_is_dead(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            store = CharacterStore(Path(tmp) / "hcid")
+            try:
+                cid = store.create_character("Sofia")["id"]
+                with self.assertRaises(ValueError):
+                    store.create_job(cid, "retrain")
+                # Gli altri kind restano validi.
+                self.assertEqual(store.create_job(cid, "train")["kind"], "train")
+            finally:
+                store.close()
+
+    def test_insert_asset_cap_is_atomic(self):
+        import tempfile
+        from character_id.validation import MAX_IMAGES
+        with tempfile.TemporaryDirectory() as tmp:
+            store = CharacterStore(Path(tmp) / "hcid")
+            try:
+                cid = store.create_character("Sofia")["id"]
+                for i in range(MAX_IMAGES):
+                    store.insert_asset(cid, {"id": f"a{i}"})
+                with self.assertRaises(ValueError):
+                    store.insert_asset(cid, {"id": "overflow"})
+            finally:
+                store.close()
+            # Il pre-check veloce dell'api resta coerente con il cap.
+            src = (REPO / "gpu-manager" / "character_id" / "api.py").read_text(encoding="utf-8")
+            self.assertIn("MAX_IMAGES", src)
+
+
+class TestSydneyDefaultSteps(unittest.TestCase):
+    def test_doctrine_120_epochs(self):
+        from character_id.training import (
+            MAX_ALLOWED_STEPS,
+            MAX_TRAIN_STEPS,
+            MIN_TRAIN_STEPS,
+            SYDNEY_AUTO_CAP_STEPS,
+            SYDNEY_EPOCHS,
+            default_max_steps,
+        )
+        self.assertEqual(SYDNEY_EPOCHS, 120)
+        self.assertEqual(default_max_steps(0), MAX_TRAIN_STEPS)
+        self.assertEqual(default_max_steps(None), MAX_TRAIN_STEPS)
+        self.assertEqual(default_max_steps(-5), MAX_TRAIN_STEPS)
+        self.assertEqual(default_max_steps(30), 3600)
+        self.assertEqual(default_max_steps(80), SYDNEY_AUTO_CAP_STEPS)
+        self.assertTrue(MIN_TRAIN_STEPS <= default_max_steps(1) <= MAX_ALLOWED_STEPS)
+
+    def test_train_route_uses_doctrine_default(self):
+        src = (REPO / "gpu-manager" / "character_id" / "api.py").read_text(encoding="utf-8")
+        start = src.index("async def characters_train")
+        tail = src[start:]
+        nxt = tail.find("\n    @app.", 1)
+        seg = tail[:nxt] if nxt > 0 else tail
+        self.assertIn("default_max_steps", seg)
 
 
 if __name__ == "__main__":

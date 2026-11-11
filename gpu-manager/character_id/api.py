@@ -156,6 +156,12 @@ def register_character_routes(
                 pgid = int(lock.get("pgid", 0) or 0)
                 if pgid > 1:
                     await _run(_terminate_tree, pgid)
+        # Il character eliminato non deve lasciare il lock appeso: solo se
+        # e ancora suo (l'albero sopra e gia terminato; mai toccare il claim
+        # di un training vivo d'altri).
+        _stale = await _run(_read_lock, store.root)
+        if _stale and _stale.get("character_id") == character_id:
+            await _run(clear_lock, store.root)
         deleted = await _run(store.delete_character, character_id)
         if not deleted:
             raise HTTPException(404, "character non trovato")
@@ -239,7 +245,8 @@ def register_character_routes(
                     {"id": asset_id, "original_path": str(dest),
                      "sha256": hashlib.sha256(data).hexdigest(), "accepted": "pending"},
                 )
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
+                # ValueError = cap foto raggiunto (check atomico nello store).
                 try:
                     dest.unlink(missing_ok=True)
                 except OSError:
@@ -270,7 +277,8 @@ def register_character_routes(
     @app.post("/characters/{character_id}/analyze", status_code=202)
     async def characters_analyze(character_id: str, request: Request, _: None = key_dep) -> dict:
         user_dep(request)
-        _manifest_or_404(character_id)
+        manifest = _manifest_or_404(character_id)
+        previous_status = manifest.get("status", "draft")
         if await _run(store.active_job, character_id) is not None:
             raise HTTPException(409, "un job e gia attivo per questo personaggio")
         if not Path(tools_python).is_file():
@@ -290,7 +298,8 @@ def register_character_routes(
         except OSError as exc:
             handle.close()
             await _run(store.update_job, job["id"], status="failed", error=str(exc)[:300])
-            await _run(store.set_status, character_id, "draft")
+            # Ripristina lo stato precedente (mai retrocedere un ready a draft).
+            await _run(store.set_status, character_id, previous_status)
             raise HTTPException(500, f"avvio worker fallito: {exc}") from exc
         handle.close()
         await _run(store.update_job, job["id"], pid=proc.pid, detail="worker avviato")
@@ -327,13 +336,19 @@ def register_character_routes(
                                _: None = key_dep) -> dict:
         user_dep(request)
         manifest = _manifest_or_404(character_id)
-        from .training import MAX_ALLOWED_STEPS, MAX_TRAIN_STEPS, MIN_TRAIN_STEPS, default_eval_steps
+        from .training import MAX_ALLOWED_STEPS, MIN_TRAIN_STEPS, default_eval_steps, default_max_steps
 
         # Valida prima la forma della richiesta, poi lo stato (422 prima di 409).
-        try:
-            max_steps = int((payload or {}).get("max_steps", MAX_TRAIN_STEPS))
-        except (TypeError, ValueError):
-            raise HTTPException(422, "max_steps non valido") from None
+        raw_steps = (payload or {}).get("max_steps", None)
+        if raw_steps is None:
+            # Default dottrina Sydney: 120 epoche * foto utilizzabili (tetto
+            # long-run incluso). Prima era 500 fissi (~17 epoche).
+            max_steps = default_max_steps(manifest.get("image_count", 0))
+        else:
+            try:
+                max_steps = int(raw_steps)
+            except (TypeError, ValueError):
+                raise HTTPException(422, "max_steps non valido") from None
         if not MIN_TRAIN_STEPS <= max_steps <= MAX_ALLOWED_STEPS:
             raise HTTPException(422, f"max_steps fuori range {MIN_TRAIN_STEPS}..{MAX_ALLOWED_STEPS}")
         # Fail-closed anti long-run: oltre 4000 step la GPU resta occupata per
@@ -356,9 +371,12 @@ def register_character_routes(
                 raise HTTPException(422, "eval_steps non validi") from None
             if any(s < 50 or s > max_steps for s in eval_steps):
                 raise HTTPException(422, "eval_steps fuori range 50..max_steps")
-        if manifest["status"] not in ("ready_to_train", "needs_retrain", "failed", "interrupted", "draft"):
-            hint = "usa /retrain per una nuova versione" if manifest["status"] == "ready" else "analizza prima le foto"
+        if manifest["status"] not in ("ready_to_train", "needs_retrain", "failed",
+                                        "interrupted", "draft", "ready"):
+            hint = "analizza prima le foto"
             raise HTTPException(409, f"personaggio in stato {manifest['status']}: {hint}")
+        # "ready" ammesso: e la via /retrain per la vN+1 (la versione
+        # auto-incrementa, mai sovrascritta). Prima era 409-loop.
         if int(manifest["image_count"]) < 20:
             raise HTTPException(409, "servono almeno 20 foto utilizzabili (analizza prima)")
         if await _run(store.active_job, character_id) is not None:
@@ -422,7 +440,9 @@ def register_character_routes(
             try:
                 targets.add(os.getpgid(pid))
             except (OSError, ValueError):
-                targets.add(pid)
+                # Processo sparito nel frattempo: niente da uccidere (mai
+                # usare il pid come pgid: potrebbe averlo riusato altri).
+                pass
         # Gruppo del lock (copre eval concatenata e figli musubi orfani del train).
         lock = await _run(_read_lock, store.root)
         if lock and lock.get("character_id") == character_id:
@@ -437,8 +457,15 @@ def register_character_routes(
                    "tracking annullato (worker gia morto o pid riciclato)",
                    error="")
         model = await _run(store.latest_model, character_id, "fl2va")
+        if model is None:
+            # Personaggi reference-only (mai un LoRA): non retrocederli.
+            model = await _run(store.latest_model, character_id, "ref2va")
         await _run(store.set_status, character_id, "ready" if model else "ready_to_train")
-        clear_lock(store.root)
+        # Solo se il lock e ancora di questo job/character: mai liberare la
+        # GPU di un training vivo d'altri (era clear incondizionato).
+        from .training import clear_own_lock as _clear_own_lock
+
+        await _run(_clear_own_lock, store.root, job["id"], character_id)
         # Ripristina chat: il worker_loop del manager riconcilia comunque.
         try:
             await _run(systemctl, "start", "hermes-tabby.service")
@@ -475,7 +502,7 @@ def register_character_routes(
 
     @app.post("/characters/{character_id}/generate", status_code=202)
     async def characters_generate(character_id: str, payload: dict, request: Request,
-                                  _: None = key_dep) -> dict:
+                                   _: None = key_dep) -> dict:
         from .generate import (
             build_workflow,
             is_trusted_lora_path,
@@ -488,6 +515,9 @@ def register_character_routes(
         )
 
         manifest = _manifest_or_404(character_id)
+        # Scrittura GPU come le altre (train/cancel/...): solo l'utente
+        # locale, mai l'agente con la sola chiave app.
+        user_dep(request)
         body = dict(payload or {})
         # @Nome nel prompt: risolvi il primo al personaggio richiesto (coerenza).
         mentions = parse_mentions(body.get("prompt", ""))
@@ -508,7 +538,9 @@ def register_character_routes(
             raise HTTPException(409, "generazione media non configurata sul server")
         try:
             if spec["engine"] == "lora":
-                model = manifest["models"]["fl2va"]
+                model = (manifest.get("models") or {}).get("fl2va")
+                if not model:
+                    raise HTTPException(409, "personaggio senza modello: allena prima")
                 link_name = publish_lora_link(
                     Path(loras_dir), manifest["slug"], manifest["training_version"],
                     Path(model["path"]))

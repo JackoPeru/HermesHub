@@ -224,6 +224,7 @@
                                 Content="Usa personaggio" />
                             <Button Style="{StaticResource TextButtonStyle}" x:Name="DetailAnalyzeButton" Click="DetailAnalyze_Click" Content="Analizza" />
                             <Button Style="{StaticResource PrimaryButtonStyle}" x:Name="DetailTrainButton" Click="DetailTrain_Click" Content="Crea / Ripeti" />
+                            <Button Style="{StaticResource TextButtonStyle}" x:Name="DetailRetrainButton" Click="DetailRetrain_Click" Content="Riallena" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Style="{StaticResource TextButtonStyle}" Click="DetailRename_Click" Content="Rinomina" />

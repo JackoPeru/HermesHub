@@ -1,7 +1,8 @@
-Hermes Hub 0.6.334 (video job + player onesto)
+Hermes Hub 0.6.335 (rebrand dashboard)
 
-- Tap su job video finito: apre direttamente il video nel player (preferenza mp4), senza passare dal browse immagini che li escludeva.
-- Player: sonda la sorgente prima di partire; su 401/403 mostra "Video non autorizzato: aggiorna la chiave" con Riprova, mai piu spinner infinito.
+- I 4 numeri live in un'unica striscia con divisori: niente piu griglia bucherellata ne spazi vuoti.
+- Ora, ricarica e Personalizza in una sola riga di titolo; hero compatto con la stessa tinta semantica.
+- Personalizza/nascondi/ordine invariati.
 - Suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.334-android.apk (Android, versionCode 338), NemoclawChat.Windows_0.6.334.0_x64.msix (x64) e HermesHub-0.6.334-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.335-android.apk (Android, versionCode 339), NemoclawChat.Windows_0.6.335.0_x64.msix (x64) e HermesHub-0.6.335-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

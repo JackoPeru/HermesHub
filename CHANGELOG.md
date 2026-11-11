@@ -2,10 +2,9 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
-## 0.6.334 - 2026-11-06
+## 0.6.335 - 2026-11-06
 
-- Job video GPU/Comfy: apertura diretta dal player (prima passavano dal browse immagini e non si aprivano mai).
-- Player video: su 401/403 messaggio chiaro invece di caricamento infinito.
+- Rebrand dashboard: striscia vitali unica, titolo con ora+ricarica+Personalizza in una riga, hero compatto.
 - Suite verdi.
 
 ## 0.6.329 - 2026-11-03

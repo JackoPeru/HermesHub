@@ -323,66 +323,6 @@ internal fun HardwareScreen(context: Context, settings: AppSettings) {
 }
 
 @Composable
-internal fun HardwareComponentList(
-    components: List<HardwareComponentView>,
-    selectedId: String,
-    onSelect: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    // Solo rivestimento: stessi dati/firme, card scure 20dp + hairline 0.5dp + ambra.
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("COMPONENTI", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        if (components.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(AppColors.Panel)
-                    .border(BorderStroke(0.5.dp, AppColors.Border), RoundedCornerShape(20.dp))
-                    .padding(vertical = 24.dp, horizontal = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(Icons.Rounded.Speed, contentDescription = null, tint = AppColors.Faint, modifier = Modifier.size(40.dp))
-                Text("Nessun componente", color = Color.White, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-                Text("In attesa di dati hardware dal server.", color = AppColors.Faint, fontSize = AppleType.RowTitleSmall, textAlign = TextAlign.Center)
-            }
-        }
-        components.forEachIndexed { index, component ->
-            val selected = component.id == selectedId
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(AppColors.Panel)
-                    .border(BorderStroke(0.5.dp, if (selected) AppColors.Accent else AppColors.Border), RoundedCornerShape(20.dp))
-                    .clickable { onSelect(component.id) }
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(component.title, color = Color.White, fontSize = AppleType.RowTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Text(component.primaryValue, color = AppColors.Accent, fontSize = AppleType.RowTitle, fontWeight = FontWeight.SemiBold)
-                }
-                Text(component.subtitle, color = AppColors.Faint, fontSize = AppleType.Footnote, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                LinearProgressIndicator(
-                    progress = { (component.utilizationPercent / 100.0).toFloat().coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
-                    color = AppColors.Accent,
-                    trackColor = AppColors.Border
-                )
-                if (selected) {
-                    Text("SELEZIONATO", color = AppColors.Accent, fontSize = AppleType.Footnote, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                }
-            }
-            if (index != components.lastIndex) {
-                HorizontalDivider(color = AppColors.Border, thickness = 0.5.dp)
-            }
-        }
-    }
-}
-
-@Composable
 internal fun HardwareComponentDetail(component: HardwareComponentView?, history: List<HardwareHistoryPoint>, modifier: Modifier = Modifier) {
     // Solo rivestimento: stessi dati/firme, card scura 20dp + hairline 0.5dp + ambra.
     Column(

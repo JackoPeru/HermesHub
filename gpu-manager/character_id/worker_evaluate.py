@@ -26,6 +26,11 @@ EVAL_EXTRA_ARGS: tuple[str, ...] = ("--allow_experimental_duration",)
 # usa le cache; il generate si). Senza: OOM in load.
 EVAL_TE_SWAP = "50"
 
+# Soglie quality gate: identity/containment a 0.5, preservation a 0.8.
+# NOTA: preservation = pres_faces / 2 (solo 2 probe) quindi vale 0.0, 0.5 o
+# 1.0: la soglia 0.8 pretende 2/2 (nessun volto inventato sui prompt base).
+PRESERVATION_MIN = 0.8
+
 
 def sh(cmd: list[str], log_path: Path, env: dict, cwd: Path) -> int:
     with open(log_path, "ab") as handle:
@@ -74,7 +79,7 @@ def main(argv: list[str]) -> int:
         TRAINER_SRC,
         VIDEO_VAE,
         ckpt_path,
-        clear_lock,
+        clear_own_lock,
         read_lock,
         systemctl,
     )
@@ -436,7 +441,8 @@ def main(argv: list[str]) -> int:
         progress(0.95, f"engine={engine} ckpt={best_step} s={best_strength}")
         metrics = results[best_step]
         if (not keep_new or (metrics["identity"] or 0) < 0.5
-                or (metrics["containment"] or 0) < 0.5 or (metrics["preservation"] or 0) < 0.5):
+                or (metrics["containment"] or 0) < 0.5
+                or (metrics["preservation"] or 0) < PRESERVATION_MIN):
             store.set_status(character_id, "needs_retrain")
             store.update_job(job_id, status="ready", progress=1.0,
                              detail=f"needs_retrain: {metrics} keep_new={keep_new}")
@@ -447,7 +453,9 @@ def main(argv: list[str]) -> int:
         store.close()
         if heartbeat is not None:
             heartbeat.set()
-        clear_lock(root)
+        # L'eval chiude il lock del train concatenato (stesso character):
+        # ownership per character, mai spazzare un claim d'altri.
+        clear_own_lock(root, job_id, character_id)
         systemctl("start", "hermes-tabby.service")
         return 0
     except Exception as exc:  # noqa: BLE001
@@ -461,7 +469,7 @@ def main(argv: list[str]) -> int:
             store.set_status(character_id, "failed")
         finally:
             store.close()
-        clear_lock(root)
+        clear_own_lock(root, job_id, character_id)
         try:
             systemctl("start", "hermes-tabby.service")
         except Exception:  # noqa: BLE001 - il manager riconcilia comunque

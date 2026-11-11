@@ -76,6 +76,75 @@ def hold_function(store):
     module = ast.Module(body=[target], type_ignores=[])
     exec(compile(module, str(MANAGER), "exec"), namespace)  # noqa: S102
     return namespace["_character_training_hold"]
+    tree = ast.parse(MANAGER.read_text(encoding="utf-8"))
+    target = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_character_training_hold"
+    )
+    namespace = {"_character_store": store}
+    module = ast.Module(body=[target], type_ignores=[])
+    exec(compile(module, str(MANAGER), "exec"), namespace)  # noqa: S102
+    return namespace["_character_training_hold"]
+
+
+def exec_manager_functions(*names):
+    import sys as _sys
+    tree = ast.parse(MANAGER.read_text(encoding="utf-8"))
+    targets = [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in names
+    ]
+    assert {node.name for node in targets} == set(names), names
+    namespace: dict = {}
+    module = ast.Module(body=targets, type_ignores=[])
+    _sys.path.insert(0, str(REPO / "gpu-manager"))
+    try:
+        exec(compile(module, str(MANAGER), "exec"), namespace)  # noqa: S102
+    finally:
+        _sys.path.remove(str(REPO / "gpu-manager"))
+    return namespace
+
+
+class TestWallclockKill(unittest.TestCase):
+    def test_terminate_never_kills_blind(self):
+        from unittest import mock
+        ns = exec_manager_functions("_terminate_character_job_tree", "_character_worker_pgid")
+        fn = ns["_terminate_character_job_tree"]
+        pgid_of = ns["_character_worker_pgid"]
+        self.assertFalse(fn({}))  # nessun pid
+        self.assertFalse(fn({"pid": 1}))  # mai pid 1
+        self.assertTrue(fn({"pid": 42424242}))  # morto: niente da spegnere
+        with mock.patch("builtins.open", side_effect=PermissionError):
+            # Non verificabile: mai uccidere alla cieca.
+            self.assertFalse(fn({"pid": os.getpid()}))
+        # Helper diretto: bogus e noi stessi non sono worker.
+        self.assertIsNone(pgid_of(42424242))
+        self.assertIsNone(pgid_of(os.getpid()))
+
+    def test_wallclock_marks_cancelled_without_server(self):
+        import logging
+        import time as _time
+        ns = exec_manager_functions("_terminate_character_job_tree", "_enforce_training_wallclock")
+        calls = []
+
+        class Store:
+            def active_training_jobs(self):
+                return [{"id": "j-old", "character_id": "c1", "pid": 0,
+                         "created_at": _time.time() - 13 * 3600}]
+
+            def update_job(self, jid, **fields):
+                calls.append((jid, fields))
+                return None
+
+        ns["_character_store"] = Store()
+        ns["CONFIG"] = {}
+        ns["time"] = _time
+        ns["log"] = logging.getLogger("wallclock-test")
+        ns["_enforce_training_wallclock"]()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], "j-old")
+        self.assertEqual(calls[0][1].get("status"), "cancelled")
 
 
 class TestCharacterTrainingHold(unittest.TestCase):

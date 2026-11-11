@@ -46,7 +46,7 @@ def main(argv: list[str]) -> int:
         cache_latents_cmd,
         cache_text_cmd,
         ckpt_steps_in,
-        clear_lock,
+        clear_own_lock,
         dataset_toml,
         gpu_free_mb,
         gpu_temp,
@@ -251,7 +251,9 @@ def main(argv: list[str]) -> int:
                                capture_output=True, timeout=60)
             except (OSError, ValueError):
                 pass
-            clear_lock(root)
+            # Solo se il lock e ancora nostro: nel frattempo un altro
+            # training potrebbe averlo rubato (stale) e lo sta usando.
+            clear_own_lock(root, job_id, character_id)
             for svc in backends_stopped:
                 systemctl("start", svc)
         # Se chained: reset/lock/restore li fa worker_evaluate alla fine

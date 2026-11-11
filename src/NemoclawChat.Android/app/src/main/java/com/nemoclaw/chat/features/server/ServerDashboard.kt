@@ -52,6 +52,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.ui.apple.AppleGlass
@@ -236,7 +237,11 @@ private suspend fun loadGpuBoard(settings: AppSettings, appKey: String?): Pair<S
 /** Segnaposto pulsante mentre i numeri arrivano: la struttura c'e',
  *  il contenuto no (niente piu "…" criptici). */
 @Composable
-private fun LoadingBar(modifier: Modifier = Modifier) {
+private fun LoadingBar(
+    modifier: Modifier = Modifier,
+    height: Dp = 26.dp,
+    width: Dp = 64.dp
+) {
     val wave = rememberInfiniteTransition(label = "boardSkeleton")
     val alpha by wave.animateFloat(
         initialValue = 0.25f,
@@ -246,56 +251,77 @@ private fun LoadingBar(modifier: Modifier = Modifier) {
     )
     Box(
         modifier = modifier
-            .height(26.dp)
-            .width(64.dp)
+            .height(height)
+            .width(width)
             .alpha(alpha)
             .clip(RoundedCornerShape(8.dp))
             .background(AppColors.Faint.copy(alpha = 0.5f))
     )
 }
 
+/** Cella della striscia vitali: numero + etichetta + contesto, tap per aprire. */
+internal data class LiveCell(
+    val label: String,
+    val value: String?,
+    val loaded: Boolean,
+    val detail: String,
+    val onOpen: () -> Unit
+)
+
 @Composable
-private fun LiveNumberCard(
-    label: String,
-    value: String?,
-    loaded: Boolean,
-    detail: String,
-    onOpen: () -> Unit,
+private fun LiveStrip(
+    cells: List<LiveCell>,
     modifier: Modifier = Modifier
 ) {
-    AppleGlass(shape = RoundedCornerShape(18.dp), onClick = onOpen) {
-        Column(
-            modifier = modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            if (!loaded && value == null) {
-                LoadingBar()
-            } else {
-                Text(
-                    value ?: "—",
-                    color = Color.White,
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+    if (cells.isEmpty()) return
+    AppleGlass(shape = RoundedCornerShape(18.dp)) {
+        Row(modifier = modifier.padding(vertical = 10.dp)) {
+            cells.forEachIndexed { index, cell ->
+                if (index > 0) {
+                    androidx.compose.material3.VerticalDivider(
+                        color = AppColors.Border,
+                        thickness = 0.5.dp,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(onClick = cell.onOpen)
+                        .padding(horizontal = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (!cell.loaded && cell.value == null) {
+                        LoadingBar(height = 22.dp, width = 44.dp)
+                    } else {
+                        Text(
+                            cell.value ?: "—",
+                            color = Color.White,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Text(
+                        cell.label,
+                        color = AppColors.Accent,
+                        fontSize = AppleType.Footnote,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        cell.detail,
+                        color = AppColors.Faint,
+                        fontSize = AppleType.Caption,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
-            Text(
-                label,
-                color = AppColors.Accent,
-                fontSize = AppleType.Footnote,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                detail,
-                color = AppColors.Faint,
-                fontSize = AppleType.Footnote,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
         }
     }
 }
@@ -353,13 +379,14 @@ internal fun ServerStatusBoard(
     val items = remember(settings.dashboardOrder, settings.dashboardHidden, custom) {
         resolveDashboardItems(settings.dashboardOrder, settings.dashboardHidden, custom)
     }
-    // Righe: le live si accoppiano a due a due in ordine, il resto da solo.
+    // Righe: le live consecutive formano UNA striscia (niente griglia
+    // bucherellata), il resto va da solo a tutta larghezza.
     val liveIds = setOf("bots", "cron", "chats", "gpu")
     val rows = remember(items) {
         val out = mutableListOf<List<DashboardItem>>()
         var pending = mutableListOf<DashboardItem>()
         fun flush() {
-            pending.chunked(2).forEach { out.add(it) }
+            if (pending.isNotEmpty()) out.add(pending.toList())
             pending = mutableListOf()
         }
         items.forEach {
@@ -386,7 +413,7 @@ internal fun ServerStatusBoard(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
                 "LA MIA DASHBOARD",
@@ -394,31 +421,24 @@ internal fun ServerStatusBoard(
                 fontSize = AppleType.Footnote,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.sp,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
-            TextButton(onClick = { showCustomize = !showCustomize }) {
-                Text(if (showCustomize) "Fine" else "Personalizza", color = AppColors.Accent)
-            }
-        }
-        // Freschezza dati sotto il titolo (riga sua: niente piu titolo
-        // schiacciato) + ricarica manuale dei numeri.
-        if (live.loaded && live.loadedAt != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            // Freschezza inline nel titolo (era una riga sua che sprecava spazio).
+            if (live.loaded && live.loadedAt != null) {
                 Text(
-                    "aggiornato ${formatBoardTime(live.loadedAt!!)}",
+                    formatBoardTime(live.loadedAt!!),
                     color = AppColors.Faint,
                     fontSize = AppleType.Footnote,
                     maxLines = 1
                 )
-                TextButton(onClick = { reloadNonce++ }) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = null, tint = AppColors.Accent, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Ricarica", color = AppColors.Accent, fontSize = AppleType.Footnote)
+                androidx.compose.material3.IconButton(onClick = { reloadNonce++ }) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = "Ricarica numeri", tint = AppColors.Accent)
                 }
+            }
+            TextButton(onClick = { showCustomize = !showCustomize }) {
+                Text(if (showCustomize) "Fine" else "Personalizza", color = AppColors.Accent)
             }
         }
         if (showCustomize) {
@@ -437,56 +457,47 @@ internal fun ServerStatusBoard(
             )
         }
         rows.forEach { row ->
-            val singles = row.size == 1
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                row.forEach { item ->
-                    when (item) {
-                        is DashboardItem.Builtin -> when (item.id) {
-                            "status" -> DashboardHero(
-                                snapshot = snapshot,
-                                online = online,
-                                failedChecks = failedChecks,
-                                modifier = Modifier.weight(1f)
-                            )
-                            "bots" -> LiveNumberCard(
-                                label = "BOT", value = live.bots?.toString(), loaded = live.loaded,
-                                detail = "in gestione", onOpen = { onOpenTab(Tab.Bots) },
-                                modifier = Modifier.weight(1f)
-                            )
-                            "cron" -> LiveNumberCard(
-                                label = "CRON", value = live.cronActive?.toString(), loaded = live.loaded,
-                                detail = "attive", onOpen = { onOpenTab(Tab.Cron) },
-                                modifier = Modifier.weight(1f)
-                            )
-                            "chats" -> LiveNumberCard(
-                                label = "CHAT", value = live.chats?.toString(), loaded = live.loaded,
-                                detail = "salvate", onOpen = { onOpenTab(Tab.Archive) },
-                                modifier = Modifier.weight(1f)
-                            )
-                            "gpu" -> LiveNumberCard(
-                                label = "GPU", value = live.gpuMode, loaded = live.loaded,
-                                detail = live.gpuJobs?.let { "$it job" } ?: "manager",
-                                onOpen = { onOpenTab(Tab.Hardware) },
-                                modifier = Modifier.weight(1f)
-                            )
-                            "quick" -> QuickChips(onOpenTab = onOpenTab, modifier = Modifier.weight(1f))
-                            else -> Box(modifier = Modifier.weight(1f))
+            val liveRow = row.filterIsInstance<DashboardItem.Builtin>().let { builtins ->
+                builtins.size == row.size && builtins.all { it.id in liveIds }
+            }
+            if (liveRow) {
+                // Striscia vitali: tutti i numeri in una card sola.
+                LiveStrip(
+                    cells = row.filterIsInstance<DashboardItem.Builtin>().mapNotNull { item ->
+                        when (item.id) {
+                            "bots" -> LiveCell("BOT", live.bots?.toString(), live.loaded, "in gestione") { onOpenTab(Tab.Bots) }
+                            "cron" -> LiveCell("CRON", live.cronActive?.toString(), live.loaded, "attive") { onOpenTab(Tab.Cron) }
+                            "chats" -> LiveCell("CHAT", live.chats?.toString(), live.loaded, "salvate") { onOpenTab(Tab.Archive) }
+                            "gpu" -> LiveCell("GPU", live.gpuMode, live.loaded, live.gpuJobs?.let { "$it job" } ?: "manager") { onOpenTab(Tab.Hardware) }
+                            else -> null
                         }
-                        is DashboardItem.Custom -> CustomWidgetCard(
-                            widget = item.widget,
-                            onOpenTab = onOpenTab,
-                            modifier = Modifier.weight(1f)
-                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    row.forEach { item ->
+                        when (item) {
+                            is DashboardItem.Builtin -> when (item.id) {
+                                "status" -> DashboardHero(
+                                    snapshot = snapshot,
+                                    online = online,
+                                    failedChecks = failedChecks,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                "quick" -> QuickChips(onOpenTab = onOpenTab, modifier = Modifier.weight(1f))
+                                else -> Box(modifier = Modifier.weight(1f))
+                            }
+                            is DashboardItem.Custom -> CustomWidgetCard(
+                                widget = item.widget,
+                                onOpenTab = onOpenTab,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
-                }
-                if (singles) {
-                    val only = row.first()
-                    val isHalf = (only is DashboardItem.Builtin && only.id in liveIds) ||
-                        only is DashboardItem.Custom
-                    if (isHalf) Box(modifier = Modifier.weight(1f))
                 }
             }
         }
@@ -520,9 +531,9 @@ private fun DashboardHero(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(20.dp))
                 .background(wash.copy(alpha = 0.08f))
-                .padding(16.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Box(
                 modifier = Modifier

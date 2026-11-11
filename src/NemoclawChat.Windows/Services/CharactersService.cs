@@ -315,6 +315,9 @@ public static class CharactersService
     public static Task<(int StatusCode, string Body)> TrainAsync(AppSettings settings, string id, CancellationToken ct = default) =>
         GatewayService.SendManagerRequestAsync(settings, HttpMethod.Post, $"/characters/{id}/train", "{}", ct);
 
+    public static Task<(int StatusCode, string Body)> RetrainAsync(AppSettings settings, string id, CancellationToken ct = default) =>
+        GatewayService.SendManagerRequestAsync(settings, HttpMethod.Post, $"/characters/{id}/retrain", "{}", ct);
+
     public static Task<(int StatusCode, string Body)> CancelAsync(AppSettings settings, string id, CancellationToken ct = default) =>
         GatewayService.SendManagerRequestAsync(settings, HttpMethod.Post, $"/characters/{id}/cancel", "{}", ct);
 

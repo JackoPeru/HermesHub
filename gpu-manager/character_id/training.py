@@ -28,6 +28,10 @@ LR_WARMUP_STEPS = 50
 MAX_TRAIN_STEPS = 500
 MIN_TRAIN_STEPS = 100
 MAX_ALLOWED_STEPS = 7200
+# Dottrina Sydney: 120 epoche sul dataset. Il default auto = 120 * foto,
+# mai oltre il tetto long-run (4000: sopra serve conferma esplicita).
+SYDNEY_EPOCHS = 120
+SYDNEY_AUTO_CAP_STEPS = 4000
 SIGMA_MIN = 0.15
 LOSS_MAG_WEIGHT = 0.5
 LOSS_DC_WEIGHT = 0.3
@@ -35,12 +39,27 @@ BLOCKS_TO_SWAP = 48
 CHECKPOINT_STEPS = (100, 250, 500)
 STRENGTH_SWEEP = (0.7, 0.85, 1.0, 1.15)
 
-
 def default_eval_steps(max_steps: int) -> tuple[int, ...]:
     """Checkpoint da valutare: fissi per 500 step, quarti (griglia 50) oltre."""
     if max_steps <= 500:
         return CHECKPOINT_STEPS
     return tuple(sorted({max(50, round(max_steps * f / 50) * 50) for f in (0.25, 0.5, 0.75, 1.0)}))
+
+
+def default_max_steps(image_count: object) -> int:
+    """Default step dalla dottrina Sydney: 120 epoche * foto utilizzabili.
+
+    Tetto SYDNEY_AUTO_CAP_STEPS (4000): oltre serve conferma esplicita, e il
+    default automatico non deve mai imporre da solo un lock oltre la policy
+    long-run. Senza foto valide, fallback al default storico 500.
+    """
+    try:
+        photos = int(image_count or 0)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        photos = 0
+    if photos <= 0:
+        return MAX_TRAIN_STEPS
+    return max(MIN_TRAIN_STEPS, min(SYDNEY_AUTO_CAP_STEPS, SYDNEY_EPOCHS * photos))
 
 # Suite eval fissa (seed fissi, mai cambiare tra checkpoint).
 EVAL_SUITE: tuple[tuple[str, int], ...] = (
@@ -101,6 +120,27 @@ def clear_lock(root: str | Path) -> None:
         lock_path(root).unlink()
     except OSError:
         pass
+
+
+def clear_own_lock(root: str | Path, job_id: str, character_id: str | None = None) -> bool:
+    """Cancella il lock solo se e ancora nostro (job o stesso character).
+
+    Mai spazzare il claim altrui: il cancel di un character, la fine di un
+    worker o un delete non devono liberare la GPU di un training vivo
+    d'altri (doppio training = OOM). Ritorna True se cancellato.
+    """
+    try:
+        lock = read_lock(root)
+    except Exception:
+        return False
+    if not isinstance(lock, dict):
+        return False
+    if lock.get("job_id") != job_id and (
+        character_id is None or lock.get("character_id") != character_id
+    ):
+        return False
+    clear_lock(root)
+    return True
 
 
 def start_heartbeat(store, job_id: str, interval_s: int = 60):
@@ -209,9 +249,27 @@ def gpu_temp(index: int) -> float:
     return float(out.stdout.strip().split()[0])
 
 
+def gpu_count() -> int:
+    """Numero GPU visibili (nvidia-smi -L). 0 se non rilevabile."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "-L"],
+            capture_output=True, text=True, timeout=30,
+        )
+        return sum(1 for line in out.stdout.splitlines() if line.strip().startswith("GPU "))
+    except (OSError, ValueError):
+        return 0
+
+
 def pick_gpu(min_free_mb: float = 13000.0, preferred: int = 1) -> int:
-    """Una sola GPU, esplicita. Solleva se nessuna ha margine (mai fail-open)."""
-    for index in (preferred, 1 - preferred):
+    """Una sola GPU, esplicita. Prova preferred poi le altre esistenti.
+
+    Niente piu assunto "2 GPU" (1 - preferred): su 1/3/4/8 GPU gira
+    comunque. Solleva se nessuna ha margine (mai fail-open).
+    """
+    total = gpu_count() or 2
+    order = [preferred] + [i for i in range(total) if i != preferred]
+    for index in order:
         try:
             if gpu_free_mb(index) >= min_free_mb:
                 return index

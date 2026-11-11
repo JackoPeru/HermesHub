@@ -590,6 +590,12 @@ private fun CharacterDetail(context: Context, settings: AppSettings, id: String,
                             message = if (code in 200..299) "Creazione avviata" else "Training HTTP $code"
                         }
                     }) { Text("Crea / Ripeti") }
+                    TextButton(enabled = state == "ready", colors = amberTextColors(), onClick = {
+                        scope.launch {
+                            val (code, _) = postCharacterAction(settings, managerKey, id, "retrain")
+                            message = if (code in 200..299) "Nuova versione avviata" else "Riallena HTTP $code"
+                        }
+                    }) { Text("Riallena") }
                     TextButton(onClick = { renameOpen = !renameOpen }, colors = amberTextColors()) { Text("Rinomina") }
                     TextButton(onClick = {
                         scope.launch {

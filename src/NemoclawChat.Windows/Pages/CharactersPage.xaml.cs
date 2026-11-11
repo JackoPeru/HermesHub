@@ -569,6 +569,7 @@ public sealed partial class CharactersPage : Page
 
         DetailAnalyzeButton.IsEnabled = status is "draft" or "failed" or "interrupted";
         DetailTrainButton.IsEnabled = status is "ready_to_train" or "failed" or "interrupted" or "needs_retrain";
+        DetailRetrainButton.IsEnabled = status == "ready";
         DetailUseButton.IsEnabled = status == "ready";
     }
 
@@ -642,6 +643,25 @@ public sealed partial class CharactersPage : Page
         catch (Exception ex)
         {
             DetailMessageText.Text = $"Creazione fallita: {ex.Message}";
+        }
+    }
+
+    private async void DetailRetrain_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_detailId))
+            {
+                return;
+            }
+
+            var (code, _) = await CharactersService.RetrainAsync(AppSettingsStore.Load(), _detailId);
+            DetailMessageText.Text = code is >= 200 and <= 299 ? "Nuova versione avviata" : $"Riallena HTTP {code}";
+            await RefreshDetailAsync(silent: true);
+        }
+        catch (Exception ex)
+        {
+            DetailMessageText.Text = $"Riallenamento fallito: {ex.Message}";
         }
     }
 

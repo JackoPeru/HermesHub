@@ -4590,20 +4590,54 @@ async def _reap_dead_character_jobs() -> None:
         try:
             pid = int(job.get("pid", 0) or 0)
             updated = float(job.get("updated_at", 0) or 0)
+            stale = now - updated >= 900
             if pid > 0:
                 try:
                     os.kill(pid, 0)
-                    continue  # vivo: non toccare
+                    if not stale:
+                        continue  # vivo e fresco: non toccare
+                    # Vivo ma senza heartbeat da 15+ min: inchiodato o pid
+                    # riciclato da un estraneo. Uccidi solo con cmdline
+                    # provata, mai alla cieca.
+                    pgid = _character_worker_pgid(pid)
+                    if pgid is None:
+                        # Estraneo o non verificabile: il job e comunque morto
+                        # (niente heartbeat), marca senza kill e sblocca il suo
+                        # lock. Mai toccare processi altrui ne tabby.
+                        jid = str(job.get("id", ""))
+                        cid = str(job.get("character_id", ""))
+                        log.error("character job %s: pid riusato da processo estraneo, marco failed senza kill",
+                                  jid, job.get("kind"))
+                        await asyncio.to_thread(
+                            _character_store.update_job, jid, status="failed",
+                            progress=float(job.get("progress", 0.0) or 0.0),
+                            detail="worker morto (pid riciclato)", error="pid riusato, mai killato")
+                        if cid:
+                            await asyncio.to_thread(_character_store.set_status, cid, "interrupted")
+                        try:
+                            from character_id.training import clear_own_lock as _clo
+
+                            _clo(str((CONFIG.get("character_id", {}) or {}).get("root")
+                                     or "/opt/hermes/character-id"), jid)
+                        except Exception:
+                            pass
+                        continue
+                    try:
+                        from character_id.training import terminate_tree as _tt
+
+                        _tt(pgid)
+                    except Exception:
+                        pass
                 except (OSError, ValueError):
                     pass
-            if now - updated < 900:
+            if not stale:
                 continue  # giovane o appena pingato: non toccare
             jid = str(job.get("id", ""))
             cid = str(job.get("character_id", ""))
             log.error("character job orfano %s (%s): worker morto da oltre 15 min, marco failed",
                       jid, job.get("kind"))
             await asyncio.to_thread(
-                _character_store.update_job, jid, status="failed", progress=1.0,
+                _character_store.update_job, jid, status="failed", progress=float(job.get("progress", 0.0) or 0.0),
                 detail="worker morto (reaper)", error="nessun heartbeat da 15 min")
             if cid:
                 await asyncio.to_thread(_character_store.set_status, cid, "interrupted")
@@ -4620,6 +4654,76 @@ async def _reap_dead_character_jobs() -> None:
             await systemctl("start", "hermes-tabby.service")
         except Exception as exc:  # noqa: BLE001 - un job non ferma il reaper
             log.warning("reaper character fallito su un job: %s", exc)
+    # Analyze morti: il reaper guardava solo train/evaluate/benchmark e un
+    # analyze crashato incastrava il personaggio in "analyzing" per sempre
+    # (anche /train va in 409). Stessa regola sicura: pid morto + silenzio
+    # oltre 15 min (l'analyze ha heartbeat come gli altri worker).
+    try:
+        characters = await asyncio.to_thread(_character_store.list_characters)
+    except Exception:
+        characters = []
+    for character in characters or []:
+        try:
+            cid = str((character or {}).get("id", ""))
+            if not cid:
+                continue
+            job = await asyncio.to_thread(_character_store.active_job, cid)
+            if not job or job.get("kind") != "analyze":
+                continue
+            pid = int(job.get("pid", 0) or 0)
+            updated = float(job.get("updated_at", 0) or 0)
+            stale = now - updated >= 900
+            if pid > 0:
+                try:
+                    os.kill(pid, 0)
+                    if not stale:
+                        continue  # vivo e fresco: non toccare
+                    # Come sopra: solo con cmdline provata si uccide.
+                    _apgid = _character_worker_pgid(pid)
+                    if _apgid is None:
+                        jid = str(job.get("id", ""))
+                        log.error("character analyze orfano %s: pid riusato, marco failed senza kill", jid)
+                        await asyncio.to_thread(
+                            _character_store.update_job, jid, status="failed",
+                            progress=float(job.get("progress", 0.0) or 0.0),
+                            detail="worker morto (pid riciclato)", error="pid riusato, mai killato")
+                        try:
+                            current = await asyncio.to_thread(_character_store.get_character, cid)
+                            if (current or {}).get("status") == "analyzing":
+                                await asyncio.to_thread(_character_store.set_status, cid, "draft")
+                        except Exception:
+                            pass
+                        try:
+                            from character_id.training import clear_own_lock as _clo2
+
+                            _clo2(str((CONFIG.get("character_id", {}) or {}).get("root")
+                                      or "/opt/hermes/character-id"), jid)
+                        except Exception:
+                            pass
+                        continue
+                    try:
+                        from character_id.training import terminate_tree as _tt2
+
+                        _tt2(_apgid)
+                    except Exception:
+                        pass
+                except (OSError, ValueError):
+                    pass
+            if not stale:
+                continue  # giovane o appena pingato: non toccare
+            jid = str(job.get("id", ""))
+            log.error("character analyze orfano %s: worker morto da oltre 15 min, marco failed", jid)
+            await asyncio.to_thread(
+                _character_store.update_job, jid, status="failed", progress=float(job.get("progress", 0.0) or 0.0),
+                detail="worker morto (reaper)", error="nessun heartbeat da 15 min")
+            try:
+                current = await asyncio.to_thread(_character_store.get_character, cid)
+                if (current or {}).get("status") == "analyzing":
+                    await asyncio.to_thread(_character_store.set_status, cid, "draft")
+            except Exception:
+                pass
+        except Exception as exc:  # noqa: BLE001 - un job non ferma il reaper
+            log.warning("reaper character fallito su analyze: %s", exc)
 
 
 def _character_wallclock_limit_s() -> float:
@@ -4646,11 +4750,72 @@ def _training_over_wallclock(created_at: object, now_s: float, max_hours: float 
     return age > limit
 
 
+def _character_worker_pgid(pid: int) -> int | None:
+    """pgid se il pid e un worker character vivo e verificato, None altrimenti.
+
+    Anti pid-recycling: la cmdline deve appartenere davvero a un worker
+    character-id (mai uccidere alla cieca un pid riusato). Mai solleva.
+    """
+    if pid <= 1:
+        return None
+    try:
+        from character_id.validation import is_character_worker_cmdline
+    except Exception:
+        return None
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as handle:
+            cmdline = handle.read().decode("utf-8", "ignore").replace("\x00", " ")
+    except OSError:
+        return None
+    if not is_character_worker_cmdline(cmdline):
+        return None
+    try:
+        pgid = os.getpgid(pid)
+    except (OSError, ValueError):
+        return None
+    return pgid if pgid > 1 else None
+
+
+def _terminate_character_job_tree(job: dict) -> bool:
+    """Termina l'albero worker di un job character (mai alla cieca).
+
+    Solo se il pid e davvero un worker character-id (cmdline verificata):
+    anti pid-recycling. Ritorna True se spento o gia morto. Mai solleva.
+    """
+    try:
+        from character_id.training import terminate_tree
+    except Exception:
+        return False
+    try:
+        pid = int((job or {}).get("pid", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 1:
+        return False
+    # Gia morto (ma non verificabile come "morto" vs "non-POSIX"): se la
+    # cmdline non si legge per assenza processo, niente da spegnere.
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb"):
+            pass
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    pgid = _character_worker_pgid(pid)
+    if pgid is None:
+        return False
+    try:
+        return bool(terminate_tree(pgid))
+    except Exception:
+        return False
+
+
 def _enforce_training_wallclock() -> None:
     """Cancella i training oltre il wall-clock e libera le GPU (mai solleva).
 
     Chiamata dal worker e prima di creare job: un training oltre il limite
-    viene cancellato con log onesto, mai lasciato occupare le GPU in eterno.
+    viene terminato (albero worker, non solo riga DB: prima restava vivo e
+    contendeva la GPU con LLM e nuovi training -> OOM) e marcato cancelled.
     """
     if _character_store is None:
         return
@@ -4674,12 +4839,27 @@ def _enforce_training_wallclock() -> None:
         if not jid:
             continue
         log.warning("character job %s superato wall-clock (%.1fh), cancel", jid, age / 3600.0)
+        # Prima l'albero worker (killpg verificato), poi la riga DB: senza
+        # kill il musubi restava vivo e contendeva la GPU. Mai solleva.
+        try:
+            killed = _terminate_character_job_tree(job or {})
+            log.warning("character job %s wall-clock kill albero: %s", jid, "ok" if killed else "niente da spegnere")
+        except Exception as exc:  # noqa: BLE001 - il cancel DB procede comunque
+            log.warning("wall-clock kill fallito su %s: %s", jid, exc)
         try:
             _character_store.update_job(jid, status="cancelled", progress=1.0,
                                         detail="superato wall-clock, cancel",
                                         error="wall-clock superato")
         except Exception as exc:  # noqa: BLE001 - un job non ferma l'enforcement
             log.warning("wall-clock cancel fallito su %s: %s", jid, exc)
+        # Rilascia il lock solo se era di questo job (mai d'altri).
+        try:
+            from character_id.training import clear_own_lock as _hc_clear_own
+
+            _hc_clear_own(str((CONFIG.get("character_id", {}) or {}).get("root")
+                              or "/opt/hermes/character-id"), jid)
+        except Exception:  # noqa: BLE001 - best effort, il prossimo claim ruba lo stale
+            pass
 
 
 def _character_training_hold() -> bool:
