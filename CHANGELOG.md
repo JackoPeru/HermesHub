@@ -2,9 +2,9 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
-## 0.6.335 - 2026-11-06
+## 0.6.336 - 2026-11-06
 
-- Rebrand dashboard: striscia vitali unica, titolo con ora+ricarica+Personalizza in una riga, hero compatto.
+- Windows: menu manager/laya (3 puntini) nell'header della shell, tra penna e impostazioni; rimosso il duplicato dalla chat.
 - Suite verdi.
 
 ## 0.6.329 - 2026-11-03

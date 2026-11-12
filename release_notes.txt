@@ -1,8 +1,8 @@
-Hermes Hub 0.6.335 (rebrand dashboard)
+Hermes Hub 0.6.336 (menu manager nell'header Windows)
 
-- I 4 numeri live in un'unica striscia con divisori: niente piu griglia bucherellata ne spazi vuoti.
-- Ora, ricarica e Personalizza in una sola riga di titolo; hero compatto con la stessa tinta semantica.
-- Personalizza/nascondi/ordine invariati.
-- Suite Android verde, python verdi, consistency 28/28.
+- I 3 puntini del manager/laya ora stanno nell'header della shell, tra penna e impostazioni: sempre visibili in ogni sezione.
+- Menu completo come prima: stato GPU, toggle LLM/auto/Comfy, chat laya, Comfy, riprova.
+- Rimosso il duplicato dalla chat (un solo menu, niente doppioni).
+- Suite Android verde, python verdi, consistency 28/28, build Windows x64 zero warning.
 
-Asset: HermesHub-0.6.335-android.apk (Android, versionCode 339), NemoclawChat.Windows_0.6.335.0_x64.msix (x64) e HermesHub-0.6.335-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.336-android.apk (Android, versionCode 340), NemoclawChat.Windows_0.6.336.0_x64.msix (x64) e HermesHub-0.6.336-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
