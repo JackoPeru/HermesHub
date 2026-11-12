@@ -366,6 +366,18 @@ ALLOWED_NODE_CLASSES = frozenset({
 # onesto, mai riscalato in silenzio.
 _WORKFLOW_MAX_AREA = max(480 * 854, 1032192)
 _WORKFLOW_MAX_LENGTH = 3600
+# Cap immagini (proprietario 2026-11-12, solo still via Hermes Studio):
+# i workflow che salvano immagini (SaveImage, senza nodi video) possono
+# arrivare a 2560x1440 (2K). Video e workflow senza output restano al cap
+# stretto anti-OOM: non toccare senza un render di prova dedicato.
+_WORKFLOW_MAX_IMAGE_AREA = 2560 * 1440
+# Nodi che marcano un workflow come video (mai soggetti al cap immagini).
+_VIDEO_NODE_CLASSES = frozenset({
+    "SaveAnimatedPNG", "SaveVideo", "LoadVideo", "GetVideoComponents",
+    "MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo",
+    "MiniMaxH3BandAVLatent", "H3MultiStream", "MiniMaxH3SigmaShift",
+    "Ref2VAVSAGatePatch", "VAEDecodeAudio", "CreateVideo",
+})
 
 # Placeholders filled by trusted server-side values only; caller params
 # must never override these.
@@ -2063,6 +2075,11 @@ def validate_workflow(workflow: dict) -> str:
     # il max dei job sono rifiutate con errore onesto (mai riscalate in
     # silenzio). Logica inline e pura: nessun helper esterno, resta testabile
     # via AST-exec come le altre funzioni pure.
+    # Cap differenziato SOLO per still (SaveImage senza nodi video): fino a 2K.
+    _wf_classes = {n.get("class_type") for n in workflow.values() if isinstance(n, dict)}
+    _image_cap = "SaveImage" in _wf_classes and not (_wf_classes & _VIDEO_NODE_CLASSES)
+    _area_cap = _WORKFLOW_MAX_IMAGE_AREA if _image_cap else _WORKFLOW_MAX_AREA
+    _area_label = "2560x1440" if _image_cap else "854x480"
     for key, node in workflow.items():
         inputs = node.get("inputs")
         if not isinstance(inputs, dict):
@@ -2075,8 +2092,8 @@ def validate_workflow(workflow: dict) -> str:
             area = 0.0
         if area != area:  # NaN
             area = 0.0
-        if width is not None and height is not None and area > _WORKFLOW_MAX_AREA:
-            return (f"node {key!r} {width}x{height} oltre area max 854x480: "
+        if width is not None and height is not None and area > _area_cap:
+            return (f"node {key!r} {width}x{height} oltre area max {_area_label}: "
                     "riduci la risoluzione al preset")
         length = inputs.get("length")
         if length is not None:
