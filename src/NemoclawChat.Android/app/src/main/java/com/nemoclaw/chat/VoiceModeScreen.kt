@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.MediaRecorder
@@ -807,8 +808,25 @@ internal suspend fun captureVoiceUtterance(context: Context, sensitivity: Float 
         AudioFormat.ENCODING_PCM_16BIT
     )
     check(minimumBuffer > 0) { "Microfono non disponibile." }
+    // Se l'audio e' instradato su Bluetooth (occhiali, cuffie), registra da li':
+    // un AudioRecord con sorgente MIC ignora la device di comunicazione scelta.
+    val audioManager = context.getSystemService(AudioManager::class.java)
+    val communication = if (Build.VERSION.SDK_INT >= 31) audioManager.communicationDevice else null
+    val bluetoothInput = if (communication != null &&
+        (communication.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+            communication.type == AudioDeviceInfo.TYPE_BLE_HEADSET)
+    ) {
+        audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull {
+            it.type == communication.type
+        }
+    } else {
+        null
+    }
     val recorder = AudioRecord.Builder()
-        .setAudioSource(MediaRecorder.AudioSource.MIC)
+        .setAudioSource(
+            if (bluetoothInput != null) MediaRecorder.AudioSource.VOICE_COMMUNICATION
+            else MediaRecorder.AudioSource.MIC
+        )
         .setAudioFormat(
             AudioFormat.Builder()
                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
@@ -818,6 +836,7 @@ internal suspend fun captureVoiceUtterance(context: Context, sensitivity: Float 
         )
         .setBufferSizeInBytes(max(minimumBuffer, VoiceFrameBytes * 6))
         .build()
+    if (bluetoothInput != null) runCatching { recorder.setPreferredDevice(bluetoothInput) }
     val preRoll = ArrayDeque<ByteArray>(VoicePreRollFrames)
     val pcm = ByteArrayOutputStream(VoiceSampleRate * 2 * 8)
     val frame = ByteArray(VoiceFrameBytes)

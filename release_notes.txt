@@ -1,8 +1,8 @@
-Hermes Hub 0.6.339 (Jarvis risponde subito)
+Hermes Hub 0.6.340 (Jarvis stabile)
 
-- In modalita Jarvis il ragionamento e spento: la risposta arriva in pochi secondi, senza passare dal loop agente (che prima impiegava minuti).
-- Le azioni inventate dal modello locale non fanno piu' perdere la risposta gia' pronta.
-- Verificato end-to-end sul server: risposta visiva in ~6 secondi.
-- Suite python verdi (inclusi i test Jarvis), consistency 28/28.
+- La visione si riconnette da sola: 3 tentativi all'avvio e una riconnessione a caldo, senza chiudere Jarvis.
+- Se gli occhiali non danno la visione, lo stato lo dice con la diagnostica DAT invece di restare muto.
+- Microfono: resta quello del telefono. Il DAT 0.8 non espone l'audio degli occhiali, e il Bluetooth degli occhiali spegnerebbe la telecamera.
+- Suite Android verde, python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.339-android.apk (Android, versionCode 343), NemoclawChat.Windows_0.6.339.0_x64.msix (x64) e HermesHub-0.6.339-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.340-android.apk (Android, versionCode 344), NemoclawChat.Windows_0.6.340.0_x64.msix (x64) e HermesHub-0.6.340-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

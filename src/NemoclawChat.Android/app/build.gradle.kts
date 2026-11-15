@@ -58,8 +58,8 @@ android {
         applicationId = "com.nemoclaw.chat"
         minSdk = if (enableMetaDat) 29 else 26
         targetSdk = 36
-        versionCode = 343
-        versionName = "0.6.339"
+        versionCode = 344
+        versionName = "0.6.340"
         resConfigs("en", "it")
         buildConfigField("boolean", "META_DAT_ENABLED", enableMetaDat.toString())
         // Nessuna chiave API nel BuildConfig: la release APK non contiene

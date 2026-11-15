@@ -54,6 +54,8 @@ internal object JarvisSessionController {
     private var frameUploadChannel: Channel<SampledFrame>? = null
     private var speechJob: Job? = null
     private var source: JarvisFrameSource? = null
+    private var preferPhoneDebug = false
+    private var reconnectAttempts = 0
     private var api: JarvisGatewayApi? = null
     private var settings: AppSettings? = null
     private var apiKey: String? = null
@@ -209,8 +211,8 @@ internal object JarvisSessionController {
             VoiceTurnController.interrupt()
             stopVoiceForegroundService(context)
             // DAT camera sessions can be ended by the glasses when HFP/SCO owns their
-            // Bluetooth link. Jarvis therefore keeps its input on the phone microphone;
-            // ordinary media output remains routed by Android.
+            // Bluetooth link. La rotta audio viene scelta dopo l'apertura della
+            // sorgente: occhiali (visione DAT) o occhiali (microfono BT) + telefono.
             routeVoiceBluetooth(context, false)
             // Must happen synchronously before the first network suspension, but
             // only after local validation and runtime permissions have succeeded.
@@ -221,32 +223,18 @@ internal object JarvisSessionController {
             capabilities = remoteCapabilities
             val remote = gateway.createSession(mode, objective)
             _state.value = _state.value.copy(sessionId = remote.id)
-            val frameSource = JarvisFrameSourceFactory.create(context, preferPhoneDebug)
-            source = frameSource
-            frameSampler.reset()
-            rollingFrames.clear()
             val uploadChannel = Channel<SampledFrame>(
                 capacity = 1,
                 onBufferOverflow = BufferOverflow.DROP_OLDEST
             )
             frameUploadChannel = uploadChannel
             startFrameUploader(gateway, remote.id, uploadChannel)
-            withTimeout(FRAME_SOURCE_START_TIMEOUT_MILLIS) {
-                frameSource.start(
-                    onFrame = { jpeg, capturedAt ->
-                        acceptFrame(jpeg, capturedAt)
-                    },
-                    onError = { frameError ->
-                        controllerScope.launch {
-                            lifecycleMutex.withLock {
-                                reportError(frameError)
-                                stopLocked(context, notifyGateway = true, preserveError = true)
-                            }
-                        }
-                    }
-                )
-            }
+            val frameSource = openFrameSource(context, preferPhoneDebug)
+            reconnectAttempts = 0
             lifecycle.tryTransition(JarvisLifecycleEvent.LISTENING_READY)
+            // Il DAT espone solo la telecamera e il Bluetooth degli occhiali
+            // spegnerebbe la sessione DAT: il microfono resta quello del telefono.
+            routeVoiceBluetooth(context, false)
             _state.value = _state.value.copy(
                 phase = JarvisPhase.ACTIVE,
                 active = true,
@@ -254,7 +242,7 @@ internal object JarvisSessionController {
                 initiativeMode = remote.mode,
                 visionActive = !remote.viewPaused,
                 deviceStatus = frameSource.label,
-                audioRoute = "Microfono telefono; audio multimediale di sistema",
+                audioRoute = "Microfono telefono",
                 gatewayStatus = "Raggiungibile",
                 singleModel = remoteCapabilities.singleModel,
                 fastModelAvailable = remoteCapabilities.fastModelConfigured,
@@ -275,6 +263,105 @@ internal object JarvisSessionController {
             }
             reportError(error)
             stopLocked(context, notifyGateway = true, preserveError = true)
+        }
+    }
+
+    /** Apre la sorgente visione con retry: un paio di occhiali lento o un
+     *  hiccup DAT non deve chiudere tutta la modalita' Jarvis. */
+    private suspend fun openFrameSource(
+        context: Context,
+        preferPhoneDebug: Boolean
+    ): JarvisFrameSource {
+        this.preferPhoneDebug = preferPhoneDebug
+        var lastError: Throwable? = null
+        for (attempt in 0 until FRAME_SOURCE_MAX_ATTEMPTS) {
+            if (attempt > 0) {
+                _state.value = _state.value.copy(
+                    deviceStatus = "Visione non pronta, nuovo tentativo (${attempt + 1}/$FRAME_SOURCE_MAX_ATTEMPTS)...",
+                    visionActive = false
+                )
+                delay(FRAME_SOURCE_RETRY_DELAY_MILLIS * attempt)
+            }
+            val candidate = JarvisFrameSourceFactory.create(context, preferPhoneDebug)
+            try {
+                withTimeout(FRAME_SOURCE_START_TIMEOUT_MILLIS) {
+                    candidate.start(
+                        onFrame = { jpeg, capturedAt -> acceptFrame(jpeg, capturedAt) },
+                        onError = { frameError -> onFrameSourceLost(context, candidate, frameError) }
+                    )
+                }
+                source = candidate
+                frameSampler.reset()
+                rollingFrames.clear()
+                return candidate
+            } catch (cancelled: CancellationException) {
+                runCatching { candidate.stop() }
+                throw cancelled
+            } catch (error: Throwable) {
+                lastError = error
+                runCatching { candidate.stop() }
+                _state.value = _state.value.copy(error = error.message?.take(300))
+            }
+        }
+        throw lastError ?: IllegalStateException("Visione non disponibile.")
+    }
+
+    /** Scollegamento a sessione attiva: un tentativo di riconnessione, poi
+     *  si ferma con un errore chiaro invece di restare in silenzio. */
+    private fun onFrameSourceLost(context: Context, failed: JarvisFrameSource, error: Throwable) {
+        controllerScope.launch {
+            lifecycleMutex.withLock {
+                if (failed !== source || _state.value.sessionId == null) return@withLock
+                source = null
+                runCatching { failed.stop() }
+                // Un calo della visione e' recuperabile: niente FAILURE nel
+                // lifecycle, solo stato visibile e un tentativo di rientro.
+                _state.value = _state.value.copy(
+                    visionActive = false,
+                    deviceStatus = "Riconnessione occhiali...",
+                    error = error.message?.take(300)
+                )
+                if (reconnectAttempts >= FRAME_SOURCE_RECONNECT_ATTEMPTS) {
+                    reportError(IllegalStateException("Visione non disponibile: fermo Jarvis. Riprova quando gli occhiali sono connessi."))
+                    stopLocked(context, notifyGateway = true, preserveError = true)
+                    return@withLock
+                }
+                reconnectAttempts++
+                delay(FRAME_SOURCE_RETRY_DELAY_MILLIS)
+                val candidate = JarvisFrameSourceFactory.create(context, preferPhoneDebug)
+                val recovered = try {
+                    withTimeout(FRAME_SOURCE_START_TIMEOUT_MILLIS) {
+                        candidate.start(
+                            onFrame = { jpeg, capturedAt -> acceptFrame(jpeg, capturedAt) },
+                            onError = { frameError -> onFrameSourceLost(context, candidate, frameError) }
+                        )
+                    }
+                    true
+                } catch (cancelled: CancellationException) {
+                    runCatching { candidate.stop() }
+                    throw cancelled
+                } catch (retryError: Throwable) {
+                    runCatching { candidate.stop() }
+                    reportError(retryError)
+                    false
+                }
+                if (!recovered) {
+                    if (_state.value.sessionId != null) {
+                        stopLocked(context, notifyGateway = true, preserveError = true)
+                    }
+                    return@withLock
+                }
+                source = candidate
+                frameSampler.reset()
+                rollingFrames.clear()
+                _state.value = _state.value.copy(
+                    visionActive = true,
+                    deviceStatus = candidate.label,
+                    phase = JarvisPhase.ACTIVE,
+                    error = null
+                )
+                refreshNotification(context)
+            }
         }
     }
 
@@ -547,6 +634,8 @@ internal object JarvisSessionController {
         sessionJob = null
         runCatching { source?.stop() }
         source = null
+        reconnectAttempts = 0
+        routeVoiceBluetooth(context, false)
         val sessionId = old.sessionId
         if (notifyGateway && !sessionId.isNullOrBlank()) runCatching { api?.deleteSession(sessionId) }
         speaking.set(false)
@@ -606,5 +695,8 @@ internal object JarvisSessionController {
     // DAT readiness includes registration, device-link stabilization and STREAMING confirmation.
     // Keep controller deadline above their bounded total so source cleanup returns its own reason.
     private const val FRAME_SOURCE_START_TIMEOUT_MILLIS = 60_000L
+    private const val FRAME_SOURCE_MAX_ATTEMPTS = 3
+    private const val FRAME_SOURCE_RECONNECT_ATTEMPTS = 2
+    private const val FRAME_SOURCE_RETRY_DELAY_MILLIS = 3_000L
     private const val JARVIS_STT_BEAM_SIZE = 1
 }

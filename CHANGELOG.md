@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.340 - 2026-11-15
+
+- Jarvis: la visione riprova da sola (3 tentativi all'avvio, 1 riconnessione a caldo) invece di chiudere la modalita'.
+- Jarvis: errori di visione visibili nello stato, con la diagnostica DAT; niente silenzi.
+- Audio: resta il microfono del telefono per scelta (il DAT 0.8 non espone audio e il Bluetooth occhiali spegnerebbe la telecamera).
+
 ## 0.6.339 - 2026-11-15
 
 - Jarvis: ragionamento spento per le domande dirette con un solo modello (risposta immediata, niente escalation al loop agente da minuti).

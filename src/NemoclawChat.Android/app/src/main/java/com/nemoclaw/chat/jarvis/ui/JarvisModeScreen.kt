@@ -342,8 +342,8 @@ internal fun JarvisModeScreen(settings: AppSettings, apiKey: String?) {
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Fotocamera telefono", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
-                        Text("Fallback diagnostico build debug", color = AppColors.Muted, fontSize = AppleType.Footnote)
+                    Text("Fotocamera telefono", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = AppleType.RowTitle)
+                    Text("Fallback diagnostico build debug", color = AppColors.Muted, fontSize = AppleType.Footnote)
                     }
                     Switch(
                         checked = preferPhoneDebug,
