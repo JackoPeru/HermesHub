@@ -1,7 +1,8 @@
-Hermes Hub 0.6.341 (Jarvis senza 502 intermittenti)
+Hermes Hub 0.6.342 (Jarvis: risposte sempre)
 
-- Il modello locale a volte risponde con punteggi in percentuale (95) o poco fuori scala: ora vengono normalizzati invece di far fallire il turno.
-- Verifica ripetuta sul server: quattro turni consecutivi tutti riusciti.
+- Rimosso il vincolo JSON che il modello locale a volte chiudeva con un oggetto vuoto, causando errori intermittenti.
+- Se il modello risponde con un JSON vuoto, Jarvis riprova da solo una volta: niente piu' 502 casuali.
+- Verifica ripetuta sul server: cinque turni consecutivi riusciti, circa 5 secondi ciascuno.
 - Suite python e Android verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.341-android.apk (Android, versionCode 345), NemoclawChat.Windows_0.6.341.0_x64.msix (x64) e HermesHub-0.6.341-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.342-android.apk (Android, versionCode 346), NemoclawChat.Windows_0.6.342.0_x64.msix (x64) e HermesHub-0.6.342-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

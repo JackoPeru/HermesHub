@@ -3178,17 +3178,26 @@ def _hermes_hub_jarvis_parse_json_object(value: Any) -> Dict[str, Any]:
     return parsed
 
 
-def _hermes_hub_jarvis_number(value: Any, field: str) -> float:
+def _hermes_hub_jarvis_number(value: Any, field: str, default: Optional[float] = None) -> float:
     import math as _math
+    import re as _re
 
-    try:
+    number: Optional[float] = None
+    if isinstance(value, bool):
+        number = 1.0 if value else 0.0
+    elif isinstance(value, (int, float)):
         number = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"invalid_{field}") from exc
-    if not _math.isfinite(number):
-        raise ValueError(f"invalid_{field}")
-    # I modelli locali a volte rispondono in percentuale (95) o sforano di
-    # poco (1.1): normalizzare evita di buttare via una risposta gia' pronta.
+    elif isinstance(value, str):
+        # "0,9", "0.9 circa", "95%": prendi il primo numero e normalizza.
+        match = _re.search(r"[-+]?\d+(?:[.,]\d+)?", value.replace(",", "."))
+        if match is not None:
+            number = float(match.group(0))
+    # I punteggi sono euristiche: un valore strano non deve mai scartare una
+    # risposta gia' pronta. Se non e' un numero si usa il default.
+    if number is None or not _math.isfinite(number):
+        if default is None:
+            raise ValueError(f"invalid_{field}")
+        number = float(default)
     if number > 1.0:
         number = number / 100.0 if 2.0 < number <= 100.0 else 1.0
     return max(0.0, number)
@@ -3246,15 +3255,15 @@ def _hermes_hub_jarvis_validate_fast_result(value: Any) -> Dict[str, Any]:
             # La memoria e' accessoria: un JSON parziale non deve invalidare
             # una risposta compatta gia' utilizzabile o causare escalation.
             memory_update = None
-    return {
+    result = {
         "action": action,
         "observation": str(raw.get("observation") or "").strip()[:1000],
         "reason": str(raw.get("reason") or "").strip()[:1000],
-        "confidence": _hermes_hub_jarvis_number(raw.get("confidence"), "confidence"),
-        "importance": _hermes_hub_jarvis_number(raw.get("importance"), "importance"),
-        "urgency": _hermes_hub_jarvis_number(raw.get("urgency"), "urgency"),
+        "confidence": _hermes_hub_jarvis_number(raw.get("confidence"), "confidence", 0.0),
+        "importance": _hermes_hub_jarvis_number(raw.get("importance"), "importance", 0.0),
+        "urgency": _hermes_hub_jarvis_number(raw.get("urgency"), "urgency", 0.0),
         "utility": _hermes_hub_jarvis_number(
-            raw.get("utility", raw.get("importance")), "utility"
+            raw.get("utility", raw.get("importance")), "utility", 0.0
         ),
         "reply": reply,
         "needs_agent": needs_agent,
@@ -3262,6 +3271,7 @@ def _hermes_hub_jarvis_validate_fast_result(value: Any) -> Dict[str, Any]:
         "memory_update": memory_update,
         "recommended_frame_ids": [str(item)[:128] for item in frame_ids[:3]],
     }
+    return result
 
 
 def _hermes_hub_jarvis_openai_endpoint(base_url: str) -> str:
@@ -3611,7 +3621,6 @@ async def _hermes_hub_jarvis_fast_call(
         ],
         "temperature": 0.0,
         "max_tokens": _hermes_hub_jarvis_env_int("HERMES_JARVIS_FAST_MAX_TOKENS", 256, 64, 512),
-        "response_format": {"type": "json_object"},
         "chat_template_kwargs": {"enable_thinking": False},
         "stream": False,
     }
@@ -3621,10 +3630,22 @@ async def _hermes_hub_jarvis_fast_call(
     queued = time.perf_counter()
     async with _hermes_hub_jarvis_model_sem(runtime, "fast"):
         acquired = time.perf_counter()
-        response = await _hermes_hub_jarvis_http_json(runtime, config, payload, timeout)
-    parsed = _hermes_hub_jarvis_validate_fast_result(
-        _hermes_hub_jarvis_fast_content(response)
-    )
+        parsed: Optional[Dict[str, Any]] = None
+        for attempt in range(2):
+            response = await _hermes_hub_jarvis_http_json(runtime, config, payload, timeout)
+            raw_value = _hermes_hub_jarvis_fast_content(response)
+            try:
+                raw_object = _hermes_hub_jarvis_parse_json_object(raw_value)
+            except (ValueError, json.JSONDecodeError):
+                raw_object = None
+            # Il guided decoder a volte chiude con un oggetto vuoto {"": ""}:
+            # un retry costa pochi secondi e salva la risposta.
+            if isinstance(raw_object, dict) and raw_object.get("action"):
+                parsed = _hermes_hub_jarvis_validate_fast_result(raw_value)
+                break
+            if attempt == 1:
+                raise ValueError("empty_model_json")
+    assert parsed is not None
     if question is None and parsed["action"] == "respond_simple":
         should_verify = parsed["importance"] >= 0.75 and parsed["utility"] >= 0.70
         parsed["action"] = "escalate" if should_verify else "ignore"

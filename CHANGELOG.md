@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.342 - 2026-11-15
+
+- Jarvis: niente piu' vincolo `json_object` (tabby lo chiudeva con `{"": ""}`) e retry automatico quando il JSON arriva vuoto.
+- Verifica ripetuta sul server: 5/5 turni riusciti a ~5s ciascuno.
+
 ## 0.6.341 - 2026-11-15
 
 - Jarvis: punteggi del modello (confidence/importance/urgency/utility) normalizzati quando arrivano in percentuale o fuori scala: niente piu' 502 intermittenti.
