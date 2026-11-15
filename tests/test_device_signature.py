@@ -10,7 +10,6 @@ import ast
 import asyncio
 import base64
 import hashlib
-import json
 import os
 import sys
 import tempfile
@@ -182,7 +181,6 @@ class DeviceSignatureTests(unittest.TestCase):
         cls.ns = ns
         cls.private, cls.pem = make_key()
         cls.key_id = "testdev-01"
-        verify = ns["_hermes_hub_device_verify_signature"]
         save = ns["_hermes_hub_device_save"]
         save({"devices": {cls.key_id: {
             "public_key": cls.pem, "label": "test", "created": 1,

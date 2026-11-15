@@ -353,7 +353,7 @@ def register_character_routes(
             raise HTTPException(422, f"max_steps fuori range {MIN_TRAIN_STEPS}..{MAX_ALLOWED_STEPS}")
         # Fail-closed anti long-run: oltre 4000 step la GPU resta occupata per
         # molte ore con una singola POST. Richiedi conferma esplicita.
-        if max_steps > 4000 and not (payload or {}).get("confirm_long_run") is True:
+        if max_steps > 4000 and (payload or {}).get("confirm_long_run") is not True:
             raise HTTPException(
                 409,
                 "max_steps > 4000 tiene la GPU per molte ore: "

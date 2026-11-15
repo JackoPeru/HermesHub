@@ -73,7 +73,6 @@ class BotGroupsAndroidContractTests(unittest.TestCase):
             self.assertNotIn(forbidden, self.feature)
 
     def test_server_and_client_normalizers_stay_in_lockstep(self):
-        runtime = self.connections.split("# HERMES_HUB_BOT_GROUPS", 1)
         # Android: 2..6 membri, nome 1..160 senza newline.
         self.assertIn("require(group.members.size in 2..6)", self.connections)
         self.assertIn("name.length <= 160", self.connections)

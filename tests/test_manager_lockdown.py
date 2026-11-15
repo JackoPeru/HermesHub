@@ -47,7 +47,7 @@ class ManagerRolesTests(unittest.TestCase):
         for fn in ("status", "list_jobs", "get_job_api", "cancel_job",
                    "resubmit_job_api", "submit_job", "submit_smart",
                    "browse_library", "get_job_workflow_api", "set_job_workflow_api"):
-            self.assertIn(f"Depends(require_key)", src)
+            self.assertIn("Depends(require_key)", src)
 
     def test_shared_hub_key_is_gone(self) -> None:
         src = text(MANAGER)

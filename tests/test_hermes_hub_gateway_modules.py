@@ -957,8 +957,6 @@ class HubArchivePagingTests(unittest.TestCase):
         return runtime
 
     def test_more_bytes_paginates_and_cursor_completes_the_series(self):
-        import os as _os
-
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             runtime = self._seed(root, 12)
@@ -1022,7 +1020,6 @@ class HubArchivePagingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             runtime = self._seed(root, 20)
-            source_path = root / "hub_conversations.json"
             with mock.patch.dict(os.environ, {"HERMES_HUB_ARCHIVE_MAX_BYTES": "0"}, clear=False):
                 baseline = runtime.changes_since(0)
             self.assertFalse(baseline["has_more"])

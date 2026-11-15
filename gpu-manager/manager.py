@@ -4399,7 +4399,6 @@ def _browse_scan(current: "Path", roots: list) -> tuple:
     (il proxy gateway ri-verifica a serve-time: doppia cintura)."""
     folders: list = []
     items: list = []
-    home = _browse_home()
     try:
         resolved_current = current.resolve()
         entries = sorted(current.iterdir(), key=lambda p: p.name.lower())

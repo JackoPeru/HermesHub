@@ -15,7 +15,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
 
-from hermes_hub_gateway.adapters.hermes import session_follow as follow
+from hermes_hub_gateway.adapters.hermes import session_follow as follow  # noqa: E402 - sys.path sopra
 
 
 def make_session_db(path, session_id, ended=False, rows=()):

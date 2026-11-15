@@ -8,7 +8,6 @@ storage JSON limitato e normalizzazione identica alla lista Android
 """
 
 import importlib.util
-import json
 import pathlib
 import tempfile
 import typing
@@ -116,7 +115,7 @@ class BotGroupsGatewayPatchTests(unittest.TestCase):
         stored = details["items"][0]
         self.assertEqual("Team  =  Test", stored["name"])
         self.assertEqual(["primary::laya", "connection-abc::nemo_2"], [m["identity_key"] for m in stored["members"]])
-        upserted = put("put", "", dict(group, name="different name"))
+        put("put", "", dict(group, name="different name"))
         self.assertEqual(2, len(self.runtime["_hermes_hub_bot_groups_payload"]()["items"]))
         # upsert con lo stesso nome (casefold) sostituisce, non duplica
         put("put", "", dict(group, name="team  =  test"))

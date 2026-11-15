@@ -311,7 +311,6 @@ class TestSubmitPreset(unittest.TestCase):
 
     def test_forwards_preset_to_manager(self):
         calls = []
-        logged = {}
 
         def http(method, url, payload=None, headers=None, timeout=15):
             calls.append({"method": method, "url": url, "payload": payload})

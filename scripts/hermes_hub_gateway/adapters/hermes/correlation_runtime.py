@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable, Mapping
 
 logger = logging.getLogger(__name__)
 
-from ...protocol import (
+from ...protocol import (  # noqa: E402 - package bootstrap sopra
     CorrelationContext,
     correlation_context_from_headers,
     correlation_headers,

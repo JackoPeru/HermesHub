@@ -3,8 +3,10 @@ using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
 using NemoclawChat_Windows.Services;
+using Windows.Media.Core;
 
 namespace NemoclawChat_Windows.Pages;
 
@@ -250,6 +252,9 @@ public sealed partial class ComfyPage : Page
             InterruptResubmitButton.IsEnabled = false;
             _jobs = new List<AgentJobInfo>();
             RenderJobs();
+            // Niente lista silenziosa: se il manager non risponde e quasi
+            // sempre la chiave GPU mancante/errata nelle Impostazioni.
+            JobDetailText.Text = "Manager non raggiungibile: incolla la chiave GPU/manager nelle Impostazioni e premi Aggiorna.";
             return;
         }
 
@@ -421,7 +426,7 @@ public sealed partial class ComfyPage : Page
         }
         lines.Add($"Creato {JobDateTime(job.CreatedAt)} · aggiornato {JobDateTime(job.UpdatedAt)}");
         JobDetailText.Text = string.Join("\n", lines);
-        OpenOutputButton.IsEnabled = job.MediaUrls.Count > 0;
+        OpenOutputButton.IsEnabled = job.ResultPaths.Count > 0 || job.MediaUrls.Count > 0;
     }
 
     private void JobsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -437,10 +442,62 @@ public sealed partial class ComfyPage : Page
         RenderJobDetail();
     }
 
+    private static readonly string[] JobImageExtensions = ["jpg", "jpeg", "png", "webp", "gif", "bmp"];
+    private static readonly string[] JobVideoExtensions = ["mp4", "webm", "mov", "mkv"];
+
+    private static string JobParentDir(string path)
+    {
+        var normalized = path.Replace('\\', '/');
+        var cut = normalized.LastIndexOf('/');
+        return cut > 0 ? normalized.Substring(0, cut) : string.Empty;
+    }
+
+    private static bool IsJobVideoFile(string name) =>
+        JobVideoExtensions.Contains(System.IO.Path.GetExtension(name).TrimStart('.').ToLowerInvariant());
+
+    private static bool IsJobImageFile(string name) =>
+        JobImageExtensions.Contains(System.IO.Path.GetExtension(name).TrimStart('.').ToLowerInvariant());
+
+    /// <summary>
+    /// URL proxy gateway come fa il browser immagini (/v1/media/id?root=...):
+    /// ResolveImageUri aggiunge poi l'hub_token. Come l'app Android.
+    /// </summary>
+    private static string JobMediaUrl(string fileName, string root) =>
+        "/v1/media/" + Uri.EscapeDataString(fileName) + "?root=" + Uri.EscapeDataString(root);
+
     private async void OpenOutput_Click(object sender, RoutedEventArgs e)
     {
         var job = _jobs.FirstOrDefault(j => string.Equals(j.JobId, _selectedJobId, StringComparison.Ordinal));
-        var url = job?.MediaUrls.FirstOrDefault(u => !string.IsNullOrWhiteSpace(u));
+        if (job is null)
+        {
+            return;
+        }
+        // Video prima delle immagini (come Android): gli mp4 non passano dal
+        // browse immagini, quindi l'URL si costruisce dai result_paths.
+        var settings = AppSettingsStore.Load();
+        var serverPaths = job.ResultPaths.Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
+        var parent = serverPaths.Select(JobParentDir).FirstOrDefault(p => !string.IsNullOrWhiteSpace(p)) ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(parent))
+        {
+            var videos = serverPaths.Select(JobFileName).Where(IsJobVideoFile).ToList();
+            var best = videos.FirstOrDefault(v => v.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase))
+                ?? videos.FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(best))
+            {
+                var full = ImageLibraryService.ResolveImageUri(settings, JobMediaUrl(best, parent));
+                ShowJobVideoDialog(job, full);
+                return;
+            }
+            var images = serverPaths.Select(JobFileName).Where(IsJobImageFile).ToList();
+            if (images.Count > 0)
+            {
+                var urls = images.Select(name => ImageLibraryService.ResolveImageUri(settings, JobMediaUrl(name, parent))).ToList();
+                ShowJobImagesDialog(job, urls);
+                return;
+            }
+        }
+        // Fallback: URL gia pronti dal manager, aperti fuori come prima.
+        var url = job.MediaUrls.FirstOrDefault(u => !string.IsNullOrWhiteSpace(u));
         if (string.IsNullOrWhiteSpace(url))
         {
             return;
@@ -452,6 +509,103 @@ public sealed partial class ComfyPage : Page
         }
         catch
         {
+        }
+    }
+
+    private void ShowJobVideoDialog(AgentJobInfo job, Uri videoUri)
+    {
+        var errorText = new TextBlock
+        {
+            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["MutedTextBrush"],
+            TextWrapping = TextWrapping.Wrap,
+            Visibility = Visibility.Collapsed,
+        };
+        var playerElement = new MediaPlayerElement
+        {
+            Source = MediaSource.CreateFromUri(videoUri),
+            AutoPlay = true,
+            AreTransportControlsEnabled = true,
+            Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
+            MinWidth = 640,
+            MinHeight = 360,
+        };
+        playerElement.MediaPlayer.MediaFailed += (_, args) =>
+        {
+            errorText.Text = $"Impossibile riprodurre il video ({args.ErrorMessage}). Controlla chiave GPU e rete, poi riapri.";
+            errorText.Visibility = Visibility.Visible;
+        };
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(playerElement);
+        panel.Children.Add(errorText);
+        var dialog = new ContentDialog
+        {
+            Title = string.IsNullOrWhiteSpace(job.Model) ? $"Video job {job.JobId[..Math.Min(8, job.JobId.Length)]}" : job.Model,
+            Content = panel,
+            CloseButtonText = "Chiudi",
+        };
+        dialog.Closed += (_, _) =>
+        {
+            try
+            {
+                playerElement.MediaPlayer?.Pause();
+                playerElement.Source = null;
+            }
+            catch
+            {
+            }
+        };
+        if (XamlRoot is not null)
+        {
+            dialog.XamlRoot = XamlRoot;
+            _ = dialog.ShowAsync();
+        }
+    }
+
+    private void ShowJobImagesDialog(AgentJobInfo job, List<Uri> imageUris)
+    {
+        if (imageUris.Count == 0) return;
+        var index = 0;
+        var image = new Image { Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform };
+        var counter = new TextBlock
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["MutedTextBrush"],
+        };
+        void Show(int i)
+        {
+            index = (i + imageUris.Count) % imageUris.Count;
+            image.Source = new BitmapImage(imageUris[index]);
+            counter.Text = $"{index + 1} / {imageUris.Count}";
+        }
+        var prev = new Button { Content = "‹" };
+        prev.Click += (_, _) => Show(index - 1);
+        var next = new Button { Content = "›" };
+        next.Click += (_, _) => Show(index + 1);
+        var nav = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Spacing = 12 };
+        nav.Children.Add(prev);
+        nav.Children.Add(counter);
+        nav.Children.Add(next);
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new ScrollViewer
+        {
+            Content = image,
+            ZoomMode = ZoomMode.Enabled,
+            MinZoomFactor = 1,
+            MaxZoomFactor = 6,
+            Height = 420,
+        });
+        panel.Children.Add(nav);
+        Show(0);
+        var dialog = new ContentDialog
+        {
+            Title = $"Foto job {job.JobId[..Math.Min(8, job.JobId.Length)]}",
+            Content = panel,
+            CloseButtonText = "Chiudi",
+        };
+        if (XamlRoot is not null)
+        {
+            dialog.XamlRoot = XamlRoot;
+            _ = dialog.ShowAsync();
         }
     }
 

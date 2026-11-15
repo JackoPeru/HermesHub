@@ -43,7 +43,6 @@ def load_matcher_ns() -> dict:
 def load_reboot_ns() -> dict:
     import secrets as secretslib
 
-    names = {"_REBOOT_TICKET_TTL_S", "_reboot_mint_ticket", "_reboot_consume_ticket"}
     # _reboot_tickets va isolato per test: namespace fresco ogni volta.
     src = (REPO / "gpu-manager" / "manager.py").read_text(encoding="utf-8")
     tree = ast.parse(src)

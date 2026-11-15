@@ -1,19 +1,25 @@
 package com.nemoclaw.chat
 
 import android.content.Context
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -22,6 +28,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -29,9 +36,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,7 +58,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
@@ -53,6 +72,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nemoclaw.chat.ui.apple.AppleGlass
@@ -265,8 +285,32 @@ internal data class LiveCell(
     val value: String?,
     val loaded: Boolean,
     val detail: String,
-    val onOpen: () -> Unit
+    val onOpen: () -> Unit,
+    // Solo per i numeri: animazione di conteggio (GPU e' un modo testuale).
+    val numeric: Int? = null
 )
+
+@Composable
+private fun CountUpNumber(
+    target: Int,
+    fontSize: TextUnit,
+    modifier: Modifier = Modifier
+) {
+    val animated by androidx.compose.animation.core.animateIntAsState(
+        targetValue = target,
+        animationSpec = androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "countUp"
+    )
+    Text(
+        animated.toString(),
+        color = Color.White,
+        fontSize = fontSize,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier
+    )
+}
 
 @Composable
 private fun LiveStrip(
@@ -274,45 +318,53 @@ private fun LiveStrip(
     modifier: Modifier = Modifier
 ) {
     if (cells.isEmpty()) return
-    AppleGlass(shape = RoundedCornerShape(18.dp)) {
-        Row(modifier = modifier.padding(vertical = 10.dp)) {
+    AppleGlass(shape = RoundedCornerShape(22.dp)) {
+        Row(modifier = modifier.padding(vertical = 4.dp)) {
             cells.forEachIndexed { index, cell ->
                 if (index > 0) {
                     androidx.compose.material3.VerticalDivider(
                         color = AppColors.Border,
                         thickness = 0.5.dp,
-                        modifier = Modifier.padding(vertical = 4.dp)
+                        modifier = Modifier.padding(vertical = 14.dp)
                     )
                 }
+                val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                val pressed by interaction.collectIsPressedAsState()
+                val scale by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = if (pressed) 0.96f else 1f,
+                    animationSpec = androidx.compose.animation.core.spring(stiffness = 900f),
+                    label = "cellPress"
+                )
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .clickable(onClick = cell.onOpen)
-                        .padding(horizontal = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                        .graphicsLayer { scaleX = scale; scaleY = scale }
+                        .clickable(interactionSource = interaction, indication = null, onClick = cell.onOpen)
+                        .padding(horizontal = 10.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    if (!cell.loaded && cell.value == null) {
-                        LoadingBar(height = 22.dp, width = 44.dp)
-                    } else {
-                        Text(
+                    Text(
+                        cell.label,
+                        color = AppColors.Accent,
+                        fontSize = AppleType.Eyebrow,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.4.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    when {
+                        !cell.loaded && cell.value == null -> LoadingBar(height = 26.dp, width = 40.dp)
+                        cell.numeric != null -> CountUpNumber(cell.numeric, 30.sp)
+                        else -> Text(
                             cell.value ?: "—",
                             color = Color.White,
-                            fontSize = 22.sp,
+                            fontSize = 30.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Text(
-                        cell.label,
-                        color = AppColors.Accent,
-                        fontSize = AppleType.Footnote,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
                     Text(
                         cell.detail,
                         color = AppColors.Faint,
@@ -409,7 +461,20 @@ internal fun ServerStatusBoard(
         )
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // Ingresso morbido della board: una sola animazione, niente fuochi d'artificio.
+    var appeared by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { appeared = true }
+    val enter by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0f,
+        animationSpec = tween(520, easing = FastOutSlowInEasing),
+        label = "boardEnter"
+    )
+    Column(
+        modifier = Modifier
+            .alpha(enter)
+            .graphicsLayer { translationY = (1f - enter) * 28.dp.toPx() },
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -465,10 +530,10 @@ internal fun ServerStatusBoard(
                 LiveStrip(
                     cells = row.filterIsInstance<DashboardItem.Builtin>().mapNotNull { item ->
                         when (item.id) {
-                            "bots" -> LiveCell("BOT", live.bots?.toString(), live.loaded, "in gestione") { onOpenTab(Tab.Bots) }
-                            "cron" -> LiveCell("CRON", live.cronActive?.toString(), live.loaded, "attive") { onOpenTab(Tab.Cron) }
-                            "chats" -> LiveCell("CHAT", live.chats?.toString(), live.loaded, "salvate") { onOpenTab(Tab.Archive) }
-                            "gpu" -> LiveCell("GPU", live.gpuMode, live.loaded, live.gpuJobs?.let { "$it job" } ?: "manager") { onOpenTab(Tab.Hardware) }
+                            "bots" -> LiveCell("BOT", live.bots?.toString(), live.loaded, "in gestione", { onOpenTab(Tab.Bots) }, live.bots)
+                            "cron" -> LiveCell("CRON", live.cronActive?.toString(), live.loaded, "attive", { onOpenTab(Tab.Cron) }, live.cronActive)
+                            "chats" -> LiveCell("CHAT", live.chats?.toString(), live.loaded, "salvate", { onOpenTab(Tab.Archive) }, live.chats)
+                            "gpu" -> LiveCell("GPU", live.gpuMode, live.loaded, live.gpuJobs?.let { "$it job" } ?: "manager", { onOpenTab(Tab.Hardware) })
                             else -> null
                         }
                     },
@@ -525,23 +590,109 @@ private fun DashboardHero(
         "checking" -> AppColors.Faint
         else -> AppColors.Error
     }
-    AppleGlass(shape = RoundedCornerShape(20.dp)) {
+    // Anello "radar": arco che si riempie in base allo stato + scia che gira.
+    val target = when (status) {
+        "ok" -> 1f
+        "degraded" -> 0.62f
+        "checking" -> 0.34f
+        else -> 0.07f
+    }
+    val arc by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = target,
+        animationSpec = androidx.compose.animation.core.tween(1100, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "heroArc"
+    )
+    val spin = rememberInfiniteTransition(label = "heroRadar")
+    val sweep by spin.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(3600, easing = LinearEasing), RepeatMode.Restart),
+        label = "heroSweep"
+    )
+    val pulse by spin.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Reverse),
+        label = "heroPulse"
+    )
+    AppleGlass(shape = RoundedCornerShape(24.dp)) {
         Row(
             modifier = modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(wash.copy(alpha = 0.08f))
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .clip(RoundedCornerShape(24.dp))
+                .background(
+                    Brush.radialGradient(
+                        listOf(wash.copy(alpha = 0.16f), Color.Transparent),
+                        center = Offset(0f, 0f),
+                        radius = 420f
+                    )
+                )
+                .padding(horizontal = 16.dp, vertical = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(12.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(wash)
-            )
-            Column(modifier = Modifier.weight(1f)) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(92.dp)) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val stroke = 7.dp.toPx()
+                    val inset = stroke / 2f
+                    val arcSize = androidx.compose.ui.geometry.Size(
+                        size.width - stroke,
+                        size.height - stroke
+                    )
+                    // alone interno
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            listOf(wash.copy(alpha = 0.18f * pulse), Color.Transparent),
+                            radius = size.minDimension * 0.52f
+                        ),
+                        radius = size.minDimension * 0.52f
+                    )
+                    // binario
+                    drawArc(
+                        color = wash.copy(alpha = 0.13f),
+                        startAngle = -90f,
+                        sweepAngle = 360f,
+                        useCenter = false,
+                        topLeft = Offset(inset, inset),
+                        size = arcSize,
+                        style = Stroke(stroke, cap = StrokeCap.Round)
+                    )
+                    // arco di stato
+                    drawArc(
+                        brush = Brush.sweepGradient(
+                            listOf(wash.copy(alpha = 0.55f), wash, Color.White.copy(alpha = 0.9f), wash)
+                        ),
+                        startAngle = -90f,
+                        sweepAngle = 360f * arc,
+                        useCenter = false,
+                        topLeft = Offset(inset, inset),
+                        size = arcSize,
+                        style = Stroke(stroke, cap = StrokeCap.Round)
+                    )
+                    // scia radar
+                    drawArc(
+                        color = Color.White.copy(alpha = 0.5f),
+                        startAngle = sweep - 90f,
+                        sweepAngle = 24f,
+                        useCenter = false,
+                        topLeft = Offset(inset, inset),
+                        size = arcSize,
+                        style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                }
+                Icon(
+                    when (status) {
+                        "ok" -> Icons.Rounded.CheckCircle
+                        "degraded" -> Icons.Rounded.Warning
+                        "checking" -> Icons.Rounded.Sync
+                        else -> Icons.Rounded.CloudOff
+                    },
+                    contentDescription = null,
+                    tint = wash,
+                    modifier = Modifier.size(30.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
                     when (status) {
                         "ok" -> "Tutto operativo"
@@ -550,25 +701,57 @@ private fun DashboardHero(
                         else -> "Server offline"
                     },
                     color = Color.White,
-                    fontSize = 18.sp,
+                    fontSize = 21.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     snapshot.model.ifBlank { snapshot.gateway },
-                    color = AppColors.Faint,
-                    fontSize = AppleType.Footnote,
+                    color = AppColors.Muted,
+                    fontSize = AppleType.RowTitleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(wash.copy(alpha = pulse))
+                    )
+                    Text(
+                        when (status) {
+                            "ok" -> "gateway raggiungibile"
+                            "degraded" -> "$failedChecks check falliti"
+                            "checking" -> "verifico il gateway"
+                            else -> "nessuna risposta dal gateway"
+                        },
+                        color = AppColors.Faint,
+                        fontSize = AppleType.Caption,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun QuickChips(onOpenTab: (Tab) -> Unit, modifier: Modifier = Modifier) {
+    // Poche scorciatoie: la dashboard non deve diventare un menu. Il resto
+    // resta nella sidebar (o dietro "Altro", che espande qui sotto).
+    val preferred = listOf(Tab.Bots, Tab.Voice, Tab.Jarvis, Tab.Video, Tab.Images, Tab.Hardware)
+    val entries = remember { dashboardEntries() }
+    val primary = remember(entries) {
+        preferred.mapNotNull { tab -> entries.firstOrNull { it.tab == tab } }
+    }
+    val rest = remember(entries, primary) { entries.filterNot { it in primary } }
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val shown = if (expanded) entries else primary
+
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -576,18 +759,16 @@ private fun QuickChips(onOpenTab: (Tab) -> Unit, modifier: Modifier = Modifier) 
         Text(
             "ACCESSO RAPIDO",
             color = AppColors.Accent,
-            fontSize = AppleType.Footnote,
+            fontSize = AppleType.Eyebrow,
             fontWeight = FontWeight.Bold,
-            letterSpacing = 1.sp
+            letterSpacing = 1.4.sp
         )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(end = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        androidx.compose.foundation.layout.FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            dashboardEntries().forEach { entry ->
+            shown.forEach { entry ->
                 // Altezza minima 48dp: il target tocco e' la chip intera.
                 AppleGlass(shape = RoundedCornerShape(14.dp), modifier = Modifier.heightIn(min = 48.dp)) {
                     Row(
@@ -595,19 +776,45 @@ private fun QuickChips(onOpenTab: (Tab) -> Unit, modifier: Modifier = Modifier) 
                             .clickable { onOpenTab(entry.tab) }
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
                         Icon(
                             entry.tab.icon,
                             contentDescription = entry.tab.label,
                             tint = AppColors.Accent,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(17.dp)
                         )
                         Text(
                             entry.tab.label,
                             color = Color.White,
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+            if (rest.isNotEmpty()) {
+                AppleGlass(shape = RoundedCornerShape(14.dp), modifier = Modifier.heightIn(min = 48.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .clickable { expanded = !expanded }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        Icon(
+                            if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            contentDescription = if (expanded) "Meno sezioni" else "Altre sezioni",
+                            tint = AppColors.Faint,
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Text(
+                            if (expanded) "Meno" else "Altro (${rest.size})",
+                            color = AppColors.Muted,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
                         )
                     }
                 }

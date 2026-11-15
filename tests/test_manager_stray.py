@@ -8,6 +8,7 @@ manager.py (fastapi/yaml non servono).
 from __future__ import annotations
 
 import ast
+import hmac
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -215,6 +216,7 @@ def load_roles_namespace() -> dict:
         "CONFIG": {},
         "Request": FakeRequest,
         "HTTPException": FakeHTTPException,
+        "hmac": hmac,
     }
     exec(compile(mod, "manager_roles", "exec"), ns)  # noqa: S102 - test locale
     return ns
@@ -292,7 +294,7 @@ class TestManualModesPolicy(unittest.TestCase):
         self.assertIn("409", src)
 
 
-class TestManagerRoles(unittest.TestCase):
+class TestManagerUserControl(unittest.TestCase):
     """Solo l'UTENTE (telefono via rete) gestisce il manager; l'agent in
     localhost usa solo coda media + letture. Stile statico via AST/stringhe:
     nessun import di manager.py (fastapi non serve)."""

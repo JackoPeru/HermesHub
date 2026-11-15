@@ -6,7 +6,11 @@ Pipeline sanzionata post-lockdown: l'agente NON parla col manager (niente
 chiave, niente yaml). Sottomette il preset a laya (/laya/jobs, ruolo agent)
 e segue lo stato sempre via laya. Chiave agent = HERMES_GATEWAY_API_KEY.
 """
-import json, os, sys, time, urllib.request
+import json
+import os
+import sys
+import time
+import urllib.request
 
 KEY = os.environ.get("HERMES_GATEWAY_API_KEY", "")
 BASE = os.environ.get("HERMES_LAYA_URL", "http://127.0.0.1:8645")
