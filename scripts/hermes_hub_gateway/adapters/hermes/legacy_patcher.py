@@ -3185,9 +3185,13 @@ def _hermes_hub_jarvis_number(value: Any, field: str) -> float:
         number = float(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"invalid_{field}") from exc
-    if not _math.isfinite(number) or number < 0.0 or number > 1.0:
+    if not _math.isfinite(number):
         raise ValueError(f"invalid_{field}")
-    return number
+    # I modelli locali a volte rispondono in percentuale (95) o sforano di
+    # poco (1.1): normalizzare evita di buttare via una risposta gia' pronta.
+    if number > 1.0:
+        number = number / 100.0 if 2.0 < number <= 100.0 else 1.0
+    return max(0.0, number)
 
 
 def _hermes_hub_jarvis_validate_fast_result(value: Any) -> Dict[str, Any]:

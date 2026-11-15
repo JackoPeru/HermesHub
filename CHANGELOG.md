@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.341 - 2026-11-15
+
+- Jarvis: punteggi del modello (confidence/importance/urgency/utility) normalizzati quando arrivano in percentuale o fuori scala: niente piu' 502 intermittenti.
+- Verifica ripetuta: 4 turni di fila tutti 200.
+
 ## 0.6.340 - 2026-11-15
 
 - Jarvis: la visione riprova da sola (3 tentativi all'avvio, 1 riconnessione a caldo) invece di chiudere la modalita'.

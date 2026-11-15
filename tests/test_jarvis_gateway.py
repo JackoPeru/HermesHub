@@ -137,8 +137,12 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
             }
         )
         self.assertEqual("ignore", valid["action"])
+        # Punteggi fuori scala: si normalizzano, non si scarta la risposta.
+        self.assertEqual(1.0, validate(dict(valid, confidence=1.1))["confidence"])
+        self.assertEqual(0.95, validate(dict(valid, confidence=95))["confidence"])
+        self.assertEqual(0.0, validate(dict(valid, urgency=-0.2))["urgency"])
         with self.assertRaises(ValueError):
-            validate(dict(valid, confidence=1.1))
+            validate(dict(valid, confidence=float("nan")))
         # Un'azione inventata non deve buttare via una risposta gia' pronta.
         normalized = validate(dict(valid, action="answer", reply="Ecco."))
         self.assertEqual("respond_simple", normalized["action"])
