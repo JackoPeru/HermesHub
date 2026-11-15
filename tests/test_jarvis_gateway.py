@@ -139,8 +139,11 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("ignore", valid["action"])
         with self.assertRaises(ValueError):
             validate(dict(valid, confidence=1.1))
-        with self.assertRaises(ValueError):
-            validate(dict(valid, action="speak_forever"))
+        # Un'azione inventata non deve buttare via una risposta gia' pronta.
+        normalized = validate(dict(valid, action="answer", reply="Ecco."))
+        self.assertEqual("respond_simple", normalized["action"])
+        self.assertEqual("Ecco.", normalized["reply"])
+        self.assertEqual("ignore", validate(dict(valid, action="speak_forever"))["action"])
         fenced = validate(
             "```json\n" + json.dumps({**valid, "action": "ignore", "reply": None}) + "\n```"
         )
@@ -149,9 +152,11 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
     def test_structured_observer_disables_thinking_budget(self):
         self.assertIn('"chat_template_kwargs": {"enable_thinking": False}', self.patched)
 
-    def test_single_model_uses_one_compact_call_before_rare_agent_escalation(self):
+    def test_single_model_answers_immediately_without_agent_escalation(self):
         self.assertIn('route = "compact" if single_model or not _hermes_hub_jarvis_requires_reasoning(question)', self.patched)
-        self.assertIn('if fast.get("reply") and not fast.get("needs_agent"):', self.patched)
+        self.assertIn("if fast.get(\"reply\"):", self.patched)
+        self.assertNotIn('if fast.get("reply") and not fast.get("needs_agent"):', self.patched)
+        self.assertIn("if single_model:\n                    raise", self.patched)
         self.assertIn('"single_model_sem": asyncio.Semaphore(1)', self.patched)
         self.assertIn('if question is None and parsed["action"] == "respond_simple":', self.patched)
         self.assertIn('parsed["reply"] = None', self.patched)
@@ -210,6 +215,42 @@ class JarvisGatewayPatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("compact", result["route"])
         self.assertEqual("Si, e' allineata.", result["text"])
         self.assertEqual({"compact": 1, "agent": 0}, calls)
+
+    async def test_single_model_failure_reports_fast_error_without_agent_wait(self):
+        create = self.runtime["_hermes_hub_jarvis_new_session"]
+        direct = self.runtime["_hermes_hub_jarvis_direct_turn"]
+        session = create({"mode": "assistive"})
+        session["frames"]["f1"] = {
+            "id": "f1",
+            "jpeg": b"jpeg",
+            "captured_at": time.time(),
+            "received_at": time.time(),
+        }
+        calls = {"agent": 0}
+
+        async def fail_compact(*_args, **_kwargs):
+            raise ValueError("invalid_action")
+
+        async def fail_agent(*_args, **_kwargs):
+            calls["agent"] += 1
+            raise AssertionError("Hermes Agent non doveva essere chiamato")
+
+        original_compact = self.runtime["_hermes_hub_jarvis_fast_call"]
+        original_agent = self.runtime["_hermes_hub_jarvis_reasoning_call"]
+        self.runtime["_hermes_hub_jarvis_fast_call"] = fail_compact
+        self.runtime["_hermes_hub_jarvis_reasoning_call"] = fail_agent
+        try:
+            with mock.patch.dict(
+                os.environ,
+                {"HERMES_JARVIS_MOCK_MODE": "1", "HERMES_JARVIS_SINGLE_MODEL": "1"},
+                clear=False,
+            ):
+                with self.assertRaises(ValueError):
+                    await direct(types.SimpleNamespace(), session, "Cosa vedi?", ["f1"])
+        finally:
+            self.runtime["_hermes_hub_jarvis_fast_call"] = original_compact
+            self.runtime["_hermes_hub_jarvis_reasoning_call"] = original_agent
+        self.assertEqual(0, calls["agent"])
 
     def test_initiative_policy_enforces_mode_cooldown_and_deduplication(self):
         create = self.runtime["_hermes_hub_jarvis_new_session"]

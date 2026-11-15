@@ -1,8 +1,8 @@
-Hermes Hub 0.6.338 (Jarvis: occhiali trovati)
+Hermes Hub 0.6.339 (Jarvis risponde subito)
 
-- Rilevamento occhiali piu permissivo: basta un dispositivo connesso noto al DAT (Ray-Ban, Oakley, display), non piu solo il modello esatto con compatibilita perfetta.
-- Attesa estesa a 30 secondi: gli occhiali possono svegliarsi dopo il tap su Jarvis.
-- Errori che dicono il perche: firmware da aggiornare, SDK/DAT piu vecchio, oppure la diagnostica di cosa vede il DAT.
-- Suite Android verde (618), python verdi, consistency 28/28.
+- In modalita Jarvis il ragionamento e spento: la risposta arriva in pochi secondi, senza passare dal loop agente (che prima impiegava minuti).
+- Le azioni inventate dal modello locale non fanno piu' perdere la risposta gia' pronta.
+- Verificato end-to-end sul server: risposta visiva in ~6 secondi.
+- Suite python verdi (inclusi i test Jarvis), consistency 28/28.
 
-Asset: HermesHub-0.6.338-android.apk (Android, versionCode 342), NemoclawChat.Windows_0.6.338.0_x64.msix (x64) e HermesHub-0.6.338-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.339-android.apk (Android, versionCode 343), NemoclawChat.Windows_0.6.339.0_x64.msix (x64) e HermesHub-0.6.339-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.

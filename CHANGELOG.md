@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.339 - 2026-11-15
+
+- Jarvis: ragionamento spento per le domande dirette con un solo modello (risposta immediata, niente escalation al loop agente da minuti).
+- Jarvis: azioni del modello normalizzate (sinonimi tipo "answer" non scartano piu' una risposta pronta) e prompt con azioni esatte.
+- Verificato end-to-end: risposta visiva in ~6s.
+
 ## 0.6.338 - 2026-11-15
 
 - Jarvis: rilevamento occhiali allentato (qualsiasi modello noto connesso al DAT, non solo RAYBAN_META/COMPATIBLE), attesa 30s.

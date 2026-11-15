@@ -3194,8 +3194,34 @@ def _hermes_hub_jarvis_validate_fast_result(value: Any) -> Dict[str, Any]:
     raw = _hermes_hub_jarvis_parse_json_object(value)
     action = str(raw.get("action") or "").strip()
     allowed = {"ignore", "respond_simple", "ask_user", "escalate", "urgent_candidate"}
+    # I modelli locali a volte inventano sinonimi ("answer", "respond",
+    # "rispondi"): normalizzarli evita di scartare una risposta gia' pronta.
+    normalized = action.lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "respond": "respond_simple",
+        "response": "respond_simple",
+        "answer": "respond_simple",
+        "reply": "respond_simple",
+        "rispondi": "respond_simple",
+        "risposta": "respond_simple",
+        "urgent": "urgent_candidate",
+        "alert": "urgent_candidate",
+        "ask": "ask_user",
+        "question": "ask_user",
+        "none": "ignore",
+        "no_action": "ignore",
+        "ignore_frame": "ignore",
+        "agent": "escalate",
+        "delegate": "escalate",
+    }
+    action = aliases.get(normalized, normalized)
     if action not in allowed:
-        raise ValueError("invalid_action")
+        reply_guess = raw.get("reply")
+        action = (
+            "respond_simple"
+            if isinstance(reply_guess, str) and reply_guess.strip()
+            else "ignore"
+        )
     reply = raw.get("reply")
     if reply is not None and not isinstance(reply, str):
         raise ValueError("invalid_reply")
@@ -3422,7 +3448,9 @@ def _hermes_hub_jarvis_reactor_system_prompt(purpose: str) -> str:
             "topic, open_loop and notable_facts. For passive observation, use ask_user or urgent_candidate only when "
             "the final short spoken reply is already supported by the image; stable or merely descriptive scenes must "
             "be ignore. Set needs_agent=true only for tools, durable memory, safety-critical verification or complex "
-            "multi-step reasoning. For direct questions, answer in reply whenever tools are unnecessary."
+            "multi-step reasoning. For direct questions, answer in reply whenever tools are unnecessary: use the "
+            "exact action string \"respond_simple\" and put the final answer in reply. Use only the exact action "
+            "strings listed."
         )
     return base + (
         " Act as Reactor. Use original images directly. Put important information first; normally one or two spoken "
@@ -4144,16 +4172,23 @@ async def _hermes_hub_jarvis_direct_turn(
                     adapter, session, frames[-1], question
                 )
                 _hermes_hub_jarvis_apply_memory_update(session, fast.get("memory_update"))
-                if fast.get("reply") and not fast.get("needs_agent"):
+                if fast.get("reply"):
+                    # Un solo modello: la risposta e' gia' pronta, quindi si
+                    # parla subito. L'escalation al loop agente costava minuti
+                    # e contraddice la promessa di risposta immediata.
                     answer = fast["reply"]
-                else:
+                elif not single_model:
                     route = "reasoning"
             except asyncio.TimeoutError:
+                if single_model:
+                    raise
                 route = "reasoning"
                 _hermes_hub_jarvis_publish(
                     session, "session.error", code="fast_model_timeout", message="Timeout modello rapido."
                 )
             except Exception as exc:
+                if single_model:
+                    raise
                 route = "reasoning"
                 _hermes_hub_jarvis_publish(
                     session,
