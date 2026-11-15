@@ -271,6 +271,12 @@ def caller_role(cfg: dict, auth: str) -> str:
     for key in app_keys(cfg):
         if _hmac.compare_digest(auth, f"Bearer {key}"):
             return "app"
+    # Le chiavi del manager valgono come ruolo app: il manager le tratta gia'
+    # come superset (letture + coda + controllo), quindi l'app con una sola
+    # chiave configurata deve poter usare anche laya.
+    for key in manager_keys(cfg):
+        if _hmac.compare_digest(auth, f"Bearer {key}"):
+            return "app"
     for key in agent_keys(cfg):
         if _hmac.compare_digest(auth, f"Bearer {key}"):
             return "agent"

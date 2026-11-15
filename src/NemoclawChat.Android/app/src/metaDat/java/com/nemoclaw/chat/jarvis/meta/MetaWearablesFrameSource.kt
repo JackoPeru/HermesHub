@@ -175,18 +175,23 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
     }
 
     private suspend fun awaitAvailableDevice(): DeviceIdentifier {
-        return withTimeoutOrNull(DEVICE_READY_TIMEOUT_MILLIS) {
+        val deviceId = withTimeoutOrNull(DEVICE_READY_TIMEOUT_MILLIS) {
             while (true) {
-                val deviceId = awaitConnectedDeviceEvent()
+                val candidate = awaitConnectedDeviceEvent()
                 delay(LINK_STABILIZATION_MILLIS)
-                val stillConnected = deviceId in Wearables.devices.value &&
-                    isEligibleDevice(deviceId)
-                if (stillConnected) return@withTimeoutOrNull deviceId
+                val stillConnected = candidate in Wearables.devices.value && isEligibleDevice(candidate)
+                if (stillConnected) return@withTimeoutOrNull candidate
             }
+            @Suppress("UNREACHABLE_CODE")
             error("Attesa connessione DAT terminata senza dispositivo.")
         } ?: throw IllegalStateException(
-            "Nessun Ray-Ban Meta connesso al DAT. Apri gli occhiali e verifica che Meta AI li mostri connessi."
+            "Nessun occhiale connesso al DAT. Apri gli occhiali e verifica che Meta AI li mostri connessi. " +
+                deviceDiagnostics()
         )
+        // Gli occhiali ci sono ma il DAT li dichiara non aggiornabili/compatibili:
+        // dirlo subito e' molto piu utile di un timeout generico.
+        compatibilityBlocker(deviceId)?.let { throw IllegalStateException(it + " " + deviceDiagnostics()) }
+        return deviceId
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -201,8 +206,7 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
             val metadataFlows = deviceIds.mapNotNull { deviceId ->
                 Wearables.devicesMetadata[deviceId]?.map { device ->
                     if (device.linkState == LinkState.CONNECTED &&
-                        device.compatibility == DeviceCompatibility.COMPATIBLE &&
-                        device.deviceType == DeviceType.RAYBAN_META
+                        device.deviceType != DeviceType.UNKNOWN
                     ) deviceId else null
                 }
             }
@@ -395,14 +399,46 @@ internal class MetaWearablesFrameSource(context: Context) : JarvisFrameSource {
 
     private fun isEligibleDevice(deviceId: DeviceIdentifier): Boolean {
         val device = Wearables.devicesMetadata[deviceId]?.value ?: return false
+        // Accetta qualsiasi paio di occhiali connesso noto al DAT (Ray-Ban,
+        // Oakley, display...): il vecchio filtro stretto su RAYBAN_META +
+        // COMPATIBLE faceva sembrare "non connessi" occhiali che Meta AI
+        // mostra collegati (altri modelli o firmware da aggiornare).
         return device.linkState == LinkState.CONNECTED &&
-            device.compatibility == DeviceCompatibility.COMPATIBLE &&
-            device.deviceType == DeviceType.RAYBAN_META
+            device.deviceType != DeviceType.UNKNOWN
+    }
+
+    /** Motivo leggibile quando il DAT espone gli occhiali ma non sono usabili. */
+    private fun compatibilityBlocker(deviceId: DeviceIdentifier): String? {
+        val device = Wearables.devicesMetadata[deviceId]?.value ?: return null
+        return when (device.compatibility) {
+            DeviceCompatibility.DEVICE_UPDATE_REQUIRED ->
+                "Gli occhiali richiedono un aggiornamento firmware (Meta AI > Aggiornamenti) prima di poter usare la fotocamera."
+            DeviceCompatibility.SDK_UPDATE_REQUIRED ->
+                "Il DAT installato e piu vecchio degli occhiali: aggiorna l'app Hermes Hub o il Meta Wearables DAT."
+            else -> null
+        }
+    }
+
+    /** Cosa vede davvero il DAT: finisce nel messaggio d'errore, mai silenzioso. */
+    private fun deviceDiagnostics(): String {
+        val ids = Wearables.devices.value
+        if (ids.isEmpty()) return "DAT non espone nessun dispositivo (0)."
+        val parts = ids.mapNotNull { id ->
+            val device = Wearables.devicesMetadata[id]?.value ?: return@mapNotNull null
+            "${device.deviceType.name.lowercase()}/${device.linkState.name.lowercase()}/${device.compatibility.name.lowercase()}"
+        }
+        return if (parts.isEmpty()) {
+            "DAT vede ${ids.size} dispositivi ma senza metadati."
+        } else {
+            "DAT vede: ${parts.joinToString(", ")}."
+        }
     }
 
     private companion object {
         const val REGISTRATION_READY_TIMEOUT_MILLIS = 8_000L
-        const val DEVICE_READY_TIMEOUT_MILLIS = 18_000L
+        // 30s: gli occhiali possono impiegare qualche secondo a svegliarsi e
+        // comparire nel DAT dopo il tap su Jarvis.
+        const val DEVICE_READY_TIMEOUT_MILLIS = 30_000L
         const val METADATA_FLOW_WAIT_MILLIS = 100L
         const val LINK_STABILIZATION_MILLIS = 750L
         const val STREAM_READY_TIMEOUT_MILLIS = 18_000L

@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.6.337"
-EXPECTED_ANDROID_VERSION_CODE = 341
+EXPECTED_VERSION = "0.6.338"
+EXPECTED_ANDROID_VERSION_CODE = 342
 
 
 def read(relative_path: str) -> str:
@@ -296,7 +296,12 @@ class ReleaseConsistencyTests(unittest.TestCase):
         self.assertIn("Wearables.checkPermissionStatus(Permission.CAMERA)", dat_frame_source)
         self.assertIn("createdStream.errorStream.collect", dat_frame_source)
         self.assertNotIn("error != StreamError.STREAM_ERROR", dat_frame_source)
-        self.assertIn("DeviceCompatibility.COMPATIBLE", dat_frame_source)
+        # Il filtro non deve piu scartare in silenzio occhiali connessi: accetta
+        # ogni modello noto e spiega la compatibilita nell'errore.
+        self.assertIn("device.deviceType != DeviceType.UNKNOWN", dat_frame_source)
+        self.assertIn("DeviceCompatibility.DEVICE_UPDATE_REQUIRED", dat_frame_source)
+        self.assertIn("DeviceCompatibility.SDK_UPDATE_REQUIRED", dat_frame_source)
+        self.assertNotIn("device.compatibility == DeviceCompatibility.COMPATIBLE", dat_frame_source)
         self.assertIn("DeviceSessionState.PAUSED", dat_frame_source)
         self.assertIn("streamGeneration", dat_frame_source)
         self.assertIn("operationMutex.withLock", dat_frame_source)

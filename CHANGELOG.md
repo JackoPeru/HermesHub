@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Hermes Hub sono documentate qui. Le release GitHub restano la fonte per asset e note complete.
 
+## 0.6.338 - 2026-11-15
+
+- Jarvis: rilevamento occhiali allentato (qualsiasi modello noto connesso al DAT, non solo RAYBAN_META/COMPATIBLE), attesa 30s.
+- Jarvis: errori con motivo reale (firmware/SDK da aggiornare) e diagnostica di cosa vede il DAT.
+- Suite verdi.
+
 ## 0.6.337 - 2026-11-15
 
 - Dashboard: hero "radar" con anello di stato animato, numeri che contano, ingresso morbido e chip ridotte a 6 + "Altro".

@@ -1,9 +1,8 @@
-Hermes Hub 0.6.337 (dashboard radar)
+Hermes Hub 0.6.338 (Jarvis: occhiali trovati)
 
-- Hero con anello di stato animato (verde/arancio/rosso), icona, modello e riga live che pulsa.
-- Numeri BOT/CRON/CHAT che salgono al valore reale; leggeri feedback al tocco.
-- Accesso rapido ridotto a 6 scorciatoie + "Altro" espandibile: la dashboard non e piu un menu.
-- Ingresso morbido della board, una sola animazione.
+- Rilevamento occhiali piu permissivo: basta un dispositivo connesso noto al DAT (Ray-Ban, Oakley, display), non piu solo il modello esatto con compatibilita perfetta.
+- Attesa estesa a 30 secondi: gli occhiali possono svegliarsi dopo il tap su Jarvis.
+- Errori che dicono il perche: firmware da aggiornare, SDK/DAT piu vecchio, oppure la diagnostica di cosa vede il DAT.
 - Suite Android verde (618), python verdi, consistency 28/28.
 
-Asset: HermesHub-0.6.337-android.apk (Android, versionCode 341), NemoclawChat.Windows_0.6.337.0_x64.msix (x64) e HermesHub-0.6.337-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
+Asset: HermesHub-0.6.338-android.apk (Android, versionCode 342), NemoclawChat.Windows_0.6.338.0_x64.msix (x64) e HermesHub-0.6.338-linux-gateway.tar.gz (gateway server), ognuno con il sidecar .sha256 nella release.
